@@ -1,3 +1,5 @@
+![Omarchy M4 Native concept artwork](docs/images/omarchy-m4-native.png)
+
 # Omarchy on the M4 MacBook Air — bring-up research
 
 Experimental Linux device-tree patches, kernel changes, and research from an
