@@ -1,0 +1,336 @@
+diff --git a/arch/arm64/boot/dts/apple/t8132-j713.dts b/arch/arm64/boot/dts/apple/t8132-j713.dts
+index 28963817..5975c2d1 100644
+--- a/arch/arm64/boot/dts/apple/t8132-j713.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j713.dts
+@@ -10,6 +10,7 @@
+ /dts-v1/;
+ 
+ #include "t8132.dtsi"
++#include "t8132-usbpd-spmi.dtsi"
+ #include "t8132-jxxx.dtsi"
+ #include <dt-bindings/leds/common.h>
+ 
+@@ -34,6 +35,30 @@ &fpwm1 {
+ 	status = "okay";
+ };
+ 
++&dwc3_0 {
++	status = "okay";
++};
++
++&dwc3_0_dart_0 {
++	status = "okay";
++};
++
++&dwc3_0_dart_1 {
++	status = "okay";
++};
++
++&dwc3_1 {
++	status = "okay";
++};
++
++&dwc3_1_dart_0 {
++	status = "okay";
++};
++
++&dwc3_1_dart_1 {
++	status = "okay";
++};
++
+ &smc_mbox {
+ 	status = "okay";
+ };
+diff --git a/arch/arm64/boot/dts/apple/t8132-jxxx.dtsi b/arch/arm64/boot/dts/apple/t8132-jxxx.dtsi
+index 2a18f5ca..a23950cd 100644
+--- a/arch/arm64/boot/dts/apple/t8132-jxxx.dtsi
++++ b/arch/arm64/boot/dts/apple/t8132-jxxx.dtsi
+@@ -11,6 +11,8 @@
+ 
+ / {
+ 	aliases {
++		atcphy0 = &atcphy0;
++		atcphy1 = &atcphy1;
+ 		serial0 = &serial0;
+ 	};
+ 
+diff --git a/arch/arm64/boot/dts/apple/t8132-usbpd-spmi.dtsi b/arch/arm64/boot/dts/apple/t8132-usbpd-spmi.dtsi
+new file mode 100644
+index 00000000..80339965
+--- /dev/null
++++ b/arch/arm64/boot/dts/apple/t8132-usbpd-spmi.dtsi
+@@ -0,0 +1,110 @@
++// SPDX-License-Identifier: GPL-2.0+ OR MIT
++/*
++ * Apple M4 MacBook Air (M4, 2025) SPMI based USB PD controller nodes
++ *
++ * This file contains nodes for t8132 devices using SPMI based ACE3 USB Type-C
++ * port controllers. They are used in the M4 MacBook Airs.
++ *
++ * target-type: J713
++ *
++ * Copyright The Asahi Linux Contributors
++ */
++
++
++&nub_spmi_a0 {
++	status = "okay";
++
++	hpm0: usb-pd@c {
++		compatible = "apple,sn201202x";
++		reg = <0xc SPMI_USID>;
++		interrupts = <11 IRQ_TYPE_EDGE_RISING>,
++			<13 IRQ_TYPE_EDGE_RISING>,
++			<17 IRQ_TYPE_EDGE_RISING>,
++			<19 IRQ_TYPE_EDGE_RISING>;
++		interrupt-names = "irq", "select", "sleep", "wake";
++
++		typec0: connector {
++			compatible = "usb-c-connector";
++			label = "USB-C Left-front";
++			power-role = "dual";
++			data-role = "dual";
++
++			ports {
++				#address-cells = <1>;
++				#size-cells = <0>;
++				port@0 {
++					reg = <0>;
++					typec0_connector_hs: endpoint {
++						remote-endpoint = <&dwc3_0_hs>;
++					};
++				};
++				port@1 {
++					reg = <1>;
++					typec0_connector_ss: endpoint {
++						remote-endpoint = <&atcphy0_typec_lanes>;
++					};
++				};
++			};
++		};
++	};
++
++	hpm1: usb-pd@a {
++		compatible = "apple,sn201202x";
++		reg = <0xa SPMI_USID>;
++		interrupts = <37 IRQ_TYPE_EDGE_RISING>,
++			<39 IRQ_TYPE_EDGE_RISING>,
++			<43 IRQ_TYPE_EDGE_RISING>,
++			<45 IRQ_TYPE_EDGE_RISING>;
++		interrupt-names = "irq", "select", "sleep", "wake";
++
++		typec1: connector {
++			compatible = "usb-c-connector";
++			label = "USB-C Left-rear";
++			power-role = "dual";
++			data-role = "dual";
++
++			ports {
++				#address-cells = <1>;
++				#size-cells = <0>;
++				port@0 {
++					reg = <0>;
++					typec1_connector_hs: endpoint {
++						remote-endpoint = <&dwc3_1_hs>;
++					};
++				};
++				port@1 {
++					reg = <1>;
++					typec1_connector_ss: endpoint {
++						remote-endpoint = <&atcphy1_typec_lanes>;
++					};
++				};
++			};
++		};
++	};
++
++	hpm5: usb-pd@8 {
++		compatible = "apple,sn201202x";
++		reg = <0x8 SPMI_USID>;
++		interrupts = <63 IRQ_TYPE_EDGE_RISING>,
++			<65 IRQ_TYPE_EDGE_RISING>,
++			<69 IRQ_TYPE_EDGE_RISING>,
++			<71 IRQ_TYPE_EDGE_RISING>;
++		interrupt-names = "irq", "select", "sleep", "wake";
++	};
++};
++
++&dwc3_0_hs {
++	remote-endpoint = <&typec0_connector_hs>;
++};
++
++&dwc3_1_hs {
++	remote-endpoint = <&typec1_connector_hs>;
++};
++
++&atcphy0_typec_lanes {
++	remote-endpoint = <&typec0_connector_ss>;
++};
++
++&atcphy1_typec_lanes {
++	remote-endpoint = <&typec1_connector_ss>;
++};
+diff --git a/arch/arm64/boot/dts/apple/t8132.dtsi b/arch/arm64/boot/dts/apple/t8132.dtsi
+index 1a7c820e..70257f7d 100644
+--- a/arch/arm64/boot/dts/apple/t8132.dtsi
++++ b/arch/arm64/boot/dts/apple/t8132.dtsi
+@@ -269,6 +269,19 @@ socd: socd@8b00 {
+ 			};
+ 		};
+ 
++		nub_spmi_a0: spmi@388908000 {
++			compatible = "apple,t8132-spmi", "apple,t8103-spmi";
++			reg = <0x3 0x88908000 0x0 0x100>;
++			#address-cells = <2>;
++			#size-cells = <0>;
++			#interrupt-cells = <2>;
++			interrupt-controller;
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 520 IRQ_TYPE_LEVEL_HIGH>;
++			power-domains = <&ps_nub_spmi_a0>;
++			status = "disabled";
++		};
++
+ 		smc: smc@38c600000 {
+ 			compatible = "apple,t8132-smc", "apple,t8103-smc";
+ 			reg = <0x3 0x8c600000 0x0 0x4000>,
+@@ -571,6 +584,9 @@ dwc3_0: usb@402280000 {
+ 			reg-names = "dwc3-core", "dwc3-apple";
+ 			interrupt-parent = <&aic>;
+ 			interrupts = <AIC_IRQ 1279 IRQ_TYPE_LEVEL_HIGH>;
++			dr_mode = "otg";
++			usb-role-switch;
++			role-switch-default-mode = "host";
+ 			iommus = <&dwc3_0_dart_0 0>,
+ 			         <&dwc3_0_dart_1 1>;
+ 			power-domains = <&ps_atc0_usb>;
+@@ -578,6 +594,24 @@ dwc3_0: usb@402280000 {
+ 			phys = <&atcphy0 PHY_TYPE_USB2>, <&atcphy0 PHY_TYPE_USB3>;
+ 			phy-names = "usb2-phy", "usb3-phy";
+ 			status = "disabled";
++
++			ports {
++				#address-cells = <1>;
++				#size-cells = <0>;
++
++				port@0 {
++					reg = <0>;
++					dwc3_0_hs: endpoint {
++					};
++				};
++
++				port@1 {
++					reg = <1>;
++					dwc3_0_ss: endpoint {
++						remote-endpoint = <&atcphy0_usb3>;
++					};
++				};
++			};
+ 		};
+ 
+ 		dwc3_0_dart_0: iommu@402f00000 {
+@@ -613,6 +647,34 @@ atcphy0: phy@403000000 {
+ 			#phy-cells = <1>;
+ 			#reset-cells = <0>;
+ 
++			orientation-switch;
++			mode-switch;
++			power-domains = <&ps_atc0_usb>;
++
++			ports {
++				#address-cells = <1>;
++				#size-cells = <0>;
++
++				port@0 {
++					reg = <0>;
++					atcphy0_typec_lanes: endpoint {
++					};
++				};
++
++				port@1 {
++					reg = <1>;
++					atcphy0_usb3: endpoint {
++						remote-endpoint = <&dwc3_0_ss>;
++					};
++				};
++			};
++		};
++
++		atcphy0_xbar: mux@40304c000 {
++			compatible = "apple,t8132-display-crossbar",
++			             "apple,t8112-display-crossbar";
++			reg = <0x4 0x0304c000 0x0 0x4000>;
++			#mux-control-cells = <1>;
+ 			power-domains = <&ps_atc0_usb>;
+ 		};
+ 
+@@ -623,6 +685,9 @@ dwc3_1: usb@40a280000 {
+ 			reg-names = "dwc3-core", "dwc3-apple";
+ 			interrupt-parent = <&aic>;
+ 			interrupts = <AIC_IRQ 1341 IRQ_TYPE_LEVEL_HIGH>;
++			dr_mode = "otg";
++			usb-role-switch;
++			role-switch-default-mode = "host";
+ 			iommus = <&dwc3_1_dart_0 0>,
+ 			         <&dwc3_1_dart_1 1>;
+ 			power-domains = <&ps_atc1_usb>;
+@@ -630,6 +695,24 @@ dwc3_1: usb@40a280000 {
+ 			phys = <&atcphy1 PHY_TYPE_USB2>, <&atcphy1 PHY_TYPE_USB3>;
+ 			phy-names = "usb2-phy", "usb3-phy";
+ 			status = "disabled";
++
++			ports {
++				#address-cells = <1>;
++				#size-cells = <0>;
++
++				port@0 {
++					reg = <0>;
++					dwc3_1_hs: endpoint {
++					};
++				};
++
++				port@1 {
++					reg = <1>;
++					dwc3_1_ss: endpoint {
++						remote-endpoint = <&atcphy1_usb3>;
++					};
++				};
++			};
+ 		};
+ 
+ 		dwc3_1_dart_0: iommu@40af00000 {
+@@ -665,6 +748,34 @@ atcphy1: phy@40b000000 {
+ 			#phy-cells = <1>;
+ 			#reset-cells = <0>;
+ 
++			orientation-switch;
++			mode-switch;
++			power-domains = <&ps_atc1_usb>;
++
++			ports {
++				#address-cells = <1>;
++				#size-cells = <0>;
++
++				port@0 {
++					reg = <0>;
++					atcphy1_typec_lanes: endpoint {
++					};
++				};
++
++				port@1 {
++					reg = <1>;
++					atcphy1_usb3: endpoint {
++						remote-endpoint = <&dwc3_1_ss>;
++					};
++				};
++			};
++		};
++
++		atcphy1_xbar: mux@40b04c000 {
++			compatible = "apple,t8132-display-crossbar",
++			             "apple,t8112-display-crossbar";
++			reg = <0x4 0x0b04c000 0x0 0x4000>;
++			#mux-control-cells = <1>;
+ 			power-domains = <&ps_atc1_usb>;
+ 		};
+ 

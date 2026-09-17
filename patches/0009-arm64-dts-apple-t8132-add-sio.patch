@@ -1,0 +1,54 @@
+diff --git a/arch/arm64/boot/dts/apple/t8132.dtsi b/arch/arm64/boot/dts/apple/t8132.dtsi
+index 3389bc910..e5636c4d7 100644
+--- a/arch/arm64/boot/dts/apple/t8132.dtsi
++++ b/arch/arm64/boot/dts/apple/t8132.dtsi
+@@ -620,6 +620,16 @@ fpwm1: pwm@3ad044000 {
+ 			status = "disabled";
+ 		};
+ 
++		sio_dart: iommu@3ad060000 {
++			compatible = "apple,t8132-dart", "apple,t8110-dart";
++			reg = <0x3 0xad060000 0x0 0x4000>;
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 1074 IRQ_TYPE_LEVEL_HIGH>;
++			#iommu-cells = <1>;
++			power-domains = <&ps_sio_cpu>;
++			status = "disabled";
++		};
++
+ 		spi2: spi@3ad108000 {
+ 			compatible = "apple,t8132-spi", "apple,t8103-spi";
+ 			reg = <0x3 0xad108000 0x0 0x4000>;
+@@ -656,6 +666,32 @@ serial0: serial@3ad200000 {
+ 			status = "disabled";
+ 		};
+ 
++		sio: sio@3ade00000 {
++			compatible = "apple,t8132-sio", "apple,sio";
++			reg = <0x3 0xade00000 0x0 0x4000>;
++			dma-channels = <128>;
++			#dma-cells = <1>;
++			mboxes = <&sio_mbox>;
++			iommus = <&sio_dart 0>;
++			power-domains = <&ps_sio_cpu>;
++			status = "disabled";
++		};
++
++		sio_mbox: mbox@3ade08000 {
++			compatible = "apple,t8132-asc-mailbox", "apple,asc-mailbox-v4";
++			reg = <0x3 0xade08000 0x0 0x4000>;
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 1079 IRQ_TYPE_LEVEL_HIGH>,
++				<AIC_IRQ 1078 IRQ_TYPE_LEVEL_HIGH>,
++				<AIC_IRQ 1081 IRQ_TYPE_LEVEL_HIGH>,
++				<AIC_IRQ 1080 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "send-empty", "send-not-empty",
++				"recv-empty", "recv-not-empty";
++			#mbox-cells = <0>;
++			power-domains = <&ps_sio_cpu>;
++			status = "disabled";
++		};
++
+ 		dwc3_0: usb@402280000 {
+ 			compatible = "apple,t8132-dwc3", "apple,t8103-dwc3";
+ 			reg = <0x4 0x02280000 0x0 0xcd00>,

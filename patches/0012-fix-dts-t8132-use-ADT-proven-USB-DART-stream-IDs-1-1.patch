@@ -1,0 +1,49 @@
+From 9de301568487939901707cf381003267f495dd64 Mon Sep 17 00:00:00 2001
+From: KB2UKA <kb2uka80@gmail.com>
+Date: Tue, 1 Sep 2026 18:58:44 -0400
+Subject: [PATCH 12/12] fix(dts): t8132: use ADT-proven USB DART stream IDs
+ <1,14>
+
+Live ADT captured from J713 hardware (2026-09-01, m1n1 proxy): dart-usb0/1
+each carry a mapper child with reg = 1 and sid array <1, 14>; IRQs
+1283/1345 confirmed. The precedent-inherited <0>,<1> wiring is wrong on
+silicon. Per the gap-analysis checklist item 1 prescription.
+
+NOT yet hardware-tested: USB probing is blocked behind the ANS mailbox
+wedge (see gap doc) and dwc3 is =m in the current test kernel.
+
+Gate: 6/6 boards compile, baseline warning only.
+Credit: KB2UKA
+---
+ arch/arm64/boot/dts/apple/t8132.dtsi | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t8132.dtsi b/arch/arm64/boot/dts/apple/t8132.dtsi
+index a7e08ef43..570aa67ec 100644
+--- a/arch/arm64/boot/dts/apple/t8132.dtsi
++++ b/arch/arm64/boot/dts/apple/t8132.dtsi
+@@ -760,8 +760,8 @@ dwc3_0: usb@402280000 {
+ 			dr_mode = "otg";
+ 			usb-role-switch;
+ 			role-switch-default-mode = "host";
+-			iommus = <&dwc3_0_dart_0 0>,
+-			         <&dwc3_0_dart_1 1>;
++			iommus = <&dwc3_0_dart_0 1>,
++			         <&dwc3_0_dart_1 14>;
+ 			power-domains = <&ps_atc0_usb>;
+ 			resets = <&atcphy0>;
+ 			phys = <&atcphy0 PHY_TYPE_USB2>, <&atcphy0 PHY_TYPE_USB3>;
+@@ -861,8 +861,8 @@ dwc3_1: usb@40a280000 {
+ 			dr_mode = "otg";
+ 			usb-role-switch;
+ 			role-switch-default-mode = "host";
+-			iommus = <&dwc3_1_dart_0 0>,
+-			         <&dwc3_1_dart_1 1>;
++			iommus = <&dwc3_1_dart_0 1>,
++			         <&dwc3_1_dart_1 14>;
+ 			power-domains = <&ps_atc1_usb>;
+ 			resets = <&atcphy1>;
+ 			phys = <&atcphy1 PHY_TYPE_USB2>, <&atcphy1 PHY_TYPE_USB3>;
+-- 
+2.50.1 (Apple Git-155)
+

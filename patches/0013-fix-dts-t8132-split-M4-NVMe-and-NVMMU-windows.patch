@@ -1,0 +1,45 @@
+From 68a22d493d80266d9254107d0685d92c2af329c6 Mon Sep 17 00:00:00 2001
+From: KB2UKA <kb2uka80@gmail.com>
+Date: Tue, 1 Sep 2026 20:12:00 -0400
+Subject: [PATCH] fix(dts): t8132: split M4 NVMe and NVMMU windows
+
+The live J713 ADT marks /arm-io/ans with nvme-secure-bar. Its reg[3]
+window at 0x285cc0000 contains only the NVMMU registers, while reg[9] at
+0x2c5cc0000 is the NVMe controller secure BAR. A proven M4 bare-metal
+implementation confirms the split and accesses controller offsets through
+0x24910 from the reg[9] base.
+
+The old node exposed reg[3] as "nvme", so the first controller access
+landed in the NVMMU block. Expose reg[9] as the intentionally 0x28000-wide
+"nvme" resource, retain reg[3] as "nvmmu", and use the T8132 split-window
+driver compatible. The generic apple,nvme-ans2 fallback is dropped on purpose: a kernel without the split-window driver must not bind this node (it would map NVMMU registers past the 0x28000 controller window and fault), so the DT and kernel change travel together.
+
+Credit: KB2UKA
+---
+ arch/arm64/boot/dts/apple/t8132.dtsi | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t8132.dtsi b/arch/arm64/boot/dts/apple/t8132.dtsi
+index 570aa67ec..4a2efaad7 100644
+--- a/arch/arm64/boot/dts/apple/t8132.dtsi
++++ b/arch/arm64/boot/dts/apple/t8132.dtsi
+@@ -974,11 +974,12 @@ sart: sart@485c50000 {
+ 			status = "disabled";
+ 		};
+ 
+-		nvme: nvme@485cc0000 {
+-			compatible = "apple,t8132-nvme-ans2", "apple,t8103-nvme-ans2";
+-			reg = <0x4 0x85cc0000 0x0 0x60000>,
++		nvme: nvme@4c5cc0000 {
++			compatible = "apple,t8132-nvme-ans2";
++			reg = <0x4 0xc5cc0000 0x0 0x28000>,
++			      <0x4 0x85cc0000 0x0 0x60000>,
+ 			      <0x4 0x81600000 0x0 0x4000>;
+-			reg-names = "nvme", "ans";
++			reg-names = "nvme", "nvmmu", "ans";
+ 			interrupt-parent = <&aic>;
+ 			interrupts = <AIC_IRQ 1018 IRQ_TYPE_LEVEL_HIGH>;
+ 			mboxes = <&ans_mbox>;
+-- 
+2.50.1 (Apple Git-155)
+

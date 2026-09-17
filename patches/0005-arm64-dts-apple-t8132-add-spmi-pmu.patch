@@ -1,0 +1,66 @@
+diff --git a/arch/arm64/boot/dts/apple/t8132.dtsi b/arch/arm64/boot/dts/apple/t8132.dtsi
+index 5cf080c..1a7c820 100644
+--- a/arch/arm64/boot/dts/apple/t8132.dtsi
++++ b/arch/arm64/boot/dts/apple/t8132.dtsi
+@@ -9,6 +9,7 @@
+ #include <dt-bindings/interrupt-controller/irq.h>
+ #include <dt-bindings/pinctrl/apple.h>
+ #include <dt-bindings/phy/phy.h>
++#include <dt-bindings/spmi/spmi.h>
+ 
+ / {
+ 	compatible = "apple,t8132", "apple,arm-platform";
+@@ -234,6 +235,40 @@ wdt: watchdog@3882b0000 {
+ 			interrupts = <AIC_IRQ 507 IRQ_TYPE_LEVEL_HIGH>;
+ 		};
+ 
++		nub_spmi: spmi@388714000 {
++			compatible = "apple,t8132-spmi", "apple,t8103-spmi";
++			reg = <0x3 0x88714000 0x0 0x100>;
++			#address-cells = <2>;
++			#size-cells = <0>;
++
++			pmic1: pmic@e {
++				compatible = "apple,abbey-pmic", "apple,spmi-nvmem";
++				reg = <0xe SPMI_USID>;
++
++				nvmem-layout {
++					compatible = "fixed-layout";
++					#address-cells = <1>;
++					#size-cells = <1>;
++
++					pm_setting: pm-setting@2001 {
++						reg = <0x2001 0x1>;
++					};
++
++					rtc_offset: rtc-offset@2100 {
++						reg = <0x2100 0x6>;
++					};
++
++					fault_shadow: fault-shadow@867b {
++						reg = <0x867b 0x10>;
++					};
++
++					socd: socd@8b00 {
++						reg = <0x8b00 0x1800>;
++					};
++				};
++			};
++		};
++
+ 		smc: smc@38c600000 {
+ 			compatible = "apple,t8132-smc", "apple,t8103-smc";
+ 			reg = <0x3 0x8c600000 0x0 0x4000>,
+@@ -251,6 +286,12 @@ smc_gpio: gpio {
+ 			smc_hwmon: hwmon {
+ 				compatible = "apple,smc-hwmon";
+ 			};
++
++			rtc {
++				compatible = "apple,smc-rtc";
++				nvmem-cells = <&rtc_offset>;
++				nvmem-cell-names = "rtc_offset";
++			};
+ 		};
+ 
+ 		smc_mbox: mbox@38c608000 {

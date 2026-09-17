@@ -1,0 +1,51 @@
+From 005a70617cab8c23cf1f42ee24279f050a5e0e0b Mon Sep 17 00:00:00 2001
+From: KB2UKA <kb2uka80@gmail.com>
+Date: Tue, 1 Sep 2026 18:27:54 -0400
+Subject: [PATCH 11/12] fix(dts): t8132-j713: delete depopulated atc2/atc3 pmgr
+ domains
+
+Hardware-observed on J713 (2026-09-01 first boot): apple-pmgr-pwrstate
+reports 'PS atc2_common: Failed to reach power state on' (and atc3), then
+the boot wedges at ~0.31s. J713 has only atc0/atc1. Remove the atc2/atc3
+pmgr subtrees at board level, following the t6022-j475d precedent for
+depopulated ATC instances.
+
+Evidence: omarchy-firstboot/logs/session-20260901-150214-recon.log
+Credit: KB2UKA
+---
+ arch/arm64/boot/dts/apple/t8132-j713.dts | 22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t8132-j713.dts b/arch/arm64/boot/dts/apple/t8132-j713.dts
+index 58440190f..410aedd57 100644
+--- a/arch/arm64/boot/dts/apple/t8132-j713.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j713.dts
+@@ -123,3 +123,25 @@ tp_accel {
+ };
+ 
+ #include "hwmon-laptop.dtsi"
++
++/*
++ * J713 has two Type-C ports (atc0/atc1). The atc2/atc3 power domains fail
++ * to reach the on state on this board (hardware-observed 2026-09-01:
++ * "PS atc2_common: Failed to reach power state on", then boot wedges),
++ * so remove the whole atc2/atc3 pmgr subtrees at board level, following
++ * the t6022-j475d.dts precedent for depopulated ATC instances.
++ */
++/delete-node/ &ps_atc2_pcie;
++/delete-node/ &ps_atc2_cio_pcie;
++/delete-node/ &ps_atc2_cio_usb;
++/delete-node/ &ps_atc2_cio;
++/delete-node/ &ps_atc2_usb;
++/delete-node/ &ps_atc2_usb_aon;
++/delete-node/ &ps_atc2_common;
++/delete-node/ &ps_atc3_pcie;
++/delete-node/ &ps_atc3_cio_pcie;
++/delete-node/ &ps_atc3_cio_usb;
++/delete-node/ &ps_atc3_cio;
++/delete-node/ &ps_atc3_usb;
++/delete-node/ &ps_atc3_usb_aon;
++/delete-node/ &ps_atc3_common;
+-- 
+2.50.1 (Apple Git-155)
+

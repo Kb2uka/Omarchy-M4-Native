@@ -1,0 +1,127 @@
+diff --git a/arch/arm64/boot/dts/apple/t8132-j713.dts b/arch/arm64/boot/dts/apple/t8132-j713.dts
+index b1f779c..2896381 100644
+--- a/arch/arm64/boot/dts/apple/t8132-j713.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j713.dts
+@@ -15,7 +15,7 @@
+ 
+ / {
+ 	compatible = "apple,j713", "apple,t8132", "apple,arm-platform";
+-	model = "Apple MacBook Air (13-inch, M4, 2024)";
++	model = "Apple MacBook Air (13-inch, M4, 2025)";
+ 
+ 	led-controller {
+ 		compatible = "pwm-leds";
+@@ -33,3 +33,25 @@ led-0 {
+ &fpwm1 {
+ 	status = "okay";
+ };
++
++&smc_mbox {
++	status = "okay";
++};
++
++&smc {
++	status = "okay";
++};
++
++&ans_mbox {
++	status = "okay";
++};
++
++&sart {
++	status = "okay";
++};
++
++&nvme {
++	status = "okay";
++};
++
++#include "hwmon-laptop.dtsi"
+diff --git a/arch/arm64/boot/dts/apple/t8132.dtsi b/arch/arm64/boot/dts/apple/t8132.dtsi
+index 715980b..1d2308e 100644
+--- a/arch/arm64/boot/dts/apple/t8132.dtsi
++++ b/arch/arm64/boot/dts/apple/t8132.dtsi
+@@ -233,6 +233,39 @@ wdt: watchdog@3882b0000 {
+ 			interrupts = <AIC_IRQ 507 IRQ_TYPE_LEVEL_HIGH>;
+ 		};
+ 
++		smc: smc@38c600000 {
++			compatible = "apple,t8132-smc", "apple,t8103-smc";
++			reg = <0x3 0x8c600000 0x0 0x4000>,
++			      <0x3 0x8de00000 0x0 0x100000>;
++			reg-names = "smc", "sram";
++			mboxes = <&smc_mbox>;
++			status = "disabled";
++
++			smc_gpio: gpio {
++				compatible = "apple,smc-gpio";
++				gpio-controller;
++				#gpio-cells = <2>;
++			};
++
++			smc_hwmon: hwmon {
++				compatible = "apple,smc-hwmon";
++			};
++		};
++
++		smc_mbox: mbox@38c608000 {
++			compatible = "apple,t8132-asc-mailbox", "apple,asc-mailbox-v4";
++			reg = <0x3 0x8c608000 0x0 0x4000>;
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 562 IRQ_TYPE_LEVEL_HIGH>,
++			             <AIC_IRQ 561 IRQ_TYPE_LEVEL_HIGH>,
++			             <AIC_IRQ 564 IRQ_TYPE_LEVEL_HIGH>,
++			             <AIC_IRQ 563 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "send-empty", "send-not-empty",
++			                  "recv-empty", "recv-not-empty";
++			#mbox-cells = <0>;
++			status = "disabled";
++		};
++
+ 		pinctrl_nub: pinctrl@3881f0000 {
+ 			compatible = "apple,t8132-pinctrl", "apple,t8103-pinctrl";
+ 			reg = <0x3 0x881f0000 0x0 0x4000>;
+@@ -434,6 +467,43 @@ serial0: serial@3ad200000 {
+ 			power-domains = <&ps_uart0>;
+ 			status = "disabled";
+ 		};
++
++		ans_mbox: mbox@481608000 {
++			compatible = "apple,t8132-asc-mailbox", "apple,asc-mailbox-v4";
++			reg = <0x4 0x81608000 0x0 0x4000>;
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 1004 IRQ_TYPE_LEVEL_HIGH>,
++			             <AIC_IRQ 1003 IRQ_TYPE_LEVEL_HIGH>,
++			             <AIC_IRQ 1006 IRQ_TYPE_LEVEL_HIGH>,
++			             <AIC_IRQ 1005 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "send-empty", "send-not-empty",
++			                  "recv-empty", "recv-not-empty";
++			#mbox-cells = <0>;
++			power-domains = <&ps_ans>;
++			status = "disabled";
++		};
++
++		sart: sart@485c50000 {
++			compatible = "apple,t8132-sart", "apple,t6000-sart";
++			reg = <0x4 0x85c50000 0x0 0xc000>;
++			power-domains = <&ps_ans>;
++			status = "disabled";
++		};
++
++		nvme: nvme@485cc0000 {
++			compatible = "apple,t8132-nvme-ans2", "apple,t8103-nvme-ans2";
++			reg = <0x4 0x85cc0000 0x0 0x60000>,
++			      <0x4 0x81600000 0x0 0x4000>;
++			reg-names = "nvme", "ans";
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 1018 IRQ_TYPE_LEVEL_HIGH>;
++			mboxes = <&ans_mbox>;
++			apple,sart = <&sart>;
++			power-domains = <&ps_ans>, <&ps_apcie_st>;
++			power-domain-names = "ans", "apcie0";
++			resets = <&ps_ans>;
++			status = "disabled";
++		};
+ 	};
+ };
+ 

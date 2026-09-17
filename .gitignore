@@ -1,0 +1,13 @@
+m1n1/
+linux-asahi/
+build/
+.artifacts/
+.claude/worktrees/
+
+# Local workflow instructions and private hardware captures
+AGENTS.md
+CLAUDE.md
+# Publish only the reviewed derived research files, regardless of capture naming.
+recon/*
+!recon/README.md
+!recon/pmgr-j713-generated-from-live-adt.dtsi

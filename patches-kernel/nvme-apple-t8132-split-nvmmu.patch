@@ -1,0 +1,183 @@
+Credit: KB2UKA
+
+diff --git a/Documentation/devicetree/bindings/nvme/apple,nvme-ans.yaml b/Documentation/devicetree/bindings/nvme/apple,nvme-ans.yaml
+index 352251c80..655a84e3b 100644
+--- a/Documentation/devicetree/bindings/nvme/apple,nvme-ans.yaml
++++ b/Documentation/devicetree/bindings/nvme/apple,nvme-ans.yaml
+@@ -18,6 +18,7 @@ properties:
+               - apple,t6020-nvme-ans2
+               - apple,t8122-nvme-ans2
+           - const: apple,t8103-nvme-ans2
++      - const: apple,t8132-nvme-ans2
+       - items:
+           - enum:
+               # Do not add additional SoC to this list.
+@@ -27,14 +28,12 @@ properties:
+           - const: apple,nvme-ans2
+ 
+   reg:
+-    items:
+-      - description: NVMe and NVMMU registers
+-      - description: ANS2 co-processor control registers
++    minItems: 2
++    maxItems: 3
+ 
+   reg-names:
+-    items:
+-      - const: nvme
+-      - const: ans
++    minItems: 2
++    maxItems: 3
+ 
+   resets:
+     maxItems: 1
+@@ -70,6 +69,39 @@ properties:
+ 
+       The SART address filter is documented in iommu/apple,sart.yaml.
+ 
++allOf:
++  - if:
++      properties:
++        compatible:
++          contains:
++            const: apple,t8132-nvme-ans2
++    then:
++      properties:
++        reg:
++          minItems: 3
++          items:
++            - description: NVMe registers
++            - description: NVMMU registers
++            - description: ANS2 co-processor control registers
++        reg-names:
++          minItems: 3
++          items:
++            - const: nvme
++            - const: nvmmu
++            - const: ans
++    else:
++      properties:
++        reg:
++          maxItems: 2
++          items:
++            - description: NVMe and NVMMU registers
++            - description: ANS2 co-processor control registers
++        reg-names:
++          maxItems: 2
++          items:
++            - const: nvme
++            - const: ans
++
+ if:
+   properties:
+     compatible:
+diff --git a/drivers/nvme/host/apple.c b/drivers/nvme/host/apple.c
+index a3343c49c..daab39d38 100644
+--- a/drivers/nvme/host/apple.c
++++ b/drivers/nvme/host/apple.c
+@@ -42,6 +42,9 @@
+ #define APPLE_ANS_ACQ_DB  0x1004
+ #define APPLE_ANS_IOCQ_DB 0x100c
+ 
++#define APPLE_ANS_IOQ_CMDS 0x1200
++#define APPLE_ANS_IOQ_CQES 0x1208
++
+ #define APPLE_ANS_MAX_PEND_CMDS_CTRL 0x1210
+ 
+ #define APPLE_ANS_BOOT_STATUS	 0x1300
+@@ -167,6 +170,7 @@ struct apple_nvme_iod {
+ 
+ struct apple_nvme_hw {
+ 	bool has_lsq_nvmmu;
++	bool has_separate_nvmmu;
+ 	u32 max_queue_depth;
+ };
+ 
+@@ -175,6 +179,7 @@ struct apple_nvme {
+ 
+ 	void __iomem *mmio_coproc;
+ 	void __iomem *mmio_nvme;
++	void __iomem *mmio_nvmmu;
+ 	const struct apple_nvme_hw *hw;
+ 
+ 	struct device **pd_dev;
+@@ -293,8 +298,8 @@ static void apple_nvmmu_inval(struct apple_nvme_queue *q, unsigned int tag)
+ {
+ 	struct apple_nvme *anv = queue_to_apple_nvme(q);
+ 
+-	writel(tag, anv->mmio_nvme + APPLE_NVMMU_TCB_INVAL);
+-	if (readl(anv->mmio_nvme + APPLE_NVMMU_TCB_STAT))
++	writel(tag, anv->mmio_nvmmu + APPLE_NVMMU_TCB_INVAL);
++	if (readl(anv->mmio_nvmmu + APPLE_NVMMU_TCB_STAT))
+ 		dev_warn_ratelimited(anv->dev,
+ 				     "NVMMU TCB invalidation failed\n");
+ }
+@@ -1160,7 +1165,7 @@ static void apple_nvme_reset_work(struct work_struct *work)
+ 
+ 		/* Setup the NVMMU for the maximum admin and IO queue depth */
+ 		writel(anv->hw->max_queue_depth - 1,
+-			anv->mmio_nvme + APPLE_NVMMU_NUM_TCBS);
++			anv->mmio_nvmmu + APPLE_NVMMU_NUM_TCBS);
+ 	}
+ 
+ 	/* Setup the admin queue */
+@@ -1173,9 +1178,9 @@ static void apple_nvme_reset_work(struct work_struct *work)
+ 	if (anv->hw->has_lsq_nvmmu) {
+ 		/* Setup NVMMU for both queues */
+ 		writeq(anv->adminq.tcb_dma_addr,
+-			anv->mmio_nvme + APPLE_NVMMU_ASQ_TCB_BASE);
++			anv->mmio_nvmmu + APPLE_NVMMU_ASQ_TCB_BASE);
+ 		writeq(anv->ioq.tcb_dma_addr,
+-			anv->mmio_nvme + APPLE_NVMMU_IOSQ_TCB_BASE);
++			anv->mmio_nvmmu + APPLE_NVMMU_IOSQ_TCB_BASE);
+ 	}
+ 
+ 	anv->ctrl.sqsize =
+@@ -1211,6 +1216,13 @@ static void apple_nvme_reset_work(struct work_struct *work)
+ 	if (ret)
+ 		goto out_remove_cq;
+ 
++	if (anv->hw->has_separate_nvmmu) {
++		lo_hi_writeq(anv->ioq.cq_dma_addr,
++			     anv->mmio_nvme + APPLE_ANS_IOQ_CQES);
++		lo_hi_writeq(anv->ioq.sq_dma_addr,
++			     anv->mmio_nvme + APPLE_ANS_IOQ_CMDS);
++	}
++
+ 	apple_nvme_init_queue(&anv->ioq);
+ 	nr_io_queues = 1;
+ 	ret = nvme_set_queue_count(&anv->ctrl, &nr_io_queues);
+@@ -1543,6 +1555,16 @@ static struct apple_nvme *apple_nvme_alloc(struct platform_device *pdev)
+ 		ret = PTR_ERR(anv->mmio_nvme);
+ 		goto put_dev;
+ 	}
++	if (anv->hw->has_separate_nvmmu) {
++		anv->mmio_nvmmu =
++			devm_platform_ioremap_resource_byname(pdev, "nvmmu");
++		if (IS_ERR(anv->mmio_nvmmu)) {
++			ret = PTR_ERR(anv->mmio_nvmmu);
++			goto put_dev;
++		}
++	} else {
++		anv->mmio_nvmmu = anv->mmio_nvme;
++	}
+ 
+ 	if (anv->hw->has_lsq_nvmmu) {
+ 		anv->adminq.sq_db = anv->mmio_nvme + APPLE_ANS_LINEAR_ASQ_DB;
+@@ -1761,9 +1783,16 @@ static const struct apple_nvme_hw apple_nvme_t8103_hw = {
+ 	.max_queue_depth = 64,
+ };
+ 
++static const struct apple_nvme_hw apple_nvme_t8132_hw = {
++	.has_lsq_nvmmu = true,
++	.has_separate_nvmmu = true,
++	.max_queue_depth = 64,
++};
++
+ static const struct of_device_id apple_nvme_of_match[] = {
+ 	{ .compatible = "apple,t8015-nvme-ans2", .data = &apple_nvme_t8015_hw },
+ 	{ .compatible = "apple,t8103-nvme-ans2", .data = &apple_nvme_t8103_hw },
++	{ .compatible = "apple,t8132-nvme-ans2", .data = &apple_nvme_t8132_hw },
+ 	{ .compatible = "apple,nvme-ans2", .data = &apple_nvme_t8103_hw },
+ 	{},
+ };
