@@ -4,6 +4,10 @@
 > limits, read [the project README](../README.md). Raw machine captures and
 > bench binaries referenced below are not part of the public tree.
 
+> 2026-10-06 correction: the inherited J713 MTP reset pins 8/24 mentioned
+> below are incorrect. Nested ADT reset functions identify pins 28/29;
+> [patch 0014 and its regression check](j713-mtp-reset.md) supersede those claims.
+
 ## Scope and method
 
 This analysis compares the checked-out `t8132.dtsi` baseline with the J713

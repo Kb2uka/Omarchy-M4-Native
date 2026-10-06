@@ -1,0 +1,27 @@
+From: KB2UKA <kb2uka80@gmail.com>
+Subject: [PATCH] fix(dts): j713: use ADT-proven MTP reset GPIOs
+
+The J713 ADT provides reset functions below dockchannel-mtp/mtp-transport.
+The multi-touch function targets SMC key gP1c and STM targets gP1d, both
+through the smc-pmu provider. The Linux apple,smc-gpio driver encodes its
+offset as two hexadecimal digits after gP, so these are pins 28 and 29.
+
+Replace the inherited J413/J613 pins 8 and 24. Retain the existing polarity;
+the key mapping alone does not independently prove the electrical polarity.
+
+Credit: KB2UKA
+---
+ arch/arm64/boot/dts/apple/t8132-j713.dts | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t8132-j713.dts b/arch/arm64/boot/dts/apple/t8132-j713.dts
+--- a/arch/arm64/boot/dts/apple/t8132-j713.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j713.dts
+@@ -102,4 +102,4 @@
+ &mtp_hid {
+-	apple,afe-reset-gpios = <&smc_gpio 8 GPIO_ACTIVE_LOW>;
+-	apple,stm-reset-gpios = <&smc_gpio 24 GPIO_ACTIVE_LOW>;
++	apple,afe-reset-gpios = <&smc_gpio 28 GPIO_ACTIVE_LOW>;
++	apple,stm-reset-gpios = <&smc_gpio 29 GPIO_ACTIVE_LOW>;
+
+--
