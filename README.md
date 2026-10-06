@@ -18,8 +18,10 @@ kernel tree, or supported operating system.
 Hardware work took place around August 31–September 2, 2026. The project was
 put on hold on September 2: accelerated graphics and audio were essential to
 the intended daily-driver experience, and this work had not delivered them.
-The third hardware session was prepared but **never run**. This public
-handoff documents that checkpoint; publication does not mean testing resumed.
+Hardware testing resumed on October 6 from the preserved bench assets. The
+new kernel reached the initramfs shell with storage disabled. Enabling the
+NVMe consumer still stalls; mailbox-only and mailbox-plus-SART configurations
+reach the shell. Storage I/O, accelerated graphics and audio remain unproved.
 
 All results below describe **this project's recorded revisions and test
 machine**, not the current support status of Asahi Linux or every M4 Mac.
@@ -35,7 +37,7 @@ for upstream progress.
 | SoC | Apple `T8132`, M4 |
 | Boot path | m1n1 USB proxy → experimental Asahi-derived Linux kernel → BusyBox initramfs |
 | Display during bring-up | Boot framebuffer / simpledrm console |
-| Proxy host | A separate Mac, with USB access to the target |
+| Proxy host | A separate Linux or macOS machine, with USB access to the target |
 | Kernel build host | Separate Linux machine with an AArch64 LLVM toolchain |
 
 The aim was bare metal. Virtual machines were outside the final project
@@ -89,11 +91,15 @@ The earlier description pointed the controller at the NVMMU window. Patch
 0013 separates them and uses `apple,t8132-nvme-ans2` without a generic fallback
 that could bind an incompatible driver. Its companion kernel patch maps the
 separate resource and adds the IO queue base writes at `0x1200` and `0x1208`,
-following the M4 sequence studied in m1n1.
+following the M4 sequence studied in m1n1. The October 6 correction also
+programs the zero-based IO queue size at `0x1210` after both queue base writes,
+following [the upstream v2 patch](https://lists.openwall.net/linux-kernel/2026/09/06/915).
+See [queue-size evidence and reproduction](docs/nvme-queue-size.md).
 
 **This is a hardware-informed candidate fix, not a demonstrated storage
-repair.** The modified driver was recorded as compiling, but the planned
-boot to prove `nvme0n1` never happened. Mailbox operation, power sequencing,
+repair.** The corrected driver compiles and its minimal-control boot reaches
+the shell, but storage-enabled boots still stall before userspace. No Linux
+`nvme0n1` or media reads have been demonstrated. Mailbox operation, power sequencing,
 and the intentional `0x28000` controller mapping beyond the ADT's `0x10000`
 window remain subjects for validation. The DT and driver changes must be
 reviewed together.
@@ -128,23 +134,26 @@ or charging under Linux.
 | SMP, suspend/resume, battery life, stability | Not validated; boot work used `nosmp` |
 | Omarchy installer or desktop | Not built or demonstrated |
 
-The original Air was restored to normal macOS operation at the end of the
-hardware work. This is a historical outcome, not a guarantee that an
+The Air was restored to normal macOS operation at the end of the September
+hardware work; October testing uses a USB proxy boot session. This is a historical outcome, not a guarantee that an
 experimental boot attempt cannot affect a machine or its data.
 
 ## Repository map
 
 | Path | Contents |
 | --- | --- |
-| [patches/](patches/) | Thirteen ordered Linux device-tree patches |
+| [patches/](patches/) | Ordered Linux device-tree patch series |
 | [patches-kernel/](patches-kernel/) | Boot hacks and the proposed NVMe/NVMMU driver/binding change |
 | [docs/t8132-gap-analysis.md](docs/t8132-gap-analysis.md) | Detailed derivations, session findings, and unresolved questions |
 | [docs/t8132-adt-audit.md](docs/t8132-adt-audit.md) | Recorded offline audit and power-manager analysis |
 | [docs/first-boot-runbook.md](docs/first-boot-runbook.md) | Historical first-session notes, including failed approaches and corrections |
-| [docs/night3-runbook.md](docs/night3-runbook.md) | Staged but unexecuted incremental validation plan |
+| [docs/night3-runbook.md](docs/night3-runbook.md) | Historical incremental validation plan; use the current host and kernel notes below |
+| [docs/host-bench.md](docs/host-bench.md) | Current Linux/macOS host commands and evidence gates |
+| [docs/nvme-queue-size.md](docs/nvme-queue-size.md) | Current kernel queue-size correction and regression command |
 | [tools/adt.py](tools/adt.py) | Standalone binary ADT reader using Python's standard library |
 | [tools/adt-audit.py](tools/adt-audit.py) | ADT versus compiled DTB comparison |
-| [tools/mkdtb.sh](tools/mkdtb.sh), [tools/boot.sh](tools/boot.sh) | Historical Mac-host bench helpers; require adaptation and external assets |
+| [tools/mkdtb.sh](tools/mkdtb.sh), [tools/boot.sh](tools/boot.sh) | DTB builder and Linux/macOS proxy launcher; require external boot assets |
+| [tests/](tests/) | Offline regression checks for host tools and driver changes |
 | [recon/](recon/) | Derived PMGR description and capture availability notes |
 
 The raw machine captures are withheld from the public tree because they
@@ -200,18 +209,23 @@ arbitrary kernel or use them on a production system.
 
 Also absent are the built kernels, initramfs and its complete build recipe,
 m1n1 sources/binaries, per-rung DTBs, full boot logs, photographs, and the
-`reboot-probe.sh` helper expected by `tools/boot.sh`. Therefore **a clone is
+historical `reboot-probe.sh` helper. The current launcher does not require that
+helper. Therefore **a clone is
 not a complete reproducible boot kit**.
 
-Both shell helpers preserve the original `~/omarchy-firstboot` layout.
+Both shell helpers default to the original `~/omarchy-firstboot` layout.
 `tools/mkdtb.sh` builds a DTB with clang and dtc and adds `/opt/homebrew/bin`
 to its search path; adapt the source and tool paths for your host. It does
 not select a proxy device.
 
-The boot wrapper `tools/boot.sh` uses macOS `script` conventions and is not
-supplied as a Linux or Windows boot wrapper. In that file, edit `DEV` to the
-target's actual macOS USB proxy device before use. The helper sets
-`M1N1DEVICE` from `DEV`, so an exported value cannot override its assignment.
+The boot wrapper `tools/boot.sh` supports Linux (util-linux `script`) and
+macOS (BSD `script`). Set `M1N1DEVICE` to the target's actual proxy interface;
+set `BOOT_KIT` and `PYTHON` when the boot assets or interpreter live elsewhere.
+It preserves the loader exit status and records artifact hashes and a PTY
+transcript. It does not infer Linux boot success from USB disappearance or
+reappearance. Automatic panic reboot is disabled by default (`panic=0`).
+See the [host bench procedure](docs/host-bench.md), which supersedes the
+historical launch commands. Windows proxy hosts are not supported by this helper.
 
 For a direct call to m1n1's `tools/linux.py`, the
 [historical first-boot runbook](docs/first-boot-runbook.md) shows how the Mac
