@@ -141,6 +141,8 @@ key_mgmt=WPA2-PSK, pairwise_cipher=CCMP, freq=5765
 DHCP lease obtained
 Gateway: 3 packets transmitted, 3 received, 0% packet loss
 Internet: 3 packets transmitted, 3 received, 0% packet loss
+HTTP command: timeout 12 wget -S -O /tmp/network-http-body http://example.com/
+Connecting to example.com (104.20.23.154:80)
 HTTP/1.1 200 OK, 577 bytes retrieved
 WIFI_CONNECT_END
 

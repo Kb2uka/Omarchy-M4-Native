@@ -7,21 +7,27 @@ attempt to run **Omarchy natively on a 13-inch M4 MacBook Air (2025)**.
 Maintained by **KB2UKA** and shared so other Apple Silicon and Omarchy
 enthusiasts can inspect, reproduce, and build on the findings.
 
-**The milestone:** Linux reached a framebuffer console and a BusyBox shell
-prompt on the Air with the storage and several other peripheral groups
-disabled. **A working Omarchy desktop was not achieved.** This repository
-contains the research and patches, not an installer, disk image, complete
-kernel tree, or supported operating system.
+**The milestone, October 7, 2026:** native Omarchy 4.0.4 now displays its bar,
+wallpaper, terminal and searchable menu on the Air using llvmpipe software
+rendering. The operator confirmed keyboard entry and trackpad movement. See
+[the desktop checkpoint and its limits](docs/j713-omarchy-desktop.md).
+This is a bounded RAM boot, not an installed operating system. Hardware GPU
+acceleration, audio, camera, suspend and daily-use reliability remain unqualified.
+The repository contains research and patches, not a supported installer or disk image.
 
 ## Project status
 
-Hardware work took place around August 31–September 2, 2026. The project was
-put on hold on September 2: accelerated graphics and audio were essential to
-the intended daily-driver experience, and this work had not delivered them.
-Hardware testing resumed on October 6 from the preserved bench assets. The
-new kernel reached the initramfs shell with storage disabled. Enabling the
-NVMe consumer still stalls; mailbox-only and mailbox-plus-SART configurations
-reach the shell. Storage I/O, accelerated graphics and audio remain unproved.
+The September work reached a framebuffer console and was paused. Hardware
+testing resumed on October 6. October 7 work demonstrated ten-CPU memory
+checks, read-only SSD reads, Wi-Fi internet access, Bluetooth HCI startup,
+physical input and the software-rendered Omarchy interface. The detailed
+hardware notes below record the tested revisions and limitations.
+
+Desktop tests use a fresh per-boot TrustCache reservation, `idle=nop`, a
+read-only internal SSD and a two-minute watchdog recovery window. No internal
+filesystem was mounted or written during these tests. Normal installation,
+updates, long-running sessions and complete hardware support are still work
+in progress.
 
 All results below describe **this project's recorded revisions and test
 machine**, not the current support status of Asahi Linux or every M4 Mac.
@@ -36,7 +42,7 @@ for upstream progress.
 | Model / board | `Mac16,12` / `J713` (board ID `0x2c`) |
 | SoC | Apple `T8132`, M4 |
 | Boot path | m1n1 USB proxy → experimental Asahi-derived Linux kernel → BusyBox initramfs |
-| Display during bring-up | Boot framebuffer / simpledrm console |
+| Display during bring-up | simpledrm with llvmpipe software-rendered Wayland desktop |
 | Proxy host | A separate Linux or macOS machine, with USB access to the target |
 | Kernel build host | Separate Linux machine with an AArch64 LLVM toolchain |
 
@@ -62,7 +68,7 @@ came from the target, which came from a precedent, and which still need a
 hardware test. A device-tree node existing or compiling does **not** establish
 that its peripheral works.
 
-### 2. Reached Linux on the actual Air
+### 2. Reached Linux on the actual Air in the initial bring-up
 
 The recorded kernel was an Asahi-derived `7.1.9+` build. Reaching the console
 required `idle=nop`, disabling the WFxT delay path, and bypassing particular
@@ -96,13 +102,12 @@ programs the zero-based IO queue size at `0x1210` after both queue base writes,
 following [the upstream v2 patch](https://lists.openwall.net/linux-kernel/2026/09/06/915).
 See [queue-size evidence and reproduction](docs/nvme-queue-size.md).
 
-**This is a hardware-informed candidate fix, not a demonstrated storage
-repair.** The corrected driver compiles and its minimal-control boot reaches
-the shell, but storage-enabled boots still stall before userspace. No Linux
-`nvme0n1` or media reads have been demonstrated. Mailbox operation, power sequencing,
-and the intentional `0x28000` controller mapping beyond the ADT's `0x10000`
-window remain subjects for validation. The DT and driver changes must be
-reviewed together.
+That split-window correction alone did not resolve the October 6 storage
+stall. Subsequent [ANS receive IRQ](docs/j713-ans-receive-irq.md) and
+[NVMe power-domain](docs/j713-nvme-power-domain.md) work reached `nvme0n1` and
+repeated direct reads. The latest checkpoint reads 8 MiB twice at each of
+three offsets with matching hashes and the device marked read-only. Filesystem
+mounting, writes and an installed root filesystem have not been tested.
 
 ### 4. Audited the descriptions against the live ADT
 
@@ -120,23 +125,29 @@ or charging under Linux.
 
 ## What worked, and what did not
 
-| Area | Evidence at the last checkpoint |
+| Area | Evidence through October 7 |
 | --- | --- |
-| m1n1 proxy boot | Observed on the target |
-| Linux framebuffer console and BusyBox prompt | Observed with peripheral groups disabled |
-| Depopulated ATC power-domain workaround | Recorded hardware finding; patch 0011 |
-| NVMe / internal SSD under Linux | Candidate split-window fix compiled; hardware validation pending |
-| USB / DART stream IDs | ADT-derived correction; end-to-end USB operation unverified |
-| Keyboard and trackpad | MTP description added; input not demonstrated |
-| SMC, charging, thermal management | Descriptions/preparation present; no daily-use validation |
-| PCIe, Wi-Fi, Bluetooth | No demonstrated working Linux connectivity |
-| GPU acceleration, accelerated desktop, audio | Not delivered by this project |
-| SMP, suspend/resume, battery life, stability | Not validated; boot work used `nosmp` |
-| Omarchy installer or desktop | Not built or demonstrated |
+| m1n1 USB proxy and recovery | Native RAM boots; watchdog return and fresh proxy verified |
+| CPU / SMP | All ten CPUs pass bounded memory checks; `idle=nop` still required |
+| NVMe / internal SSD | Repeated direct reads with matching hashes; read-only, no filesystem mount/write |
+| USB diagnostic link | USB Ethernet link-local transport and key-only SSH demonstrated |
+| Keyboard and trackpad | [Physical events and haptics confirmed](docs/j713-input-power-v2.md#captured-hardware-evidence); [graphical typing and pointer movement confirmed in the eighth RAM image](docs/j713-omarchy-desktop.md#native-evidence) |
+| Wi-Fi | [Scan, association, DHCP, DNS and internet request demonstrated in radio test](docs/j713-radio-bringup.md) |
+| Bluetooth | HCI startup demonstrated; pairing and audio unqualified |
+| Omarchy desktop | Bar, wallpaper, terminal and interactive search demonstrated in RAM |
+| Graphics acceleration | Software rendering only; M4 GPU acceleration unqualified |
+| Audio, camera, suspend, battery life | Unqualified |
+| SMC, charging, thermal management; general USB ports | Unqualified for daily use; diagnostic USB transport does not establish general peripheral support |
+| Installed OS and updates | No installed Omarchy root filesystem or qualified update path |
 
-The Air was restored to normal macOS operation at the end of the September
-hardware work; October testing uses a USB proxy boot session. This is a historical outcome, not a guarantee that an
-experimental boot attempt cannot affect a machine or its data.
+The Air was restored to normal macOS operation after the September work.
+October testing uses a USB proxy boot session and bounded recovery. These
+results do not establish production safety or all-hardware support.
+When `/dev/nvme0n1` is present, the private RAM startup script sets it read-only
+and checks the flag; otherwise that check is skipped. The published NVMe driver
+patch does not supply that guard. The startup guard covers ordinary
+block-device writes to that namespace, not privileged NVMe passthrough or other
+namespaces. Experimental boots can still affect the machine or its data.
 
 ## Repository map
 
@@ -148,6 +159,7 @@ experimental boot attempt cannot affect a machine or its data.
 | [docs/t8132-adt-audit.md](docs/t8132-adt-audit.md) | Recorded offline audit and power-manager analysis |
 | [docs/first-boot-runbook.md](docs/first-boot-runbook.md) | Historical first-session notes, including failed approaches and corrections |
 | [docs/night3-runbook.md](docs/night3-runbook.md) | Historical incremental validation plan; use the current host and kernel notes below |
+| [docs/j713-omarchy-desktop.md](docs/j713-omarchy-desktop.md) | Native Omarchy interface checkpoint, evidence and remaining work |
 | [docs/host-bench.md](docs/host-bench.md) | Current Linux/macOS host commands and evidence gates |
 | [docs/nvme-queue-size.md](docs/nvme-queue-size.md) | Current kernel queue-size correction and regression command |
 | [tools/adt.py](tools/adt.py) | Standalone binary ADT reader using Python's standard library |
@@ -204,7 +216,7 @@ do not assume the whole set can be consumed by `git am`.
 
 Apply the numbered DT patches in order only against a compatible source
 baseline. Do not assume an already-patched historical checkout needs the
-whole series again. Do not apply the two kernel patches blindly to an
+whole series again. Do not apply the kernel patches blindly to an
 arbitrary kernel or use them on a production system.
 
 Also absent are the built kernels, initramfs and its complete build recipe,
@@ -241,16 +253,12 @@ run as an unattended installer.
 
 ## Useful next work
 
-1. Reconcile the old patches with current upstream work and recover or replace
-   the exact source/build inputs.
-2. Establish the minimal known-good console configuration again.
-3. Test storage alone with the paired DT and driver change, capturing both
-   successful probe output and failures. Split mailbox, SART, and NVMe into
-   separate steps if the wedge remains.
-4. Add SMC, MTP, and USB one group at a time, holding the kernel and boot
-   arguments fixed during each comparison.
-5. Validate power, input, connectivity, graphics, and audio before attempting
-   an Omarchy desktop or installer.
+1. Preserve a reproducible package/build recipe for the demonstrated RAM desktop.
+2. Complete and qualify the normal service/session setup and application launching.
+3. Qualify graphics, audio, camera, power management, suspend and sustained operation.
+4. Design and test installation and recovery on an explicitly allocated target.
+5. Package board-specific changes and validate coherent upstream updates before
+   publishing an M4 update channel. Such a channel does not exist yet.
 
 For useful issue reports, include the board/SoC, exact source revisions,
 patch list, kernel configuration, boot arguments, artifact hashes, and
@@ -267,7 +275,7 @@ Project work: **KB2UKA**. This research depends on the groundwork of the
 device-tree notices remain applicable. The historical boot investigation
 also references Yureka's M4 work.
 
-The intended desktop was [Omarchy](https://github.com/basecamp/omarchy).
+The desktop is [Omarchy](https://github.com/basecamp/omarchy).
 [omarchy-mac](https://github.com/omarchy-mac/omarchy-mac) is related work at
 the distribution/integration layer. This repository is an independent
 experiment, not an official release or endorsement by those projects.
