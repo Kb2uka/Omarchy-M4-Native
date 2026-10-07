@@ -31,8 +31,8 @@ Serial-derived device names have been replaced with placeholders.
 | `dtb-night3/r2a-ansmbox-only.dtb` | `128dc15e2e69f6fc` | Fallback: only ans_mbox ON. |
 | `dtb-night3/r2b-ansmbox-sart.dtb` | `6f7614a380a189f3` | Fallback: ans_mbox + sart ON, nvme OFF. |
 | `dtb-night3/r3-storage-smc.dtb` | `de71c45bdea360cd` | storage + smc_mbox + smc. |
-| `dtb-night3/r4-storage-smc-mtp.dtb` | `b1823ca9d6ead410` | + mtp, mtp_mbox, mtp_dart, mtp_dockchannel (keyboard/trackpad). |
-| `dtb-night3/r5-all.dtb` | `95a6df2199077ff2` | Everything the J713 board file enables (+ dwc3_0/1 and their four DARTs). Byte-identical to `t8132-j713-night2.dtb`. |
+| `dtb-night3/r4-storage-smc-mtp.dtb` | `b1823ca9d6ead410` | **WITHDRAWN: rebuild with patch 0014 before boot.** Historical MTP input candidate. |
+| `dtb-night3/r5-all.dtb` | `95a6df2199077ff2` | **WITHDRAWN: rebuild with patch 0014 before boot.** Historical all-devices candidate, byte-identical to `t8132-j713-night2.dtb`. |
 | `t8132-j713-night2-nostorage.dtb` | `7ff1f1ed52000536` | The older night-2 "control" — has SMC+USB+MTP ON with storage OFF. Superseded by r1..r5; do not use unless a rung says so. |
 | `air-adt.bin` | — | Live ADT from this Air (469352 B). Same file as `omarchy/recon/air-adt-j713.bin`. Parse offline with `omarchy/tools/adt.py`. |
 | `tools/mkdtb.sh` | — | `tools/mkdtb.sh /abs/out.dtb [label ...]` builds the J713 DTB from `omarchy/linux-asahi` with the named labels forced to `status = "disabled"`. Validated today: no labels → identical to night2.dtb; `ans_mbox sart nvme` → identical to night2-nostorage.dtb. **Output path must be absolute.** |
@@ -46,6 +46,14 @@ on night 1): `nosmp idle=nop panic=-1 console=tty0 fbcon=nodefer loglevel=7`.
 
 ## 2. Pre-flight on the mini (do this BEFORE Doug touches the Air)
 
+**Historical inventory check only:** the table hashes identify the September
+artifacts, including withdrawn r4/r5 images. They are not acceptance hashes
+for a rebuilt candidate. Do not boot an input-enabled image merely because
+it matches this table. For a new image, apply patch 0014, record its new hash,
+and pass `tests/check_mtp_reset.py air-adt.bin candidate.dtb` as described in
+[the reset correction](j713-mtp-reset.md). The old r4/r5 filenames remain
+withdrawn; save rebuilt candidates under distinct names.
+
 ```sh
 cd ~/omarchy-firstboot
 git -C omarchy log --oneline -1                 # expect 1824538
@@ -57,8 +65,12 @@ ls /dev/cu.usbmodem* 2>/dev/null || echo "no proxy yet (expected until the Air i
 mkdir -p logs
 ```
 
-If anything above is off, STOP and fix it before the Air goes down; nothing
-in the ladder is worth running against unverified inputs.
+For reproducing this historical inventory, STOP on any mismatch and resolve
+it before continuing. Do not restore withdrawn input images for booting. A
+corrected candidate intentionally has a new hash: require
+`python3 tests/check_mtp_reset.py air-adt.bin candidate.dtb` to pass and record
+that candidate's hash before use. Nothing in the ladder is worth running
+against unverified inputs.
 
 ## 3. Target-side prerequisites and manual steps
 
@@ -209,18 +221,26 @@ Expected new lines: `macsmc` / `apple-smc` probe, SMC mailbox on IRQs
 `macsmc-hwmon`. Failure = wedge → the SMC ASC +0x8000 mailbox window or SRAM
 region; record and move on with SMC disabled again.
 
-### Rung 4 — + MTP keyboard/trackpad: `dtb-night3/r4-storage-smc-mtp.dtb`
+### Rung 4 — + MTP keyboard/trackpad (rebuild required)
+
+**2026-10-06 correction:** do not boot the original
+`dtb-night3/r4-storage-smc-mtp.dtb`. Apply patch 0014 and rebuild; the
+[corrected r4 image and hash](j713-mtp-reset.md) use ADT-derived pins 28/29.
 
 Expected: `apple-dockchannel`, `dockchannel-hid`, MTP RTKit boot, and — the
 real test — **the keyboard works at the `/ #` prompt.** Have Doug type
 `cat /proc/partitions` and `dmesg | grep -iE 'nvme|smc|dart|hid|mtp'` and
-photograph it. Dead keyboard with no probe error = the AFE/STM reset GPIOs
-8/24 (copied from J413/J613, unconfirmed on J713) — checklist item 6. Record;
-do not guess new GPIO numbers tonight.
+photograph it. A dead keyboard alone does not identify the cause: record the
+SMC, reset, firmware-transport and HID evidence. The old 8/24 pin hypothesis
+is superseded by the ADT correction; polarity remains unverified. Record the
+result; do not guess new GPIO numbers or change polarity during this rung.
 
 Note MTP needs SMC GPIOs, so rung 4 assumes rung 3 passed.
 
-### Rung 5 — everything: `dtb-night3/r5-all.dtb`
+### Rung 5 — everything (rebuild required)
+
+Do not boot the original `dtb-night3/r5-all.dtb`: rebuild it with patch 0014
+as well, after the prerequisite rungs pass.
 
 Adds dwc3_0/dwc3_1 and their four DARTs (SID <1,14>, ADT-proven by patch
 0012, never yet exercised). Expected: `apple-dart` probes on the two USB DARTs

@@ -171,9 +171,11 @@ needs no node for tonight's HPM path.
 5. **AOP ADMAC interrupt output slot 2 is inherited.** The ADT proves IRQ 478,
    the leap-ns 0x34000 window, SID 10, and nine channels, but carries no output
    slot. AOP audio DMA completion is the settling probe.
-6. **MTP reset GPIOs 8/24 are inherited.** No property under `/arm-io/mtp`,
-   `dockchannel-mtp`, `smc-gpio`, or the AP/AOP GPIO nodes names those
-   reset lines. Keyboard/trackpad interface start is the settling probe.
+6. **MTP reset GPIOs 8/24 were inherited and incorrect.** The nested
+   `/arm-io/dockchannel-mtp/mtp-transport` children name reset functions
+   targeting SMC keys `gP1c` and `gP1d`: GPIOs 28 and 29. Patch 0014 corrects
+   the pins; see [the evidence and check](j713-mtp-reset.md). Input operation
+   and the preserved active-low polarity still need hardware confirmation.
 7. **PCIe, SPI, and Type-C MMIO are internally consistent.** The PCIe root
    eight selected resources, IRQs 1231/1240/1249, DART IRQ 1232, WLAN SID 1,
    Bluetooth SID 2, and RID split 0x100/0x101 agree. SPI2/SPI4 addresses,

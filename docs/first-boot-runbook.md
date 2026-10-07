@@ -97,9 +97,11 @@ Iterate freely; kernels run from RAM, nothing touches the macOS volume.
    subwindow disjoint.
 5. **AOP ADMAC IRQ output index (2, precedent-inherited)** — wrong slot =
    DMA completions never serviced, aop-audio stalls *silently*.
-6. **MTP HID AFE/STM reset GPIOs (8/24 on J713, copied from J413/J613)** —
-   wrong number fails only at interface start: dead keyboard/trackpad,
-   no probe error.
+6. **MTP HID AFE/STM reset GPIOs** — the inherited J713 values 8/24
+   are superseded by ADT-derived 28/29 in patch 0014. Apply that patch and
+   rebuild input-enabled DTBs before booting them. See
+   [J713 reset correction](j713-mtp-reset.md); working input and polarity
+   still require hardware verification.
 
 Version-skew caveat: DTBs from pinned linux-asahi, kernel from the
 2026-08-06 copr build. Binding is by compatible string; if a probe fails
