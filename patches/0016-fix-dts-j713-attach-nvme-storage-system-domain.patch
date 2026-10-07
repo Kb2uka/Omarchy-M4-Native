@@ -1,0 +1,32 @@
+From: KB2UKA <kb2uka80@gmail.com>
+Subject: [PATCH] fix(dts): j713: attach NVMe storage system power domain
+
+Attach J713 NVMe to APCIE_SYS_ST rather than its parent APCIE_ST.
+APCIE_SYS_ST already depends on ANS and APCIE_ST, so the full storage
+system domain participates in the consumer's runtime power reference.
+Keep the override at board level; only J713 has been tested.
+
+In bounded native Linux RAM boots with identical kernel, initramfs and
+boot arguments, the old attachment reports an RTKit firmware SError
+before controller initialization. Changing only this phandle allows
+controller initialization and partition discovery. A follow-up direct
+read probe reads the first MiB twice with matching hashes while the
+block device is read-only. No filesystem is mounted or installed.
+The boots used reduced-device bench DTs. The full-board DTB from this
+patch was compiled and compared, but has not been booted.
+The exact faulty firmware access is not established by these results.
+
+Credit: KB2UKA
+---
+ arch/arm64/boot/dts/apple/t8132-j713.dts | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t8132-j713.dts b/arch/arm64/boot/dts/apple/t8132-j713.dts
+--- a/arch/arm64/boot/dts/apple/t8132-j713.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j713.dts
+@@ -82,3 +82,4 @@
+ &nvme {
++	power-domains = <&ps_ans>, <&ps_apcie_sys_st>;
+-	status = "okay";
++	status = "okay";
+ };
