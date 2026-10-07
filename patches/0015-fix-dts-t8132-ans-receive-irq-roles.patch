@@ -1,0 +1,38 @@
+From: KB2UKA <kb2uka80@gmail.com>
+Subject: [PATCH] fix(dts): t8132: correct ANS mailbox IRQ roles
+
+The ADT interrupt list is not ordered by the Linux mailbox role names.
+On the J713, IRQ1005 is asserted while the receive FIFO is empty and
+IRQ1006 is deasserted. Assigning 1005 to recv-not-empty makes the handler
+repeatedly poll an empty FIFO before enable_irq() can return.
+
+With only the receive pair exchanged, bounded RAM boots pass the
+previously unreachable mailbox-start return and ANS boot-ready checkpoints.
+The same idle-state capture shows IRQ1003 asserted for an empty send FIFO,
+so also correct send-empty/send-not-empty to 1003/1004. A send-pair-only
+follow-up preserves controller initialization but does not cure the later
+Create Submission Queue timeout. Full-FIFO send recovery is not yet tested.
+The SoC include affects every T8132 board; hardware validation is J713 only.
+Do not generalize these IRQ numbers to other coprocessor mailboxes.
+
+Credit: KB2UKA
+---
+ arch/arm64/boot/dts/apple/t8132.dtsi | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t8132.dtsi b/arch/arm64/boot/dts/apple/t8132.dtsi
+--- a/arch/arm64/boot/dts/apple/t8132.dtsi
++++ b/arch/arm64/boot/dts/apple/t8132.dtsi
+@@ -958,8 +958,8 @@
+ 			interrupt-parent = <&aic>;
+-			interrupts = <AIC_IRQ 1004 IRQ_TYPE_LEVEL_HIGH>,
+-			             <AIC_IRQ 1003 IRQ_TYPE_LEVEL_HIGH>,
+-			             <AIC_IRQ 1006 IRQ_TYPE_LEVEL_HIGH>,
+-			             <AIC_IRQ 1005 IRQ_TYPE_LEVEL_HIGH>;
++			interrupts = <AIC_IRQ 1003 IRQ_TYPE_LEVEL_HIGH>,
++			             <AIC_IRQ 1004 IRQ_TYPE_LEVEL_HIGH>,
++			             <AIC_IRQ 1005 IRQ_TYPE_LEVEL_HIGH>,
++			             <AIC_IRQ 1006 IRQ_TYPE_LEVEL_HIGH>;
+ 			interrupt-names = "send-empty", "send-not-empty",
+ 			                  "recv-empty", "recv-not-empty";
+ 			#mbox-cells = <0>;

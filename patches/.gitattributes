@@ -1,0 +1,2 @@
+# Unified patch context has a marker before the original DTS indentation.
+0015-fix-dts-t8132-ans-receive-irq-roles.patch whitespace=-space-before-tab
