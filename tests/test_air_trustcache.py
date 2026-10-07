@@ -125,11 +125,18 @@ class Reservations(unittest.TestCase):
             prefix=['air_trustcache.py','--proxyclient',str(client),'--watchdog-runtime',str(runtime),'--output-dtb',str(root/'output.dtb'),'--']
             cases=[(['--arm','--kernel','Image.gz','--dtb','board.dtb'],True),
                    (['--arm','--kernel=Image.gz','--dtb=board.dtb'],True),
-                   (['--arm','--kernel','Image.gz','--dtb','board.dtb','--proxyclient=elsewhere'],False)]
+                   (['--arm','--kernel','Image.gz','--dtb','board.dtb','--proxyclient=elsewhere'],False),
+                   (['--arm','--kernel','Image.gz','--dtb','board.dtb','--proxyclient','elsewhere'],False),
+                   (['--kernel=Image.gz','--dtb=board.dtb'],False),
+                   (['--arm','--dtb=board.dtb'],False),
+                   (['--arm','--kernel=Image.gz'],False)]
             for forwarded,accepted in cases:
                 with self.subTest(forwarded=forwarded),patch.object(M.sys,'argv',prefix+forwarded),patch.object(M.sys,'path',list(M.sys.path)),patch.dict(M.sys.modules,{'m1n1.proxy':SimpleNamespace(M1N1Proxy=Proxy)}),patch.object(M.runpy,'run_path') as run:
                     if accepted:
+                        seen=[]
+                        run.side_effect=lambda *a,**kw:seen.append(list(M.sys.argv))
                         M.main();run.assert_called_once_with(str(runtime),run_name='__main__')
+                        self.assertEqual(seen,[[str(runtime),'--proxyclient',str(client),*forwarded]])
                     else:
                         with self.assertRaises(SystemExit):M.main()
                         run.assert_not_called()
