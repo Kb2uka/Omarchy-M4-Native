@@ -1,0 +1,75 @@
+--- a/drivers/hid/dockchannel-hid/dockchannel-hid.c
++++ b/drivers/hid/dockchannel-hid/dockchannel-hid.c
+@@ -11,6 +11,7 @@
+ #include <linux/device.h>
+ #include <linux/dma-mapping.h>
+ #include <linux/firmware.h>
++#include <linux/module.h>
+ #include <linux/gpio/consumer.h>
+ #include <linux/hid.h>
+ #include <linux/platform_device.h>
+@@ -20,6 +21,10 @@
+ #include <linux/unaligned.h>
+ #include <linux/of.h>
+ #include "../hid-ids.h"
++
++static bool m4_power_v2;
++module_param(m4_power_v2, bool, 0444);
++MODULE_PARM_DESC(m4_power_v2, "Test J713 MTP version-2 interface power requests");
+ 
+ #define COMMAND_TIMEOUT_MS 1000
+ #define START_TIMEOUT_MS 2000
+@@ -372,8 +377,36 @@
+ static int dchid_reset_interface(struct dchid_iface *iface, int state)
+ {
+ 	u8 msg[] = { CMD_RESET_INTERFACE, 1, iface->index, state };
+-
+-	return dchid_comm_cmd(iface->dchid, msg, sizeof(msg));
++	struct {
++		u8 command;
++		u8 version;
++		u8 interface;
++		u8 state;
++		u8 phase;
++		__le32 status;
++	} __packed request = {
++		.command = CMD_RESET_INTERFACE,
++		.version = 2,
++		.interface = iface->index,
++		.state = state,
++		.phase = 0,
++		.status = cpu_to_le32(0),
++	};
++	int ret;
++
++	if (!m4_power_v2 || !of_machine_is_compatible("apple,j713") ||
++	    !of_machine_is_compatible("apple,t8132"))
++		return dchid_comm_cmd(iface->dchid, msg, sizeof(msg));
++
++	ret = dchid_comm_cmd(iface->dchid, &request, sizeof(request));
++	if (ret < 0)
++		return ret;
++	request.phase = 1;
++	ret = dchid_comm_cmd(iface->dchid, &request, sizeof(request));
++	dev_info(iface->dchid->dev,
++		 "M4INPUT v2 power iface=%u state=%u bytes=%zu result=%d\n",
++		 iface->index, request.state, sizeof(request), ret);
++	return ret;
+ }
+ 
+ static int dchid_send_firmware(struct dchid_iface *iface, void *firmware, size_t size)
+@@ -518,8 +551,12 @@
+ 
+ 		/* After loading firmware, multi-touch needs a reset */
+ 		dev_info(iface->dchid->dev, "Resetting %s\n", iface->name);
+-		dchid_reset_interface(iface, 0);
+-		dchid_reset_interface(iface, 2);
++		ret = dchid_reset_interface(iface, 0);
++		if (ret < 0)
++			goto err;
++		ret = dchid_reset_interface(iface, 2);
++		if (ret < 0)
++			goto err;
+ 	}
+ 
+ 	return 0;

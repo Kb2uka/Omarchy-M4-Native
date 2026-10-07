@@ -1,0 +1,2 @@
+# Unified patch context retains original C indentation.
+*.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
