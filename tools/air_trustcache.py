@@ -173,9 +173,10 @@ def main():
     forwarded = args.runtime_args
     if forwarded[:1] == ['--']:
         forwarded = forwarded[1:]
-    if '--arm' not in forwarded or '--kernel' not in forwarded or '--dtb' not in forwarded:
+    options = {argument.partition('=')[0] for argument in forwarded}
+    if '--arm' not in forwarded or '--kernel' not in options or '--dtb' not in options:
         parser.error('forward a watchdog-protected Linux boot after --')
-    if '--proxyclient' in forwarded:
+    if '--proxyclient' in options:
         parser.error('--proxyclient is provided by this wrapper')
     if not args.watchdog_runtime.is_file() or not (args.proxyclient / 'm1n1/proxy.py').is_file():
         parser.error('existing watchdog runtime and proxyclient are required')

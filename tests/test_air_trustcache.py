@@ -8,6 +8,7 @@ import struct
 from types import SimpleNamespace
 import unittest
 import tempfile
+from unittest.mock import patch
 
 SPEC = importlib.util.spec_from_file_location('air_trustcache', Path(__file__).resolve().parents[1] / 'tools/air_trustcache.py')
 M = importlib.util.module_from_spec(SPEC)
@@ -101,6 +102,38 @@ class Reservations(unittest.TestCase):
     def test_live_hardware_bounds(self):
         proxy,utils,start,size=hardware()
         self.assertEqual(M.live_range(proxy,utils),(start,size))
+
+    def test_live_allocation_alignment_and_size(self):
+        for shift, size in [(0x1000, 0x60000), (0, 16 * 1024 * 1024 + M.PAGE)]:
+            proxy,utils,start,_=hardware()
+            memory=utils.adt['/chosen/memory-map']._properties
+            adt,adt_size=memory['DeviceTree']
+            memory['DeviceTree']=(adt+shift,adt_size)
+            memory['TrustCache']=(start+shift,size)
+            memory['BootKC-rw']=(start+shift+size,0x110000)
+            utils.mrs=lambda reg: adt+shift if reg==M.D_LOWER else start+shift+size-0x1000
+            with self.subTest(shift=shift,size=size),self.assertRaisesRegex(ValueError,'alignment or TrustCache size'):
+                M.live_range(proxy,utils)
+
+    def test_forwarded_cli_forms_and_proxyclient_guard(self):
+        class Proxy:
+            kboot_prepare_dt=object()
+        original=Proxy.kboot_prepare_dt
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);client=root/'client';(client/'m1n1').mkdir(parents=True)
+            (client/'m1n1/proxy.py').touch();runtime=root/'runtime.py';runtime.touch()
+            prefix=['air_trustcache.py','--proxyclient',str(client),'--watchdog-runtime',str(runtime),'--output-dtb',str(root/'output.dtb'),'--']
+            cases=[(['--arm','--kernel','Image.gz','--dtb','board.dtb'],True),
+                   (['--arm','--kernel=Image.gz','--dtb=board.dtb'],True),
+                   (['--arm','--kernel','Image.gz','--dtb','board.dtb','--proxyclient=elsewhere'],False)]
+            for forwarded,accepted in cases:
+                with self.subTest(forwarded=forwarded),patch.object(M.sys,'argv',prefix+forwarded),patch.object(M.sys,'path',list(M.sys.path)),patch.dict(M.sys.modules,{'m1n1.proxy':SimpleNamespace(M1N1Proxy=Proxy)}),patch.object(M.runpy,'run_path') as run:
+                    if accepted:
+                        M.main();run.assert_called_once_with(str(runtime),run_name='__main__')
+                    else:
+                        with self.assertRaises(SystemExit):M.main()
+                        run.assert_not_called()
+                    self.assertIs(Proxy.kboot_prepare_dt,original)
 
     def test_stale_or_wrong_hardware_rejected(self):
         changes = [lambda p,u:setattr(p,'get_chipid',lambda:0x8122),
