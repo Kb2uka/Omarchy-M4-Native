@@ -39,6 +39,10 @@ machine**, not the current support status of Asahi Linux or every M4 Mac.
 Check the [Asahi M4 feature page](https://asahilinux.org/docs/platform/feature-support/m4/)
 for upstream progress.
 
+October 9 adds an [experimental J713 installer profile](docs/j713-installer-profile.md)
+with exact recovery-image and radio-firmware checks. It is preparation for a
+separate SSD installation; no permanent Omarchy boot has been demonstrated.
+
 ## Hardware and approach
 
 | Item | Research target |
