@@ -1,0 +1,164 @@
+diff --git i/src/diskutil.py w/src/diskutil.py
+index a22eab5..67ba2fb 100644
+--- i/src/diskutil.py
++++ w/src/diskutil.py
+@@ -256,11 +256,13 @@ class DiskUtil:
+         # macOS may insert Apple_Boot helpers between Linux partitions.
+         # Identify the newly created partition by UUID and requested type.
+         requested_type = "Apple_APFS" if fs.lower() == "apfs" else fs.strip("%")
+-        # diskutil accepts %Linux% but reports Content as Linux Filesystem.
+-        # Normalize this alias without weakening the UUID/type uniqueness check.
++        # diskutil accepts the Linux alias or GPT type GUID, but may report
++        # either spelling or Linux Filesystem in Content.
+         def canonical_type(value):
+             value = value.lower()
+-            return "linux filesystem" if value == "linux" else value
++            if value in ("linux", "0fc63daf-8483-4772-8e79-3d69d8477de4"):
++                return "linux filesystem"
++            return value
+ 
+         candidates = [p for p in parts if not p.free and p.uuid not in before
+                       and canonical_type(p.type) == canonical_type(requested_type)]
+diff --git i/tests/fixtures/j713-ssd-20261009.json w/tests/fixtures/j713-ssd-20261009.json
+new file mode 100644
+index 0000000..64a1cfc
+--- /dev/null
++++ w/tests/fixtures/j713-ssd-20261009.json
+@@ -0,0 +1,52 @@
++{
++  "os_list": [
++    {
++      "name": "Omarchy M4 Air experimental SSD qualification",
++      "default_os_name": "Omarchy M4",
++      "expert": true,
++      "boot_object": "m1n1.bin",
++      "next_object": "omarchy/boot.bin",
++      "package": "omarchy-m4-air-20261009.zip",
++      "supported_fw": [
++        "26.5.1"
++      ],
++      "m4_boot": {
++        "loader": {
++          "file": "boot/loader.bin",
++          "sha256": "3a3f7a64c65fc366d5ac9aece3e1bee64119be012aa1ec5b15d2743c6f91fce4"
++        },
++        "kernel": {
++          "file": "boot/Image.gz",
++          "sha256": "69b92b6531b1f1c0748427a9f6975ae63352e3c3bb630517ca0f3eb0236242ea"
++        },
++        "dtb": {
++          "file": "boot/portable.dtb",
++          "sha256": "7d3adb1cabae27d75488992b886cc144294fc6bbcadef071a48234c8fd7ada60"
++        },
++        "initramfs": {
++          "file": "boot/initramfs.cpio.gz",
++          "sha256": "0b4e8f8ac58ec7afda6de5810b1f96599f582297e246cbe7ac4dfdfad8e0af28"
++        },
++        "bootargs": "maxcpus=10 idle=nop panic=0 console=tty0 fbcon=nodefer loglevel=4 log_buf_len=1M m4trace_hit=999 dockchannel_hid.m4_power_v2=1 pcie_apple.m4_link_diag=1 pcie_apple.m4_keep_clocks=1"
++      },
++      "partitions": [
++        {
++          "name": "EFI",
++          "type": "EFI",
++          "size": "524288000B",
++          "format": "fat",
++          "copy_firmware": true,
++          "copy_installer_data": true
++        },
++        {
++          "name": "Root",
++          "type": "0fc63daf-8483-4772-8e79-3d69d8477de4",
++          "size": "17179869184B",
++          "expand": true,
++          "image": "root.ext4",
++          "rootfs_uuid": "4f0f5127-9f0e-428a-a303-122e87e4be64"
++        }
++      ]
++    }
++  ]
++}
+diff --git i/tests/test_partition_selection.py w/tests/test_partition_selection.py
+index 0f6f978..72e3591 100644
+--- i/tests/test_partition_selection.py
++++ w/tests/test_partition_selection.py
+@@ -1,5 +1,8 @@
++import json
++from pathlib import Path
+ import unittest
+-from unittest.mock import Mock
++from unittest.mock import Mock, patch
++from osinstall import OSInstaller
+ 
+ from diskutil import DiskUtil, Partition
+ 
+@@ -13,7 +16,8 @@ class PartitionSelectionTests(unittest.TestCase):
+         disk = DiskUtil()
+         disk.disk_parts = {}
+         existing = [partition('disk0s4', 'EFI', 'existing-efi'),
+-                    partition('disk0s7', 'Linux Filesystem', 'existing-linux')]
++                    partition('disk0s7', 'Linux Filesystem', 'existing-linux'),
++                    Partition('disk0s7', 1 << 30, 32 << 20, True, None)]
+         disk.get_partitions = Mock(side_effect=[existing, existing + added])
+         disk.action = Mock()
+         disk.get_list = Mock()
+@@ -46,3 +50,60 @@ class PartitionSelectionTests(unittest.TestCase):
+                 with self.assertRaisesRegex(Exception, 'Could not uniquely identify'):
+                     disk.addPartition('disk0s4', '%Linux%', '%noformat%', 1073741824)
+                 disk.get_partition_info.assert_not_called()
++
++    def test_linux_guid_forms_match_diskutil_content(self):
++        guid = '0fc63daf-8483-4772-8e79-3d69d8477de4'
++        for requested, actual in [(guid, 'Linux Filesystem'),
++                                  (guid.upper(), 'Linux Filesystem'),
++                                  ('Linux', guid), (guid, guid.upper())]:
++            with self.subTest(requested=requested, actual=actual):
++                wanted = partition('disk0s8', actual, 'new-root')
++                disk = self.setup_disk([partition('disk0s6', 'Apple_Boot', 'helper'), wanted])
++                self.assertIs(disk.addPartition('disk0s4', '%' + requested + '%',
++                                               '%noformat%', 1073741824), wanted)
++
++    def test_identified_root_template_through_real_partition_method(self):
++        fixture = Path(__file__).with_name('fixtures') / 'j713-ssd-20261009.json'
++        template = json.loads(fixture.read_text())['os_list'][0]
++        stub = partition('disk0s5', 'Apple_APFS', 'existing-stub')
++        efi = Partition('disk0s4', stub.offset + stub.size, 524288000,
++                        False, 'EFI', 'new-efi')
++        root = Partition('disk0s8', efi.offset + efi.size, 381225533440,
++                         False, 'Linux Filesystem', 'new-root')
++        helper = Partition('disk0s6', root.offset + root.size, 134217728,
++                           False, 'Apple_Boot', 'new-helper')
++        free = Partition(helper.name, helper.offset + helper.size, 32 << 20, True, None)
++        # get_partitions names free extents after the preceding partition.
++        before_efi = Partition(stub.name, efi.offset,
++                               efi.size + root.size + helper.size + free.size, True, None)
++        after_efi = Partition(efi.name, root.offset,
++                              root.size + helper.size + free.size, True, None)
++        disk = DiskUtil()
++        disk.disk_parts = {}
++        disk.get_partitions = Mock(side_effect=[[stub, before_efi], [stub, efi, after_efi],
++                                                [stub, efi, after_efi],
++                                                [stub, efi, root, helper, free]])
++        disk.action = Mock()
++        disk.get_list = Mock()
++        disk.get_partition_info = Mock(side_effect=lambda name, **kwargs:
++                                       {efi.name: efi, root.name: root}[name])
++        installer = OSInstaller(disk, {}, template)
++        with patch('osinstall.subprocess.run'):
++            installer.partition_disk(stub.name, 381749821440)
++        self.assertEqual(installer.part_info, [efi, root])
++        self.assertIs(installer.efi_part, efi)
++        self.assertEqual(disk.action.call_count, 2)
++        self.assertEqual(disk.action.call_args.args[2], '%0fc63daf-8483-4772-8e79-3d69d8477de4%')
++
++    def test_guid_request_rejects_missing_existing_ambiguous_and_wrong_types(self):
++        for added in [[], [partition('disk0s8', 'Linux Filesystem', 'existing-linux')],
++                      [partition('disk0s8', 'Linux Filesystem', 'one'),
++                       partition('disk0s9', 'Linux Filesystem', 'two')],
++                      [partition('disk0s8', 'Apple_Boot', 'new')],
++                      [partition('disk0s8', '0657FD6D-A4AB-43C4-84E5-0933C84B4F4F', 'new')]]:
++            with self.subTest(added=added):
++                disk = self.setup_disk(added)
++                with self.assertRaisesRegex(Exception, 'Could not uniquely identify'):
++                    disk.addPartition('disk0s4', '%0fc63daf-8483-4772-8e79-3d69d8477de4%',
++                                      '%noformat%', 1073741824)
++                disk.get_partition_info.assert_not_called()
