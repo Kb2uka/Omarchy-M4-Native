@@ -1,0 +1,643 @@
+diff --git i/gravity_firmware/bluetooth.py w/gravity_firmware/bluetooth.py
+index 0769c43..4a9dc1f 100644
+--- i/gravity_firmware/bluetooth.py
++++ w/gravity_firmware/bluetooth.py
+@@ -19,0 +20,6 @@ MACHINE_OUTPUTS = {
++    "j713": (
++        "brcm/brcmbt4388c2-apple,garden-a.bin",
++        "brcm/brcmbt4388c2-apple,garden-a.ptb",
++        "brcm/brcmbt4388c2-apple,garden-u.bin",
++        "brcm/brcmbt4388c2-apple,garden-u.ptb",
++    ),
+diff --git i/gravity_firmware/open_firmware.py w/gravity_firmware/open_firmware.py
+index 03d45ef..173da1b 100644
+--- i/gravity_firmware/open_firmware.py
++++ w/gravity_firmware/open_firmware.py
+@@ -11,0 +12 @@ MACHINE_FILES = {
++    "j713": (),
+diff --git i/gravity_firmware/update.py w/gravity_firmware/update.py
+index 01da79f..1ca4f44 100644
+--- i/gravity_firmware/update.py
++++ w/gravity_firmware/update.py
+@@ -5 +5 @@ from .core import FWPackage
+-from .wifi import WiFiFWCollection
++from .wifi import WiFiFWCollection, MACHINE_ALIASES
+@@ -76 +76 @@ def main():
+-    parser.add_argument('--machine', choices=('j773g',), required=True,
++    parser.add_argument('--machine', choices=tuple(MACHINE_ALIASES), required=True,
+diff --git i/gravity_firmware/wifi.py w/gravity_firmware/wifi.py
+index cd566e1..9b13df2 100644
+--- i/gravity_firmware/wifi.py
++++ w/gravity_firmware/wifi.py
+@@ -10,0 +11,8 @@ MACHINE_ALIASES = {
++    "j713": {
++        "brcm/brcmfmac4388c2-pcie.apple,garden.bin": "C-4388__s-C2/garden.trx",
++        "brcm/brcmfmac4388c2-pcie.apple,garden.clm_blob": "C-4388__s-C2/garden.clmb",
++        "brcm/brcmfmac4388c2-pcie.apple,garden.txcap_blob": "C-4388__s-C2/garden.txcb",
++        "brcm/brcmfmac4388c2-pcie.apple,garden.sig": "C-4388__s-C2/garden.sig",
++        "brcm/brcmfmac4388c2-pcie.apple,garden-WLMT-a.txt": "C-4388__s-C2/P-garden_M-WLMT_V-a__m-4.9.txt",
++        "brcm/brcmfmac4388c2-pcie.apple,garden-WLMT-u.txt": "C-4388__s-C2/P-garden_M-WLMT_V-u__m-4.9.txt"
++    },
+diff --git i/src/main.py w/src/main.py
+index c1b5523..46dbfb3 100644
+--- i/src/main.py
++++ w/src/main.py
+@@ -36,0 +37 @@ class Device:
++    chip_min_ver: str = None
+@@ -39 +40,5 @@ CHIP_MIN_VER = {0x8132: "26.6.2"}  # T8132, M4
+-DEVICES = {"j773gap": Device("26.6.2", False)}  # Mac mini (M4, 2024)
++DEVICES = {
++    "j773gap": Device("26.6.2", False),
++    # Experimental J713 qualification; do not relax the shared T8132 minimum.
++    "j713ap": Device("26.5.1", True, "26.5.1"),
++}
+@@ -41,0 +47 @@ IPSW_VERSIONS = [
++
+@@ -44,0 +51,3 @@ IPSW_VERSIONS = [
++    # SFR uses RestoreLongVersion, not the macOS ProductVersion.
++    IPSW("26.5.1", "26.5.1", "0", "25.6.80.0.0,0", True, ["j713ap"],
++         "https://updates.cdn-apple.com/2026SpringFCS/fullrestores/122-88870/E47EBB85-45F2-4E3C-B9E7-6FF7868C2FBA/UniversalMac_26.5.1_25F80_Restore.ipsw"),
+@@ -510 +519 @@ class InstallerMain:
+-        chip_min = split_ver(CHIP_MIN_VER.get(self.sysinfo.chip_id, "0"))
++        chip_min = split_ver(self.device.chip_min_ver or CHIP_MIN_VER.get(self.sysinfo.chip_id, "0"))
+@@ -525,0 +535,4 @@ class InstallerMain:
++        if not minver:
++            p_error("No qualified firmware matches this device and OS image.")
++            sys.exit(1)
++
+@@ -527 +540 @@ class InstallerMain:
+-            p_error("Your system firmware is too old.")
++            p_error("Your system firmware is too old or this firmware requires expert mode.")
+@@ -894 +907 @@ class InstallerMain:
+-            p_error("Gravity Linux supports only the M4 Mac mini (j773gap).")
++            p_error("Supported profiles: M4 Mac mini (j773gap); experimental M4 Air (j713ap) in expert mode.")
+@@ -909,4 +922 @@ class InstallerMain:
+-        if self.expert:
+-            min_ver = MIN_MACOS_VERSION_EXPERT
+-        else:
+-            min_ver = MIN_MACOS_VERSION
++        min_ver = MIN_MACOS_VERSION
+diff --git i/src/recovery.py w/src/recovery.py
+index fe8062d..ee7be23 100644
+--- i/src/recovery.py
++++ w/src/recovery.py
+@@ -4,2 +4,3 @@
+-The AEA key below is Apple-published release material, not a device secret.
+-It was resolved with ipsw v3.1.722 from the archive's public FCS metadata:
++The AEA keys below are Apple-published release material, not device secrets.
++The 26.5.1 key was resolved with ipsw v3.1.732 from its qualified archive.
++The 26.6.2 key was resolved with ipsw v3.1.722 from its public FCS metadata:
+@@ -20,0 +22,5 @@ QUALIFIED_IMAGES = {
++    ("26.5.1", "022-21678-093.dmg.aea"): {
++        "encrypted_sha256": "12919ca28b831ec9ff71291ac857a51cef54263f4846180c7b7311a58c51d13e",
++        "decoded_sha256": "c7e05c0261a687b256c9ee58341346fbb995dfd04f03affd874524e6bc2e615d",
++        "key": "base64:jwTzZTlYzWR0hJi0ISUdhMp39bmqC112h34G5qV6PDM="
++    },
+diff --git i/src/stub.py w/src/stub.py
+index 9dc607c..d78c935 100644
+--- i/src/stub.py
++++ w/src/stub.py
+@@ -295 +295 @@ class StubInstaller(PackageInstaller):
+-        # 26.6.2 omits this key. Its installed Preboot layout still places
++        # Qualified 26.5.1 and 26.6.2 images omit this key. Preboot still places
+@@ -298 +298 @@ class StubInstaller(PackageInstaller):
+-        if self.install_version == "26.6.2":
++        if self.install_version in ("26.5.1", "26.6.2"):
+diff --git i/tests/fixtures/j713-radio-25F80.json w/tests/fixtures/j713-radio-25F80.json
+new file mode 100644
+index 0000000..9a9a00a
+--- /dev/null
++++ w/tests/fixtures/j713-radio-25F80.json
+@@ -0,0 +1,42 @@
++{
++  "brcmbt4388c2-apple,garden-a.ptb": {
++    "size": 3728,
++    "sha256": "249f4b637bfa5c3494ed9b8f6ef7d213ace06a1c0f188360b3b4bbf7d9405572"
++  },
++  "brcmbt4388c2-apple,garden-u.bin": {
++    "size": 591606,
++    "sha256": "f2a53a83cbd03c842cd81da156671c8813cc8b1466c9d43b8818e629bb79bba6"
++  },
++  "brcmfmac4388c2-pcie.apple,garden-WLMT-u.txt": {
++    "size": 24913,
++    "sha256": "68acd4eca6ae81340bcc27bc093c554010c087756dfd0bd2f754f3f667f76b35"
++  },
++  "brcmfmac4388c2-pcie.apple,garden.clm_blob": {
++    "size": 79547,
++    "sha256": "ae2858d4ead5f22c23a9eda5c1d76cb840de1d6ddb1d27c9ae15936e0ee1e135"
++  },
++  "brcmbt4388c2-apple,garden-a.bin": {
++    "size": 591632,
++    "sha256": "2887244dae0cf9bd8122bd418002c38f880c66d4725242f3585b5f61b8802a6e"
++  },
++  "brcmfmac4388c2-pcie.apple,garden-WLMT-a.txt": {
++    "size": 24870,
++    "sha256": "a3cf85bdd68083f40e47e9a029e77a4e14b32047bb9251a46e6b04e2232591f6"
++  },
++  "brcmbt4388c2-apple,garden-u.ptb": {
++    "size": 3728,
++    "sha256": "249f4b637bfa5c3494ed9b8f6ef7d213ace06a1c0f188360b3b4bbf7d9405572"
++  },
++  "brcmfmac4388c2-pcie.apple,garden.sig": {
++    "size": 204,
++    "sha256": "9abb8c1afe0413339f5eca7706150c507a7bca5d244b0a4c6f79e4c28d2ce7cf"
++  },
++  "brcmfmac4388c2-pcie.apple,garden.txcap_blob": {
++    "size": 1371,
++    "sha256": "e269797d1729325a5610bd081b6274efc66aebf6486cb77442fe24d61250f830"
++  },
++  "brcmfmac4388c2-pcie.apple,garden.bin": {
++    "size": 1804405,
++    "sha256": "7cfae8622feeb119c756ae707d26f3a94f1cde44becefacf27ecf1fdc586d93b"
++  }
++}
+diff --git i/tests/test_j713_profile.py w/tests/test_j713_profile.py
+new file mode 100644
+index 0000000..ecc8c89
+--- /dev/null
++++ w/tests/test_j713_profile.py
+@@ -0,0 +1,182 @@
++# SPDX-License-Identifier: MIT
++import contextlib
++import io
++from pathlib import Path
++import tempfile
++from types import SimpleNamespace
++import unittest
++from unittest.mock import Mock, patch
++
++import main
++import recovery
++from stub import StubInstaller
++from gravity_firmware import update
++from gravity_firmware.bluetooth import BluetoothFWCollection
++from gravity_firmware.open_firmware import OpenFirmwareCollection
++from gravity_firmware.wifi import WiFiFWCollection
++
++
++WIFI = {
++    "brcm/brcmfmac4388c2-pcie.apple,garden.bin": "garden.trx",
++    "brcm/brcmfmac4388c2-pcie.apple,garden.clm_blob": "garden.clmb",
++    "brcm/brcmfmac4388c2-pcie.apple,garden.txcap_blob": "garden.txcb",
++    "brcm/brcmfmac4388c2-pcie.apple,garden.sig": "garden.sig",
++    "brcm/brcmfmac4388c2-pcie.apple,garden-WLMT-a.txt": "P-garden_M-WLMT_V-a__m-4.9.txt",
++    "brcm/brcmfmac4388c2-pcie.apple,garden-WLMT-u.txt": "P-garden_M-WLMT_V-u__m-4.9.txt",
++}
++BT = {
++    "brcm/brcmbt4388c2-apple,garden-u.bin": "BCM4388C2_23.5.224.1477_PCIE_macOS_Willamette_Garden_CLPC_OS_USI_20251203.bin",
++    "brcm/brcmbt4388c2-apple,garden-u.ptb": "BCM4388C2_P1v1_PCIE_macOS_Willamette_Garden_CLPC_OS_USI_K_R_20240524.ptb",
++    "brcm/brcmbt4388c2-apple,garden-a.bin": "BCM4388C2_23.5.224.1476_PCIE_macOS_Willamette_Garden_CLPC_OS_AMKOR_20251203.bin",
++    "brcm/brcmbt4388c2-apple,garden-a.ptb": "BCM4388C2_P1v1_PCIE_macOS_Willamette_Garden_CLPC_OS_AMKOR_K_R_20240524.ptb",
++}
++
++
++class AirProfileTests(unittest.TestCase):
++    def test_experimental_main_entry_reaches_menu(self):
++        for device, expert, version, succeeds in (
++            ("j713ap", True, "26.5.1", True),
++            ("j713ap", False, "26.5.1", False),
++            ("j773gap", False, "26.6.2", True),
++            ("j773gap", True, "26.6.2", True),
++            ("j715ap", True, "26.5.1", False),
++            ("j713ap", True, "26.4", False),
++        ):
++            with self.subTest(device=device, expert=expert, version=version):
++                obj = self.installer(device, version)
++                state = obj.sysinfo
++                state.show = Mock()
++                state.boot_mode = "macOS"
++                state.login_user = "fixture"
++                obj.input = Mock()
++                obj.yesno = Mock(return_value=expert)
++                obj.main_loop = Mock(return_value=False)
++                with patch.object(main.system, "SystemInfo", return_value=state), \
++                     patch.dict(main.os.environ, {"EXPERT": "1" if expert else ""}), \
++                     contextlib.redirect_stdout(io.StringIO()):
++                    if succeeds:
++                        obj.main()
++                        obj.main_loop.assert_called_once()
++                    else:
++                        with self.assertRaises(SystemExit):
++                            obj.main()
++                        obj.main_loop.assert_not_called()
++
++    def test_air_restore_path_and_unknown_layout(self):
++        obj = StubInstaller.__new__(StubInstaller)
++        obj.bootcaches = {"bless2": {"Version": 1, "BootObjects": {}}}
++        obj.install_version = "26.5.1"
++        self.assertEqual(obj.restore_bundle_path(), "restore")
++        obj.install_version = "26.5.2"
++        with self.assertRaises(ValueError):
++            obj.restore_bundle_path()
++
++    def test_fwextract_cli_accepts_air_profile(self):
++        with patch("sys.argv", ["gravity-fwextract", "source", "dest", "--machine", "j713"]), \
++             patch.object(update, "update_firmware") as rebuild:
++            update.main()
++        rebuild.assert_called_once_with(Path("source"), Path("dest"), machine="j713", open_firmware=None)
++
++    def installer(self, device="j713ap", version="26.5.1"):
++        obj = main.InstallerMain.__new__(main.InstallerMain)
++        obj.sysinfo = SimpleNamespace(sys_firmware="mBoot-18000.120.36",
++            macos_ver=version, sfr_full_ver="25.6.80.0.0,0", chip_id=0x8132,
++            device_class=device)
++        obj.device = main.DEVICES.get(device, main.Device("26.5.1", False))
++        obj.expert = True
++        obj.choice = lambda prompt, options, default=None: default
++        return obj
++
++    def choose(self, device="j713ap", version="26.5.1", supported=None):
++        with contextlib.redirect_stdout(io.StringIO()):
++            return self.installer(device, version).choose_ipsw(supported)
++
++    def test_air_selects_qualified_2651(self):
++        self.assertIn("j713ap", main.DEVICES)
++        self.assertTrue(main.DEVICES["j713ap"].expert_only)
++        choice = self.choose()
++        self.assertEqual(choice.version, "26.5.1")
++        self.assertEqual(choice.devices, ["j713ap"])
++        self.assertEqual(choice.url, "https://updates.cdn-apple.com/2026SpringFCS/fullrestores/122-88870/E47EBB85-45F2-4E3C-B9E7-6FF7868C2FBA/UniversalMac_26.5.1_25F80_Restore.ipsw")
++
++    def test_mini_retains_2662_minimum(self):
++        self.assertEqual(main.CHIP_MIN_VER[0x8132], "26.6.2")
++        self.assertEqual(main.DEVICES["j773gap"].min_ver, "26.6.2")
++        self.assertEqual(self.choose("j773gap", "26.6.2").version, "26.6.2")
++        with self.assertRaises(SystemExit):
++            self.choose("j773gap", "26.6.2", ["26.5.1"])
++
++    def test_air_rejects_unqualified_firmware_and_old_host(self):
++        for supported in (["26.6.2"], []):
++            with self.subTest(supported=supported), self.assertRaises(SystemExit):
++                self.choose(supported=supported)
++        with self.assertRaises(SystemExit):
++            self.choose(version="26.5")
++
++    def test_host_version_does_not_select_boot_firmware(self):
++        for host in ("26.5.1", "26.5.2", "26.6.2"):
++            with self.subTest(host=host):
++                self.assertEqual(self.choose(version=host).version, "26.5.1")
++
++    def test_air_enforces_recovery_minimum_and_expert_selection(self):
++        for expert, sfr in ((False, "25.6.80.0.0,0"), (True, "25.6.79.0.0,0")):
++            obj = self.installer()
++            obj.expert = expert
++            obj.sysinfo.sfr_full_ver = sfr
++            with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
++                obj.choose_ipsw()
++
++    def test_other_m4_models_are_not_enabled(self):
++        for name in ("j715ap", "j614ap", "j616ap"):
++            self.assertNotIn(name, main.DEVICES)
++
++    def test_recovery_uses_exact_qualified_hashes(self):
++        profile = recovery.QUALIFIED_IMAGES[("26.5.1", "022-21678-093.dmg.aea")]
++        self.assertEqual(profile["encrypted_sha256"], "12919ca28b831ec9ff71291ac857a51cef54263f4846180c7b7311a58c51d13e")
++        self.assertEqual(profile["decoded_sha256"], "c7e05c0261a687b256c9ee58341346fbb995dfd04f03affd874524e6bc2e615d")
++
++    def test_radio_selection_ignores_other_boards_and_steppings(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            root = Path(tmp)
++            for dest, name in WIFI.items():
++                for stepping in ("C0", "C2"):
++                    path = root / "wifi" / ("C-4388__s-" + stepping) / name
++                    path.parent.mkdir(parents=True, exist_ok=True)
++                    payload = f"fixture ={stepping}/{name}\n" if name.endswith(".txt") else f"{stepping}/{name}"
++                    path.write_bytes(payload.encode())
++            bt = root / "bt"
++            bt.mkdir()
++            for dest, name in BT.items():
++                (bt / name).write_bytes(dest.encode())
++                (bt / name.replace("Garden", "Sakhalin")).write_bytes(b"wrong board")
++            wifi = dict(WiFiFWCollection(str(root / "wifi"), machine="j713").files())
++            bluetooth = dict(BluetoothFWCollection(str(bt), machine="j713").files())
++            self.assertEqual(set(wifi), set(WIFI))
++            self.assertEqual(set(bluetooth), set(BT))
++            for name, firmware in wifi.items():
++                source = WIFI[name]
++                expected = f"fixture=C2/{source}\n" if name.endswith(".txt") else f"C2/{source}"
++                self.assertEqual(firmware.data, expected.encode())
++            for name, firmware in bluetooth.items():
++                self.assertEqual(firmware.data, name.encode())
++            for source in WIFI.values():
++                path = root / "wifi/C-4388__s-C2" / source
++                data = path.read_bytes()
++                path.unlink()
++                with self.subTest(missing=source), self.assertRaises(FileNotFoundError):
++                    list(WiFiFWCollection(str(root / "wifi"), machine="j713").files())
++                path.write_bytes(data)
++            for source in BT.values():
++                path = bt / source
++                data = path.read_bytes()
++                path.unlink()
++                with self.subTest(missing=source), self.assertRaises(FileNotFoundError):
++                    list(BluetoothFWCollection(str(bt), machine="j713").files())
++                path.write_bytes(data)
++
++    def test_air_has_no_unqualified_bundled_open_firmware(self):
++        self.assertEqual(list(OpenFirmwareCollection(machine="j713").files()), [])
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git i/tests/test_j713_validation.py w/tests/test_j713_validation.py
+new file mode 100644
+index 0000000..be5a97c
+--- /dev/null
++++ w/tests/test_j713_validation.py
+@@ -0,0 +1,167 @@
++# SPDX-License-Identifier: MIT
++import contextlib
++import io
++import os
++from pathlib import Path
++import plistlib
++import tarfile
++import tempfile
++from types import SimpleNamespace
++import unittest
++from unittest.mock import Mock, patch
++import zipfile
++import zlib
++
++import stub
++from gravity_firmware import update
++from gravity_firmware.core import FWFile, FWPackage
++import validate_j713_recovery_macos as validator
++
++
++class NativeObserverTests(unittest.TestCase):
++    def test_cached_recovery_size_checked_independently(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            cached = Path(tmp) / "cached.aea"
++            cached.write_bytes(b"qualified bytes")
++            archive = Mock()
++            archive.getinfo.return_value = SimpleNamespace(
++                file_size=cached.stat().st_size + 1,
++                CRC=zlib.crc32(cached.read_bytes()))
++            with self.assertRaisesRegex(ValueError, "cached recovery"):
++                validator.CachedRecoveryPackage(archive, cached)
++
++    def test_cached_recovery_must_match_archive_member(self):
++        member = "022-21678-093.dmg.aea"
++        with tempfile.TemporaryDirectory() as tmp:
++            cached = Path(tmp) / member
++            stream = io.BytesIO()
++            with zipfile.ZipFile(stream, "w") as archive:
++                archive.writestr(member, b"qualified bytes")
++            with zipfile.ZipFile(stream) as archive:
++                for data in (b"qualified bytes", b"wrong", b"different bytes"):
++                    cached.write_bytes(data)
++                    with self.subTest(data=data):
++                        if data == b"qualified bytes":
++                            package = validator.CachedRecoveryPackage(archive, cached)
++                            with package.open(member) as source:
++                                self.assertEqual(source.read(), data)
++                        else:
++                            with self.assertRaisesRegex(ValueError, "cached recovery"):
++                                validator.CachedRecoveryPackage(archive, cached)
++
++    def test_native_require_rejects_false_without_assert(self):
++        with self.assertRaisesRegex(ValueError, "sentinel"):
++            validator.require(False, "sentinel")
++        validator.require(True, "sentinel")
++
++
++class InstallerRadioDispatchTests(unittest.TestCase):
++    def test_preflight_uses_identity_machine(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            mount = Path(tmp)
++            version = mount / "System/Library/CoreServices/SystemVersion.plist"
++            version.parent.mkdir(parents=True)
++            version.write_bytes(plistlib.dumps({"ProductVersion": "26.5.1"}))
++            obj = stub.StubInstaller(None, None, None)
++            obj.install_version = "26.5.1"
++            obj.load_identity = Mock(return_value={"Info": {"DeviceClass": "j713ap"},
++                "Manifest": {"BaseSystem": {"Info": {"Path": "fixture.aea"}}}})
++            obj.recovery_wifi_source = Mock(return_value="fixture-wifi")
++            with patch.object(stub, "RecoveryImage"), \
++                 patch.object(stub, "mounted_recovery", return_value=contextlib.nullcontext(mount)), \
++                 patch.object(stub, "WiFiFWCollection") as wifi, \
++                 patch.object(stub, "BluetoothFWCollection") as bluetooth, \
++                 contextlib.redirect_stdout(io.StringIO()):
++                obj.preflight_recovery()
++            wifi.assert_called_once_with("fixture-wifi", machine="j713")
++            bluetooth.assert_called_once_with(str(mount / "usr/share/firmware/bluetooth"), machine="j713")
++
++    def test_complete_collector_dispatches_air_radio(self):
++        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
++            mount = Path(tmp) / "recovery"
++            mount.mkdir()
++            previous = Path.cwd()
++            stack.callback(os.chdir, previous)
++            os.chdir(tmp)
++            obj = stub.StubInstaller(None, None, None)
++            obj.identity = {"Info": {"DeviceClass": "j713ap", "RestoreBehavior": "Erase", "Variant": "fixture"}, "Manifest": {"Fixture": {"Info": {"Path": "fixture.im4p", "IsFUDFirmware": True}}}}
++            obj.behavior, obj.variant = "Erase", "fixture"
++            obj.pb_vgid = tmp
++            obj.osi = SimpleNamespace(recovery=tmp, vgid="fixture")
++            obj.restore_bundle_path = Mock(return_value="restore")
++            obj.extract = Mock(side_effect=lambda path, dest: (Path(dest) / path).write_bytes(b"synthetic FUD input"))
++            wifi_source = mount / "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware"
++            wifi_source.mkdir(parents=True)
++            (wifi_source / "fixture.bin").write_bytes(b"synthetic dext Wi-Fi input")
++            legacy_wifi = mount / "usr/share/firmware/wifi"
++            legacy_wifi.mkdir(parents=True)
++            (legacy_wifi / "fixture.bin").write_bytes(b"different legacy Wi-Fi input")
++            bluetooth = mount / "usr/share/firmware/bluetooth"
++            bluetooth.mkdir()
++            (bluetooth / "fixture.bin").write_bytes(b"synthetic Bluetooth input")
++            camera = mount / "usr/sbin/appleh13camerad"
++            camera.parent.mkdir(parents=True)
++            camera.write_bytes(b"synthetic camera input")
++            factory = Path(tmp) / "host/com.apple.factorydata"
++            factory.mkdir(parents=True)
++            (factory / "HmCA-fixture").write_bytes(b"synthetic factory input")
++            stack.enter_context(patch.object(stub, "FACTORY_DIR", str(factory)))
++            stack.enter_context(patch.object(stub, "mounted_recovery", return_value=contextlib.nullcontext(mount)))
++            collectors = {}
++            for name in ("WiFi", "Bluetooth", "Multitouch", "ISP", "Kernel", "Als", "OpenFirmware"):
++                class_name = name + ("Collection" if name == "OpenFirmware" else "FWCollection")
++                collectors[name] = stack.enter_context(patch.object(stub, class_name))
++                collectors[name].return_value.files.return_value = []
++            expected = {"apple/isp-fixture.bin": b"synthetic ISP output",
++                        "apple/aop-als-cal.bin": b"synthetic ALS output"}
++            for kind, name in (("ISP", "apple/isp-fixture.bin"), ("Als", "apple/aop-als-cal.bin")):
++                collectors[kind].return_value.files.return_value = [(name, FWFile(name, expected[name]))]
++            output = mount / "collected"
++            output.mkdir()
++            with FWPackage(output) as package, contextlib.redirect_stdout(io.StringIO()):
++                obj.collect_firmware(package)
++            with tarfile.open(output / "firmware.tar") as archive:
++                self.assertEqual({member.name: archive.extractfile(member).read() for member in archive}, expected)
++            with tarfile.open("all_firmware.tar.gz") as archive:
++                self.assertEqual(archive.extractfile("apple_bcmwlan_firmware/fixture.bin").read(), b"synthetic dext Wi-Fi input")
++                self.assertEqual(archive.extractfile("firmware/wifi/fixture.bin").read(), b"different legacy Wi-Fi input")
++                self.assertEqual(archive.extractfile("firmware/bluetooth/fixture.bin").read(), b"synthetic Bluetooth input")
++                self.assertEqual(archive.extractfile("fud_firmware/fixture.im4p").read(), b"synthetic FUD input")
++                self.assertEqual(archive.extractfile("appleh13camerad").read(), b"synthetic camera input")
++                self.assertEqual(archive.extractfile("com.apple.factorydata/HmCA-fixture").read(), b"synthetic factory input")
++                self.assertEqual(archive.extractfile("apple/aop-als-cal.bin").read(), expected["apple/aop-als-cal.bin"])
++            collectors["WiFi"].assert_called_once_with(str(wifi_source), machine="j713")
++            collectors["Bluetooth"].assert_called_once_with(str(mount / "usr/share/firmware/bluetooth"), machine="j713")
++            collectors["ISP"].assert_called_once_with(str(mount / "usr/sbin"))
++            collectors["Als"].assert_called_once_with()
++
++    def test_update_retains_air_peripheral_collectors(self):
++        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
++            source, dest = Path(tmp) / "source", Path(tmp) / "dest"
++            source.mkdir()
++            with tarfile.open(source / "all_firmware.tar.gz", "w:gz") as archive:
++                for name in ("apple_bcmwlan_firmware", "firmware/wifi"):
++                    member = tarfile.TarInfo(name)
++                    member.type = tarfile.DIRTYPE
++                    archive.addfile(member)
++            collectors = {}
++            for name in ("WiFi", "Bluetooth", "Multitouch", "ISP", "Kernel", "Als", "OpenFirmware"):
++                class_name = name + ("Collection" if name == "OpenFirmware" else "FWCollection")
++                collectors[name] = stack.enter_context(patch.object(update, class_name))
++                collectors[name].return_value.files.return_value = []
++            expected = {"apple/isp-fixture.bin": b"synthetic ISP output",
++                        "apple/aop-als-cal.bin": b"synthetic ALS output"}
++            for kind, name in (("ISP", "apple/isp-fixture.bin"), ("Als", "apple/aop-als-cal.bin")):
++                collectors[kind].return_value.files.return_value = [(name, FWFile(name, expected[name]))]
++            update.update_firmware(source, dest, machine="j713")
++            with tarfile.open(dest / "firmware.tar") as archive:
++                self.assertEqual({member.name: archive.extractfile(member).read() for member in archive}, expected)
++            collectors["ISP"].assert_called_once()
++            extraction_root = collectors["ISP"].call_args.args[0]
++            collectors["Als"].assert_called_once_with(extraction_root)
++            collectors["WiFi"].assert_called_once_with(str(Path(extraction_root) / "apple_bcmwlan_firmware"), machine="j713")
++            collectors["Bluetooth"].assert_called_once_with(str(Path(extraction_root) / "firmware/bluetooth"), machine="j713")
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git i/tests/validate_j713_recovery_macos.py w/tests/validate_j713_recovery_macos.py
+new file mode 100644
+index 0000000..081fa70
+--- /dev/null
++++ w/tests/validate_j713_recovery_macos.py
+@@ -0,0 +1,116 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: MIT
++"""Qualify J713 recovery and radio packaging on scratch storage only."""
++import argparse
++import hashlib
++import json
++from pathlib import Path
++import plistlib
++import subprocess
++from types import SimpleNamespace
++import zipfile
++import zlib
++
++from gravity_firmware.bluetooth import BluetoothFWCollection
++from gravity_firmware.core import FWPackage
++from gravity_firmware.wifi import WiFiFWCollection
++from recovery import mounted_recovery
++from stub import StubInstaller
++from test_m4_firmware import read_newc
++from urlcache import URLCache
++
++
++def require(condition, message):
++    if not condition:
++        raise ValueError(message)
++
++
++class CachedRecoveryPackage:
++    def __init__(self, archive, encrypted):
++        self.archive = archive
++        self.encrypted = encrypted
++        member = archive.getinfo("022-21678-093.dmg.aea")
++        size, crc = 0, 0
++        with encrypted.open("rb") as source:
++            while data := source.read(1024 * 1024):
++                size += len(data)
++                crc = zlib.crc32(data, crc)
++        require(size == member.file_size and crc == member.CRC,
++                "The cached recovery does not match the IPSW member")
++
++    def open(self, name):
++        if name == "022-21678-093.dmg.aea":
++            return self.encrypted.open("rb")
++        return self.archive.open(name)
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("ipsw_url")
++    parser.add_argument("encrypted", type=Path)
++    parser.add_argument("known_radio", type=Path)
++    parser.add_argument("output", type=Path)
++    args = parser.parse_args()
++    args.output.mkdir(parents=True, exist_ok=False)
++    before = plistlib.loads(subprocess.check_output(["diskutil", "list", "-plist", "disk0"]))
++    installer = StubInstaller(SimpleNamespace(board_id=0x2C, chip_id=0x8132,
++        device_class="j713ap"), None, None)
++    installer.install_version = "26.5.1"
++    cache = URLCache(args.ipsw_url)
++    try:
++        with zipfile.ZipFile(cache) as archive:
++            installer.pkg = CachedRecoveryPackage(archive, args.encrypted)
++            # Uses real IPSW metadata, hash validation, native aea/hdiutil, and
++            # the same collector entry points used before partition creation.
++            installer.preflight_recovery()
++            require(installer.identity["Info"]["BuildNumber"] == "25F80", "Unexpected build")
++            machine = installer.identity["Info"]["DeviceClass"].removesuffix("ap")
++            require(machine == "j713", "Unexpected device")
++            (args.output / "bootcaches.plist").write_bytes(plistlib.dumps(installer.bootcaches))
++            report = {"version": "26.5.1", "build": "25F80", "device": "j713ap"}
++            report["restore_bundle"] = installer.restore_bundle_path()
++            require(report["restore_bundle"] == "restore", "Unexpected restore directory")
++            with mounted_recovery(installer.recovery_image.path) as mount:
++                wifi = dict(WiFiFWCollection(installer.recovery_wifi_source(mount), machine=machine).files())
++                bluetooth = dict(BluetoothFWCollection(str(mount / "usr/share/firmware/bluetooth"), machine=machine).files())
++                files = wifi | bluetooth
++                known = json.loads(args.known_radio.read_text())
++                require({Path(name).name for name in files} == set(known), "Unexpected radio inventory")
++                report["radio"] = {}
++                for name, firmware in files.items():
++                    expected = known[Path(name).name]
++                    digest = hashlib.sha256(firmware.data).hexdigest()
++                    require(digest == expected["sha256"], f"Incorrect hash: {name}")
++                    require(len(firmware.data) == expected["size"], f"Incorrect size: {name}")
++                    report["radio"][name] = digest
++                output = args.output / "firmware"
++                output.mkdir()
++                with FWPackage(output) as package:
++                    package.add_files(sorted(files.items()))
++                cpio = read_newc(output / "firmware.cpio")
++                require(set(cpio) == {"vendorfw/" + name for name in files} | {"vendorfw/.vendorfw.manifest"},
++                        "Unexpected CPIO inventory")
++                extracted = args.output / "extracted"
++                extracted.mkdir()
++                subprocess.run(["/usr/bin/tar", "-xf", str(output / "firmware.cpio"),
++                                "-C", str(extracted)], check=True)
++                for name, firmware in files.items():
++                    require((extracted / "vendorfw" / name).read_bytes() == firmware.data,
++                            f"Incorrect extracted file: {name}")
++                amkor = extracted / "vendorfw/brcm/brcmbt4388c2-apple,garden-a.ptb"
++                usi = extracted / "vendorfw/brcm/brcmbt4388c2-apple,garden-u.ptb"
++                require(amkor.stat().st_ino == usi.stat().st_ino, "Shared PTB hard link missing")
++                report["cpio_sha256"] = hashlib.sha256((output / "firmware.cpio").read_bytes()).hexdigest()
++            after = plistlib.loads(subprocess.check_output(["diskutil", "list", "-plist", "disk0"]))
++            require(before == after, "Host physical disk layout changed")
++            report["disk0_unchanged"] = True
++            (args.output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
++            print(json.dumps(report, indent=2))
++    finally:
++        if installer.recovery_image is not None:
++            installer.recovery_image.close()
++        cache.close_connection()
++
++
++if __name__ == "__main__":
++    main()
+diff --git i/tests/validate_m4_recovery_macos.py w/tests/validate_m4_recovery_macos.py
+index f005c79..6722ee9 100644
+--- i/tests/validate_m4_recovery_macos.py
++++ w/tests/validate_m4_recovery_macos.py
+@@ -58 +58 @@ def main():
+-        expected = next(iter(QUALIFIED_IMAGES.values()))["decoded_sha256"]
++        expected = QUALIFIED_IMAGES[("26.6.2", "022-22048-093.dmg.aea")]["decoded_sha256"]
