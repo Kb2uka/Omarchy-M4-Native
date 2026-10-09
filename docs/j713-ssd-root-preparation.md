@@ -12,8 +12,45 @@ verified hardware boot: a RAM-backed root supplied through the development host.
 
 Apply [the recovery/radio profile patch](../patches/installer/j713-recovery-radio-profile.patch)
 to Gravity installer revision `6420623289fe7544cb8589b658355e57f0290fcc`, then apply
-[root-identity.patch](../patches/installer/root-identity.patch). Existing templates
-without `rootfs_uuid` or `m4_boot` retain their existing installation behavior.
+[root-identity.patch](../patches/installer/root-identity.patch), followed by
+[linux-partition-guid.patch](../patches/installer/linux-partition-guid.patch). The
+root identity and portable boot additions remain optional. The type-alias fix
+applies to every template requesting the Linux filesystem GUID, including
+templates without `rootfs_uuid` or `m4_boot`.
+
+The first physical installation on macOS 26.5.1 passed recovery validation and
+created the stub, EFI and Linux partitions, then stopped before writing the root
+image. The template requests the Linux filesystem GPT type GUID, while `diskutil`
+reports its content as `Linux Filesystem`. The partition-selection fix treats
+that GUID and the Linux alias as the same type while retaining the new-UUID and
+unique-candidate checks, including when macOS inserts an `Apple_Boot` helper.
+The `linux-partition-guid.patch` adds `tests/fixtures/j713-ssd-20261009.json` to the
+installer tree. The regression test loads that exact October 9 Air template and
+exercises the real `OSInstaller.partition_disk` and `DiskUtil.addPartition` methods. This fixture is
+a captured qualification input; a future packaged template needs its own matching
+integration check. Free-space entries are included alongside existing partitions.
+
+An installation that already stopped at this point needs its existing partition
+identities inspected before recovery. Do not repeat free-space installation or
+assume the normal boot-authorization repair option writes the missing root image.
+Recovery from this partial state currently requires maintainer assistance:
+
+1. Keep the original `installer.log`. Record the failed `addPartition` call and
+   compare the partition lists immediately before and after it.
+2. Identify the stub and EFI by their `New partition:` log entries. The root may
+   have no such success entry: use the later debug `Partition ...` entries to
+   identify its new UUID, type, offset and size. Include any newly inserted
+   `Apple_Boot` helper in the comparison; preserve pre-existing partitions.
+3. Capture `diskutil list internal physical` and `diskutil info -plist <identifier>`
+   for each candidate, using the identifiers found in that log. Confirm the UUID,
+   parent disk, type, offset and size still match before any recovery writes.
+4. Contact the maintainer who supplied the experimental installer, using the
+   same channel, to arrange sharing the log and disk information and preparing
+   a continuation for that exact layout. Repository collaborators can also use
+   the [issue tracker](https://github.com/Kb2uka/Omarchy-M4-Native/issues); the
+   repository is currently private. If ownership or installation progress is uncertain,
+   stop. These notes do not authorize deleting partitions or overwriting a root
+   image that may already contain an installation.
 
 The SSD template declares `rootfs_uuid` on exactly one Linux filesystem GPT
 partition (`0fc63daf-8483-4772-8e79-3d69d8477de4`). That partition needs an `image`
@@ -166,10 +203,11 @@ In a separate clean Gravity installer checkout at the pinned revision:
 ```sh
 git apply --unidiff-zero /path/to/j713-recovery-radio-profile.patch
 git apply /path/to/root-identity.patch
+git apply /path/to/linux-partition-guid.patch
 PYTHONPATH=src:tests:. python3 -m unittest discover -s tests
 ```
 
-The installer suite currently has 66 tests. Linux and macOS runs passed.
+The installer suite currently has 69 tests. Linux and macOS runs passed.
 Twenty initial deliberate mutations were caught, covering identity selection, image
 validation, component checksums/limits, payload offsets, local firmware,
 filesystem check handling, growth target, fstab preservation and ARM selection.
