@@ -1,5 +1,8 @@
 # J713 native Omarchy desktop checkpoint
 
+Historical October 7 checkpoint. The [October 8 GPU and normal-root
+checkpoint](j713-gpu-normal-root.md) records subsequent progress and its limits.
+
 On October 7, 2026, the M4 MacBook Air J713/T8132 displayed the actual
 Omarchy 4.0.4 interface in a native Linux RAM boot. The bar, wallpaper,
 Foot terminal and searchable menu rendered through llvmpipe. The operator
