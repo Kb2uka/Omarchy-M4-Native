@@ -7,13 +7,15 @@ attempt to run **Omarchy natively on a 13-inch M4 MacBook Air (2025)**.
 Maintained by **KB2UKA** and shared so other Apple Silicon and Omarchy
 enthusiasts can inspect, reproduce, and build on the findings.
 
-**The milestone, October 7, 2026:** native Omarchy 4.0.4 now displays its bar,
-wallpaper, terminal and searchable menu on the Air using llvmpipe software
-rendering. The operator confirmed keyboard entry and trackpad movement. See
-[the desktop checkpoint and its limits](docs/j713-omarchy-desktop.md).
-This is a bounded RAM boot, not an installed operating system. Hardware GPU
-acceleration, audio, camera, suspend and daily-use reliability remain unqualified.
-The repository contains research and patches, not a supported installer or disk image.
+**The milestone, October 8, 2026:** the native Omarchy desktop renders on the
+Apple M4 GPU and starts through systemd and UWSM from an ext4 root on a
+RAM-backed GPT disk. A deliberately wrong root partition ID is rejected before
+mounting, with the error captured remotely. See the
+[GPU and normal-root checkpoint](docs/j713-gpu-normal-root.md).
+This remains a bounded RAM boot. The internal SSD has no installed Omarchy
+root, and permanent boot, updates, audio, camera, suspend and daily-use
+reliability remain unqualified. This repository contains research and selected
+source helpers, not a supported installer or disk image.
 
 ## Project status
 
@@ -21,11 +23,14 @@ The September work reached a framebuffer console and was paused. Hardware
 testing resumed on October 6. October 7 work demonstrated ten-CPU memory
 checks, read-only SSD reads, Wi-Fi internet access, Bluetooth HCI startup,
 physical input and the software-rendered Omarchy interface. The detailed
-hardware notes below record the tested revisions and limitations.
+hardware notes below record the tested revisions and limitations. October 8
+adds GPU rendering, normal systemd startup with an automatic UWSM session,
+and RAM root identity checks.
 
 Desktop tests use a fresh per-boot TrustCache reservation, `idle=nop`, a
 read-only internal SSD and a two-minute watchdog recovery window. No internal
-filesystem was mounted or written during these tests. Normal installation,
+filesystem was mounted or written during these tests; filesystem writes and
+remount checks used RAM-backed disks only. Normal installation,
 updates, long-running sessions and complete hardware support are still work
 in progress.
 
@@ -41,8 +46,8 @@ for upstream progress.
 | Machine | MacBook Air, 13-inch, M4, 2025 |
 | Model / board | `Mac16,12` / `J713` (board ID `0x2c`) |
 | SoC | Apple `T8132`, M4 |
-| Boot path | m1n1 USB proxy → experimental Asahi-derived Linux kernel → BusyBox initramfs |
-| Display during bring-up | simpledrm with llvmpipe software-rendered Wayland desktop |
+| Boot path | m1n1 USB proxy → combined loader/kernel/initramfs → systemd on a RAM ext4 root |
+| Display during bring-up | simpledrm scanout with experimental Apple M4 GPU rendering |
 | Proxy host | A separate Linux or macOS machine, with USB access to the target |
 | Kernel build host | Separate Linux machine with an AArch64 LLVM toolchain |
 
@@ -106,8 +111,10 @@ That split-window correction alone did not resolve the October 6 storage
 stall. Subsequent [ANS receive IRQ](docs/j713-ans-receive-irq.md) and
 [NVMe power-domain](docs/j713-nvme-power-domain.md) work reached `nvme0n1` and
 repeated direct reads. The latest checkpoint reads 8 MiB twice at each of
-three offsets with matching hashes and the device marked read-only. Filesystem
+three offsets with matching hashes and the device marked read-only. Internal SSD filesystem
 mounting, writes and an installed root filesystem have not been tested.
+RAM-backed ext4 mounting and write/remount checks are recorded separately in
+the October 8 checkpoint.
 
 ### 4. Audited the descriptions against the live ADT
 
@@ -125,7 +132,7 @@ or charging under Linux.
 
 ## What worked, and what did not
 
-| Area | Evidence through October 7 |
+| Area | Evidence through October 8 |
 | --- | --- |
 | m1n1 USB proxy and recovery | Native RAM boots; watchdog return and fresh proxy verified |
 | CPU / SMP | All ten CPUs pass bounded memory checks; `idle=nop` still required |
@@ -134,8 +141,9 @@ or charging under Linux.
 | Keyboard and trackpad | [Physical events and haptics confirmed](docs/j713-input-power-v2.md#captured-hardware-evidence); [graphical typing and pointer movement confirmed in the eighth RAM image](docs/j713-omarchy-desktop.md#native-evidence) |
 | Wi-Fi | [Scan, association, DHCP, DNS and internet request demonstrated in radio test](docs/j713-radio-bringup.md) |
 | Bluetooth | HCI startup demonstrated; pairing and audio unqualified |
-| Omarchy desktop | Bar, wallpaper, terminal and interactive search demonstrated in RAM |
-| Graphics acceleration | Software rendering only; M4 GPU acceleration unqualified |
+| Omarchy desktop | Interface demonstrated in RAM; systemd/UWSM startup demonstrated October 8 |
+| Graphics acceleration | Apple M4 renderer demonstrated in bounded RAM tests; compatibility and sustained use unqualified |
+| Root filesystem | Exact RAM GPT partition selected by identity; root write passed; remount persistence passed on a separate RAM ext4 disk; wrong ID rejected |
 | Audio, camera, suspend, battery life | Unqualified |
 | SMC, charging, thermal management; general USB ports | Unqualified for daily use; diagnostic USB transport does not establish general peripheral support |
 | Installed OS and updates | No installed Omarchy root filesystem or qualified update path |
@@ -159,7 +167,9 @@ namespaces. Experimental boots can still affect the machine or its data.
 | [docs/t8132-adt-audit.md](docs/t8132-adt-audit.md) | Recorded offline audit and power-manager analysis |
 | [docs/first-boot-runbook.md](docs/first-boot-runbook.md) | Historical first-session notes, including failed approaches and corrections |
 | [docs/night3-runbook.md](docs/night3-runbook.md) | Historical incremental validation plan; use the current host and kernel notes below |
-| [docs/j713-omarchy-desktop.md](docs/j713-omarchy-desktop.md) | Native Omarchy interface checkpoint, evidence and remaining work |
+| [docs/j713-omarchy-desktop.md](docs/j713-omarchy-desktop.md) | Historical October 7 software-rendered desktop checkpoint |
+| [docs/j713-gpu-normal-root.md](docs/j713-gpu-normal-root.md) | October 8 GPU, normal-root and error-path evidence |
+| [tools/m4-root-identity.sh](tools/m4-root-identity.sh) | Experimental read-only root identity resolver; does not mount or install |
 | [docs/host-bench.md](docs/host-bench.md) | Current Linux/macOS host commands and evidence gates |
 | [docs/nvme-queue-size.md](docs/nvme-queue-size.md) | Current kernel queue-size correction and regression command |
 | [tools/adt.py](tools/adt.py) | Standalone binary ADT reader using Python's standard library |
@@ -254,8 +264,8 @@ run as an unattended installer.
 ## Useful next work
 
 1. Preserve a reproducible package/build recipe for the demonstrated RAM desktop.
-2. Complete and qualify the normal service/session setup and application launching.
-3. Qualify graphics, audio, camera, power management, suspend and sustained operation.
+2. Prepare owner provisioning and qualify application launching beyond the bounded desktop test.
+3. Qualify graphics compatibility, audio, camera, power management, suspend and sustained operation.
 4. Design and test installation and recovery on an explicitly allocated target.
 5. Package board-specific changes and validate coherent upstream updates before
    publishing an M4 update channel. Such a channel does not exist yet.
