@@ -1,0 +1,36 @@
+#!/bin/busybox sh
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 KB2UKA
+set -eu
+/bin/busybox --install -s /bin
+export PATH=/usr/bin:/bin:/sbin:/usr/sbin
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+exec </dev/console >/dev/console 2>&1
+fail() {
+    printf '\nM4_SSD_BOOT_FAILED: %s\n' "$*"
+    while :; do sleep 60; done
+}
+trap 'fail early-init-error' EXIT
+mkdir -p /run /newroot
+mount -t tmpfs -o mode=755 tmpfs /run
+. /lib/m4-root-identity.sh
+. /lib/m4-root-config.sh
+. /lib/m4-ssd-root.sh
+read_root_config /sys/firmware/devicetree/base/chosen || fail boot-identity-missing
+insmod /lib/modules/nvme-apple.ko
+for i in $(seq 1 30); do
+    if resolve_root "$ROOT_PARTUUID" "$ROOT_FSUUID" nvme0n1 >/dev/null &&
+       resolve_efi "$EFI_PARTUUID" nvme0n1 >/dev/null; then
+        break
+    fi
+    sleep 1
+done
+prepare_ssd_root || fail root-preparation
+for name in dev proc sys run; do
+    mkdir -p "/newroot/$name"
+    mount --move "/$name" "/newroot/$name"
+done
+unset SYSTEMD_IN_CHROOT SYSTEMD_UNIT_PATH SYSTEMD_GENERATOR_PATH SYSTEMD_ENVIRONMENT_GENERATOR_PATH
+exec switch_root /newroot /usr/lib/systemd/systemd --system --unit=graphical.target --log-target=kmsg --show-status=yes

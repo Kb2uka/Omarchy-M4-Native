@@ -19,9 +19,9 @@ validate_root_identity() {
     test "$actual_parent" = "$expected_parent" || return 1
     test "$actual_gpt_type" = 0fc63daf-8483-4772-8e79-3d69d8477de4 || return 1
 }
-resolve_root() {
-    part_uuid=$1 fs_uuid=$2 parent=$3
-    valid_uuid "$part_uuid" && valid_uuid "$fs_uuid" || return 1
+read_partition_identity() {
+    part_uuid=$1 parent=$2
+    valid_uuid "$part_uuid" || return 1
     case $parent in
         nvme0n1) ;;
         loop|loop*[!0-9]*) return 1 ;;
@@ -38,6 +38,19 @@ resolve_root() {
     actual_fs=$(blkid -p -s UUID -o value "$device") || return 1
     actual_type=$(blkid -p -s TYPE -o value "$device") || return 1
     actual_gpt_type=$(blkid -p -s PART_ENTRY_TYPE -o value "$device") || return 1
+    test "$actual_part" = "$part_uuid" || return 1
+    test "${parent_path##*/}" = "$parent" || return 1
+}
+resolve_root() {
+    fs_uuid=$2
+    valid_uuid "$fs_uuid" || return 1
+    read_partition_identity "$1" "$3" || return 1
     validate_root_identity "$part_uuid" "$fs_uuid" "$parent" "$actual_part" "$actual_fs" "$actual_type" "${parent_path##*/}" "$actual_gpt_type" || return 1
+    printf '%s\n' "$device"
+}
+resolve_efi() {
+    read_partition_identity "$1" "$2" || return 1
+    test "$actual_type" = vfat || return 1
+    test "$actual_gpt_type" = c12a7328-f81f-11d2-ba4b-00a0c93ec93b || return 1
     printf '%s\n' "$device"
 }

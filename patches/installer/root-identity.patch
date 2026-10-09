@@ -1,0 +1,705 @@
+diff --git i/src/m4boot.py w/src/m4boot.py
+new file mode 100644
+index 0000000..8b76da5
+--- /dev/null
++++ w/src/m4boot.py
+@@ -0,0 +1,64 @@
++# SPDX-License-Identifier: MIT
++"""Compose one Linux initramfs from portable files and locally collected firmware."""
++import hashlib
++import re
++import struct
++
++LIMITS = {"loader": 4 << 20, "kernel": 64 << 20, "dtb": 2 << 20,
++          "initramfs": 128 << 20}
++MAGIC = b"m1n1_initramfs"
++
++
++def validate_spec(spec):
++    if not isinstance(spec, dict) or set(spec) != set(LIMITS) | {"bootargs"}:
++        raise ValueError("M4 boot description must specify four parts and bootargs")
++    args = spec["bootargs"]
++    if (not isinstance(args, str) or not 0 < len(args) <= 1024 or not args.isascii()
++            or any(ord(char) < 32 or ord(char) == 127 for char in args)):
++        raise ValueError("M4 bootargs must be one printable ASCII line")
++    for name in LIMITS:
++        part = spec[name]
++        if (not isinstance(part, dict) or set(part) != {"file", "sha256"}
++                or not isinstance(part["file"], str) or not part["file"]
++                or not isinstance(part["sha256"], str)
++                or not re.fullmatch(r"[0-9a-f]{64}", part["sha256"])):
++            raise ValueError(f"Invalid M4 boot part: {name}")
++
++
++def read_parts(package, spec):
++    validate_spec(spec)
++    parts = {}
++    for name, limit in LIMITS.items():
++        entry = spec[name]
++        info = package.getinfo(entry["file"])
++        if not 0 < info.file_size <= limit:
++            raise ValueError(f"Invalid M4 boot part size: {name}")
++        data = package.read(info)
++        if hashlib.sha256(data).hexdigest() != entry["sha256"]:
++            raise ValueError(f"M4 boot part checksum mismatch: {name}")
++        parts[name] = data
++    if not parts["kernel"].startswith(b"\x1f\x8b"):
++        raise ValueError("M4 kernel must be gzip compressed")
++    if not parts["initramfs"].startswith(b"\x1f\x8b"):
++        raise ValueError("M4 base initramfs must be gzip compressed")
++    dtb = parts["dtb"]
++    if (len(dtb) < 40 or dtb[:4] != b"\xd0\x0d\xfe\xed"
++            or struct.unpack_from(">I", dtb, 4)[0] != len(dtb)):
++        raise ValueError("Invalid M4 device tree header or length")
++    return parts
++
++
++def compose(parts, bootargs, firmware):
++    # Firmware is produced by FWPackage in this installation, never downloaded
++    # in the portable image. Its trailer resets CPIO hard-link inode tracking.
++    if (not firmware or len(firmware) > 128 << 20
++            or not firmware.startswith(b"070701")
++            or b"TRAILER!!!\0" not in firmware[-124:]):
++        raise ValueError("Locally collected firmware is not a complete newc archive")
++    base = parts["initramfs"]
++    initramfs = base + bytes(-len(base) % 4) + firmware
++    # Stage 1 appends the selected partition identities here before adding its
++    # terminator. An earlier terminator would hide those variables from stage 2.
++    return (parts["loader"] + ("chosen.bootargs=" + bootargs + "\n").encode("ascii")
++            + parts["kernel"] + parts["dtb"]
++            + MAGIC + struct.pack("<I", len(initramfs)) + initramfs)
+diff --git i/src/osinstall.py w/src/osinstall.py
+index 7ae0542..d80837b 100644
+--- i/src/osinstall.py
++++ w/src/osinstall.py
+@@ -2,8 +2,10 @@
+ import os, shutil, sys, stat, subprocess, urlcache, zipfile, logging
+ 
+ import m1n1
++import m4boot
+ from util import *
+ import unicodedata
++import uuid
+ 
+ class OSInstaller(PackageInstaller):
+     PART_ALIGNMENT = 1024 * 1024
+@@ -17,6 +19,77 @@ class OSInstaller(PackageInstaller):
+         self.efi_part = None
+         self.idata_targets = []
+         self.install_size = self.min_size
++        self.root_part_index = None
++        self.rootfs_uuid = None
++        self.validate_root_template()
++        self.m4_boot = template.get("m4_boot")
++        self.m4_parts = None
++        if self.m4_boot is not None:
++            efi = [p for p in template["partitions"] if p["type"] == "EFI"]
++            if (self.root_part_index is None or not efi[0].get("copy_firmware")
++                    or template.get("next_object") != "omarchy/boot.bin"):
++                raise ValueError("M4 boot requires an identified root, EFI firmware and omarchy/boot.bin")
++            m4boot.validate_spec(self.m4_boot)
++
++    @staticmethod
++    def canonical_uuid(value):
++        if not isinstance(value, str):
++            raise ValueError("Root identity must be a UUID string")
++        parsed = str(uuid.UUID(value))
++        if parsed != value.lower():
++            raise ValueError("Root identity must use the hyphenated UUID format")
++        return parsed
++
++    def validate_root_template(self):
++        roots = [(index, part) for index, part in enumerate(self.template["partitions"])
++                 if "rootfs_uuid" in part]
++        if not roots:
++            return
++        if len(roots) != 1:
++            raise ValueError("Exactly one partition may declare rootfs_uuid")
++        index, part = roots[0]
++        if (part.get("type", "").lower() != "0fc63daf-8483-4772-8e79-3d69d8477de4"
++                or not part.get("image") or not self.template.get("package")):
++            raise ValueError("An identified root requires a packaged Linux filesystem image")
++        efi = [p for p in self.template["partitions"] if p["type"] == "EFI"]
++        if len(efi) != 1 or efi[0].get("format") != "fat":
++            raise ValueError("An identified root requires exactly one FAT EFI partition")
++        self.rootfs_uuid = self.canonical_uuid(part["rootfs_uuid"])
++        self.root_part_index = index
++
++    def validate_root_image(self):
++        if self.root_part_index is None:
++            return
++        part = self.template["partitions"][self.root_part_index]
++        try:
++            info = self.pkg.getinfo(part["image"])
++        except KeyError as error:
++            raise ValueError("Root image is missing from the OS package") from error
++        if info.file_size % 4096 or info.file_size > self.align(psize(part["size"])):
++            raise ValueError("Root image must be aligned and fit its initial partition")
++        with self.pkg.open(info) as source:
++            source.seek(1024)
++            superblock = source.read(1024)
++        if len(superblock) != 1024 or superblock[56:58] != b"\x53\xef":
++            raise ValueError("Root image has no valid ext filesystem superblock")
++        if str(uuid.UUID(bytes=superblock[104:120])) != self.rootfs_uuid:
++            raise ValueError("Root image filesystem UUID does not match the template")
++        state = int.from_bytes(superblock[58:60], "little")
++        mounted = int.from_bytes(superblock[44:48], "little")
++        checked = int.from_bytes(superblock[64:68], "little")
++        if not state & 1 or state & 2 or checked < mounted:
++            raise ValueError("Root image must be clean and fully checked after its last writable mount")
++
++    def root_identity_vars(self):
++        if self.root_part_index is None:
++            return []
++        part = self.part_info[self.root_part_index]
++        part_uuid = self.canonical_uuid(part.uuid)
++        efi_uuid = self.canonical_uuid(self.efi_part.uuid)
++        if part_uuid == efi_uuid:
++            raise ValueError("Root and EFI partitions must have different identities")
++        return [f"chosen.omarchy,root-partition={part_uuid}",
++                f"chosen.omarchy,root-filesystem={self.rootfs_uuid}"]
+ 
+     @property
+     def default_os_name(self):
+@@ -56,9 +129,16 @@ class OSInstaller(PackageInstaller):
+             self.pkg = zipfile.ZipFile(self.ucache)
+         else:
+             p_progress("Loading OS package info...")
+-            self.pkg = zipfile.ZipFile(open(package, "rb"))
++            self.pkg = zipfile.ZipFile(package)
+         self.flush_progress()
+         logging.info(f"OS package opened")
++        try:
++            self.validate_root_image()
++            if self.m4_boot is not None:
++                self.m4_parts = m4boot.read_parts(self.pkg, self.m4_boot)
++        except Exception:
++            self.pkg.close()
++            raise
+ 
+     def flush_progress(self):
+         if self.ucache:
+@@ -130,6 +210,14 @@ class OSInstaller(PackageInstaller):
+     def install(self, stub_ins):
+         p_progress("Installing OS...")
+         logging.info("OSInstaller.install()")
++        root_vars = self.root_identity_vars()
++        m4_payload = None
++        if self.m4_boot is not None:
++            if self.m4_parts is None or not self.firmware_package.closed:
++                raise ValueError("M4 boot components and firmware must be prepared before installation")
++            with open(self.firmware_package.cpio_path, "rb") as source:
++                firmware = source.read((128 << 20) + 1)
++            m4_payload = m4boot.compose(self.m4_parts, self.m4_boot["bootargs"], firmware)
+ 
+         # Force a reconnect, since the connection is likely to have timed out
+         if self.ucache is not None:
+@@ -175,6 +263,21 @@ class OSInstaller(PackageInstaller):
+                 os.makedirs(data_path, exist_ok=True)
+                 self.idata_targets.append(data_path)
+ 
++        if m4_payload is not None:
++            mountpoint = self.dutil.mount(self.efi_part.name)
++            directory = os.path.join(mountpoint, "omarchy")
++            os.makedirs(directory, exist_ok=True)
++            temporary = os.path.join(directory, "boot.bin.new")
++            try:
++                with open(temporary, "wb") as target:
++                    target.write(m4_payload)
++                    target.flush()
++                    os.fsync(target.fileno())
++                os.replace(temporary, os.path.join(directory, "boot.bin"))
++            finally:
++                if os.path.exists(temporary):
++                    os.unlink(temporary)
++
+         if "extras" in self.template:
+             assert self.efi_part is not None
+             self.download_extras()
+@@ -194,6 +297,8 @@ class OSInstaller(PackageInstaller):
+             assert self.efi_part is not None
+             m1n1_vars.append(f"chainload={self.efi_part.uuid.lower()};{next_object}")
+ 
++        m1n1_vars.extend(root_vars)
++
+         logging.info(f"m1n1 vars:")
+         for i in m1n1_vars:
+             logging.info(f"  {i}")
+diff --git i/tests/test_m4_boot_package.py w/tests/test_m4_boot_package.py
+new file mode 100644
+index 0000000..7b21a9d
+--- /dev/null
++++ w/tests/test_m4_boot_package.py
+@@ -0,0 +1,147 @@
++# SPDX-License-Identifier: MIT
++import copy
++import gzip
++import hashlib
++import io
++from pathlib import Path
++import struct
++import tempfile
++import unittest
++import zipfile
++import zlib
++
++import m4boot
++from gravity_firmware.core import FWFile, FWPackage
++from test_m4_firmware import read_newc
++
++
++def boot_parts():
++    dtb = b"\xd0\x0d\xfe\xed" + struct.pack(">I", 40) + bytes(32)
++    parts = {"loader": b"fixture-loaderSTACKBOT", "kernel": gzip.compress(b"kernel fixture"),
++             "dtb": dtb, "initramfs": gzip.compress(b"base archive fixture!")}
++    spec = {name: {"file": "boot/" + name, "sha256": hashlib.sha256(data).hexdigest()}
++            for name, data in parts.items()}
++    spec["bootargs"] = "console=tty0 loglevel=4"
++    return parts, spec
++
++
++class M4BootTests(unittest.TestCase):
++    def setUp(self):
++        directory = tempfile.TemporaryDirectory(prefix="M4 boot package ")
++        self.addCleanup(directory.cleanup)
++        self.root = Path(directory.name)
++        self.parts, self.spec = boot_parts()
++        self.assertNotEqual(len(self.parts["initramfs"]) % 4, 0)
++
++    def read_parts(self, parts=None, spec=None):
++        source = io.BytesIO()
++        with zipfile.ZipFile(source, "w") as package:
++            for name, data in (self.parts if parts is None else parts).items():
++                package.writestr("boot/" + name, data)
++        with zipfile.ZipFile(source) as package:
++            return m4boot.read_parts(package, self.spec if spec is None else spec)
++
++    def test_all_portable_parts_are_hash_checked(self):
++        self.assertEqual(self.read_parts(), self.parts)
++        for name in self.parts:
++            for operation in ("changed", "missing", "empty"):
++                with self.subTest(name=name, operation=operation):
++                    parts = dict(self.parts)
++                    if operation == "missing":
++                        del parts[name]
++                    else:
++                        parts[name] = b"" if operation == "empty" else parts[name] + b"changed"
++                    with self.assertRaises((ValueError, KeyError)):
++                        self.read_parts(parts)
++
++    def test_part_limits_and_formats(self):
++        for name in self.parts:
++            with self.subTest(name=name):
++                from unittest.mock import patch
++                with patch.dict(m4boot.LIMITS, {name: len(self.parts[name]) - 1}):
++                    with self.assertRaises(ValueError):
++                        self.read_parts()
++        for name, data in (("kernel", b"raw"), ("initramfs", b"raw"),
++                           ("dtb", self.parts["dtb"][:-1]), ("dtb", bytes(40)),
++                           ("dtb", self.parts["dtb"] + bytes(8))):
++            with self.subTest(name=name, data=data):
++                parts, spec = dict(self.parts), copy.deepcopy(self.spec)
++                parts[name] = data
++                spec[name]["sha256"] = hashlib.sha256(data).hexdigest()
++                with self.assertRaises(ValueError):
++                    self.read_parts(parts, spec)
++
++    def test_template_rejects_incomplete_parts_and_variable_injection(self):
++        for args in ("", "console=tty0\nchainload=other", "\0", "\r", "\x7f", "é", 7, "x" * 1025):
++            with self.subTest(args=args), self.assertRaises(ValueError):
++                m4boot.validate_spec(dict(self.spec, bootargs=args))
++        m4boot.validate_spec(dict(self.spec, bootargs="x" * 1024))
++        for name in self.parts:
++            spec = copy.deepcopy(self.spec)
++            del spec[name]
++            with self.subTest(name=name), self.assertRaises(ValueError):
++                m4boot.validate_spec(spec)
++            spec = copy.deepcopy(self.spec)
++            spec[name]["sha256"] = "invalid"
++            with self.subTest(name=name), self.assertRaises(ValueError):
++                m4boot.validate_spec(spec)
++
++    def test_one_initramfs_contains_base_and_actual_firmware_writer_output(self):
++        with FWPackage(self.root) as package:
++            package.add_file("apple/tpmtfw-j713.bin", FWFile("touch", b"touch fixture"))
++            package.add_file("apple/alias.bin", FWFile("alias", b"touch fixture"))
++        firmware = (self.root / "firmware.cpio").read_bytes()
++        payload = m4boot.compose(self.parts, self.spec["bootargs"], firmware)
++        prefix = (self.parts["loader"] + b"chosen.bootargs=console=tty0 loglevel=4\n"
++                  + self.parts["kernel"] + self.parts["dtb"])
++        self.assertEqual(payload[:len(prefix)], prefix)
++        header = len(prefix)
++        self.assertEqual(payload[header:header + 14], b"m1n1_initramfs")
++        length = struct.unpack_from("<I", payload, header + 14)[0]
++        combined = payload[header + 18:header + 18 + length]
++        self.assertEqual(payload[header + 18 + length:], b"")
++        decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
++        self.assertEqual(decoder.decompress(combined), b"base archive fixture!")
++        self.assertTrue(decoder.eof)
++        end = len(combined) - len(decoder.unused_data)
++        aligned = (end + 3) & ~3
++        self.assertEqual(combined[end:aligned], bytes(aligned - end))
++        self.assertEqual(combined[aligned:], firmware)
++        recovered = self.root / "recovered.cpio"
++        recovered.write_bytes(combined[aligned:])
++        entries = read_newc(recovered)
++        self.assertEqual(entries["vendorfw/apple/tpmtfw-j713.bin"], b"touch fixture")
++        # The writer encodes its second identical file as a zero-data hard link.
++        self.assertEqual(entries["vendorfw/apple/alias.bin"], b"")
++        self.assertIn("vendorfw/.vendorfw.manifest", entries)
++
++    def test_stage_one_variables_are_immediately_after_the_initramfs(self):
++        with FWPackage(self.root) as package:
++            package.add_file("apple/tpmtfw-j713.bin", FWFile("touch", b"touch fixture"))
++        payload = m4boot.compose(self.parts, self.spec["bootargs"],
++                                 (self.root / "firmware.cpio").read_bytes())
++        variables = (b"chosen.omarchy,root-partition=cb2e29b7-ff84-41cc-a30f-b9c91b81e9ca\n"
++                     b"chosen.omarchy,root-filesystem=61924e2a-307d-4f34-9b04-4eef87d46729\n"
++                     b"chosen.gravity,efi-system-partition=5870193f-b249-4d1e-ae24-c3a3fb0ebd9a\n")
++        # chainload_image appends chosen variables at the end of the disk file,
++        # then its own four-byte terminator. load_cpio advances by header size.
++        chained = payload + variables + bytes(4)
++        header = len(self.parts["loader"]) + len(("chosen.bootargs=" + self.spec["bootargs"] + "\n").encode())
++        header += len(self.parts["kernel"]) + len(self.parts["dtb"])
++        next_offset = header + 18 + struct.unpack_from("<I", chained, header + 14)[0]
++        self.assertEqual(chained[next_offset:], variables + bytes(4))
++
++    def test_incomplete_firmware_rejects(self):
++        for data in (b"", b"070701incomplete", b"not-newcTRAILER!!!\0"):
++            with self.subTest(data=data), self.assertRaises(ValueError):
++                m4boot.compose(self.parts, self.spec["bootargs"], data)
++
++    def test_oversize_firmware_with_valid_boundary_markers_rejects(self):
++        data = b"070701" + bytes((128 << 20) - 16) + b"TRAILER!!!\0"
++        self.assertGreater(len(data), 128 << 20)
++        with self.assertRaises(ValueError):
++            m4boot.compose(self.parts, self.spec["bootargs"], data)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git i/tests/test_ssd_root_identity.py w/tests/test_ssd_root_identity.py
+new file mode 100644
+index 0000000..ad38b40
+--- /dev/null
++++ w/tests/test_ssd_root_identity.py
+@@ -0,0 +1,319 @@
++# SPDX-License-Identifier: MIT
++import contextlib
++import copy
++import io
++import os
++import struct
++from pathlib import Path
++import tempfile
++from types import SimpleNamespace
++import unittest
++from unittest.mock import Mock, patch
++import uuid
++import zipfile
++
++import m1n1
++from osinstall import OSInstaller
++
++ROOT_TYPE = "0fc63daf-8483-4772-8e79-3d69d8477de4"
++FS_UUID = "61924e2a-307d-4f34-9b04-4eef87d46729"
++PART_UUID = "cb2e29b7-ff84-41cc-a30f-b9c91b81e9ca"
++EFI_UUID = "5870193f-b249-4d1e-ae24-c3a3fb0ebd9a"
++
++
++def template():
++    return {"default_os_name": "Omarchy fixture", "package": "root.zip",
++            "boot_object": "stage1.bin", "next_object": "omarchy/boot.bin",
++            "partitions": [
++                {"name": "EFI", "type": "EFI", "size": "1MiB", "format": "fat"},
++                {"name": "Root", "type": ROOT_TYPE, "size": "1MiB", "image": "root.ext4",
++                 "rootfs_uuid": FS_UUID, "expand": True},
++            ]}
++
++
++def filesystem(fs_uuid=FS_UUID):
++    data = bytearray(4096)
++    data[1024 + 56:1024 + 58] = b"\x53\xef"
++    struct.pack_into("<H", data, 1024 + 58, 1)
++    data[1024 + 104:1024 + 120] = uuid.UUID(fs_uuid).bytes
++    return data
++
++
++class RootIdentityTests(unittest.TestCase):
++    def setUp(self):
++        directory = tempfile.TemporaryDirectory(prefix="root identity ")
++        self.addCleanup(directory.cleanup)
++        self.root = Path(directory.name)
++        self.dutil = Mock()
++        self.stack = contextlib.ExitStack()
++        self.addCleanup(self.stack.close)
++        self.stack.enter_context(patch.dict(os.environ, {"REPO_BASE": str(self.root)}))
++        self.stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
++        (self.root / "os").mkdir()
++
++    def package(self, data, parts=None):
++        with zipfile.ZipFile(self.root / "os/root.zip", "w") as archive:
++            archive.writestr("root.ext4", data)
++            for name, content in (parts or {}).items():
++                archive.writestr("boot/" + name, content)
++
++    def installer(self, config=None):
++        obj = OSInstaller(self.dutil, {}, config if config is not None else template())
++        # Close any archive even if validation rejects its contents.
++        self.addCleanup(lambda: obj.pkg.close() if getattr(obj, "pkg", None) is not None else None)
++        return obj
++
++    def test_rejects_invalid_template_before_any_disk_call(self):
++        invalid = []
++        for value in ("", "not-a-uuid", FS_UUID.replace("-", ""), None, 7):
++            config = template()
++            config["partitions"][1]["rootfs_uuid"] = value
++            invalid.append(config)
++        config = template()
++        config["partitions"].append(copy.deepcopy(config["partitions"][1]))
++        invalid.append(config)
++        for field, value in (("type", "Apple_APFS"), ("image", "")):
++            config = template()
++            config["partitions"][1][field] = value
++            invalid.append(config)
++        config = template()
++        config["partitions"].pop(0)
++        invalid.append(config)
++        for config in invalid:
++            with self.subTest(config=config), self.assertRaises(ValueError):
++                self.installer(config)
++        self.assertEqual(self.dutil.mock_calls, [])
++
++    def test_rejects_wrong_image_identity_before_disk_calls(self):
++        wrong_magic = filesystem()
++        wrong_magic[1024 + 56:1024 + 58] = bytes(2)
++        for data in (filesystem(EFI_UUID), wrong_magic, bytearray(4096), filesystem()[:1080],
++                     filesystem() + b"unaligned"):
++            with self.subTest(size=len(data)):
++                self.package(data)
++                obj = self.installer()
++                with self.assertRaises(ValueError):
++                    obj.load_package()
++                self.assertIsNone(obj.pkg.fp)
++                self.assertEqual(self.dutil.mock_calls, [])
++
++    def test_rejects_image_larger_than_initial_root_partition(self):
++        self.package(filesystem() + bytes(1024 * 1024))
++        obj = self.installer()
++        with self.assertRaises(ValueError):
++            obj.load_package()
++        self.assertEqual(self.dutil.mock_calls, [])
++
++    def test_accepts_matching_ext4_before_disk_calls(self):
++        self.package(filesystem())
++        obj = self.installer()
++        obj.load_package()
++        self.assertEqual(self.dutil.mock_calls, [])
++
++    def test_rejects_unchecked_or_unclean_image_before_disk_calls(self):
++        for state, mounted, checked in ((0, 0, 0), (2, 0, 0), (3, 0, 0),
++                                        (1, 1700000001, 1700000000),
++                                        (1, 1700000256, 1700000255)):
++            with self.subTest(state=state, mounted=mounted, checked=checked):
++                data = filesystem()
++                struct.pack_into("<H", data, 1024 + 58, state)
++                struct.pack_into("<I", data, 1024 + 44, mounted)
++                struct.pack_into("<I", data, 1024 + 64, checked)
++                self.package(data)
++                obj = self.installer()
++                with self.assertRaises(ValueError):
++                    obj.load_package()
++                self.assertIsNone(obj.pkg.fp)
++                self.assertEqual(self.dutil.mock_calls, [])
++
++    def test_accepts_image_checked_at_or_after_last_mount(self):
++        for mounted, checked in ((0, 1700000000), (1700000000, 1700000000),
++                                  (1700000000, 1700000001),
++                                  (1700000255, 1700000256)):
++            with self.subTest(mounted=mounted, checked=checked):
++                data = filesystem()
++                struct.pack_into("<I", data, 1024 + 44, mounted)
++                struct.pack_into("<I", data, 1024 + 64, checked)
++                self.package(data)
++                self.installer().load_package()
++                self.assertEqual(self.dutil.mock_calls, [])
++
++    def test_legacy_template_has_no_new_requirements(self):
++        config = template()
++        del config["partitions"][1]["rootfs_uuid"]
++        self.package(bytearray(4096))
++        self.installer(config).load_package()
++        self.assertEqual(self.dutil.mock_calls, [])
++
++    def test_package_close_releases_local_archive(self):
++        self.package(filesystem())
++        obj = self.installer()
++        obj.load_package()
++        stream = obj.pkg.fp
++        try:
++            obj.pkg.close()
++            self.assertTrue(stream.closed)
++        finally:
++            stream.close()
++
++    def test_boot_template_requires_root_firmware_and_chainload_before_disk_calls(self):
++        from test_m4_boot_package import boot_parts
++        _, spec = boot_parts()
++        for invalid in ('root', 'firmware', 'chainload'):
++            config = template()
++            config['m4_boot'] = spec
++            config['partitions'][0]['copy_firmware'] = True
++            if invalid == 'root':
++                del config['partitions'][1]['rootfs_uuid']
++            elif invalid == 'firmware':
++                config['partitions'][0]['copy_firmware'] = False
++            else:
++                config['next_object'] = 'other/boot.bin'
++            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
++                self.installer(config)
++            self.assertEqual(self.dutil.mock_calls, [])
++
++    def test_open_firmware_package_stops_before_partition_writes(self):
++        from test_m4_boot_package import boot_parts
++        parts, spec = boot_parts()
++        config = template()
++        config['m4_boot'] = spec
++        config['partitions'][0]['copy_firmware'] = True
++        self.package(filesystem(), parts)
++        obj = self.installer(config)
++        obj.load_package()
++        obj.efi_part = SimpleNamespace(uuid=EFI_UUID)
++        obj.part_info = [obj.efi_part, SimpleNamespace(uuid=PART_UUID)]
++        obj.firmware_package = SimpleNamespace(closed=False, cpio_path=str(self.root / 'firmware.cpio'))
++        with patch('builtins.open', side_effect=AssertionError('File opened before firmware closed')) as opened, self.assertRaises(ValueError):
++            obj.install(SimpleNamespace())
++        opened.assert_not_called()
++        self.assertEqual(self.dutil.mock_calls, [])
++
++    def test_invalid_created_partition_uuid_stops_before_writes(self):
++        self.package(filesystem())
++        obj = self.installer()
++        obj.load_package()
++        obj.efi_part = SimpleNamespace(uuid=EFI_UUID)
++        for value in (None, "", "invalid", PART_UUID.replace("-", "")):
++            with self.subTest(value=value):
++                obj.part_info = [SimpleNamespace(uuid=EFI_UUID), SimpleNamespace(uuid=value)]
++                with patch("builtins.open") as opened, self.assertRaises(ValueError):
++                    obj.install(SimpleNamespace())
++                opened.assert_not_called()
++
++    def test_invalid_or_duplicate_efi_identity_stops_before_writes(self):
++        self.package(filesystem())
++        obj = self.installer()
++        obj.load_package()
++        for value in (None, "", "invalid", EFI_UUID.replace("-", ""), PART_UUID):
++            with self.subTest(value=value):
++                obj.efi_part = SimpleNamespace(uuid=value)
++                obj.part_info = [obj.efi_part, SimpleNamespace(uuid=PART_UUID)]
++                with self.assertRaises(ValueError):
++                    obj.root_identity_vars()
++                with patch("builtins.open") as opened, self.assertRaises(ValueError):
++                    obj.install(SimpleNamespace())
++                opened.assert_not_called()
++
++    def test_install_seals_created_partition_and_image_identity(self):
++        self.package(filesystem())
++        obj = self.installer()
++        obj.load_package()
++        efi = SimpleNamespace(name="disk0s4", uuid=EFI_UUID.upper(), size=1024 * 1024)
++        root = SimpleNamespace(name="disk0s5", uuid=PART_UUID.upper(), size=1024 * 1024)
++        obj.part_info, obj.efi_part = [efi, root], efi
++        self.dutil.get_partition_info.return_value = root
++        (self.root / "boot").mkdir()
++        (self.root / "boot/stage1.bin").write_bytes(b"fixture-stage-oneSTACKBOT")
++        target = self.root / "raw-partition"
++        target.write_bytes(bytes(8192))
++        boot_object = self.root / "boot-object.bin"
++        original_open = open
++        def scratch_open(path, *args, **kwargs):
++            if str(path).startswith("/dev/"):
++                self.assertEqual(str(path), "/dev/rdisk0s5")
++                return original_open(target, *args, **kwargs)
++            return original_open(path, *args, **kwargs)
++        previous = Path.cwd()
++        try:
++            os.chdir(self.root)
++            with patch("builtins.open", side_effect=scratch_open):
++                obj.install(SimpleNamespace(boot_obj_path=boot_object))
++        finally:
++            os.chdir(previous)
++        self.assertEqual(target.read_bytes()[:4096], filesystem())
++        self.assertEqual(m1n1.extract_vars(boot_object), [
++            "chosen.gravity,efi-system-partition=" + EFI_UUID,
++            "chainload=" + EFI_UUID + ";omarchy/boot.bin",
++            "chosen.omarchy,root-partition=" + PART_UUID,
++            "chosen.omarchy,root-filesystem=" + FS_UUID,
++        ])
++        self.assertEqual(boot_object.stat().st_size % 65536, 0)
++
++    def test_m4_boot_package_is_validated_before_disk_calls(self):
++        from test_m4_boot_package import boot_parts
++        parts, spec = boot_parts()
++        config = template()
++        config["m4_boot"] = spec
++        config["partitions"][0]["copy_firmware"] = True
++        for name in parts:
++            damaged = dict(parts)
++            damaged[name] += b"changed"
++            self.package(filesystem(), damaged)
++            obj = self.installer(config)
++            with self.subTest(name=name), self.assertRaises(ValueError):
++                obj.load_package()
++            self.assertIsNone(obj.pkg.fp)
++        self.assertEqual(self.dutil.mock_calls, [])
++
++    def test_install_writes_device_firmware_into_one_boot_payload(self):
++        import m4boot
++        from gravity_firmware.core import FWFile, FWPackage
++        from test_m4_boot_package import boot_parts
++        parts, spec = boot_parts()
++        config = template()
++        config["m4_boot"] = spec
++        config["partitions"][0]["copy_firmware"] = True
++        self.package(filesystem(), parts)
++        obj = self.installer(config)
++        obj.load_package()
++        firmware_dir = self.root / "firmware"
++        firmware_dir.mkdir()
++        with FWPackage(firmware_dir) as package:
++            package.add_file("apple/tpmtfw-j713.bin", FWFile("touch", b"device fixture"))
++        obj.firmware_package = package
++        efi = SimpleNamespace(name="disk0s4", uuid=EFI_UUID, size=1024 * 1024)
++        root = SimpleNamespace(name="disk0s5", uuid=PART_UUID, size=1024 * 1024)
++        obj.part_info, obj.efi_part = [efi, root], efi
++        self.dutil.get_partition_info.return_value = root
++        mount = self.root / "EFI"
++        mount.mkdir()
++        self.dutil.mount.return_value = str(mount)
++        (self.root / "boot").mkdir()
++        (self.root / "boot/stage1.bin").write_bytes(b"fixture-stage-oneSTACKBOT")
++        target = self.root / "raw-partition"
++        target.write_bytes(bytes(8192))
++        original_open = open
++        def scratch_open(path, *args, **kwargs):
++            if str(path).startswith("/dev/"):
++                self.assertEqual(str(path), "/dev/rdisk0s5")
++                return original_open(target, *args, **kwargs)
++            return original_open(path, *args, **kwargs)
++        previous = Path.cwd()
++        try:
++            os.chdir(self.root)
++            with patch("builtins.open", side_effect=scratch_open):
++                obj.install(SimpleNamespace(boot_obj_path=self.root / "boot-object.bin"))
++        finally:
++            os.chdir(previous)
++        firmware = (firmware_dir / "firmware.cpio").read_bytes()
++        self.assertEqual((mount / "omarchy/boot.bin").read_bytes(),
++                         m4boot.compose(parts, spec["bootargs"], firmware))
++        self.assertEqual((mount / "vendorfw/firmware.cpio").read_bytes(), firmware)
++        self.assertFalse((mount / "omarchy/boot.bin.new").exists())
++        self.assertEqual(target.read_bytes()[:4096], filesystem())
++
++
++if __name__ == "__main__":
++    unittest.main()
