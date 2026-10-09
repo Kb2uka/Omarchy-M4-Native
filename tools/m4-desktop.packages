@@ -1,0 +1,12 @@
+# General desktop requirements omitted by the initial J713 image.
+# Install alongside Omarchy's omarchy-base.packages, before configuring the image.
+sudo
+base-devel
+autoconf-archive
+gst-plugin-pipewire
+pipewire-alsa
+pipewire-jack
+pipewire-pulse
+zram-generator
+# Requested process viewer; Omarchy also retains its stock btop.
+htop

@@ -7,15 +7,16 @@ attempt to run **Omarchy natively on a 13-inch M4 MacBook Air (2025)**.
 Maintained by **KB2UKA** and shared so other Apple Silicon and Omarchy
 enthusiasts can inspect, reproduce, and build on the findings.
 
-**The milestone, October 8, 2026:** the native Omarchy desktop renders on the
-Apple M4 GPU and starts through systemd and UWSM from an ext4 root on a
-RAM-backed GPT disk. A deliberately wrong root partition ID is rejected before
-mounting, with the error captured remotely. See the
-[GPU and normal-root checkpoint](docs/j713-gpu-normal-root.md).
-This remains a bounded RAM boot. The internal SSD has no installed Omarchy
-root, and permanent boot, updates, audio, camera, suspend and daily-use
-reliability remain unqualified. This repository contains research and selected
-source helpers, not a supported installer or disk image.
+**The milestone, October 9, 2026:** Omarchy 4.0.4 has reached its desktop from
+an installed ext4 root on the Air's internal SSD. The owner confirmed Wi-Fi,
+terminal and browser operation; EGL reports the Apple M4 renderer. Package
+and startup omissions were repaired after installation. See the
+[installed desktop checkpoint](docs/j713-desktop-image.md) and the earlier
+[GPU and RAM-root checkpoint](docs/j713-gpu-normal-root.md).
+The owner confirmed one normal repeat boot with a working trackpad. Installed
+boot required verbose mode; reliable cold boot, updates, audio, camera, suspend and daily-use reliability remain
+unqualified. This repository contains research and selected source helpers,
+not a supported installer or disk image.
 
 ## Project status
 
@@ -25,12 +26,14 @@ checks, read-only SSD reads, Wi-Fi internet access, Bluetooth HCI startup,
 physical input and the software-rendered Omarchy interface. The detailed
 hardware notes below record the tested revisions and limitations. October 8
 adds GPU rendering, normal systemd startup with an automatic UWSM session,
-and RAM root identity checks.
+and RAM root identity checks. October 9 reached an installed SSD desktop, with
+the remaining limitations described above.
 
-Desktop tests use a fresh per-boot TrustCache reservation, `idle=nop`, a
+The October 8 RAM desktop tests used a fresh per-boot TrustCache reservation, `idle=nop`, a
 read-only internal SSD and a two-minute watchdog recovery window. No internal
 filesystem was mounted or written during these tests; filesystem writes and
-remount checks used RAM-backed disks only. Normal installation,
+remount checks used RAM-backed disks only. The later owner-operated installation
+created a separate SSD root. Reproducible installation,
 updates, long-running sessions and complete hardware support are still work
 in progress.
 
@@ -40,8 +43,8 @@ Check the [Asahi M4 feature page](https://asahilinux.org/docs/platform/feature-s
 for upstream progress.
 
 October 9 adds an [experimental J713 installer profile](docs/j713-installer-profile.md)
-with exact recovery-image and radio-firmware checks. It is preparation for a
-separate SSD installation; no permanent Omarchy boot has been demonstrated.
+with exact recovery-image and radio-firmware checks. The resulting experimental
+installation reached the SSD desktop but still needs complete hardware and boot qualification.
 The [SSD root preparation](docs/j713-ssd-root-preparation.md) adds selected-partition
 identity, locally assembled boot firmware, an early root with checked ARM
 libraries, and corrected offline ARM owner provisioning.
@@ -53,7 +56,7 @@ libraries, and corrected offline ARM owner provisioning.
 | Machine | MacBook Air, 13-inch, M4, 2025 |
 | Model / board | `Mac16,12` / `J713` (board ID `0x2c`) |
 | SoC | Apple `T8132`, M4 |
-| Boot path | m1n1 USB proxy → combined loader/kernel/initramfs → systemd on a RAM ext4 root |
+| Boot paths tested | m1n1 USB proxy to a RAM ext4 root; installed m1n1/kernel/initramfs payload to an SSD ext4 root |
 | Display during bring-up | simpledrm scanout with experimental Apple M4 GPU rendering |
 | Proxy host | A separate Linux or macOS machine, with USB access to the target |
 | Kernel build host | Separate Linux machine with an AArch64 LLVM toolchain |
