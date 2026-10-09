@@ -42,6 +42,9 @@ for upstream progress.
 October 9 adds an [experimental J713 installer profile](docs/j713-installer-profile.md)
 with exact recovery-image and radio-firmware checks. It is preparation for a
 separate SSD installation; no permanent Omarchy boot has been demonstrated.
+The [SSD root preparation](docs/j713-ssd-root-preparation.md) adds selected-partition
+identity, locally assembled boot firmware, an early root with checked ARM
+libraries, and corrected offline ARM owner provisioning.
 
 ## Hardware and approach
 
