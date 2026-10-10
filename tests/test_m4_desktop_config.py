@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SOURCE = Path(__file__).resolve().parents[1] / "tools/configure-m4-desktop.py"
@@ -56,6 +57,8 @@ class DesktopImageTests(unittest.TestCase):
                          "pipewire-jack", "pipewire-pulse", "zram-generator", "htop")
         for name in self.packages:
             self.write(f"var/lib/pacman/local/{name}-1-1/desc", f"%NAME%\n{name}\n\n%VERSION%\n1-1\n")
+        if os.name != "nt":
+            (self.root / "etc").chmod(0o755)
 
     def write(self, name, content):
         path = self.root / name
@@ -92,6 +95,76 @@ class DesktopImageTests(unittest.TestCase):
         self.assertIn("#de_DE.UTF-8 UTF-8", locale)
         self.assertEqual((self.root / "etc/systemd/zram-generator.conf.d/90-omarchy.conf").read_text(), self.zram)
         desktop.configure(self.root)
+
+    def test_shader_cache_override_is_installed_and_checked(self):
+        desktop.configure(self.root, apply=True)
+        override = self.root / "etc/xdg/uwsm/env.d/90-m4-shader-cache"
+        self.assertEqual(override.read_bytes(), b"export MESA_SHADER_CACHE_DISABLE=false\n")
+        override.write_bytes(b"export MESA_SHADER_CACHE_DISABLE=true\n")
+        before = self.snapshot()
+        with self.assertRaisesRegex(ValueError, "etc/xdg/uwsm/env.d/90-m4-shader-cache"):
+            desktop.configure(self.root)
+        self.assertEqual(self.snapshot(), before)
+        report = desktop.configure(self.root, apply=True)
+        self.assertEqual(report["changed_files"], ["etc/xdg/uwsm/env.d/90-m4-shader-cache"])
+        self.assertEqual(override.read_bytes(), b"export MESA_SHADER_CACHE_DISABLE=false\n")
+
+    @unittest.skipIf(os.name == "nt", "POSIX image permissions")
+    def test_shader_cache_remains_readable_under_restrictive_umask(self):
+        previous = os.umask(0o077)
+        try:
+            desktop.configure(self.root, apply=True)
+        finally:
+            os.umask(previous)
+        override = self.root / "etc/xdg/uwsm/env.d/90-m4-shader-cache"
+        self.assertEqual(override.stat().st_mode & 0o777, 0o644)
+        for parent in (override.parent, override.parent.parent, override.parent.parent.parent):
+            self.assertEqual(parent.stat().st_mode & 0o777, 0o755)
+        for mode in (0o600, 0o666):
+            with self.subTest(mode=oct(mode)):
+                override.chmod(mode)
+                with self.assertRaisesRegex(ValueError, "90-m4-shader-cache"):
+                    desktop.configure(self.root)
+                report = desktop.configure(self.root, apply=True)
+                self.assertIn("etc/xdg/uwsm/env.d/90-m4-shader-cache", report["changed_files"])
+                self.assertEqual(override.stat().st_mode & 0o777, 0o644)
+
+    @unittest.skipIf(os.name == "nt", "POSIX image permissions")
+    def test_shader_cache_rejects_private_existing_directory_before_writes(self):
+        desktop.configure(self.root, apply=True)
+        for name, mode in (("etc/xdg/uwsm", 0o700), ("etc/xdg/uwsm/env.d", 0o711),
+                           ("etc/xdg/uwsm/env.d", 0o744), ("etc/xdg", 0o700),
+                           ("etc", 0o750)):
+            for apply in (False, True):
+                with self.subTest(parent=name, mode=oct(mode), apply=apply):
+                    parent = self.root / name
+                    parent.chmod(mode)
+                    before = self.snapshot()
+                    try:
+                        with patch.object(Path, "write_bytes") as write:
+                            with self.assertRaisesRegex(ValueError, "^" + re.escape(
+                                    "Image path is not a publicly readable directory: " + name) + "$"):
+                                desktop.configure(self.root, apply=apply)
+                            write.assert_not_called()
+                        self.assertEqual(self.snapshot(), before)
+                        self.assertEqual(parent.stat().st_mode & 0o777, mode)
+                    finally:
+                        parent.chmod(0o755)
+
+    def test_shader_cache_rejects_non_directory_before_writes(self):
+        parent = self.write("etc/xdg/uwsm", "This is a regular file.\n")
+        if os.name != "nt":
+            parent.parent.chmod(0o755)
+            parent.chmod(0o755)
+        before = self.snapshot()
+        for apply in (False, True):
+            with self.subTest(apply=apply):
+                with self.assertRaisesRegex(ValueError, "^" + re.escape(
+                        "Image path is not a publicly readable directory: etc/xdg/uwsm") + "$"):
+                    desktop.configure(self.root, apply=apply)
+                self.assertEqual(self.snapshot(), before)
+                if os.name != "nt":
+                    self.assertEqual(parent.stat().st_mode & 0o777, 0o755)
 
     def test_missing_packages_fail_before_any_write(self):
         for name in self.packages:
