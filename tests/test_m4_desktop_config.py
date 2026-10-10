@@ -109,18 +109,30 @@ class DesktopImageTests(unittest.TestCase):
         self.assertEqual(report["changed_files"], ["etc/xdg/uwsm/env.d/90-m4-shader-cache"])
         self.assertEqual(override.read_bytes(), b"export MESA_SHADER_CACHE_DISABLE=false\n")
 
-    def test_session_placement_hook_and_helper_are_installed_and_checked(self):
+    def test_session_placement_helper_is_checked_without_automatic_hook(self):
         desktop.configure(self.root, apply=True)
         hook = self.root / "etc/skel/.config/omarchy/hooks/post-boot.d/50-m4-placement"
         helper = self.root / "etc/skel/.local/lib/omarchy/m4-session-placement.py"
-        self.assertEqual(hook.read_text(),
-                         '#!/bin/bash\nexec /usr/bin/python3 "$HOME/.local/lib/omarchy/m4-session-placement.py" apply\n')
+        self.assertFalse(hook.exists())
+        self.assertNotIn(hook, desktop.planned_files(self.root))
         self.assertEqual(helper.read_bytes(), SOURCE.with_name("m4-session-placement.py").read_bytes())
         helper.write_text("changed\n")
         before = self.snapshot()
         with self.assertRaisesRegex(ValueError, "m4-session-placement.py"):
             desktop.configure(self.root)
         self.assertEqual(self.snapshot(), before)
+
+    def test_previous_automatic_placement_hook_is_refused_before_any_write(self):
+        desktop.configure(self.root, apply=True)
+        for content in ('#!/bin/bash\nexec /usr/bin/python3 "$HOME/.local/lib/omarchy/m4-session-placement.py" apply\n',
+                        '# Owner-customized hook\n'):
+            self.write("etc/skel/.config/omarchy/hooks/post-boot.d/50-m4-placement", content)
+            before = self.snapshot()
+            for apply in (False, True):
+                with self.subTest(content=content, apply=apply):
+                    with self.assertRaisesRegex(ValueError, "Existing automatic placement hook"):
+                        desktop.configure(self.root, apply=apply)
+                    self.assertEqual(self.snapshot(), before)
 
     @unittest.skipIf(os.name == "nt", "POSIX image permissions")
     def test_shader_cache_remains_readable_under_restrictive_umask(self):

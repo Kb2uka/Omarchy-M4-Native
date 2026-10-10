@@ -171,15 +171,18 @@ An actual stock Chromium launch later reported 27/1815 drops for Comic-Con and
 failed during shutdown after recording both clips, so the overall qualification
 did not pass. Smooth playback remains unfinished.
 
-The image helper now stages `m4-session-placement.py` and an owner `post-boot.d`
-hook. The packaged Omarchy startup invokes this hook after loading its startup
-configuration. The helper derives logical performance CPU IDs from each online
+The image helper stages `m4-session-placement.py` as an opt-in tool, without an
+automatic startup hook. An offline candidate containing the earlier
+`etc/skel/.config/omarchy/hooks/post-boot.d/50-m4-placement` hook is refused
+before configuration writes. Review and remove that hook from the candidate,
+or start with a fresh candidate; the tool does not delete it automatically.
+The placement helper derives logical performance CPU IDs from each online
 CPU's device-tree node, requires the qualified J713/T8132 topology and unchanged
 capacity values, and identifies the owner's actual compositor through the
 current Hyprland instance. It changes only that main thread. A runtime user
 drop-in applies the same CPU preference to future `omarchy-browser-*.service`
 launches, keeping the packaged launcher intact. Unsupported hardware fails in
-the hook without adding a condition that could block browser launches.
+the helper without adding a condition that could block browser launches.
 
 This is a scheduling workaround, not CPU frequency control, hardware video
 decoding, or a global scheduler repair. Existing browser singletons keep their
@@ -190,7 +193,7 @@ terminal and its child inherited the four performance CPUs. Affinity-aware job c
 therefore use four CPUs instead of all ten, and terminal workloads share those
 CPUs with the compositor.
 Browser workers can independently widen their masks. These are explicit limits
-of this experimental image default.
+of this opt-in experiment.
 
 A matched placement-off then placement-on trial played the full local Comic-Con
 clip while four independent C++ compilation jobs ran. Both arms completed and
@@ -211,9 +214,12 @@ ones currently hidden by a higher-priority file. Unreadable configuration stops
 the operation before changes. It also refuses same-named drop-ins or masks
 that could hide its runtime file, regardless of their contents. The runtime
 drop-in disappears at reboot;
-the hook rediscovers topology on the next login. On an installed candidate:
+no startup hook reapplies placement at login. If the user manager survives
+logout, its runtime drop-in can remain until explicit restore or reboot.
+To opt in on an installed candidate, run as the desktop owner:
 
 ```sh
+python3 ~/.local/lib/omarchy/m4-session-placement.py apply
 python3 ~/.local/lib/omarchy/m4-session-placement.py status
 python3 ~/.local/lib/omarchy/m4-session-placement.py restore
 ```
@@ -249,8 +255,8 @@ python3 -m unittest discover -s tests -p test_m4_session_placement.py
 `restore` restores the saved compositor's main-thread mask and removes the
 managed browser drop-in. It does not widen masks of other compositor threads
 or applications started during placement; they keep their masks until they
-exit or are explicitly changed. For an opt-out across subsequent logins in
-this owner account, remove the owner hook before running `restore`:
+exit or are explicitly changed. If this owner previously received the older
+automatic hook, remove that hook before running `restore`:
 
 ```sh
 rm ~/.config/omarchy/hooks/post-boot.d/50-m4-placement
@@ -258,7 +264,7 @@ python3 ~/.local/lib/omarchy/m4-session-placement.py restore
 ```
 
 The image builder stages defaults in `/etc/skel`, without rewriting existing
-owners' home directories. A newly created owner receives the hook again.
+owners' home directories. New owners receive the helper but no placement hook.
 
 If the managed runtime drop-in was manually edited, restore preserves that file
 and its saved identity record, reports the conflict, and restores its own main
