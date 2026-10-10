@@ -193,7 +193,9 @@ refuses existing custom affinity or drop-in content, and can restore its own
 state without touching a reused PID. It inspects the running user manager's
 unit search paths and refuses other applicable CPU affinity assignments, even
 ones currently hidden by a higher-priority file. Unreadable configuration stops
-the operation before changes. The runtime drop-in disappears at reboot;
+the operation before changes. It also refuses same-named drop-ins or masks
+that could hide its runtime file, regardless of their contents. The runtime
+drop-in disappears at reboot;
 the hook rediscovers topology on the next login. On an installed candidate:
 
 ```sh

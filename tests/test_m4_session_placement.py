@@ -178,6 +178,29 @@ class PlacementTests(unittest.TestCase):
         self.assertFalse(self.state.exists())
         self.assertFalse(self.dropin.exists())
 
+    def test_same_name_dropin_cannot_shadow_runtime_placement(self):
+        name = "home/kb2uka/.config/systemd/user/omarchy-browser-.service.d/70-m4-placement.conf"
+        path = self.root / name
+        path.parent.mkdir(parents=True)
+        for content in ("[Service]\nNice=5\n", "", None):
+            with self.subTest(content=content):
+                if content is None:
+                    path.symlink_to("/dev/null")
+                else:
+                    path.write_text(content)
+                try:
+                    with self.assertRaisesRegex(ValueError, "affinity configuration"):
+                        self.apply()
+                    self.assertFalse(self.state.exists())
+                    self.assertFalse(self.dropin.exists())
+                    self.assertEqual(self.set_calls, [])
+                    if content is None:
+                        self.assertEqual(path.readlink(), Path("/dev/null"))
+                    else:
+                        self.assertEqual(path.read_text(), content)
+                finally:
+                    path.unlink()
+
     def test_affinity_scan_ignores_comments_but_rejects_unreadable_config(self):
         path = self.write("etc/systemd/user/service.d/20-custom.conf", "# CPUAffinity=2\n; CPUAffinity=4\n[Service]\nNice=5\n")
         self.apply()

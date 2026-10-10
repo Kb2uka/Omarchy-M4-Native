@@ -104,6 +104,8 @@ def check_browser_affinity(root, managed):
             for path in files:
                 if path == managed or path.suffix != ".conf":
                     continue
+                if path.name == managed.name:
+                    raise ValueError("Existing browser affinity configuration: " + str(path))
                 for line in path.read_text().splitlines():
                     text = line.strip()
                     if not text.startswith(("#", ";")) and text.partition("=")[0].strip() == "CPUAffinity":
