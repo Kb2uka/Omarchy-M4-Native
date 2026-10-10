@@ -118,6 +118,45 @@ The installed desktop created EGL contexts reporting Apple M4 (G16G B1) for
 Wayland, GBM and the device platform. That demonstrates driver selection and
 context creation, not every graphics workload.
 
+The image helper also installs `etc/xdg/uwsm/env.d/90-m4-shader-cache` to enable
+Mesa's on-disk shader cache. UWSM loads this system configuration after the
+earlier bring-up environment in `/usr/share/uwsm`, using the installed session's
+`XDG_CONFIG_DIRS=/etc/xdg`; owner configuration can
+override it later. On this Air, `MESA_SHADER_CACHE_DISABLE=true` reproducibly
+crashed Chromium's GPU process on a sandbox-denied `sched_setscheduler` call.
+With the same private M4 driver, `ASAHI_MESA_DEBUG=nocompress` and cache disabling
+set to `false`, both Chromium and Brave created a WebGL2 context reporting
+Apple M4 and read back the expected pixel without GL errors. The sandbox
+remained enabled. Browser launches must inherit the matching M4 library paths;
+starting from a sparse SSH environment selected incompatible system libraries.
+
+This corrects one startup failure, not the remaining video performance problem.
+Local 60 fps playback still dropped frames after the change. The installed
+session was tested by relaunching the browser; a fresh native owner boot with
+this image override remains unqualified.
+
+For an existing installation using the same M4 driver and UWSM layout, install
+the override directly; the offline image helper intentionally refuses a live
+root:
+
+```bash
+sudo install -d -m 0755 /etc/xdg /etc/xdg/uwsm /etc/xdg/uwsm/env.d
+printf '%s\n' 'export MESA_SHADER_CACHE_DISABLE=false' | sudo tee /etc/xdg/uwsm/env.d/90-m4-shader-cache >/dev/null
+sudo chmod 0644 /etc/xdg/uwsm/env.d/90-m4-shader-cache
+```
+
+Save work, log out and log back in to reload the session environment. Verify
+`systemctl --user show-environment | grep '^MESA_SHADER_CACHE_DISABLE='`
+reports `MESA_SHADER_CACHE_DISABLE=false`. Later
+UWSM configuration, including owner overrides, still takes precedence. On the
+development Air the value was changed in its existing custom, unowned
+`/usr/share/uwsm/env.d/90-m4`, exported to the user service manager and tested
+with relaunched browsers. That live repair did not test a fresh login using
+the new image file. On POSIX build hosts the helper creates the new cache
+directories as 0755 and its file as 0644 regardless of umask; it rejects an
+existing parent without public read/traverse access before writing anything.
+Windows fixture tests cover content only, not Linux permission semantics.
+
 The successful repeat boot logged `Touch MT ready` at 2.293 seconds; Hyprland
 listed the multi-touch device and the owner confirmed physical operation.
 Earlier boots failed AFE startup with `No HINT_L`. A temporary delayed-start

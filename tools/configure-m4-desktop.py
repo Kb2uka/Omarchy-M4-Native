@@ -4,8 +4,10 @@
 """Prepare desktop defaults in an offline J713 image, retaining packaged Omarchy defaults."""
 import argparse
 import json
+import os
 from pathlib import Path
 import re
+import stat
 
 
 M4_OVERRIDES = '''
@@ -147,6 +149,7 @@ def planned_files(root):
         "etc/skel/.config/hypr/hyprland.lua": stock.rstrip() + "\n" + M4_OVERRIDES,
         "etc/locale.gen": "\n".join(locale) + "\n",
         "etc/locale.conf": "LANG=en_US.UTF-8\n",
+        "etc/xdg/uwsm/env.d/90-m4-shader-cache": "export MESA_SHADER_CACHE_DISABLE=false\n",
         "etc/systemd/zram-generator.conf.d/90-omarchy.conf": zram,
     }
     files.update(session_logging_files(root))
@@ -158,12 +161,30 @@ def planned_files(root):
 def configure(root, apply=False):
     root = root.resolve(strict=True)
     files = planned_files(root)
+    cache = image_path(root, "etc/xdg/uwsm/env.d/90-m4-shader-cache")
+    new_cache_dirs = []
+    for parent in cache.parents:
+        if parent == root:
+            break
+        if not parent.exists():
+            new_cache_dirs.append(parent)
+        elif not parent.is_dir() or (os.name != "nt" and
+                                    parent.stat().st_mode & 0o005 != 0o005):
+            raise ValueError("Image path is not a publicly readable directory: " +
+                             parent.relative_to(root).as_posix())
     different = [path.relative_to(root).as_posix() for path, content in files.items()
-                 if not path.is_file() or path.read_bytes() != content]
+                 if not path.is_file() or path.read_bytes() != content or
+                 (path == cache and os.name != "nt" and
+                  stat.S_IMODE(path.stat().st_mode) != 0o644)]
     if apply:
         for path, content in files.items():
             path.parent.mkdir(parents=True, exist_ok=True)
+            if path == cache and os.name != "nt":
+                for parent in new_cache_dirs:
+                    parent.chmod(0o755)
             path.write_bytes(content)
+            if path == cache and os.name != "nt":
+                path.chmod(0o644)
     elif different:
         raise ValueError("Desktop image configuration differs: " + ", ".join(different))
     return {"configured_files": [p.relative_to(root).as_posix() for p in files],
