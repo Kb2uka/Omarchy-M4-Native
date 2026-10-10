@@ -184,9 +184,9 @@ the hook without adding a condition that could block browser launches.
 This is a scheduling workaround, not CPU frequency control, hardware video
 decoding, or a global scheduler repair. Existing browser singletons keep their
 current masks; direct launches that bypass the stock browser service do not use
-its drop-in. New compositor threads and directly forked applications inherit the main
-thread's mask. In the qualified stock terminal launch, both the terminal and
-its child inherited the four performance CPUs. Affinity-aware job counts can
+its drop-in. New threads and directly forked applications inherit the mask of
+the thread that creates them. In the qualified stock terminal launch, both the
+terminal and its child inherited the four performance CPUs. Affinity-aware job counts can
 therefore use four CPUs instead of all ten, and terminal workloads share those
 CPUs with the compositor. Mixed build/video performance remains unmeasured.
 Browser workers can independently widen their masks. These are explicit limits
@@ -227,21 +227,27 @@ Internal audio, repeated cold boots, quiet boot, safe updates and native
 first-owner qualification of the rebuilt candidate remain open. None of these
 observations qualifies another Mac model or the M4 Pro.
 
-Run the configuration regressions on a leased test host:
+Run the configuration regressions on a leased Linux test host using discovery
+(the platform skip in the placement suite relies on this invocation):
 
 ```sh
 python3 -m unittest discover -s tests -p test_m4_desktop_config.py
+python3 -m unittest discover -s tests -p test_m4_session_placement.py
 ```
 
-`restore` changes the saved compositor and removes the managed browser drop-in;
-it does not widen the masks of applications already launched during placement.
-Those applications keep their masks until they exit or are explicitly changed.
-For a persistent opt-out, remove the owner hook before running `restore`:
+`restore` restores the saved compositor's main-thread mask and removes the
+managed browser drop-in. It does not widen masks of other compositor threads
+or applications started during placement; they keep their masks until they
+exit or are explicitly changed. For an opt-out across subsequent logins in
+this owner account, remove the owner hook before running `restore`:
 
 ```sh
 rm ~/.config/omarchy/hooks/post-boot.d/50-m4-placement
 python3 ~/.local/lib/omarchy/m4-session-placement.py restore
 ```
+
+The image builder stages defaults in `/etc/skel`, without rewriting existing
+owners' home directories. A newly created owner receives the hook again.
 
 If the managed runtime drop-in was manually edited, restore preserves that file
 and its saved identity record, reports the conflict, and restores its own main

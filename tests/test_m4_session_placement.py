@@ -50,12 +50,13 @@ class PlacementTests(unittest.TestCase):
         patch.object(placement.os, "sched_getaffinity", side_effect=lambda pid: self.masks[pid].copy()).start()
         patch.object(placement.os, "sched_setaffinity", side_effect=self.set_affinity).start()
         patch.object(placement, "command", side_effect=self.command).start()
+        self.runtime_uid = 1000
         real_stat = Path.stat
         def owned_runtime(path, *args, **kwargs):
             info = real_stat(path, *args, **kwargs)
             if path.is_relative_to(self.root / "run/user"):
                 fields = list(info)
-                fields[4] = 1000
+                fields[4] = self.runtime_uid
                 return os.stat_result(fields)
             return info
         patch.object(Path, "stat", owned_runtime).start()
@@ -303,6 +304,11 @@ class PlacementTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 placement.paths(self.root, {**self.environment, "XDG_RUNTIME_DIR": "/run/user/0"})
 
+    def test_runtime_owned_by_another_user_is_rejected(self):
+        self.runtime_uid = 1001
+        with self.assertRaisesRegex(ValueError, "Unexpected owner runtime directory"):
+            placement.paths(self.root, self.environment)
+
     def test_live_nested_session_refusal_preserves_outer(self):
         self.apply()
         saved, dropin = self.state.read_bytes(), self.dropin.read_bytes()
@@ -375,6 +381,7 @@ class PlacementTests(unittest.TestCase):
         self.assertEqual(self.set_calls, [])
         self.assertFalse(self.state.exists())
         self.assertFalse(self.dropin.exists())
+        self.assertEqual(self.commands.count(("systemctl", "--user", "daemon-reload")), 2)
 
     def test_concurrent_state_creation_is_not_overwritten(self):
         original_open = Path.open
@@ -392,22 +399,27 @@ class PlacementTests(unittest.TestCase):
 
     def test_cli_reads_state_only_under_exclusive_lock(self):
         self.state.write_text("{}")
-        locked = False
+        locked_handle = None
+        reads = 0
         real_read = Path.read_text
         def lock(fd, operation):
-            nonlocal locked
+            nonlocal locked_handle
             self.assertEqual(operation, placement.fcntl.LOCK_EX)
             self.assertTrue(os.fstat(fd if isinstance(fd, int) else fd.fileno()).st_mode)
-            locked = True
+            locked_handle = fd
         def read(path, *args, **kwargs):
+            nonlocal reads
             if path == self.state:
-                self.assertTrue(locked, "CLI read saved state without locking")
+                self.assertIsNotNone(locked_handle, "CLI read saved state without locking")
+                self.assertFalse(locked_handle.closed, "CLI released lock before reading state")
+                reads += 1
             return real_read(path, *args, **kwargs)
         with patch.object(sys, "argv", ["placement", "status"]), \
              patch.object(placement, "paths", return_value=(self.state, self.dropin)), \
              patch.object(placement.fcntl, "flock", side_effect=lock), \
              patch.object(Path, "read_text", read), redirect_stdout(io.StringIO()):
             placement.main()
+        self.assertEqual(reads, 1)
 
 
 class CommandTests(unittest.TestCase):
