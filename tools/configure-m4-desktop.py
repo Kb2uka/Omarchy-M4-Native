@@ -150,6 +150,9 @@ def planned_files(root):
         "etc/locale.gen": "\n".join(locale) + "\n",
         "etc/locale.conf": "LANG=en_US.UTF-8\n",
         "etc/xdg/uwsm/env.d/90-m4-shader-cache": "export MESA_SHADER_CACHE_DISABLE=false\n",
+        "etc/skel/.local/lib/omarchy/m4-session-placement.py": Path(__file__).with_name("m4-session-placement.py").read_bytes(),
+        "etc/skel/.config/omarchy/hooks/post-boot.d/50-m4-placement":
+            '#!/bin/bash\nexec /usr/bin/python3 "$HOME/.local/lib/omarchy/m4-session-placement.py" apply\n',
         "etc/systemd/zram-generator.conf.d/90-omarchy.conf": zram,
     }
     files.update(session_logging_files(root))

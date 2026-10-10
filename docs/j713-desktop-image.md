@@ -157,6 +157,54 @@ directories as 0755 and its file as 0644 regardless of umask; it rejects an
 existing parent without public read/traverse access before writing anything.
 Windows fixture tests cover content only, not Linux permission semantics.
 
+## Experimental session placement
+
+The current J713 kernel reports the same scheduler capacity for its four
+performance and six efficiency CPUs. In a local 1080p60 crossover, restricting
+the existing compositor's main thread to the performance CPUs reduced reported
+drops from 178/1196 to 29/1196; restoring its original mask produced 154/1196.
+This implicates scheduling without relying on Internet buffering. Later full
+Comic-Con playback completed with zero reported drops in two controlled browser
+placement trials. These counters do not measure uniform physical-panel cadence.
+An actual stock Chromium launch later reported 27/1815 drops for Comic-Con and
+0/1196 for the 1080p60 fixture, with no buffering events. Its diagnostic bridge
+failed during shutdown after recording both clips, so the overall qualification
+did not pass. Smooth playback remains unfinished.
+
+The image helper now stages `m4-session-placement.py` and an owner `post-boot.d`
+hook. The packaged Omarchy startup invokes this hook after loading its startup
+configuration. The helper derives logical performance CPU IDs from each online
+CPU's device-tree node, requires the qualified J713/T8132 topology and unchanged
+capacity values, and identifies the owner's actual compositor through the
+current Hyprland instance. It changes only that main thread. A runtime user
+drop-in applies the same CPU preference to future `omarchy-browser-*.service`
+launches, keeping the packaged launcher intact. Unsupported hardware fails in
+the hook without adding a condition that could block browser launches.
+
+This is a scheduling workaround, not CPU frequency control, hardware video
+decoding, or a global scheduler repair. Existing browser singletons keep their
+current masks; direct launches that bypass the stock browser service do not use
+its drop-in. New compositor threads and directly forked applications can inherit
+the main thread's mask. Browser workers can independently widen theirs. Those
+limits must remain visible when evaluating general desktop performance.
+
+The helper saves the original main-thread mask with boot/PID/start identity,
+refuses existing custom affinity or drop-in content, and can restore its own
+state without touching a reused PID. It inspects the running user manager's
+unit search paths and refuses other applicable CPU affinity assignments, even
+ones currently hidden by a higher-priority file. Unreadable configuration stops
+the operation before changes. The runtime drop-in disappears at reboot;
+the hook rediscovers topology on the next login. On an installed candidate:
+
+```sh
+python3 ~/.local/lib/omarchy/m4-session-placement.py status
+python3 ~/.local/lib/omarchy/m4-session-placement.py restore
+```
+
+The new helper and image integration are undergoing qualification. A fresh
+owner boot and everyday application launches are not yet verified. Do not
+describe these staged files as a finished video fix or a qualified new image.
+
 The successful repeat boot logged `Touch MT ready` at 2.293 seconds; Hyprland
 listed the multi-touch device and the owner confirmed physical operation.
 Earlier boots failed AFE startup with `No HINT_L`. A temporary delayed-start
