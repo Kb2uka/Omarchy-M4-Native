@@ -35,8 +35,10 @@ The user WirePlumber drop-in calls the ordinary-user `gate` explicitly. A system
 preserves WirePlumber's existing restart policy; its retries can only observe
 state, not start/restart or unlock protection. Both templates use bounded startup
 timeouts. A gate failure stops that WP start, not the desktop or protection daemon. It
-holds the entire user session manager, so other devices managed by WirePlumber
-(including USB and Bluetooth audio) are also unavailable while readiness fails.
+blocks WirePlumber (the PipeWire session manager) as a whole, so other audio
+devices it manages, including USB and Bluetooth, are also unavailable while
+readiness fails. Other PipeWire media that depend on WirePlumber may also be
+affected; camera and portal screen-sharing behavior has not been tested here.
 If the existing WirePlumber restart policy retries, each gate attempt remains
 read-only and bounded; this package does not cap the number of manager retries.
 Only the J713 package should install this board-specific drop-in; no other board

@@ -22,19 +22,22 @@ def assemble(inputs, readiness, output, local_only=False):
             continue
         origin = REPO / 'audio/j713' if 'source' in entry else inputs
         payload[name] = (verified(origin, entry.get('source', name), entry), entry['mode'])
-    sources = {
+    repo_sources = {
         'usr/lib/omarchy/m4-j713-audio-register.py': REPO / 'tools/m4-j713-audio-register.py',
         'usr/lib/systemd/system/m4-j713-audio-register.service': REPO / 'packaging/j713-audio/m4-j713-audio-register.service',
-        'usr/lib/omarchy/m4-j713-audio-ready.py': readiness / 'tools/m4-j713-audio-ready.py',
-        'usr/lib/systemd/system/speakersafetyd-j713.service': readiness / 'packaging/j713-audio/speakersafetyd-j713.service',
-        'etc/systemd/user/wireplumber.service.d/80-j713-audio-ready.conf': readiness / 'packaging/j713-audio/wireplumber.service.d/80-j713-audio-ready.conf',
     }
-    readiness_bytes = {readiness / name: verified(readiness, name, entry)
-                       for name, entry in spec['readiness_inputs'].items()}
-    for name, source in sources.items():
+    readiness_sources = {
+        'usr/lib/omarchy/m4-j713-audio-ready.py': 'tools/m4-j713-audio-ready.py',
+        'usr/lib/systemd/system/speakersafetyd-j713.service': 'packaging/j713-audio/speakersafetyd-j713.service',
+        'etc/systemd/user/wireplumber.service.d/80-j713-audio-ready.conf': 'packaging/j713-audio/wireplumber.service.d/80-j713-audio-ready.conf',
+    }
+    require(set(readiness_sources.values()) == set(spec['readiness_inputs']),
+            'Readiness source/pin set mismatch')
+    for name, relative in readiness_sources.items():
+        payload[name] = (verified(readiness, relative, spec['readiness_inputs'][relative]), 0o644)
+    for name, source in repo_sources.items():
         require(source.is_file() and not source.is_symlink(), 'Missing source integration: ' + str(source))
-        data = readiness_bytes[source] if source in readiness_bytes else source.read_bytes()
-        payload[name] = (data, 0o644)
+        payload[name] = (source.read_bytes(), 0o644)
     manifest = {key: value for key, value in spec.items() if key != 'files'}
     manifest['redistributable'] = False
     manifest['file_metadata'] = {name: dict(sha256=digest(data), size=len(data), mode=mode)

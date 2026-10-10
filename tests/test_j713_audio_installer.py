@@ -109,18 +109,24 @@ class ImageTests(unittest.TestCase):
                 self.assertEqual(self.configure(apply=False)['changed_files'], [])
 
     def test_apply_consumes_verified_payload_snapshot(self):
-        original = installer.load_package
         target = self.package / 'root/usr/lib/omarchy/example'
-        def replace_after_verification(path):
-            result = original(path)
-            target.write_bytes(b'swapped after verification')
-            return result
-        with mock.patch.object(installer, 'load_package', side_effect=replace_after_verification):
+        original = Path.read_bytes
+        reads = []
+        def replace_after_read(path):
+            data = original(path)
+            if path == target:
+                reads.append(data)
+                path.write_bytes(b'swapped after verified read')
+            return data
+        # Swap after the verifier's actual read, before its hash/return. This
+        # covers an extra read inside verified(), load_package(), or configure().
+        with mock.patch.object(Path, 'read_bytes', replace_after_read):
             self.configure()
-        self.assertEqual(target.read_bytes(), b'swapped after verification')
+        self.assertEqual(reads, [b'qualified'])
+        self.assertEqual(target.read_bytes(), b'swapped after verified read')
         self.assertEqual((self.image / 'usr/lib/omarchy/example').read_bytes(), b'qualified')
 
-    def test_assembly_consumes_verified_readiness_snapshot(self):
+    def assembly_inputs(self):
         repo = Path(self.temp.name) / 'source'
         readiness = Path(self.temp.name) / 'readiness'
         output = Path(self.temp.name) / 'assembled'
@@ -130,7 +136,11 @@ class ImageTests(unittest.TestCase):
             'packaging/j713-audio/wireplumber.service.d/80-j713-audio-ready.conf':
                 'etc/systemd/user/wireplumber.service.d/80-j713-audio-ready.conf',
         }
-        spec = dict(files={}, readiness_inputs={}, module_artifacts={})
+        binary = 'usr/lib/modules/exact/fixture.ko'
+        put(self.package / binary, b'qualified module input')
+        spec = dict(files={binary: dict(sha256=digest(b'qualified module input'),
+                                       size=len(b'qualified module input'), mode=0o644)},
+                    readiness_inputs={}, module_artifacts={})
         for name in names:
             data = ('qualified ' + name).encode()
             put(readiness / name, data)
@@ -139,6 +149,10 @@ class ImageTests(unittest.TestCase):
                      'packaging/j713-audio/m4-j713-audio-register.service'):
             put(repo / name)
         put(repo / 'audio/j713/qualified.json', json.dumps(spec).encode())
+        return repo, readiness, output, names, spec, binary
+
+    def test_assembly_consumes_verified_readiness_snapshot(self):
+        repo, readiness, output, names, spec, binary = self.assembly_inputs()
         original = package.verified
         def replace_after_verification(root, name, entry):
             data = original(root, name, entry)
@@ -149,6 +163,18 @@ class ImageTests(unittest.TestCase):
             package.assemble(self.package, readiness, output, local_only=True)
         for name, installed in names.items():
             self.assertEqual((output / 'root' / installed).read_bytes(), ('qualified ' + name).encode())
+        self.assertEqual((output / 'root' / binary).read_bytes(), b'qualified module input')
+
+    def test_assembly_requires_each_readiness_pin(self):
+        repo, readiness, output, names, spec, binary = self.assembly_inputs()
+        for name in names:
+            entry = spec['readiness_inputs'].pop(name)
+            put(repo / 'audio/j713/qualified.json', json.dumps(spec).encode())
+            with self.subTest(name=name), mock.patch.object(package, 'REPO', repo):
+                with self.assertRaisesRegex(ValueError, 'Readiness source/pin set mismatch'):
+                    package.assemble(self.package, readiness, output, local_only=True)
+            self.assertFalse(output.exists())
+            spec['readiness_inputs'][name] = entry
 
     def test_check_refuses_missing_without_write(self):
         with self.assertRaisesRegex(ValueError, 'differs'):

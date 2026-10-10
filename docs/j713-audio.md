@@ -74,7 +74,7 @@ python3 -B tests/j713_audio_readiness_mutants.py
 git diff --check
 ```
 
-The installer suite has 30 tests and the readiness suite has 35. The mutation
+The installer suite has 31 tests and the readiness suite has 35. The mutation
 scripts temporarily change one source guard at a time and restore it; they must
 not run in a shared checkout. Fixtures exercise actual helper/CLI paths while
 mocking system-manager, clock, ownership or hardware boundaries. They do not
