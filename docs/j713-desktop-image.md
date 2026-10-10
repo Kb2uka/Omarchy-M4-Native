@@ -51,6 +51,22 @@ manifest until the replacement has completed native qualification.
    drop-ins for six user services, replacing the known RAM diagnostic settings
    where present; unexpected extra settings fail validation before any write.
 
+   It derives `/etc/skel/.config/chromium-flags.conf` from the packaged Chromium
+   options and disables `OnBeginFrameThrottleVideo`. Existing disabled features
+   are retained in the same switch; a conflicting enable, duplicate feature
+   switch or unsupported syntax fails before any write. The packaged file must
+   use LF line endings and one unquoted option per nonblank, noncomment line,
+   without CR or NUL bytes, embedded whitespace or backslash escapes. ASCII spaces
+   may surround options and indent blank lines or `#` comments; other forms
+   require review because the Chromium launcher shell-parses each line. Feature
+   switches must use two dashes and comma-separated bare names (ASCII letters,
+   digits and underscores); trial/group/parameter forms require review.
+   Every input and rewritten output line, including comments, is limited to
+   2,046 UTF-8 content bytes. With its LF it fits in one read of the installed
+   launcher's 2,048-byte buffer, without a separate newline chunk. This
+   affects future accounts created from the candidate. Existing owners and
+   Brave settings are unchanged. See the measured limits below.
+
    It also retains the full packaged shell layout and generates an `m4.agents`
    clone under `/etc/skel/.config/omarchy/plugins/`. It configures the agent widget
    to remain visible before the first account has usage data; fresh-owner native
@@ -130,10 +146,31 @@ Apple M4 and read back the expected pixel without GL errors. The sandbox
 remained enabled. Browser launches must inherit the matching M4 library paths;
 starting from a sparse SSH environment selected incompatible system libraries.
 
-This corrects one startup failure, not the remaining video performance problem.
-Local 60 fps playback still dropped frames after the change. The installed
+This corrects one startup failure. Local 60 fps playback still dropped frames
+after the change. The installed
 session was tested by relaunching the browser; a fresh native owner boot with
 this image override remains unqualified.
+
+### Chromium video timing
+
+A later four-run A/B/B/A comparison on the installed J713 used Chromium
+153.0.8010.36, the matching private M4 graphics libraries and the same local
+60.633-second, 1080-by-1920, 30 fps H.264 clip without an audio track. The only
+B change was `--disable-features=OnBeginFrameThrottleVideo`. The baseline runs
+dropped 51 and 71 frames out of 1,815 each; the B runs dropped 1 and 5.
+That is 122/3,630 versus 6/3,630, a 95.1% reduction in this browser counter.
+Disabling the feature changed both frame-request cadence and the deadline
+window; the experiment does not isolate their individual contributions.
+
+The setting is retained in the installed owner's Chromium flags. A separate
+normal Omarchy browser launch verified that the actual Chromium child loaded
+it alongside the packaged options. Neither test proves fully smooth panel
+output: callback gaps remain, and frame submission is not physical display
+delivery. Unmuted playback, other codecs and browser versions, 60 fps and other
+frame rates, battery use, thermals, and a fresh owner boot using the candidate
+remain unqualified. The local fixture removes
+internet buffering from this comparison; it does not rule out separate Wi-Fi
+issues. Revalidate this default when changing the browser or graphics stack.
 
 For an existing installation using the same M4 driver and UWSM layout, install
 the override directly; the offline image helper intentionally refuses a live

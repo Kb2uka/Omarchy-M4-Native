@@ -115,6 +115,51 @@ def session_logging_files(root):
     return files
 
 
+def check_chromium_line_lengths(lines):
+    """Fit each UTF-8 line and LF in one read of the launcher's 2048-byte buffer."""
+    if any(len(line.encode("utf-8")) + 1 > 2047 for line in lines):
+        raise ValueError("Unexpected Chromium option syntax; review packaged defaults")
+
+
+def chromium_flags(root):
+    """Retain packaged options and disable the measured M4 video throttle."""
+    source = image_path(root, "usr/share/omarchy/config/chromium-flags.conf")
+    text = source.read_bytes().decode("utf-8")
+    if "\x00" in text or "\r" in text:
+        raise ValueError("Unexpected Chromium option syntax; review packaged defaults")
+    lines = text.split("\n")
+    if lines[-1] == "":
+        lines.pop()
+    check_chromium_line_lengths(lines)
+    feature = "OnBeginFrameThrottleVideo"
+    switches = {}
+    for index, line in enumerate(lines):
+        value = line.strip(" ")
+        if not value or value.startswith("#"):
+            continue
+        if not re.fullmatch(r"--?[A-Za-z0-9][A-Za-z0-9_-]*(?:=[^\s'\"\\]*)?", value):
+            raise ValueError("Unexpected Chromium option syntax; review packaged defaults")
+        if not re.match(r"--?(enable|disable)-features", value):
+            continue
+        match = re.fullmatch(r"--(enable|disable)-features=([A-Za-z0-9_,]+)", value)
+        if not match or match[1] in switches:
+            raise ValueError("Unexpected Chromium feature switch; review packaged defaults")
+        names = match[2].split(",")
+        if not all(names):
+            raise ValueError("Unexpected Chromium feature list; review packaged defaults")
+        switches[match[1]] = (index, names)
+        if match[1] == "enable" and feature in names:
+            raise ValueError("Conflicting Chromium feature enable; review packaged defaults")
+    if "disable" in switches:
+        index, names = switches["disable"]
+        if feature not in names:
+            lines[index] = "--disable-features=" + ",".join([*names, feature])
+    else:
+        lines.append("--disable-features=" + feature)
+    check_chromium_line_lengths(lines)
+    return "\n".join(lines) + "\n"
+
+
 def planned_files(root):
     if root == Path(root.anchor):
         raise ValueError("An offline image directory is required; refusing a filesystem root")
@@ -149,6 +194,7 @@ def planned_files(root):
     zram = image_path(root, "usr/share/omarchy/default/systemd/zram-generator.conf.d/90-omarchy.conf").read_text(encoding="utf-8")
     files = {
         "etc/skel/.config/hypr/hyprland.lua": stock.rstrip() + "\n" + M4_OVERRIDES,
+        "etc/skel/.config/chromium-flags.conf": chromium_flags(root),
         "etc/locale.gen": "\n".join(locale) + "\n",
         "etc/locale.conf": "LANG=en_US.UTF-8\n",
         "etc/xdg/uwsm/env.d/90-m4-shader-cache": "export MESA_SHADER_CACHE_DISABLE=false\n",
