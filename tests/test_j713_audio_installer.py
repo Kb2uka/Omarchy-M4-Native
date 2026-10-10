@@ -109,7 +109,10 @@ class ImageTests(unittest.TestCase):
                 self.assertEqual(self.configure(apply=False)['changed_files'], [])
 
     def test_apply_consumes_verified_payload_snapshot(self):
-        target = self.package / 'root/usr/lib/omarchy/example'
+        alias = Path(self.temp.name) / 'package-alias'
+        alias.symlink_to(self.package, target_is_directory=True)
+        self.package = alias
+        target = (self.package / 'root/usr/lib/omarchy/example').resolve()
         original = Path.read_bytes
         reads = []
         def replace_after_read(path):
@@ -162,7 +165,9 @@ class ImageTests(unittest.TestCase):
                 package, 'verified', side_effect=replace_after_verification):
             package.assemble(self.package, readiness, output, local_only=True)
         for name, installed in names.items():
+            self.assertEqual((readiness / name).read_bytes(), b'swapped after verification')
             self.assertEqual((output / 'root' / installed).read_bytes(), ('qualified ' + name).encode())
+        self.assertEqual((self.package / binary).read_bytes(), b'swapped after verification')
         self.assertEqual((output / 'root' / binary).read_bytes(), b'qualified module input')
 
     def test_assembly_requires_each_readiness_pin(self):
@@ -175,6 +180,14 @@ class ImageTests(unittest.TestCase):
                     package.assemble(self.package, readiness, output, local_only=True)
             self.assertFalse(output.exists())
             spec['readiness_inputs'][name] = entry
+        extra = 'tools/unmapped-readiness.py'
+        put(readiness / extra, b'unmapped')
+        spec['readiness_inputs'][extra] = dict(sha256=digest(b'unmapped'), size=len(b'unmapped'))
+        put(repo / 'audio/j713/qualified.json', json.dumps(spec).encode())
+        with mock.patch.object(package, 'REPO', repo):
+            with self.assertRaisesRegex(ValueError, 'Readiness source/pin set mismatch'):
+                package.assemble(self.package, readiness, output, local_only=True)
+        self.assertFalse(output.exists())
 
     def test_check_refuses_missing_without_write(self):
         with self.assertRaisesRegex(ValueError, 'differs'):
