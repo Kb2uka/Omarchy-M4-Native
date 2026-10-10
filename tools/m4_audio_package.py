@@ -92,8 +92,8 @@ def load_package(package):
     raw = image_path(package, "manifest.json").read_bytes()
     manifest = json.loads(raw)
     require(manifest.get("schema") == 1, "Unsupported audio package schema")
-    for name, entry in manifest["file_metadata"].items():
-        verified(package / "root", name, entry)
+    payload = {name: verified(package / "root", name, entry)
+               for name, entry in manifest["file_metadata"].items()}
     require(manifest["files"] == {"/" + n: e["sha256"] for n, e in manifest["file_metadata"].items()},
             "Package/readiness file maps disagree")
-    return raw, manifest
+    return raw, manifest, payload

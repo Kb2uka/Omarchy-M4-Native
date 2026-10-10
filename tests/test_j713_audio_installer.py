@@ -92,6 +92,64 @@ class ImageTests(unittest.TestCase):
         self.assertEqual(self.configure(apply=False)['changed_files'], [])
         self.assertEqual(self.configure()['changed_files'], [])
 
+    def test_existing_file_mode_drift_check_refuses_and_apply_repairs(self):
+        self.configure()
+        for name in ('usr/lib/omarchy/example', installer.MANIFEST):
+            with self.subTest(name=name):
+                target = self.image / name
+                original = target.read_bytes()
+                target.chmod(0o600)
+                with self.assertRaisesRegex(ValueError, 'differs'):
+                    self.configure(apply=False)
+                self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(target.read_bytes(), original)
+                self.assertEqual(self.configure()['changed_files'], [name])
+                self.assertEqual(target.stat().st_mode & 0o777, 0o644)
+                self.assertEqual(target.read_bytes(), original)
+                self.assertEqual(self.configure(apply=False)['changed_files'], [])
+
+    def test_apply_consumes_verified_payload_snapshot(self):
+        original = installer.load_package
+        target = self.package / 'root/usr/lib/omarchy/example'
+        def replace_after_verification(path):
+            result = original(path)
+            target.write_bytes(b'swapped after verification')
+            return result
+        with mock.patch.object(installer, 'load_package', side_effect=replace_after_verification):
+            self.configure()
+        self.assertEqual(target.read_bytes(), b'swapped after verification')
+        self.assertEqual((self.image / 'usr/lib/omarchy/example').read_bytes(), b'qualified')
+
+    def test_assembly_consumes_verified_readiness_snapshot(self):
+        repo = Path(self.temp.name) / 'source'
+        readiness = Path(self.temp.name) / 'readiness'
+        output = Path(self.temp.name) / 'assembled'
+        names = {
+            'tools/m4-j713-audio-ready.py': 'usr/lib/omarchy/m4-j713-audio-ready.py',
+            'packaging/j713-audio/speakersafetyd-j713.service': 'usr/lib/systemd/system/speakersafetyd-j713.service',
+            'packaging/j713-audio/wireplumber.service.d/80-j713-audio-ready.conf':
+                'etc/systemd/user/wireplumber.service.d/80-j713-audio-ready.conf',
+        }
+        spec = dict(files={}, readiness_inputs={}, module_artifacts={})
+        for name in names:
+            data = ('qualified ' + name).encode()
+            put(readiness / name, data)
+            spec['readiness_inputs'][name] = dict(sha256=digest(data), size=len(data))
+        for name in ('tools/m4-j713-audio-register.py',
+                     'packaging/j713-audio/m4-j713-audio-register.service'):
+            put(repo / name)
+        put(repo / 'audio/j713/qualified.json', json.dumps(spec).encode())
+        original = package.verified
+        def replace_after_verification(root, name, entry):
+            data = original(root, name, entry)
+            (root / name).write_bytes(b'swapped after verification')
+            return data
+        with mock.patch.object(package, 'REPO', repo), mock.patch.object(
+                package, 'verified', side_effect=replace_after_verification):
+            package.assemble(self.package, readiness, output, local_only=True)
+        for name, installed in names.items():
+            self.assertEqual((output / 'root' / installed).read_bytes(), ('qualified ' + name).encode())
+
     def test_check_refuses_missing_without_write(self):
         with self.assertRaisesRegex(ValueError, 'differs'):
             self.configure(apply=False)
@@ -221,6 +279,66 @@ class ImageTests(unittest.TestCase):
         self.assertFalse((self.image / 'out').exists())
 
 
+class RegistrationEntryTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.manifest_path = self.root / 'manifest.json'
+        self.payload = self.root / 'module.ko'
+        self.payload.write_bytes(b'pinned module')
+        pin = digest(self.payload.read_bytes())
+        self.manifest = dict(files={str(self.payload): pin}, modules={'fixture': 'note'},
+                             module_artifacts={'fixture': dict(module='fixture', note='note',
+                                                              path=str(self.payload), sha256=pin)})
+        self.runtime = self.root / 'run/registration'
+
+    def invoke(self):
+        self.manifest_path.write_text(json.dumps(self.manifest))
+        lstat, fstat, open_fd, read_text = Path.lstat, os.fstat, os.open, Path.read_text
+        def owned(info):
+            fields = list(info)
+            fields[0] &= ~0o022
+            fields[4] = 0
+            return os.stat_result(fields)
+        def local_open(path, flags, mode=0o777):
+            self.assertEqual(path, '/run/lock/m4-audio-test.lock')
+            return open_fd(self.root / 'lock', flags, mode)
+        def text(path, *args, **kwargs):
+            if str(path) == '/proc/sys/kernel/random/boot_id':
+                return 'fixture-boot'
+            return read_text(path, *args, **kwargs)
+        # Real manifest/hash/map/lock orchestration; privilege metadata and the
+        # final hardware registration boundary are isolated from the host.
+        with mock.patch.object(registration, 'MANIFEST', self.manifest_path), \
+                mock.patch.object(registration, 'RUNTIME', self.runtime), \
+                mock.patch.object(registration.os, 'getuid', return_value=0), \
+                mock.patch.object(Path, 'lstat', lambda p: owned(lstat(p))), \
+                mock.patch.object(registration.os, 'fstat', lambda fd: owned(fstat(fd))), \
+                mock.patch.object(registration.os, 'open', side_effect=local_open), \
+                mock.patch.object(Path, 'read_text', text), \
+                mock.patch.object(registration, 'register') as register:
+            self.register_call = register
+            registration.main()
+
+    def test_main_checks_payload_before_registration(self):
+        self.invoke()
+        self.register_call.assert_called_once()
+        self.payload.write_bytes(b'changed module')
+        with self.assertRaisesRegex(RuntimeError, 'Installed hash mismatch'):
+            self.invoke()
+        self.register_call.assert_not_called()
+
+    def test_main_checks_module_map_before_registration(self):
+        for field, value in (('sha256', '0' * 64), ('module', 'foreign')):
+            original = self.manifest['module_artifacts']['fixture'][field]
+            self.manifest['module_artifacts']['fixture'][field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(RuntimeError, 'Module not pinned'):
+                self.invoke()
+            self.register_call.assert_not_called()
+            self.manifest['module_artifacts']['fixture'][field] = original
+
+
 class RegistrationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -243,6 +361,11 @@ class RegistrationTests(unittest.TestCase):
     def test_preflight_exact_fresh(self):
         self.r.preflight()
         self.assertEqual(sum(c[0] == 'modinfo' for c in self.commands), 7)
+
+    def test_preflight_wrong_vermagic_refused(self):
+        self.r.command = lambda argv: 'wrong-kernel SMP preempt mod_unload aarch64' if argv[0] == 'modinfo' else 'inactive'
+        with self.assertRaisesRegex(RuntimeError, 'Module ABI mismatch'):
+            self.r.preflight()
 
     def test_preflight_wrong_board_or_existing_topology(self):
         put(self.r.dt / 'compatible', b'apple,j413\0apple,t8132\0')

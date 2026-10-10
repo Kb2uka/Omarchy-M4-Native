@@ -54,7 +54,7 @@ Cargo dependencies are pinned in `Cargo.lock` and remain external build inputs.
 
 ## Build and assemble
 
-Run development builds and tests on a leased build host. `build-j713-audio.sh`
+Run development builds and tests on a leased Linux build host. `build-j713-audio.sh`
 requires an existing exact configured kernel, exact supplemental sound exports,
 the qualified ARM64 sysroot, an offline Cargo cache and two explicit immutable
 container image IDs. It checks the kernel inputs before and after compilation,

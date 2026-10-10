@@ -36,7 +36,7 @@ def configure(root, package, board, kernel_release, base_dtb, package_sha256, ap
     require(not any(p.is_symlink() for p in (root, *root.parents)), "Symlink image root")
     root = root.resolve(strict=True)
     require(root != Path(root.anchor), "Offline image required; refusing live root")
-    raw, manifest = load_package(package.resolve(strict=True))
+    raw, manifest, planned = load_package(package.resolve(strict=True))
     require(digest(raw) == package_sha256, "Package manifest pin mismatch")
     require(board == manifest["board"] == "apple,j713", "Unsupported board")
     require(kernel_release == manifest["kernel_release"], "Kernel ABI mismatch")
@@ -60,7 +60,6 @@ def configure(root, package, board, kernel_release, base_dtb, package_sha256, ap
         require(not overrides.exists() or overrides.is_dir() and not list(overrides.iterdir()),
                 "Unreviewed system service overrides: " + unit)
 
-    planned = {name: (package / "root" / name).read_bytes() for name in manifest["file_metadata"]}
     planned[MANIFEST] = raw
     modes = {name: e["mode"] for name, e in manifest["file_metadata"].items()}
     modes[MANIFEST] = 0o644

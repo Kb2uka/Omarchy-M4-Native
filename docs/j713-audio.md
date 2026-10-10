@@ -57,8 +57,10 @@ coordinator, PM changes and resume daemon are not included in this runtime.
 
 Faults remain latched and the protection service retains `Restart=no`. This
 package does not promise automatic recovery after thermal faults, capture XRUNs,
-lease loss or a changed ABI. A mismatched kernel, libasound, payload or customized
-destination is a refusal, not an implicit upgrade path.
+lease loss or a changed ABI. Offline image apply/check refuses a mismatched
+kernel, libasound, payload or customized destination. Runtime registration and
+readiness pin the kernel and installed payloads; they do not re-attest the shared
+library ABI after a system update. Such updates require separate qualification.
 
 ## Reproduce the source checks
 
@@ -72,7 +74,7 @@ python3 -B tests/j713_audio_readiness_mutants.py
 git diff --check
 ```
 
-The installer suite has 24 tests and the readiness suite has 35. The mutation
+The installer suite has 30 tests and the readiness suite has 35. The mutation
 scripts temporarily change one source guard at a time and restore it; they must
 not run in a shared checkout. Fixtures exercise actual helper/CLI paths while
 mocking system-manager, clock, ownership or hardware boundaries. They do not

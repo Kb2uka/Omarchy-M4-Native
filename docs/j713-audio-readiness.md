@@ -34,7 +34,11 @@ The user WirePlumber drop-in calls the ordinary-user `gate` explicitly. A system
 `Before=wireplumber.service` would not order that separate user manager. The drop-in
 preserves WirePlumber's existing restart policy; its retries can only observe
 state, not start/restart or unlock protection. Both templates use bounded startup
-timeouts. A gate failure stops that WP start, not the desktop or protection daemon.
+timeouts. A gate failure stops that WP start, not the desktop or protection daemon. It
+holds the entire user session manager, so other devices managed by WirePlumber
+(including USB and Bluetooth audio) are also unavailable while readiness fails.
+If the existing WirePlumber restart policy retries, each gate attempt remains
+read-only and bounded; this package does not cap the number of manager retries.
 Only the J713 package should install this board-specific drop-in; no other board
 or generic desktop policy is changed by merely storing these source templates.
 

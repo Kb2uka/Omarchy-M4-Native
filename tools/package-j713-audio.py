@@ -29,11 +29,12 @@ def assemble(inputs, readiness, output, local_only=False):
         'usr/lib/systemd/system/speakersafetyd-j713.service': readiness / 'packaging/j713-audio/speakersafetyd-j713.service',
         'etc/systemd/user/wireplumber.service.d/80-j713-audio-ready.conf': readiness / 'packaging/j713-audio/wireplumber.service.d/80-j713-audio-ready.conf',
     }
-    for name, entry in spec['readiness_inputs'].items():
-        verified(readiness, name, entry)
+    readiness_bytes = {readiness / name: verified(readiness, name, entry)
+                       for name, entry in spec['readiness_inputs'].items()}
     for name, source in sources.items():
         require(source.is_file() and not source.is_symlink(), 'Missing source integration: ' + str(source))
-        payload[name] = (source.read_bytes(), 0o644)
+        data = readiness_bytes[source] if source in readiness_bytes else source.read_bytes()
+        payload[name] = (data, 0o644)
     manifest = {key: value for key, value in spec.items() if key != 'files'}
     manifest['redistributable'] = False
     manifest['file_metadata'] = {name: dict(sha256=digest(data), size=len(data), mode=mode)

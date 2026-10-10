@@ -16,6 +16,11 @@ cases = [
     ('tools/m4-j713-audio-register.py', '        bus = self.wait_providers()', '        bus = self.providers()', 'test_deferred_provider_binds_without_reloading'),
     ('tools/m4-j713-audio-register.py', "                    raise RuntimeError('Provider readiness timed out: ' + str(error)) from error", "                    return '1'", 'test_provider_wait_timeout_and_wrong_driver_refuse'),
     ('tools/m4-j713-audio-register.py', '        self.driver(device, name, module)', '        pass', 'test_provider_wait_timeout_and_wrong_driver_refuse'),
+    ('tools/configure-m4-audio.py', 'if not path.exists() or stat.S_IMODE(path.stat().st_mode) != modes[name]:', 'if not path.exists():', 'test_existing_file_mode_drift_check_refuses_and_apply_repairs'),
+    ('tools/configure-m4-audio.py', '    planned[MANIFEST] = raw', '    planned = {name: (package / "root" / name).read_bytes() for name in manifest["file_metadata"]}\n    planned[MANIFEST] = raw', 'test_apply_consumes_verified_payload_snapshot'),
+    ('tools/package-j713-audio.py', '        data = readiness_bytes[source] if source in readiness_bytes else source.read_bytes()', '        data = source.read_bytes()', 'test_assembly_consumes_verified_readiness_snapshot'),
+    ('tools/m4-j713-audio-register.py', '        trusted_file(Path(name), expected)', '        pass', 'RegistrationEntryTests.test_main_checks_payload_before_registration'),
+    ('tools/m4-j713-audio-register.py', "        require(entry['module'] == name and manifest['files'].get(entry['path']) == entry['sha256'], 'Module not pinned')", '        pass', 'RegistrationEntryTests.test_main_checks_module_map_before_registration'),
 
 ]
 for number, (filename, before, after, test) in enumerate(cases):
@@ -24,8 +29,9 @@ for number, (filename, before, after, test) in enumerate(cases):
     assert original.count(before) == 1, (filename, before)
     try:
         path.write_text(original.replace(before, after))
-        cls = 'ImageTests' if filename.endswith('configure-m4-audio.py') else 'RegistrationTests'
-        p = subprocess.run(['python3', '-B', '-m', 'unittest', 'test_j713_audio_installer.' + cls + '.' + test],
+        cls = 'RegistrationTests' if filename.endswith('m4-j713-audio-register.py') else 'ImageTests'
+        target = test if '.' in test else cls + '.' + test
+        p = subprocess.run(['python3', '-B', '-m', 'unittest', 'test_j713_audio_installer.' + target],
                            cwd=root / 'tests', text=True, capture_output=True)
         print('MUTANT', number, test, 'rc', p.returncode, flush=True)
         print(p.stdout + p.stderr, flush=True)
