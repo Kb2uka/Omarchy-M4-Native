@@ -122,20 +122,22 @@ def check_browser_affinity(root, managed):
                         raise ValueError("Existing browser affinity configuration: " + str(path))
 
 
-def paths(root, environment):
+def paths(root, environment, main_only=False):
     runtime = environment.get("XDG_RUNTIME_DIR")
     if os.getuid() == 0 or runtime != f"/run/user/{os.getuid()}":
         raise ValueError("Run as the desktop owner, without sudo")
     directory = root / runtime.lstrip("/")
     if directory.is_symlink() or directory.stat().st_uid != os.getuid():
         raise ValueError("Unexpected owner runtime directory")
-    for relative in ("m4-session-placement.json", "m4-session-placement.lock", DROPIN_NAME):
+    basename = "m4-hyprland-main-placement" if main_only else "m4-session-placement"
+    relatives = (basename + ".json", basename + ".lock")
+    for relative in relatives if main_only else (*relatives, DROPIN_NAME):
         path = directory
         for part in Path(relative).parts:
             path /= part
             if path.is_symlink():
                 raise ValueError("Symlink in placement state or drop-in path")
-    return directory / "m4-session-placement.json", directory / DROPIN_NAME
+    return directory / (basename + ".json"), directory / DROPIN_NAME
 
 
 def restore(root, state, dropin):
@@ -199,16 +201,84 @@ def apply(root, environment, state, dropin):
     return {"status": "active", "pid": target["pid"], "performance": sorted(performance)}
 
 
+def main_state(state):
+    saved = json.loads(state.read_text())
+    if saved.get("policy") != "hyprland-main-only-v1":
+        raise ValueError("Unrecognized main-only state; leaving it unchanged")
+    return saved
+
+
+def restore_main(root, state):
+    if not state.exists():
+        return {"status": "inactive"}
+    saved = main_state(state)
+    current = saved_process(root, saved["identity"])
+    if current == saved["identity"]:
+        pid = current["pid"]
+        mask = os.sched_getaffinity(pid)
+        if mask == set(saved["performance"]):
+            os.sched_setaffinity(pid, saved["original"])
+            if os.sched_getaffinity(pid) != set(saved["original"]):
+                raise ValueError("Main-thread restore did not round-trip")
+        elif mask != set(saved["original"]):
+            raise ValueError("Compositor affinity was changed elsewhere; leaving it unchanged")
+    state.unlink()
+    return {"status": "restored", "identity_still_current": current == saved["identity"]}
+
+
+def apply_main(root, environment, state):
+    online, performance = performance_cpus(root)
+    target = session(root, environment)
+    if state.exists():
+        saved = main_state(state)
+        if saved["identity"] == target:
+            if (saved["performance"] != sorted(performance) or
+                    saved["original"] != sorted(online) or
+                    os.sched_getaffinity(target["pid"]) != performance):
+                raise ValueError("Saved main-only placement was changed; leaving it unchanged")
+            return {"status": "active", "pid": target["pid"], "performance": sorted(performance)}
+        if saved_process(root, saved["identity"]) == saved["identity"]:
+            raise ValueError("Another live compositor owns main-only placement")
+        restore_main(root, state)
+    original = os.sched_getaffinity(target["pid"])
+    if original != online:
+        raise ValueError("Existing compositor affinity is customized; leaving it unchanged")
+    saved = {"policy": "hyprland-main-only-v1", "identity": target,
+             "original": sorted(original), "performance": sorted(performance)}
+    fd = os.open(state, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as stream:
+        json.dump(saved, stream)
+    try:
+        if identity(root, target["pid"]) != target:
+            raise ValueError("Compositor changed during configuration")
+        os.sched_setaffinity(target["pid"], performance)
+        if os.sched_getaffinity(target["pid"]) != performance:
+            raise ValueError("Main-thread affinity did not round-trip")
+    except Exception:
+        restore_main(root, state)
+        raise
+    return {"status": "active", "pid": target["pid"], "performance": sorted(performance)}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("apply", "restore", "status"))
+    parser.add_argument("--main-only", action="store_true",
+                        help="Change only the current compositor main thread; no browser policy")
     args = parser.parse_args()
     root = Path("/")
-    state, dropin = paths(root, os.environ)
+    state, dropin = paths(root, os.environ, main_only=True) if args.main_only else paths(root, os.environ)
     fd = os.open(state.with_suffix(".lock"), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        if args.action == "apply":
+        if args.main_only:
+            if args.action == "apply":
+                result = apply_main(root, os.environ, state)
+            elif args.action == "restore":
+                result = restore_main(root, state)
+            else:
+                result = {"saved": main_state(state) if state.exists() else None}
+        elif args.action == "apply":
             result = apply(root, os.environ, state, dropin)
         elif args.action == "restore":
             result = restore(root, state, dropin)

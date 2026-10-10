@@ -208,18 +208,65 @@ An actual stock Chromium launch later reported 27/1815 drops for Comic-Con and
 failed during shutdown after recording both clips, so the overall qualification
 did not pass. Smooth playback remains unfinished.
 
-The image helper stages `m4-session-placement.py` as an opt-in tool, without an
-automatic startup hook. An offline candidate containing the earlier
-`etc/skel/.config/omarchy/hooks/post-boot.d/50-m4-placement` hook is refused
-before configuration writes. Review and remove that hook from the candidate,
-or start with a fresh candidate; the tool does not delete it automatically.
-The placement helper derives logical performance CPU IDs from each online
-CPU's device-tree node, requires the qualified J713/T8132 topology and unchanged
-capacity values, and identifies the owner's actual compositor through the
-current Hyprland instance. It changes only that main thread. A runtime user
-drop-in applies the same CPU preference to future `omarchy-browser-*.service`
-launches, keeping the packaged launcher intact. Unsupported hardware fails in
-the helper without adding a condition that could block browser launches.
+The image helper now stages the accepted **main-thread-only** startup policy in
+`etc/skel/.config/omarchy/hooks/post-boot.d/50-m4-main-placement`. The packaged
+Omarchy post-boot runner executes it in the owner's graphical session, after
+startup configuration loads. Its sole command is:
+
+```sh
+exec /usr/bin/python3 "$HOME/.local/lib/omarchy/m4-session-placement.py" --main-only apply
+```
+
+This mode derives logical CPU IDs from each online CPU's device-tree node,
+requires J713/T8132 with four `apple,donan-p` and six `apple,donan-e` CPUs and
+capacity 1024, and matches both the current Hyprland instance signature and
+Wayland socket. The PID must be that owner's Hyprland main thread. The helper
+explicitly writes only that thread's affinity; existing compositor worker
+threads and browser processes retain their masks. It creates no browser drop-in
+and does not reload the user manager.
+
+This also sets the inherited default for threads and applications subsequently
+created by that main thread. Directly launched terminal programs can therefore
+use four eligible CPUs instead of ten, while applications started separately by
+the user manager retain its mask. The earlier stock terminal measurement below
+observed this inheritance. Restoring the compositor's mask does not restore
+masks already inherited by its children. The startup policy accepts these
+scheduling limits; it does not promise unrestricted terminal workloads, better
+battery life, or improved performance for every launch path.
+
+The helper stores boot/PID/start identity and the original mask in the owner's
+runtime directory, separately from the older experiment. Repeat calls for the
+same session are idempotent. Custom main affinity, modified saved state,
+another live compositor's state, and ambiguous sessions are refused. Restore
+acts only on the same live process and the tool's own mask. If a successful
+affinity call reads back a different mask, the helper refuses to report success
+and retains the original-mask record; it does not overwrite a mask it cannot
+identify as its own. After correcting the underlying cpuset or CPU-hotplug
+condition, end the graphical session and log in again: the new compositor lets
+the helper discard the stale record and apply the policy to the new process.
+As the owner:
+
+```sh
+python3 ~/.local/lib/omarchy/m4-session-placement.py --main-only status
+python3 ~/.local/lib/omarchy/m4-session-placement.py --main-only restore
+```
+
+To opt out across subsequent logins, remove the managed `50-m4-main-placement`
+hook and then run the main-only restore command. The offline installer refuses
+an existing differing hook before writes and preserves unrelated custom hooks.
+It still refuses the old automatic `50-m4-placement` hook; review/remove that
+old hook explicitly instead of running both policies. Image defaults apply to
+newly provisioned owners through `/etc/skel`; this command does not migrate an
+existing home or modify the live machine. The new startup-hook entry point
+requires a fresh native session qualification separately from its leased
+fixture tests. Runtime main-only placement has improved the measured J713
+video case, but this is not a universal smoothness or mixed-workload claim.
+
+The older CLI behavior **without `--main-only`** remains a separate manual
+experiment for compatibility. It also creates a runtime browser-service
+CPUAffinity drop-in. It is not the accepted automatic startup policy, and the
+new hook never invokes it. The following measurements and constraints describe
+that earlier combined experiment.
 
 This is a scheduling workaround, not CPU frequency control, hardware video
 decoding, or a global scheduler repair. Existing browser singletons keep their
@@ -249,11 +296,14 @@ state without touching a reused PID. It inspects the running user manager's
 unit search paths and refuses other applicable CPU affinity assignments, even
 ones currently hidden by a higher-priority file. Unreadable configuration stops
 the operation before changes. It also refuses same-named drop-ins or masks
-that could hide its runtime file, regardless of their contents. The runtime
-drop-in disappears at reboot;
-no startup hook reapplies placement at login. If the user manager survives
+that could hide its runtime file, regardless of their contents. The legacy runtime
+drop-in disappears at reboot; the new startup hook never reapplies that browser
+policy. If the user manager survives
 logout, its runtime drop-in can remain until explicit restore or reboot.
-To opt in on an installed candidate, run as the desktop owner:
+To try the legacy experiment on an image with the new startup hook, first opt
+out of that hook and run `--main-only restore` as described above. Otherwise
+the legacy command correctly refuses the already changed compositor mask.
+Do not run both placement modes together. Then, as the desktop owner:
 
 ```sh
 python3 ~/.local/lib/omarchy/m4-session-placement.py apply
@@ -261,9 +311,9 @@ python3 ~/.local/lib/omarchy/m4-session-placement.py status
 python3 ~/.local/lib/omarchy/m4-session-placement.py restore
 ```
 
-The new helper and image integration are undergoing qualification. A fresh
-owner boot and everyday application launches are not yet verified. Do not
-describe these staged files as a finished video fix or a qualified new image.
+The legacy combined experiment is not promoted by the main-only hook. Native
+qualification of the new hook and its exact installed bytes remains necessary;
+do not describe source/fixture tests as a completed new-image boot test.
 
 The successful repeat boot logged `Touch MT ready` at 2.293 seconds; Hyprland
 listed the multi-touch device and the owner confirmed physical operation.

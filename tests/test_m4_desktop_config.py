@@ -328,18 +328,33 @@ class DesktopImageTests(unittest.TestCase):
                 target.unlink()
                 self.write(relative, self.chromium)
 
-    def test_session_placement_helper_is_checked_without_automatic_hook(self):
+    def test_session_placement_helper_and_main_only_hook_entrypoint(self):
         desktop.configure(self.root, apply=True)
         hook = self.root / "etc/skel/.config/omarchy/hooks/post-boot.d/50-m4-placement"
         helper = self.root / "etc/skel/.local/lib/omarchy/m4-session-placement.py"
         self.assertFalse(hook.exists())
         self.assertNotIn(hook, desktop.planned_files(self.root))
+        main_hook = self.root / "etc/skel/.config/omarchy/hooks/post-boot.d/50-m4-main-placement"
+        self.assertEqual(main_hook.read_text(), '#!/bin/bash\nexec /usr/bin/python3 "$HOME/.local/lib/omarchy/m4-session-placement.py" --main-only apply\n')
+        if os.name != "nt": self.assertEqual(main_hook.stat().st_mode & 0o777, 0o755)
+        self.assertEqual(desktop.configure(self.root, apply=True)["changed_files"], [])
         self.assertEqual(helper.read_bytes(), SOURCE.with_name("m4-session-placement.py").read_bytes())
         helper.write_text("changed\n")
         before = self.snapshot()
         with self.assertRaisesRegex(ValueError, "m4-session-placement.py"):
             desktop.configure(self.root)
         self.assertEqual(self.snapshot(), before)
+
+    def test_custom_main_hook_refused_and_unrelated_hook_preserved(self):
+        unrelated = self.write("etc/skel/.config/omarchy/hooks/post-boot.d/40-owner", "# Custom owner hook\n")
+        desktop.configure(self.root, apply=True)
+        self.assertEqual(unrelated.read_text(), "# Custom owner hook\n")
+        self.write("etc/skel/.config/omarchy/hooks/post-boot.d/50-m4-main-placement", "# Custom replacement\n")
+        before = self.snapshot()
+        for apply in (False, True):
+            with self.assertRaisesRegex(ValueError, "main-only placement hook differs"):
+                desktop.configure(self.root, apply=apply)
+            self.assertEqual(self.snapshot(), before)
 
     def test_previous_automatic_placement_hook_is_refused_before_any_write(self):
         desktop.configure(self.root, apply=True)
