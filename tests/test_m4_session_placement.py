@@ -1,11 +1,19 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 KB2UKA
+from contextlib import redirect_stdout
 import importlib.util
+import io
+import os
 import json
+import sys
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+
+
+if sys.platform != "linux":
+    raise unittest.SkipTest("Native Linux session placement tests")
 
 
 SOURCE = Path(__file__).resolve().parents[1] / "tools/m4-session-placement.py"
@@ -42,6 +50,15 @@ class PlacementTests(unittest.TestCase):
         patch.object(placement.os, "sched_getaffinity", side_effect=lambda pid: self.masks[pid].copy()).start()
         patch.object(placement.os, "sched_setaffinity", side_effect=self.set_affinity).start()
         patch.object(placement, "command", side_effect=self.command).start()
+        real_stat = Path.stat
+        def owned_runtime(path, *args, **kwargs):
+            info = real_stat(path, *args, **kwargs)
+            if path.is_relative_to(self.root / "run/user"):
+                fields = list(info)
+                fields[4] = 1000
+                return os.stat_result(fields)
+            return info
+        patch.object(Path, "stat", owned_runtime).start()
 
     def write(self, name, value):
         path = self.root / name
@@ -80,7 +97,9 @@ class PlacementTests(unittest.TestCase):
         self.assertEqual(self.set_calls, [(789, self.performance)])
         self.assertIn(b"CPUAffinity=\nCPUAffinity=1 3 5 9\n", self.dropin.read_bytes())
         self.assertEqual(json.loads(self.state.read_text())["original"], list(range(10)))
+        reloads = self.commands.count(("systemctl", "--user", "daemon-reload"))
         placement.restore(self.root, self.state, self.dropin)
+        self.assertEqual(self.commands.count(("systemctl", "--user", "daemon-reload")), reloads + 1)
         self.assertEqual(self.set_calls[-1], (789, set(range(10))))
         self.assertFalse(self.state.exists())
         self.assertFalse(self.dropin.exists())
@@ -96,6 +115,7 @@ class PlacementTests(unittest.TestCase):
 
     def test_hardware_mismatch_precedes_all_writes(self):
         cases = [("sys/firmware/devicetree/base/compatible", b"apple,j714\0apple,t8132\0"),
+                 ("sys/firmware/devicetree/base/compatible", b"apple,j713\0apple,t8103\0"),
                  ("sys/devices/system/cpu/online", b"0-8"),
                  ("sys/devices/system/cpu/cpu1/cpu_capacity", b"2048"),
                  ("sys/devices/system/cpu/cpu1/of_node/compatible", b"unknown\0"),
@@ -113,11 +133,20 @@ class PlacementTests(unittest.TestCase):
                 self.assertFalse(self.dropin.exists())
 
     def test_wrong_session_and_launcher_are_rejected(self):
-        for instances in ([], self.instances * 2, [{**self.instances[0], "instance": "other"}]):
-            with patch.object(placement, "command", return_value=json.dumps(instances)):
+        for instances in ([], self.instances * 2, [{**self.instances[0], "instance": "other"}],
+                          [{**self.instances[0], "wl_socket": "wayland-other"}]):
+            def query(*args):
+                return json.dumps(instances) if args[0] == "hyprctl" else self.command(*args)
+            with patch.object(placement, "command", side_effect=query):
                 with self.assertRaises(ValueError):
                     self.apply()
         self.write("proc/789/comm", "start-hyprland\n")
+        with self.assertRaises(ValueError):
+            self.apply()
+        self.write("proc/789/comm", "Hyprland\n")
+        exe = self.root / "proc/789/exe"
+        exe.unlink()
+        exe.symlink_to("/usr/bin/bash")
         with self.assertRaises(ValueError):
             self.apply()
         self.assertEqual(self.set_calls, [])
@@ -237,11 +266,16 @@ class PlacementTests(unittest.TestCase):
     def test_restore_keeps_custom_dropin_but_restores_own_main_mask(self):
         self.apply()
         self.dropin.write_bytes(b"custom\n")
+        with self.assertRaisesRegex(ValueError, "Saved placement was changed"):
+            self.apply()
         with self.assertRaisesRegex(ValueError, "file left unchanged"):
             placement.restore(self.root, self.state, self.dropin)
         self.assertEqual(self.masks[789], set(range(10)))
         self.assertEqual(self.dropin.read_bytes(), b"custom\n")
         self.assertTrue(self.state.exists())
+        self.dropin.unlink()
+        placement.restore(self.root, self.state, self.dropin)
+        self.assertFalse(self.state.exists())
 
     def test_next_session_clears_stale_state_without_touching_reused_pid(self):
         self.apply()
@@ -254,15 +288,139 @@ class PlacementTests(unittest.TestCase):
         self.assertEqual(json.loads(self.state.read_text())["identity"]["pid"], 901)
 
     def test_runtime_symlinks_and_root_invocation_are_rejected(self):
+        self.assertEqual(placement.paths(self.root, self.environment), (self.state, self.dropin))
+        other = self.root / "run/user/1001"
+        other.mkdir()
+        with self.assertRaisesRegex(ValueError, "without sudo"):
+            placement.paths(self.root, {**self.environment, "XDG_RUNTIME_DIR": "/run/user/1001"})
         for path in (self.state, self.state.with_suffix(".lock"), self.dropin.parent):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.symlink_to(self.root / "elsewhere")
-            with self.assertRaises(ValueError):
+            with self.assertRaisesRegex(ValueError, "Symlink"):
                 placement.paths(self.root, self.environment)
             path.unlink()
         with patch.object(placement.os, "getuid", return_value=0):
             with self.assertRaises(ValueError):
                 placement.paths(self.root, {**self.environment, "XDG_RUNTIME_DIR": "/run/user/0"})
+
+    def test_live_nested_session_refusal_preserves_outer(self):
+        self.apply()
+        saved, dropin = self.state.read_bytes(), self.dropin.read_bytes()
+        calls = self.set_calls.copy()
+        self.process(901, 15000)
+        self.masks[901] = {2, 4}
+        self.instances[0] = {"instance": "nested", "wl_socket": "wayland-2", "pid": 901}
+        self.environment.update(HYPRLAND_INSTANCE_SIGNATURE="nested", WAYLAND_DISPLAY="wayland-2")
+        with self.assertRaisesRegex(ValueError, "Another live compositor"):
+            self.apply()
+        self.assertEqual(self.masks[789], self.performance)
+        self.assertEqual(self.masks[901], {2, 4})
+        self.assertEqual(self.set_calls, calls)
+        self.assertEqual(self.state.read_bytes(), saved)
+        self.assertEqual(self.dropin.read_bytes(), dropin)
+
+    def test_deleted_executable_same_process_restores_original(self):
+        self.apply()
+        exe = self.root / "proc/789/exe"
+        exe.unlink()
+        exe.symlink_to("/opt/m4-hypr/bin/Hyprland (deleted)")
+        result = placement.restore(self.root, self.state, self.dropin)
+        self.assertTrue(result["identity_still_current"])
+        self.assertEqual(self.masks[789], set(range(10)))
+        self.assertFalse(self.state.exists())
+        self.assertFalse(self.dropin.exists())
+
+    def test_changed_executable_same_pid_is_not_restored(self):
+        self.apply()
+        calls = self.set_calls.copy()
+        exe = self.root / "proc/789/exe"
+        exe.unlink()
+        exe.symlink_to("/different-build/Hyprland")
+        result = placement.restore(self.root, self.state, self.dropin)
+        self.assertFalse(result["identity_still_current"])
+        self.assertEqual(self.set_calls, calls)
+        self.assertFalse(self.state.exists())
+        self.assertFalse(self.dropin.exists())
+
+    def test_unreadable_exe_reused_pid_cleans_up_but_current_pid_preserves_state(self):
+        self.apply()
+        saved, dropin = self.state.read_bytes(), self.dropin.read_bytes()
+        calls = self.set_calls.copy()
+        readlink = placement.os.readlink
+        def denied(path, *args, **kwargs):
+            if Path(path) == self.root / "proc/789/exe":
+                raise PermissionError("nondumpable process")
+            return readlink(path, *args, **kwargs)
+        with patch.object(placement.os, "readlink", side_effect=denied):
+            with self.assertRaises(PermissionError):
+                placement.restore(self.root, self.state, self.dropin)
+            self.assertEqual(self.state.read_bytes(), saved)
+            self.assertEqual(self.dropin.read_bytes(), dropin)
+            self.process(789, 9999)
+            result = placement.restore(self.root, self.state, self.dropin)
+        self.assertFalse(result["identity_still_current"])
+        self.assertEqual(self.set_calls, calls)
+        self.assertFalse(self.state.exists())
+        self.assertFalse(self.dropin.exists())
+
+    def test_changed_process_after_reload_is_never_placed(self):
+        def changed(*args):
+            result = self.command(*args)
+            if args == ("systemctl", "--user", "daemon-reload"):
+                self.process(789, 9999)
+            return result
+        with patch.object(placement, "command", side_effect=changed):
+            with self.assertRaisesRegex(ValueError, "Compositor changed"):
+                self.apply()
+        self.assertEqual(self.set_calls, [])
+        self.assertFalse(self.state.exists())
+        self.assertFalse(self.dropin.exists())
+
+    def test_concurrent_state_creation_is_not_overwritten(self):
+        original_open = Path.open
+        def raced(path, mode="r", *args, **kwargs):
+            if path == self.state:
+                with original_open(path, "w") as stream:
+                    stream.write("created elsewhere")
+            return original_open(path, mode, *args, **kwargs)
+        with patch.object(Path, "open", raced):
+            with self.assertRaises(FileExistsError):
+                self.apply()
+        self.assertEqual(self.state.read_text(), "created elsewhere")
+        self.assertEqual(self.set_calls, [])
+        self.assertFalse(self.dropin.exists())
+
+    def test_cli_reads_state_only_under_exclusive_lock(self):
+        self.state.write_text("{}")
+        locked = False
+        real_read = Path.read_text
+        def lock(fd, operation):
+            nonlocal locked
+            self.assertEqual(operation, placement.fcntl.LOCK_EX)
+            self.assertTrue(os.fstat(fd if isinstance(fd, int) else fd.fileno()).st_mode)
+            locked = True
+        def read(path, *args, **kwargs):
+            if path == self.state:
+                self.assertTrue(locked, "CLI read saved state without locking")
+            return real_read(path, *args, **kwargs)
+        with patch.object(sys, "argv", ["placement", "status"]), \
+             patch.object(placement, "paths", return_value=(self.state, self.dropin)), \
+             patch.object(placement.fcntl, "flock", side_effect=lock), \
+             patch.object(Path, "read_text", read), redirect_stdout(io.StringIO()):
+            placement.main()
+
+
+class CommandTests(unittest.TestCase):
+    def test_stalled_command_is_bounded_and_timeout_propagates(self):
+        def stalled(args, *, text, timeout=None):
+            self.assertTrue(text)
+            self.assertIsNotNone(timeout, "External command has no deadline")
+            self.assertGreater(timeout, 0)
+            self.assertLessEqual(timeout, 10)
+            raise placement.subprocess.TimeoutExpired(args, timeout)
+        with patch.object(placement.subprocess, "check_output", side_effect=stalled):
+            with self.assertRaises(placement.subprocess.TimeoutExpired):
+                placement.command("busctl", "--user")
 
 
 if __name__ == "__main__":

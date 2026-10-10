@@ -184,9 +184,13 @@ the hook without adding a condition that could block browser launches.
 This is a scheduling workaround, not CPU frequency control, hardware video
 decoding, or a global scheduler repair. Existing browser singletons keep their
 current masks; direct launches that bypass the stock browser service do not use
-its drop-in. New compositor threads and directly forked applications can inherit
-the main thread's mask. Browser workers can independently widen theirs. Those
-limits must remain visible when evaluating general desktop performance.
+its drop-in. New compositor threads and directly forked applications inherit the main
+thread's mask. In the qualified stock terminal launch, both the terminal and
+its child inherited the four performance CPUs. Affinity-aware job counts can
+therefore use four CPUs instead of all ten, and terminal workloads share those
+CPUs with the compositor. Mixed build/video performance remains unmeasured.
+Browser workers can independently widen their masks. These are explicit limits
+of this experimental image default.
 
 The helper saves the original main-thread mask with boot/PID/start identity,
 refuses existing custom affinity or drop-in content, and can restore its own
@@ -228,3 +232,19 @@ Run the configuration regressions on a leased test host:
 ```sh
 python3 -m unittest discover -s tests -p test_m4_desktop_config.py
 ```
+
+`restore` changes the saved compositor and removes the managed browser drop-in;
+it does not widen the masks of applications already launched during placement.
+Those applications keep their masks until they exit or are explicitly changed.
+For a persistent opt-out, remove the owner hook before running `restore`:
+
+```sh
+rm ~/.config/omarchy/hooks/post-boot.d/50-m4-placement
+python3 ~/.local/lib/omarchy/m4-session-placement.py restore
+```
+
+If the managed runtime drop-in was manually edited, restore preserves that file
+and its saved identity record, reports the conflict, and restores its own main
+thread when possible. Save or move the customized drop-in elsewhere, then run
+`restore` again to finish cleanup. The saved record is deliberately retained
+until that conflict is resolved; it is not a persistent file across reboot.

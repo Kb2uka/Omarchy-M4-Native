@@ -57,17 +57,27 @@ def performance_cpus(root):
     return online, roles[b"apple,donan-p"]
 
 
-def identity(root, pid):
+def identity(root, pid, expected=None):
     process = root / "proc" / str(pid)
     status = dict(line.split(":", 1) for line in (process / "status").read_text().splitlines())
     if status["Uid"].split() != [str(os.getuid())] * 4 or int(status["Tgid"]) != pid:
         raise ValueError("Compositor must be this owner's main thread")
-    executable = os.readlink(process / "exe")
+    fields = (process / "stat").read_text().rsplit(")", 1)[1].split()
+    current = {"pid": pid, "start": int(fields[19]), "uid": os.getuid(),
+               "boot": (root / "proc/sys/kernel/random/boot_id").read_text().strip()}
+    if expected is not None and any(current[key] != expected[key] for key in current):
+        raise ValueError("Saved compositor process changed")
+    executable = os.readlink(process / "exe").removesuffix(" (deleted)")
     if Path(executable).name != "Hyprland" or (process / "comm").read_text().strip() != "Hyprland":
         raise ValueError("Session PID is not the compositor")
-    fields = (process / "stat").read_text().rsplit(")", 1)[1].split()
-    return {"pid": pid, "start": int(fields[19]), "executable": executable,
-            "uid": os.getuid(), "boot": (root / "proc/sys/kernel/random/boot_id").read_text().strip()}
+    return {**current, "executable": executable}
+
+
+def saved_process(root, saved):
+    try:
+        return identity(root, saved["pid"], expected=saved)
+    except (FileNotFoundError, ProcessLookupError, ValueError):
+        return None
 
 
 def session(root, environment):
@@ -135,10 +145,7 @@ def restore(root, state, dropin):
         return {"status": "inactive"}
     saved = json.loads(state.read_text())
     expected = dropin_content(saved["performance"])
-    try:
-        current = identity(root, saved["identity"]["pid"])
-    except (FileNotFoundError, ProcessLookupError, ValueError):
-        current = None
+    current = saved_process(root, saved["identity"])
     if current == saved["identity"]:
         pid = current["pid"]
         mask = os.sched_getaffinity(pid)
@@ -167,6 +174,8 @@ def apply(root, environment, state, dropin):
             if dropin.read_bytes() != dropin_content(performance) or os.sched_getaffinity(target["pid"]) != performance:
                 raise ValueError("Saved placement was changed; review before reapplying")
             return {"status": "active", "pid": target["pid"], "performance": sorted(performance)}
+        if saved["identity"] != target and saved_process(root, saved["identity"]) == saved["identity"]:
+            raise ValueError("Another live compositor owns placement; restore it explicitly first")
         restore(root, state, dropin)
     if dropin.exists() or dropin.is_symlink():
         raise ValueError("Existing placement drop-in; leaving it unchanged")
