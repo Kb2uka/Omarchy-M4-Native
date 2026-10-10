@@ -157,6 +157,77 @@ directories as 0755 and its file as 0644 regardless of umask; it rejects an
 existing parent without public read/traverse access before writing anything.
 Windows fixture tests cover content only, not Linux permission semantics.
 
+## Experimental session placement
+
+The current J713 kernel reports the same scheduler capacity for its four
+performance and six efficiency CPUs. In a local 1080p60 crossover, restricting
+the existing compositor's main thread to the performance CPUs reduced reported
+drops from 178/1196 to 29/1196; restoring its original mask produced 154/1196.
+This implicates scheduling without relying on Internet buffering. Later full
+Comic-Con playback completed with zero reported drops in two controlled browser
+placement trials. These counters do not measure uniform physical-panel cadence.
+An actual stock Chromium launch later reported 27/1815 drops for Comic-Con and
+0/1196 for the 1080p60 fixture, with no buffering events. Its diagnostic bridge
+failed during shutdown after recording both clips, so the overall qualification
+did not pass. Smooth playback remains unfinished.
+
+The image helper stages `m4-session-placement.py` as an opt-in tool, without an
+automatic startup hook. An offline candidate containing the earlier
+`etc/skel/.config/omarchy/hooks/post-boot.d/50-m4-placement` hook is refused
+before configuration writes. Review and remove that hook from the candidate,
+or start with a fresh candidate; the tool does not delete it automatically.
+The placement helper derives logical performance CPU IDs from each online
+CPU's device-tree node, requires the qualified J713/T8132 topology and unchanged
+capacity values, and identifies the owner's actual compositor through the
+current Hyprland instance. It changes only that main thread. A runtime user
+drop-in applies the same CPU preference to future `omarchy-browser-*.service`
+launches, keeping the packaged launcher intact. Unsupported hardware fails in
+the helper without adding a condition that could block browser launches.
+
+This is a scheduling workaround, not CPU frequency control, hardware video
+decoding, or a global scheduler repair. Existing browser singletons keep their
+current masks; direct launches that bypass the stock browser service do not use
+its drop-in. New threads and directly forked applications inherit the mask of
+the thread that creates them. In the qualified stock terminal launch, both the
+terminal and its child inherited the four performance CPUs. Affinity-aware job counts can
+therefore use four CPUs instead of all ten, and terminal workloads share those
+CPUs with the compositor.
+Browser workers can independently widen their masks. These are explicit limits
+of this opt-in experiment.
+
+A matched placement-off then placement-on trial played the full local Comic-Con
+clip while four independent C++ compilation jobs ran. Both arms completed and
+restored the original desktop, with no buffering, corruption or new GPU fault.
+Reported video drops rose from 32/1815 to 45/1815, while compilation throughput
+rose from 4.544 to 6.556 compilations per second. Workers reported ten eligible
+CPUs without placement and four with it; both arms used exactly four jobs.
+This single pair demonstrates a workload trade-off, not improved mixed-load
+video or representative full-project build performance. Order/cache effects and
+thermal drift were not isolated. Browser callback timing is not physical-panel
+cadence. Persistent placement was not retained after this test.
+
+The helper saves the original main-thread mask with boot/PID/start identity,
+refuses existing custom affinity or drop-in content, and can restore its own
+state without touching a reused PID. It inspects the running user manager's
+unit search paths and refuses other applicable CPU affinity assignments, even
+ones currently hidden by a higher-priority file. Unreadable configuration stops
+the operation before changes. It also refuses same-named drop-ins or masks
+that could hide its runtime file, regardless of their contents. The runtime
+drop-in disappears at reboot;
+no startup hook reapplies placement at login. If the user manager survives
+logout, its runtime drop-in can remain until explicit restore or reboot.
+To opt in on an installed candidate, run as the desktop owner:
+
+```sh
+python3 ~/.local/lib/omarchy/m4-session-placement.py apply
+python3 ~/.local/lib/omarchy/m4-session-placement.py status
+python3 ~/.local/lib/omarchy/m4-session-placement.py restore
+```
+
+The new helper and image integration are undergoing qualification. A fresh
+owner boot and everyday application launches are not yet verified. Do not
+describe these staged files as a finished video fix or a qualified new image.
+
 The successful repeat boot logged `Touch MT ready` at 2.293 seconds; Hyprland
 listed the multi-touch device and the owner confirmed physical operation.
 Earlier boots failed AFE startup with `No HINT_L`. A temporary delayed-start
@@ -173,8 +244,30 @@ Internal audio, repeated cold boots, quiet boot, safe updates and native
 first-owner qualification of the rebuilt candidate remain open. None of these
 observations qualifies another Mac model or the M4 Pro.
 
-Run the configuration regressions on a leased test host:
+Run the configuration regressions on a leased Linux test host using discovery
+(the platform skip in the placement suite relies on this invocation):
 
 ```sh
 python3 -m unittest discover -s tests -p test_m4_desktop_config.py
+python3 -m unittest discover -s tests -p test_m4_session_placement.py
 ```
+
+`restore` restores the saved compositor's main-thread mask and removes the
+managed browser drop-in. It does not widen masks of other compositor threads
+or applications started during placement; they keep their masks until they
+exit or are explicitly changed. If this owner previously received the older
+automatic hook, remove that hook before running `restore`:
+
+```sh
+rm ~/.config/omarchy/hooks/post-boot.d/50-m4-placement
+python3 ~/.local/lib/omarchy/m4-session-placement.py restore
+```
+
+The image builder stages defaults in `/etc/skel`, without rewriting existing
+owners' home directories. New owners receive the helper but no placement hook.
+
+If the managed runtime drop-in was manually edited, restore preserves that file
+and its saved identity record, reports the conflict, and restores its own main
+thread when possible. Save or move the customized drop-in elsewhere, then run
+`restore` again to finish cleanup. The saved record is deliberately retained
+until that conflict is resolved; it is not a persistent file across reboot.
