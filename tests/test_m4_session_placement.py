@@ -370,9 +370,11 @@ class PlacementTests(unittest.TestCase):
         self.assertFalse(self.dropin.exists())
 
     def test_changed_process_after_reload_is_never_placed(self):
+        reload_dropins = []
         def changed(*args):
             result = self.command(*args)
             if args == ("systemctl", "--user", "daemon-reload"):
+                reload_dropins.append(self.dropin.exists())
                 self.process(789, 9999)
             return result
         with patch.object(placement, "command", side_effect=changed):
@@ -382,6 +384,7 @@ class PlacementTests(unittest.TestCase):
         self.assertFalse(self.state.exists())
         self.assertFalse(self.dropin.exists())
         self.assertEqual(self.commands.count(("systemctl", "--user", "daemon-reload")), 2)
+        self.assertEqual(reload_dropins, [True, False])
 
     def test_concurrent_state_creation_is_not_overwritten(self):
         original_open = Path.open
@@ -397,29 +400,32 @@ class PlacementTests(unittest.TestCase):
         self.assertEqual(self.set_calls, [])
         self.assertFalse(self.dropin.exists())
 
-    def test_cli_reads_state_only_under_exclusive_lock(self):
+    def test_cli_dispatches_each_action_under_exclusive_lock(self):
         self.state.write_text("{}")
-        locked_handle = None
-        reads = 0
+        self.state.with_suffix(".lock").touch()
         real_read = Path.read_text
-        def lock(fd, operation):
-            nonlocal locked_handle
-            self.assertEqual(operation, placement.fcntl.LOCK_EX)
-            self.assertTrue(os.fstat(fd if isinstance(fd, int) else fd.fileno()).st_mode)
-            locked_handle = fd
+        dispatched = []
+        def locked(action):
+            with self.state.with_suffix(".lock").open("r") as contender:
+                with self.assertRaises(BlockingIOError, msg="Action dispatched without an exclusive lock"):
+                    placement.fcntl.flock(contender, placement.fcntl.LOCK_SH | placement.fcntl.LOCK_NB)
+            dispatched.append(action)
+            return {}
         def read(path, *args, **kwargs):
-            nonlocal reads
             if path == self.state:
-                self.assertIsNotNone(locked_handle, "CLI read saved state without locking")
-                self.assertFalse(locked_handle.closed, "CLI released lock before reading state")
-                reads += 1
+                locked("status")
             return real_read(path, *args, **kwargs)
-        with patch.object(sys, "argv", ["placement", "status"]), \
-             patch.object(placement, "paths", return_value=(self.state, self.dropin)), \
-             patch.object(placement.fcntl, "flock", side_effect=lock), \
-             patch.object(Path, "read_text", read), redirect_stdout(io.StringIO()):
-            placement.main()
-        self.assertEqual(reads, 1)
+        for action in ("apply", "restore", "status"):
+            with self.subTest(action=action), \
+                 patch.object(sys, "argv", ["placement", action]), \
+                 patch.object(placement, "paths", return_value=(self.state, self.dropin)), \
+                 patch.object(placement, "apply", side_effect=lambda *args: locked("apply")), \
+                 patch.object(placement, "restore", side_effect=lambda *args: locked("restore")), \
+                 patch.object(Path, "read_text", read), redirect_stdout(io.StringIO()):
+                placement.main()
+            with self.state.with_suffix(".lock").open("r") as contender:
+                placement.fcntl.flock(contender, placement.fcntl.LOCK_EX | placement.fcntl.LOCK_NB)
+        self.assertEqual(dispatched, ["apply", "restore", "status"])
 
 
 class CommandTests(unittest.TestCase):
