@@ -1,0 +1,59 @@
+/dts-v1/;
+/plugin/;
+/ {
+    /* Exact saved pinctrl phandle0x3f must be rechecked before native apply. */
+    fragment@0 {
+        target-path = "/soc/i2s@393600000";
+        __overlay__ {
+            apple,speaker-group = <&speaker_group>;
+        };
+    };
+    fragment@1 {
+        target-path = "/";
+        __overlay__ {
+            speaker_group: speaker-group {
+                compatible = "apple,j713-speaker-group";
+                reset-gpios = <0x3f 15 0>;
+            };
+            sound {
+                compatible = "apple,j713-audio";
+                model = "Apple J713";
+                apple,speaker-group = <&speaker_group>;
+
+                apple,codecs = <&amp0 &amp1 &amp2 &amp3>;
+            };
+        };
+    };
+    fragment@2 {
+        target-path = "/soc/i2c@3ad01c000";
+        __overlay__ {
+            #address-cells = <1>;
+            #size-cells = <0>;
+            /* Controller already enabled and independently qualified. */
+            amp0: amplifier@38 {
+                compatible = "ti,sn012776";
+                reg = <0x38>;
+                #sound-dai-cells = <0>;
+                apple,speaker-group = <&speaker_group>;
+            };
+            amp1: amplifier@3b {
+                compatible = "ti,sn012776";
+                reg = <0x3b>;
+                #sound-dai-cells = <0>;
+                apple,speaker-group = <&speaker_group>;
+            };
+            amp2: amplifier@39 {
+                compatible = "ti,sn012776";
+                reg = <0x39>;
+                #sound-dai-cells = <0>;
+                apple,speaker-group = <&speaker_group>;
+            };
+            amp3: amplifier@3c {
+                compatible = "ti,sn012776";
+                reg = <0x3c>;
+                #sound-dai-cells = <0>;
+                apple,speaker-group = <&speaker_group>;
+            };
+        };
+    };
+};

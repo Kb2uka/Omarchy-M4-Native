@@ -1,0 +1,271 @@
+{
+  "abi_files": {
+    "usr/lib/ld-linux-aarch64.so.1": {
+      "sha256": "b1f2738bdb51e6419d7062f96c8a44bd68853698dc5ac624fa6ca9f9b03d456d",
+      "size": 201832
+    },
+    "usr/lib/libasound.so.2": {
+      "symlink": "libasound.so.2.0.0"
+    },
+    "usr/lib/libasound.so.2.0.0": {
+      "sha256": "5ab60457a31f4f47ff5bfa9d6541631828eb826e71bd49672949b4444b4ff92e",
+      "size": 1116792
+    },
+    "usr/lib/libc.so.6": {
+      "sha256": "6ab264fb4e8df9942b0fb75b48fcd5c30b2f081d8dfaa6c25d7be1d3fce5b2ab",
+      "size": 1853736
+    },
+    "usr/lib/libgcc_s.so.1": {
+      "sha256": "ac598673a4bf67c0295b6609e46b1fafd0d4adf3f80a513d61ac49ecff772e48",
+      "size": 133352
+    },
+    "usr/lib/libm.so.6": {
+      "sha256": "71ed8de709c40acd4fd0177258fc71251a5acdb1d075122409ad42529d6c7a4e",
+      "size": 788960
+    }
+  },
+  "base_dtb_sha256": [
+    "7d3adb1cabae27d75488992b886cc144294fc6bbcadef071a48234c8fd7ada60",
+    "97cc1d35fd3d03f172877b808b5b6f8569e98af40317aac7b1ff41483feb1d85"
+  ],
+  "board": "apple,j713",
+  "distribution_hold": [
+    "Measured FIR impulse responses have no established redistribution license; not included in tracked source."
+  ],
+  "files": {
+    "etc/wireplumber/wireplumber.conf.d/80-j713-protected.conf": {
+      "license": "MIT",
+      "mode": 420,
+      "origin": "original-source-policy",
+      "sha256": "7d70461763f20660d6564e8ce94be7c22755ded68330dfe617e4dbcaf14827e1",
+      "size": 1280,
+      "source": "policy/etc/wireplumber/wireplumber.conf.d/80-j713-protected.conf"
+    },
+    "etc/wireplumber/wireplumber.conf.d/81-j713-busy-discovery.conf": {
+      "license": "MIT",
+      "mode": 420,
+      "origin": "original-source-policy",
+      "sha256": "25487cbc2ddc614f10bda5b00600c1017c2f2481ffa43ed4e3303a1b70042e5c",
+      "size": 59,
+      "source": "policy/etc/wireplumber/wireplumber.conf.d/81-j713-busy-discovery.conf"
+    },
+    "usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/apple-admac.ko": {
+      "license": "GPL-2.0-only",
+      "mode": 420,
+      "origin": "kernel-build",
+      "sha256": "cd57f99657e6232e45d58645949a0f73b656372d92e272828c14bcd4e63ea110",
+      "size": 44296
+    },
+    "usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/j713_audio_bootstrap.ko": {
+      "license": "GPL-2.0-only",
+      "mode": 420,
+      "origin": "kernel-build",
+      "sha256": "1bf6408c629f446e8d73b6962ef58c2a98a3c7ecd5f7b7ae001bcd5bab6c1875",
+      "size": 23984
+    },
+    "usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/j713_audio_dt3.ko": {
+      "license": "GPL-2.0-only",
+      "mode": 420,
+      "origin": "kernel-build",
+      "sha256": "0b115a55e3aaccad6f148ee152c399c403c8ebcbcbf01f22210e33484c166e4e",
+      "size": 17088
+    },
+    "usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-apple-mca.ko": {
+      "license": "GPL-2.0-only",
+      "mode": 420,
+      "origin": "kernel-build",
+      "sha256": "d3194660a28d30ba8ea296b6592836ad4ca9426d9471d05ba8ce3cad284baa1e",
+      "size": 79152
+    },
+    "usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-j713-group.ko": {
+      "license": "GPL-2.0-only",
+      "mode": 420,
+      "origin": "kernel-build",
+      "sha256": "465a88aa9f70ceac8682499ad6bd9ecd34a33b35a3b5c556b42f7bd1524272d0",
+      "size": 52088
+    },
+    "usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-macaudio.ko": {
+      "license": "GPL-2.0-only",
+      "mode": 420,
+      "origin": "kernel-build",
+      "sha256": "1dc3a6878b10154676b1b06529b197baf3b1cf1c81b5ef94128b2f52d605ea34",
+      "size": 97152
+    },
+    "usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-tas2764.ko": {
+      "license": "GPL-2.0-only",
+      "mode": 420,
+      "origin": "kernel-build",
+      "sha256": "dc00caabad80dffe95e872222440a4711ca57a37bd4271ae08e971e22d7d15f7",
+      "size": 45216
+    },
+    "usr/lib/speakersafetyd-j713": {
+      "license": "GPL-2.0-only",
+      "mode": 493,
+      "origin": "daemon-build",
+      "sha256": "3f5427f631507c71ae25679ea979dbac77eee4a716044c80826da4811f21036d",
+      "size": 1388376
+    },
+    "usr/share/alsa/ucm2/conf.d/macaudio/Apple J713.conf": {
+      "license": "MIT",
+      "mode": 420,
+      "origin": "original-source-policy",
+      "sha256": "142538db002b860aee84cb6046ec69743b6bd3cc84559af5b159f7c6a810fe39",
+      "size": 93,
+      "source": "policy/usr/share/alsa/ucm2/conf.d/macaudio/Apple J713.conf"
+    },
+    "usr/share/alsa/ucm2/conf.d/macaudio/J713-HiFi.conf": {
+      "license": "MIT",
+      "mode": 420,
+      "origin": "original-source-policy",
+      "sha256": "3021e37532d98736538cac36237d55d17332bf7527d8a5cc184fff53e24080ec",
+      "size": 184,
+      "source": "policy/usr/share/alsa/ucm2/conf.d/macaudio/J713-HiFi.conf"
+    },
+    "usr/share/asahi-audio/j713/80-j713-protected.conf.in": {
+      "license": "MIT",
+      "mode": 420,
+      "origin": "original-source-policy",
+      "sha256": "7d70461763f20660d6564e8ce94be7c22755ded68330dfe617e4dbcaf14827e1",
+      "size": 1280,
+      "source": "policy/usr/share/asahi-audio/j713/80-j713-protected.conf.in"
+    },
+    "usr/share/asahi-audio/j713/contract.json": {
+      "license": "MIT",
+      "mode": 420,
+      "origin": "original-source-policy",
+      "sha256": "e1753ac2bde979c2d6ae0f596646246fee80c210cb76ab18fa2db974e677e2e3",
+      "size": 3742,
+      "source": "policy/usr/share/asahi-audio/j713/contract.json"
+    },
+    "usr/share/asahi-audio/j713/graph.json": {
+      "license": "MIT",
+      "mode": 420,
+      "origin": "original-source-policy",
+      "sha256": "9c68ca5f8e5696737b51db5402904edf3b5538caa539a0050839ec04e4fa7a20",
+      "size": 2899,
+      "source": "policy/usr/share/asahi-audio/j713/graph.json"
+    },
+    "usr/share/asahi-audio/j713/j713-static-minimal-lane0-48000.wav": {
+      "license": "LicenseRef-FIR-Redistribution-Unresolved",
+      "mode": 420,
+      "origin": "qualified-runtime",
+      "sha256": "aef7e77552a656bec7e91703cb189701d38f34e9ad39d4ea6cf28d78ebcc0e64",
+      "size": 16440
+    },
+    "usr/share/asahi-audio/j713/j713-static-minimal-lane1-48000.wav": {
+      "license": "LicenseRef-FIR-Redistribution-Unresolved",
+      "mode": 420,
+      "origin": "qualified-runtime",
+      "sha256": "1eb0b0c9c1c741ae0686453ef46367d5946740001d0d7a50b4fa9c382f1f271e",
+      "size": 16440
+    },
+    "usr/share/asahi-audio/j713/j713-static-minimal-lane2-48000.wav": {
+      "license": "LicenseRef-FIR-Redistribution-Unresolved",
+      "mode": 420,
+      "origin": "qualified-runtime",
+      "sha256": "aded8f7baf203291404261909a16d41b791abc14315bca3efef8db8e2acc8f0c",
+      "size": 4152
+    },
+    "usr/share/asahi-audio/j713/j713-static-minimal-lane3-48000.wav": {
+      "license": "LicenseRef-FIR-Redistribution-Unresolved",
+      "mode": 420,
+      "origin": "qualified-runtime",
+      "sha256": "aded8f7baf203291404261909a16d41b791abc14315bca3efef8db8e2acc8f0c",
+      "size": 4152
+    },
+    "usr/share/asahi-audio/j713/ucm/Apple J713.conf.in": {
+      "license": "MIT",
+      "mode": 420,
+      "origin": "original-source-policy",
+      "sha256": "142538db002b860aee84cb6046ec69743b6bd3cc84559af5b159f7c6a810fe39",
+      "size": 93,
+      "source": "policy/usr/share/asahi-audio/j713/ucm/Apple J713.conf.in"
+    },
+    "usr/share/asahi-audio/j713/ucm/J713-HiFi.conf.in": {
+      "license": "MIT",
+      "mode": 420,
+      "origin": "original-source-policy",
+      "sha256": "3021e37532d98736538cac36237d55d17332bf7527d8a5cc184fff53e24080ec",
+      "size": 184,
+      "source": "policy/usr/share/asahi-audio/j713/ucm/J713-HiFi.conf.in"
+    },
+    "usr/share/speakersafetyd/apple/j713.conf": {
+      "license": "GPL-2.0-only",
+      "mode": 420,
+      "origin": "daemon-build",
+      "sha256": "6cd4e035c6efcf8483ece2efcf0ad3b8116fe358943aa632670089747bad2fbd",
+      "size": 1104,
+      "source": "j713.conf"
+    }
+  },
+  "kernel_release": "7.1.9-m4-gpu-backport-20261008",
+  "module_artifacts": {
+    "apple_admac": {
+      "module": "apple_admac",
+      "note": "040000001400000003000000474e55004fbc28a4a46b6e177afe54fb5e070702f7380512",
+      "path": "/usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/apple-admac.ko",
+      "sha256": "cd57f99657e6232e45d58645949a0f73b656372d92e272828c14bcd4e63ea110",
+      "size": 44296
+    },
+    "j713_audio_bootstrap": {
+      "module": "j713_audio_bootstrap",
+      "note": "040000001400000003000000474e5500a1dbc8a559c046aeda0bbf6ef97ad8fb9d1c3431",
+      "path": "/usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/j713_audio_bootstrap.ko",
+      "sha256": "1bf6408c629f446e8d73b6962ef58c2a98a3c7ecd5f7b7ae001bcd5bab6c1875",
+      "size": 23984
+    },
+    "j713_audio_dt3": {
+      "module": "j713_audio_dt3",
+      "note": "040000001400000003000000474e55005f12e5239595901f0a41aa7872861d75a285718e",
+      "path": "/usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/j713_audio_dt3.ko",
+      "sha256": "0b115a55e3aaccad6f148ee152c399c403c8ebcbcbf01f22210e33484c166e4e",
+      "size": 17088
+    },
+    "snd_soc_apple_mca": {
+      "module": "snd_soc_apple_mca",
+      "note": "040000001400000003000000474e550057b999a68c50407955e8b2ed92f242b0cfe426e9",
+      "path": "/usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-apple-mca.ko",
+      "sha256": "d3194660a28d30ba8ea296b6592836ad4ca9426d9471d05ba8ce3cad284baa1e",
+      "size": 79152
+    },
+    "snd_soc_j713_group": {
+      "module": "snd_soc_j713_group",
+      "note": "040000001400000003000000474e5500f2078435f633f3e320dc95119734cfd263d6edd9",
+      "path": "/usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-j713-group.ko",
+      "sha256": "465a88aa9f70ceac8682499ad6bd9ecd34a33b35a3b5c556b42f7bd1524272d0",
+      "size": 52088
+    },
+    "snd_soc_macaudio": {
+      "module": "snd_soc_macaudio",
+      "note": "040000001400000003000000474e5500013a6a348a90635b4811175cd80fa6cd1620a01b",
+      "path": "/usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-macaudio.ko",
+      "sha256": "1dc3a6878b10154676b1b06529b197baf3b1cf1c81b5ef94128b2f52d605ea34",
+      "size": 97152
+    },
+    "snd_soc_tas2764": {
+      "module": "snd_soc_tas2764",
+      "note": "040000001400000003000000474e550069a07998fc803eabcf8ece350ccc9c6ab4a8ae48",
+      "path": "/usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-tas2764.ko",
+      "sha256": "dc00caabad80dffe95e872222440a4711ca57a37bd4271ae08e971e22d7d15f7",
+      "size": 45216
+    }
+  },
+  "readiness_inputs": {
+    "packaging/j713-audio/speakersafetyd-j713.service": {
+      "sha256": "ff3da34751fba7d6cf54e8899ef43c24801550a1c773ae99c6e3a400f8c34137",
+      "size": 808
+    },
+    "packaging/j713-audio/wireplumber.service.d/80-j713-audio-ready.conf": {
+      "sha256": "a847df53f52ffc3677d0ed3d1493565fda97443206f820d05887247137fd9b15",
+      "size": 206
+    },
+    "tools/m4-j713-audio-ready.py": {
+      "sha256": "2418a41926bc9c228af602a74c62579920ea0a5f6a1090a1194d1f231cbe4d72",
+      "size": 20328
+    }
+  },
+  "schema": 1,
+  "service": "speakersafetyd-j713.service",
+  "soc": "apple,t8132",
+  "source_revision": "qualified 2026-10-10 transport and daemon v4"
+}

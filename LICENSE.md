@@ -19,6 +19,9 @@ Copyright (c) 2026 KB2UKA for original contributions.
 | The same patch: `drivers/irqchip/irq-apple-aic.c` hunks | GPL-2.0-or-later |
 | `patches-kernel/nvme-apple-t8132-split-nvmmu.patch`: `drivers/nvme/host/apple.c` hunks | GPL-2.0-only |
 | The same patch: `Documentation/devicetree/bindings/nvme/apple,nvme-ans.yaml` hunks | GPL-2.0-only OR BSD-2-Clause |
+| Original J713 packaging tools, tests and service templates, `audio/j713/README.md`, `audio/j713/policy/` routing/metadata configuration | MIT |
+| `audio/j713/kernel/`, `audio/j713/bootstrap/`, `audio/j713/topology/` | Linux-derived GPL-2.0-only unless a file-level notice grants additional choices |
+| `audio/j713/speakersafetyd/` | GPL-2.0-only application; vendored ALSA has its own Apache-2.0 OR MIT licenses |
 | Full texts in `LICENSES/` | Reproduced license documents; their own terms apply |
 
 An `OR` grants a choice between the listed alternatives for that material.
@@ -58,3 +61,11 @@ proprietary payloads, or hardware captures supplied separately. Factual
 hardware observations in the research do not convey rights to those works.
 All trademarks remain with their respective owners. The applicable license
 texts contain the warranty and liability terms.
+
+## J713 runtime assets
+
+The measured FIR responses named by `audio/j713/qualified.json` are not included
+in this source tree. Their redistribution license has not been established.
+Exact-hash local assembly is not a grant of rights to redistribute them. See
+[audio/j713/README.md](audio/j713/README.md) for build provenance and open
+corresponding-source requirements.

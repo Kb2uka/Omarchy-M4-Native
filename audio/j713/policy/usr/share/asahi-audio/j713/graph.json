@@ -1,0 +1,132 @@
+{
+  "node.description": "J713 protected speakers",
+  "media.name": "J713 protected speakers",
+  "filter.graph": {
+    "nodes": [
+      {
+        "type": "builtin",
+        "label": "clamp",
+        "name": "inputL",
+        "control": {
+          "Min": -1.0,
+          "Max": 1.0
+        }
+      },
+      {
+        "type": "builtin",
+        "label": "clamp",
+        "name": "inputR",
+        "control": {
+          "Min": -1.0,
+          "Max": 1.0
+        }
+      },
+      {
+        "type": "builtin",
+        "label": "convolver",
+        "name": "lane0",
+        "config": {
+          "filename": "/usr/share/asahi-audio/j713/j713-static-minimal-lane0-48000.wav",
+          "channel": 0,
+          "gain": 0.38,
+          "blocksize": 128
+        }
+      },
+      {
+        "type": "builtin",
+        "label": "convolver",
+        "name": "lane1",
+        "config": {
+          "filename": "/usr/share/asahi-audio/j713/j713-static-minimal-lane1-48000.wav",
+          "channel": 0,
+          "gain": 0.38,
+          "blocksize": 128
+        }
+      },
+      {
+        "type": "builtin",
+        "label": "convolver",
+        "name": "lane2",
+        "config": {
+          "filename": "/usr/share/asahi-audio/j713/j713-static-minimal-lane2-48000.wav",
+          "channel": 0,
+          "gain": 0.38,
+          "blocksize": 128
+        }
+      },
+      {
+        "type": "builtin",
+        "label": "convolver",
+        "name": "lane3",
+        "config": {
+          "filename": "/usr/share/asahi-audio/j713/j713-static-minimal-lane3-48000.wav",
+          "channel": 0,
+          "gain": 0.38,
+          "blocksize": 128
+        }
+      }
+    ],
+    "links": [
+      {
+        "output": "inputL:Out",
+        "input": "lane0:In"
+      },
+      {
+        "output": "inputR:Out",
+        "input": "lane1:In"
+      },
+      {
+        "output": "inputL:Out",
+        "input": "lane2:In"
+      },
+      {
+        "output": "inputR:Out",
+        "input": "lane3:In"
+      }
+    ],
+    "inputs": [
+      "inputL:In",
+      "inputR:In"
+    ],
+    "outputs": [
+      "lane0:Out",
+      "lane1:Out",
+      "lane2:Out",
+      "lane3:Out"
+    ]
+  },
+  "capture.props": {
+    "node.name": "audio_effect.j713-protected",
+    "media.class": "Audio/Sink",
+    "audio.channels": 2,
+    "audio.position": [
+      "FL",
+      "FR"
+    ],
+    "audio.rate": 48000,
+    "audio.allowed-rates": [
+      48000
+    ],
+    "node.virtual": false
+  },
+  "playback.props": {
+    "node.name": "effect_output.j713-protected",
+    "target.object": "alsa_output.j713.RawSpeakers",
+    "node.dont-fallback": true,
+    "node.passive": true,
+    "stream.dont-remix": true,
+    "channelmix.lock-volumes": true,
+    "channelmix.max-volume": 1.0,
+    "audio.channels": 4,
+    "audio.position": [
+      "AUX0",
+      "AUX1",
+      "AUX2",
+      "AUX3"
+    ],
+    "audio.rate": 48000,
+    "audio.allowed-rates": [
+      48000
+    ]
+  }
+}

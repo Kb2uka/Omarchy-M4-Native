@@ -1,0 +1,6 @@
+{
+  "status": "stable=1 phase=2 generation=1 public_generation=1 owner=1 control_owner=1 sequence=37 deadline_ns=5117205611563 cancelled=0 faulted=0 removing=0 error=0 sensing=1 mute_ns=5116320404787 mute_mask=f gpio_hw=00070a03 gpio_cache=00070a03 gpio_error=0 gpio_low_verified=0 profile=1",
+  "rx_status": "state: RUNNING\nowner_pid   : 4242\ntrigger_time: 5116.320407995\ntstamp      : 0.000000000\ndelay       : 168\navail       : 168\navail_max   : 1024\n-----\nhw_ptr      : 40632\nappl_ptr    : 40464",
+  "rx_hw": "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 8\nrate: 48000 (48000/1)\nperiod_size: 1024\nbuffer_size: 2048",
+  "tx_status": "closed"
+}

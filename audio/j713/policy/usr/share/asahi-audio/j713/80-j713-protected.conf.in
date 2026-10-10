@@ -1,0 +1,57 @@
+monitor.alsa.rules = [
+  {
+    "matches": [
+      {
+        "api.alsa.path": "hw:AppleJ713,0",
+        "media.class": "Audio/Sink"
+      }
+    ],
+    "actions": {
+      "update-props": {
+        "node.name": "alsa_output.j713.RawSpeakers",
+        "node.description": "J713 raw speakers (do not use)",
+        "node.nick": "RawSpeakers",
+        "audio.rate": 48000,
+        "audio.allowed-rates": [
+          48000
+        ],
+        "audio.format": "S32LE",
+        "audio.channels": 4,
+        "audio.position": [
+          "AUX0",
+          "AUX1",
+          "AUX2",
+          "AUX3"
+        ],
+        "channelmix.lock-volumes": true,
+        "channelmix.max-volume": 1.0,
+        "api.alsa.soft-mixer": true
+      }
+    }
+  }
+]
+node.software-dsp.rules = [
+  {
+    "matches": [
+      {
+        "api.alsa.path": "hw:AppleJ713,0",
+        "media.class": "Audio/Sink"
+      }
+    ],
+    "actions": {
+      "create-filter": {
+        "filter-path": "/usr/share/asahi-audio/j713/graph.json",
+        "hide-parent": true
+      }
+    }
+  }
+]
+wireplumber.profiles = {
+  "main": {
+    "node.software-dsp": "required"
+  }
+}
+wireplumber.components.rules = [
+ { matches = [ { provides = "node.software-dsp" } ]
+   actions = { merge = { before = [ support.standard-event-source ] } } }
+]

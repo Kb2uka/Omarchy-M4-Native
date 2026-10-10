@@ -1,0 +1,24 @@
+[Unit]
+Description=J713 speaker protection and readiness
+Requires=m4-j713-audio-register.service
+After=m4-j713-audio-register.service sound.target
+
+[Service]
+Type=simple
+ExecStartPre=/usr/bin/python3 /usr/lib/omarchy/m4-j713-audio-ready.py invalidate
+ExecStart=/usr/lib/speakersafetyd-j713 --config-path /usr/share/speakersafetyd
+ExecStartPost=/usr/bin/python3 /usr/lib/omarchy/m4-j713-audio-ready.py startup --manifest /etc/omarchy/j713-audio-manifest.json --publish
+ExecStopPost=/usr/bin/python3 /usr/lib/omarchy/m4-j713-audio-ready.py invalidate
+RuntimeDirectory=speakersafetyd omarchy/j713-audio-readiness
+RuntimeDirectoryMode=0755
+TimeoutStartSec=65
+Restart=no
+LimitRTPRIO=50
+LimitMEMLOCK=64M
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

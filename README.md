@@ -14,9 +14,16 @@ and startup omissions were repaired after installation. See the
 [installed desktop checkpoint](docs/j713-desktop-image.md) and the earlier
 [GPU and RAM-root checkpoint](docs/j713-gpu-normal-root.md).
 The owner confirmed one normal repeat boot with a working trackpad. Installed
-boot required verbose mode; reliable cold boot, updates, audio, camera, suspend and daily-use reliability remain
+boot required verbose mode; reliable cold boot, updates, camera, suspend and daily-use reliability remain
 unqualified. This repository contains research and selected source helpers,
 not a supported installer or disk image.
+
+**Audio checkpoint, October 10, 2026:** The owner confirmed internal speaker
+playback, and the exact pinned J713 runtime completed automatic registration and
+protection startup on a normal reboot. See the [audio source and qualification
+guide](docs/j713-audio.md). This records the tested installation; fresh-image
+deployment, broader reboot coverage, audio suspend/resume, safe updates and a
+generally distributable runtime remain unqualified or blocked as documented.
 
 ## Project status
 
