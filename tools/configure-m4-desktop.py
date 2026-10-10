@@ -10,6 +10,10 @@ import re
 import stat
 
 
+MAIN_PLACEMENT_HOOK = "etc/skel/.config/omarchy/hooks/post-boot.d/50-m4-main-placement"
+MAIN_PLACEMENT_CONTENT = ('#!/bin/bash\n'
+                          'exec /usr/bin/python3 "$HOME/.local/lib/omarchy/m4-session-placement.py" --main-only apply\n')
+
 M4_OVERRIDES = '''
 -- J713 display and session integration.
 hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 2 })
@@ -168,6 +172,9 @@ def planned_files(root):
             raise ValueError(f"Not a pending M4 owner image: missing {marker}")
     if image_path(root, "etc/skel/.config/omarchy/hooks/post-boot.d/50-m4-placement").exists():
         raise ValueError("Existing automatic placement hook; review and remove it from the offline candidate before configuration")
+    hook = image_path(root, MAIN_PLACEMENT_HOOK)
+    if hook.exists() and (not hook.is_file() or hook.read_bytes() != MAIN_PLACEMENT_CONTENT.encode()):
+        raise ValueError("Existing main-only placement hook differs; leaving it unchanged")
     packages = Path(__file__).with_name("m4-desktop.packages").read_text(encoding="utf-8").splitlines()
     required = {p for p in packages if p and not p.startswith("#")}
     required.update(("omarchy", "omarchy-settings", "hyprland"))
@@ -193,6 +200,7 @@ def planned_files(root):
         locale[index] = "en_US.UTF-8 UTF-8"
     zram = image_path(root, "usr/share/omarchy/default/systemd/zram-generator.conf.d/90-omarchy.conf").read_text(encoding="utf-8")
     files = {
+        MAIN_PLACEMENT_HOOK: MAIN_PLACEMENT_CONTENT,
         "etc/skel/.config/hypr/hyprland.lua": stock.rstrip() + "\n" + M4_OVERRIDES,
         "etc/skel/.config/chromium-flags.conf": chromium_flags(root),
         "etc/locale.gen": "\n".join(locale) + "\n",
@@ -221,10 +229,12 @@ def configure(root, apply=False):
                                     parent.stat().st_mode & 0o005 != 0o005):
             raise ValueError("Image path is not a publicly readable directory: " +
                              parent.relative_to(root).as_posix())
+    owned_modes = {cache: 0o644, image_path(root, MAIN_PLACEMENT_HOOK): 0o755,
+                   image_path(root, "etc/skel/.local/lib/omarchy/m4-session-placement.py"): 0o644}
     different = [path.relative_to(root).as_posix() for path, content in files.items()
                  if not path.is_file() or path.read_bytes() != content or
-                 (path == cache and os.name != "nt" and
-                  stat.S_IMODE(path.stat().st_mode) != 0o644)]
+                 (path in owned_modes and os.name != "nt" and
+                  stat.S_IMODE(path.stat().st_mode) != owned_modes[path])]
     if apply:
         for path, content in files.items():
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -232,8 +242,8 @@ def configure(root, apply=False):
                 for parent in new_cache_dirs:
                     parent.chmod(0o755)
             path.write_bytes(content)
-            if path == cache and os.name != "nt":
-                path.chmod(0o644)
+            if path in owned_modes and os.name != "nt":
+                path.chmod(owned_modes[path])
     elif different:
         raise ValueError("Desktop image configuration differs: " + ", ".join(different))
     return {"configured_files": [p.relative_to(root).as_posix() for p in files],
