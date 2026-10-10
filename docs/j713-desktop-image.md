@@ -188,9 +188,20 @@ its drop-in. New threads and directly forked applications inherit the mask of
 the thread that creates them. In the qualified stock terminal launch, both the
 terminal and its child inherited the four performance CPUs. Affinity-aware job counts can
 therefore use four CPUs instead of all ten, and terminal workloads share those
-CPUs with the compositor. Mixed build/video performance remains unmeasured.
+CPUs with the compositor.
 Browser workers can independently widen their masks. These are explicit limits
 of this experimental image default.
+
+A matched placement-off then placement-on trial played the full local Comic-Con
+clip while four independent C++ compilation jobs ran. Both arms completed and
+restored the original desktop, with no buffering, corruption or new GPU fault.
+Reported video drops rose from 32/1815 to 45/1815, while compilation throughput
+rose from 4.544 to 6.556 compilations per second. Workers reported ten eligible
+CPUs without placement and four with it; both arms used exactly four jobs.
+This single pair demonstrates a workload trade-off, not improved mixed-load
+video or representative full-project build performance. Order/cache effects and
+thermal drift were not isolated. Browser callback timing is not physical-panel
+cadence. Persistent placement was not retained after this test.
 
 The helper saves the original main-thread mask with boot/PID/start identity,
 refuses existing custom affinity or drop-in content, and can restore its own
