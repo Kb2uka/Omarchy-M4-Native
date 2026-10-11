@@ -102,7 +102,11 @@ Run apply/check as root. The target must be an explicitly mounted ext4 image con
 live `/`, symlink traversal, mismatched board/DTB/kernel/userspace ABI, incomplete
 packages, conflicting startup hooks and customized destinations. It validates
 all destinations before the first write. Existing identical files are retained;
-updates with different bytes require a separately reviewed migration.
+updates with different bytes require a separately reviewed migration. The one
+supported transition adds the two protected-default policy files from the
+27-file package without changing any prior payload. It requires the previous
+manifest's exact pin through `--previous-package-sha256`, as documented in
+[the protected-default guide](../../docs/j713-audio-default.md).
 
 ```sh
 sudo python3 tools/configure-m4-audio.py --root MOUNTED_IMAGE --package NEW_PACKAGE \
@@ -143,3 +147,14 @@ configuration, firmware updates, Limine/snapshot integration and ordinary rollin
 updates are not handled by this prototype. Exact ABI refusal makes such a change
 visible instead of silently loading an unqualified stack. Current Omarchy package
 parity is a separate installer audit, not a claim made by this audio package.
+
+## Clean-owner default policy
+
+The separate [protected-default policy](../../docs/j713-audio-default.md) excludes
+the hidden raw speaker parent from normal default selection while preserving
+existing output choices. Its source and regression tests are included here; it
+is now included by the assembler in a 29-file integration candidate. The 27-file
+qualified manifest above remains the historical native evidence, not evidence
+for the new policy. Native component loading and selection with no saved output
+remain required before this candidate is described as a durable fresh-install
+fix.

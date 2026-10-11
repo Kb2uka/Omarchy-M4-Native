@@ -7,7 +7,7 @@ root = Path(__file__).resolve().parents[1]
 cases = [
     ('tools/configure-m4-audio.py', 'require(board == manifest["board"] == "apple,j713", "Unsupported board")', 'require(True, "Unsupported board")', 'test_board_kernel_abi_refused_before_write'),
     ('tools/configure-m4-audio.py', '    verify_abi(root, manifest["abi_files"])', '    pass', 'test_board_kernel_abi_refused_before_write'),
-    ('tools/configure-m4-audio.py', 'require(path.read_bytes() == content, "Conflicting existing audio file: " + name)', 'require(True, "Conflicting existing audio file: " + name)', 'test_custom_file_refuses_before_any_write'),
+    ('tools/configure-m4-audio.py', 'require(path.read_bytes() == expected, "Conflicting existing audio file: " + name)', 'require(True, "Conflicting existing audio file: " + name)', 'test_custom_file_refuses_before_any_write'),
     ('tools/configure-m4-audio.py', '            os.replace(temporary, path)', '            temporary.unlink()', 'test_apply_check_idempotent_and_enable_links'),
     ('tools/m4-j713-audio-register.py', "    write_record(runtime / 'attempt.json', identity)", '    pass', 'test_attempt_failure_retained_and_never_retried'),
     ('tools/m4-j713-audio-register.py', '        bus = self.wait_providers()', "        bus = '1'", 'test_stage4_does_not_replace_provider_binding'),
@@ -16,7 +16,7 @@ cases = [
     ('tools/m4-j713-audio-register.py', '        bus = self.wait_providers()', '        bus = self.providers()', 'test_deferred_provider_binds_without_reloading'),
     ('tools/m4-j713-audio-register.py', "                    raise RuntimeError('Provider readiness timed out: ' + str(error)) from error", "                    return '1'", 'test_provider_wait_timeout_and_wrong_driver_refuse'),
     ('tools/m4-j713-audio-register.py', '        self.driver(device, name, module)', '        pass', 'test_provider_wait_timeout_and_wrong_driver_refuse'),
-    ('tools/configure-m4-audio.py', 'if not path.exists() or stat.S_IMODE(path.stat().st_mode) != modes[name]:', 'if not path.exists():', 'test_existing_file_mode_drift_check_refuses_and_apply_repairs'),
+    ('tools/configure-m4-audio.py', 'not path.exists() or stat.S_IMODE(path.stat().st_mode) != modes[name] or', 'not path.exists() or', 'test_existing_file_mode_drift_check_refuses_and_apply_repairs'),
     ('tools/configure-m4-audio.py', '    planned[MANIFEST] = raw', '    planned = {name: (package / "root" / name).read_bytes() for name in manifest["file_metadata"]}\n    planned[MANIFEST] = raw', 'test_apply_consumes_verified_payload_snapshot'),
     ('tools/package-j713-audio.py', "payload[name] = (verified(readiness, relative, spec['readiness_inputs'][relative]), 0o644)", "payload[name] = ((verified(readiness, relative, spec['readiness_inputs'][relative]), (readiness / relative).read_bytes())[1], 0o644)", 'test_assembly_consumes_verified_readiness_snapshot'),
     ('tools/m4-j713-audio-register.py', '        trusted_file(Path(name), expected)', '        pass', 'RegistrationEntryTests.test_main_checks_payload_before_registration'),
