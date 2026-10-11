@@ -1,17 +1,22 @@
 # Browser startup on J713
 
-The private installer includes Brave and Chromium. Their ordinary launch paths
-request the qualified M4 video stack when its current-boot readiness and device
+The private installer includes Brave and Chromium. Brave's ordinary launch path
+requests the qualified M4 video stack when its current-boot readiness and device
 checks pass. Software decoding remains available for unsupported media and when
-the hardware stack is unavailable. Hardware decoding is a playback-path result;
-a GPU-rendered desktop alone does not prove it.
+the hardware stack is unavailable. The shipped Arch Linux ARM Chromium
+153.0.8010.36 build disables VA-API and enables a different V4L2 backend. It uses
+software video decoding with GPU rendering; forcing its direct V4L2 decoder
+failed the native playback test. VA-API flags cannot enable an omitted backend.
+A future hardware-capable Chromium package requires separate qualification.
+Hardware decoding is a playback-path result; a GPU-rendered desktop alone does
+not prove it.
 
 Install `tools/brave-m4-hardware.py` as `/usr/local/bin/brave`,
 `/usr/local/bin/chromium`, and `/usr/local/bin/brave-m4-hardware`. The first two
 retain the browser's normal profile and explicit profile arguments. The last
 retains the existing separate Brave-Browser-M4 profile. Chromium continues through
 its packaged launcher; system and owner feature flags are merged before the
-hardware switches are supplied. Browser-specific libraries are scoped to the
+decoder switches are supplied. Browser-specific libraries are scoped to the
 launched process.
 
 The packaged Chromium desktop entry uses an absolute `/usr/bin/chromium` command.

@@ -126,7 +126,10 @@ def launch(arguments, environment, *, normal_profile=False, browser_name='brave'
                              ('--disable-accelerated-video-decode', '--disable-gpu')
                              for arg in ordinary)
     requested_software |= any(name in disabled for name in HW_FEATURES)
-    hardware = not requested_software and hardware_available()
+    stack_ready = hardware_available()
+    # The shipped ARM Chromium build has V4L2 but no VA-API backend. Its direct
+    # decoder is not qualified with AVD; retain GPU rendering and CPU decoding.
+    hardware = not chromium and not requested_software and stack_ready
     extensions = [path for path in extensions if path.rstrip('/') != str(SITE_EXTENSION)]
     if hardware:
         extensions.append(str(SITE_EXTENSION))
@@ -134,13 +137,16 @@ def launch(arguments, environment, *, normal_profile=False, browser_name='brave'
         env.pop(key, None)
     disabled['OnBeginFrameThrottleVideo'] = 'OnBeginFrameThrottleVideo'
     switches = [] if normal_profile else ['--user-data-dir=' + str(profile)]
-    if hardware:
-        for name in HW_FEATURES:
-            enabled.setdefault(name, name)
+    if stack_ready and '--disable-gpu' not in ordinary:
         env.update({
             'LD_LIBRARY_PATH': str(PREFIX / 'mesa/lib'),
             'GBM_BACKENDS_PATH': str(PREFIX / 'mesa/lib/gbm'),
             'LD_BIND_NOW': '1', 'ASAHI_MESA_DEBUG': 'nocompress',
+        })
+    if hardware:
+        for name in HW_FEATURES:
+            enabled.setdefault(name, name)
+        env.update({
             'LIBVA_DRIVER_NAME': 'v4l2_request',
             'LIBVA_DRIVERS_PATH': str(PREFIX / 'vaapi'),
             'LIBVA_V4L2_REQUEST_MEDIA_PATH': '/dev/media0',

@@ -126,7 +126,25 @@ class BrowserLaunchTests(unittest.TestCase):
         self.assertEqual(binary, '/usr/bin/chromium')
         self.assertFalse(any(x.startswith('--user-data-dir=') for x in argv))
         self.assertEqual(env['CHROME_DESKTOP'], 'chromium.desktop')
-        self.assertEqual(env['LIBVA_DRIVER_NAME'], 'v4l2_request')
+        self.assertIn('--disable-accelerated-video-decode', argv)
+        self.assertNotIn('LIBVA_DRIVER_NAME', env)
+
+    def test_packaged_chromium_does_not_force_unqualified_v4l2_decoder(self):
+        with patch.object(browser, 'CHROMIUM_SYSTEM_CONFIG', self.home / 'no-system-flags'), \
+                patch.object(browser, 'hardware_available', return_value=True):
+            argv, env, hardware = browser.launch(
+                ['--enable-features=AcceleratedVideoDecoder,OwnerFeature',
+                 '--load-extension=/owner/extension'], self.env,
+                normal_profile=True, browser_name='chromium')
+        self.assertFalse(hardware)
+        self.assertIn('--disable-accelerated-video-decode', argv)
+        self.assertNotIn('--disable-gpu', argv)
+        self.assertNotIn('LIBVA_DRIVER_NAME', env)
+        self.assertEqual(env.get('LD_LIBRARY_PATH'), str(browser.PREFIX / 'mesa/lib'))
+        self.assertEqual(env.get('ASAHI_MESA_DEBUG'), 'nocompress')
+        self.assertIn('--enable-features=OwnerFeature', argv)
+        self.assertIn('--load-extension=/owner/extension', argv)
+        self.assertFalse(any(str(browser.SITE_EXTENSION) in arg for arg in argv))
 
     def test_chromium_system_user_and_cli_flags_merge_with_quoted_profile(self):
         system = self.home / 'system.conf'
@@ -139,11 +157,12 @@ class BrowserLaunchTests(unittest.TestCase):
                 patch.object(browser, 'hardware_available', return_value=True):
             argv, env, hardware = browser.launch(['--enable-features=CliFeature'], self.env,
                                                  normal_profile=True, browser_name='chromium')
-        self.assertTrue(hardware)
+        self.assertFalse(hardware)
         self.assertIn('--user-data-dir=/owner/profile with spaces', argv)
         feature = next(x for x in argv if x.startswith('--enable-features='))
-        for value in ('SystemFeature', 'OwnerFeature<Trial', 'CliFeature', 'AcceleratedVideoDecoder'):
+        for value in ('SystemFeature', 'OwnerFeature<Trial', 'CliFeature'):
             self.assertIn(value, feature)
+        self.assertNotIn('AcceleratedVideoDecoder', feature)
         disabled = next(x for x in argv if x.startswith('--disable-features='))
         for value in ('SystemOff', 'OwnerOff', 'OnBeginFrameThrottleVideo'):
             self.assertIn(value, disabled)
