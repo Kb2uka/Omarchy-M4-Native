@@ -207,6 +207,53 @@ class ImageTests(unittest.TestCase):
                 package.assemble(self.package, readiness, output, local_only=True)
         self.assertFalse(output.exists())
 
+    def test_executable_image_mode_apply_check_and_repair(self):
+        name = 'usr/lib/fixture-daemon'
+        data = b'qualified executable'
+        self.manifest['file_metadata'][name] = dict(sha256=digest(data), size=len(data), mode=0o755)
+        self.manifest['files']['/' + name] = digest(data)
+        put(self.package / 'root' / name, data)
+        self.write_manifest()
+        self.configure()
+        target = self.image / name
+        self.assertEqual(target.read_bytes(), data)
+        self.assertEqual(target.stat().st_mode & 0o777, 0o755)
+        self.assertEqual(self.configure(apply=False)['changed_files'], [])
+        target.chmod(0o644)
+        with self.assertRaisesRegex(ValueError, 'differs'):
+            self.configure(apply=False)
+        self.assertEqual(self.configure()['changed_files'], [name])
+        self.assertEqual(target.stat().st_mode & 0o777, 0o755)
+
+    def test_abi_symlink_target_must_match_before_image_write(self):
+        name = 'usr/lib/libasound.so.2'
+        link = self.image / name
+        self.manifest['abi_files'][name] = dict(symlink='libasound.so.2.0.0')
+        self.write_manifest()
+        link.symlink_to('libasound.so.wrong')
+        with self.assertRaisesRegex(ValueError, 'ABI link mismatch'):
+            self.configure()
+        self.assert_no_install()
+        link.unlink()
+        link.symlink_to('libasound.so.2.0.0')
+        put(self.image / 'usr/lib/libasound.so.2.0.0', b'fixture library')
+        self.configure()
+        self.assertEqual(self.configure(apply=False)['changed_files'], [])
+
+    def test_assembly_repo_source_uses_declared_source_not_input_tree(self):
+        repo, readiness, output, names, spec, binary = self.assembly_inputs()
+        target, source = 'etc/fixture-policy.conf', 'policy/fixture.conf'
+        data = b'repository policy'
+        put(repo / 'audio/j713' / source, data)
+        put(self.package / source, b'foreign input policy')
+        spec['files'][target] = dict(source=source, sha256=digest(data), size=len(data), mode=0o644)
+        put(repo / 'audio/j713/qualified.json', json.dumps(spec).encode())
+        with mock.patch.object(package, 'REPO', repo):
+            package.assemble(self.package, readiness, output, local_only=True)
+        self.assertEqual((output / 'root' / target).read_bytes(), data)
+        manifest = json.loads((output / 'manifest.json').read_text())
+        self.assertEqual(manifest['files']['/' + target], digest(data))
+
     def test_check_refuses_missing_without_write(self):
         with self.assertRaisesRegex(ValueError, 'differs'):
             self.configure(apply=False)

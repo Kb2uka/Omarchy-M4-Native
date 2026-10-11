@@ -1,6 +1,7 @@
 # Third-party notices and provenance
 
-Original project contributions are credited to **KB2UKA**. This notice
+Original project contributions are credited to **studioxradio aka kb2uka**.
+Existing file-level KB2UKA notices are preserved. This notice
 preserves upstream attribution separately; it does not imply endorsement.
 
 ## Linux and Asahi device trees
@@ -101,3 +102,49 @@ respective licenses apply if you obtain or redistribute them.
 
 The full license documents under `LICENSES/` were obtained from the
 [SPDX license-list-data project](https://github.com/spdx/license-list-data/tree/main/text).
+
+## Gravity and Asahi installer
+
+The J713 recovery/radio and SSD-root patches target the
+[Gravity Linux installer](https://github.com/GravityLinux/installer), based on
+the Asahi installer. The recorded base is
+`6420623289fe7544cb8589b658355e57f0290fcc`. Its MIT license retains
+`Copyright (c) 2021 The Asahi Linux contributors`; the exact notice is included
+in [LICENSES/Gravity-installer-MIT.txt](LICENSES/Gravity-installer-MIT.txt).
+Gravity's M4 adaptation and the Asahi foundation are upstream work, not original
+work of this project. Preserve additional notices in the actual inputs used
+when assembling an installer.
+
+Source: [pinned installer license](https://github.com/GravityLinux/installer/blob/6420623289fe7544cb8589b658355e57f0290fcc/LICENSE).
+
+## Radio, input and Omarchy additions
+
+The radio patch changes Broadcom `fwil_types.h` (Copyright (c) 2012 Broadcom
+Corporation) and `pcie.c` (Copyright (c) 2014 Broadcom Corporation). Both source
+headers specify ISC. The DockChannel HID source carries the Asahi contributor
+notice and `GPL-2.0 OR MIT`. These terms apply to the corresponding patched
+files, not a blanket MIT license over the kernel.
+
+Pinned source: [fwil_types.h](https://github.com/AsahiLinux/linux/blob/77cb8f24c2381a8abb7272d7bbdec548d6426a8a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil_types.h),
+[pcie.c](https://github.com/AsahiLinux/linux/blob/77cb8f24c2381a8abb7272d7bbdec548d6426a8a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c),
+[DockChannel HID](https://github.com/AsahiLinux/linux/blob/77cb8f24c2381a8abb7272d7bbdec548d6426a8a/drivers/hid/dockchannel-hid/dockchannel-hid.c).
+
+The Omarchy ARM Node patch and retained `mise-work` fixture derive from Omarchy,
+whose MIT notice credits David Heinemeier Hansson. That full notice remains in
+[tests/fixtures/omarchy-LICENSE](tests/fixtures/omarchy-LICENSE). Related
+[omarchy-mac](https://github.com/omacom/omarchy-mac) integration is also credited
+where used; it is not represented as this project's original implementation.
+
+## Additional runtime components
+
+Native runtime candidates also use Gravity/Asahi kernel and decoder work, Mesa,
+PipeWire, WirePlumber, ALSA, speakersafetyd, libva and mpv. Their complete source,
+modifications, notices and binary provenance must accompany the corresponding
+release as required by their licenses. Listing a dependency here does not mean
+its complete source or binaries are already included in this checkout. Preserve
+every upstream file-level notice when those components are joined.
+
+The measured speaker FIR assets have no established redistribution license.
+No project credit or source license grants rights to Apple firmware, macOS,
+Widevine or separately obtained assets. See the
+[experimental release boundary](docs/experimental-release.md).
