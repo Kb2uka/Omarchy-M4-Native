@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: MIT
 """Invoke actual Lua policy and retained upstream hooks without a live session."""
 import hashlib
-import json
 import os
 from pathlib import Path
 import subprocess
@@ -16,16 +15,15 @@ FIXTURE = ROOT / 'tests/fixtures/wireplumber-0.5.18'
 
 class DefaultPolicyTests(unittest.TestCase):
     def test_component_required_and_loads_shipped_hook(self):
-        config = json.loads(CONF.read_text())
-        component, = config['wireplumber.components']
-        self.assertEqual(component, {
-            'name': 'default-nodes/j713-protected.lua', 'type': 'script/lua',
-            'provides': 'hooks.default-nodes.j713-protected',
-            'requires': ['policy.default-nodes'],
-        })
-        self.assertEqual(config['wireplumber.profiles'], {
-            'main': {'hooks.default-nodes.j713-protected': 'required'},
-        })
+        # This guards the source contract only. The separate integration check
+        # loads this fragment with WirePlumber's real component resolver.
+        config = CONF.read_text()
+        self.assertIn('name = default-nodes/j713-protected.lua', config)
+        self.assertIn('type = script/lua', config)
+        self.assertIn('provides = hooks.default-nodes.j713-protected', config)
+        self.assertIn('requires = [ policy.default-nodes ]', config)
+        self.assertIn('hooks.default-nodes.j713-protected = required', config)
+        self.assertNotIn('"policy.default-nodes"', config)
         self.assertTrue(SCRIPT.is_file())
 
     def test_upstream_sources_unchanged(self):

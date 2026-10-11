@@ -38,6 +38,14 @@ defaults are unchanged. The existing protection-readiness gate and raw-node
 permission hiding remain necessary; this default policy is not an access-control
 or speaker-protection replacement.
 
+The component fragment uses native SPA-JSON assignment syntax and the unquoted
+dependency `requires = [ policy.default-nodes ]`, matching the installed
+WirePlumber 0.5.18 configuration. The initial JSON-form candidate passed the Lua
+fixture but failed native component loading: the resolver treated the quote
+marks in `["policy.default-nodes"]` as part of the feature name and exited with
+CONFIG status78. `policy.default-nodes` itself is a real stock virtual component.
+The Lua algorithm and its event ordering did not change in this correction.
+
 `qualified.json` pins both source files. The assembler includes them together in
 a new 29-file integration candidate; all 27 previous payload hashes and modes,
 module notes, ABI inputs, service links and protection settings remain unchanged.
@@ -64,6 +72,8 @@ LUA=/path/to/lua python3 -m unittest discover -s tests -p 'test_j713_audio_defau
 python3 tests/j713_audio_default_mutants.py --lua /path/to/lua
 python3 -m unittest discover -s tests -p 'test_j713_audio_package_join.py' -v
 python3 tests/j713_audio_package_join_mutants.py
+python3 tests/check_j713_audio_config_load.py --runtime-root COPIED_RUNTIME \
+  --qemu /usr/bin/qemu-aarch64 --output NEW_PRIVATE_TEST_DIRECTORY
 ```
 
 The fixture executes unchanged WirePlumber 0.5.18 collection, selected/stored
@@ -72,6 +82,16 @@ route availability are substituted; no PCM is opened. It covers clean owners,
 existing choices/history, external ranking, unavailable preferences, absent
 filters/ports/routes, legacy raw choices and unrelated names/categories. The
 baseline without the new hook fails the clean-owner and raw-fallback assertions.
+
+The separate configuration integration check runs actual WirePlumber 0.5.18,
+its stock configuration and script engine against a private PipeWire socket.
+Supply the installed runtime layout under `usr/`, including its binaries,
+libraries, modules and data; omit `--qemu` on a matching native architecture.
+Run only on a leased fleet host in an isolated container. Hardware discovery is
+disabled. The quoted-dependency control must reproduce exit78, while the shipped
+fragment must keep the real manager running and register the real hook. This
+checks configuration resolution and hook loading; the separate Lua scenarios
+check selection policy, and native testing still checks actual devices/defaults.
 
 Actual WirePlumber component loading and a controlled fresh-selection check on
 the Air are still required before claiming a native durable fix. The current

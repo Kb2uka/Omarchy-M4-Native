@@ -53,8 +53,8 @@
       "license": "MIT",
       "mode": 420,
       "origin": "original-source-policy",
-      "sha256": "df15ec5d79de4a2935d2a7a03c341ad64582d09967d994a6667a9dfe7ec992c0",
-      "size": 323,
+      "sha256": "bbc788c9186b3b82d68fa9f28f902b86e90df00cef4e542a13a128ff9a2a5abf",
+      "size": 286,
       "source": "policy/etc/wireplumber/wireplumber.conf.d/82-j713-protected-default.conf"
     },
     "usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/apple-admac.ko": {
@@ -283,5 +283,5 @@
   "schema": 1,
   "service": "speakersafetyd-j713.service",
   "soc": "apple,t8132",
-  "source_revision": "2026-10-10 qualified transport and daemon v4; 2026-10-11 protected-default integration candidate"
+  "source_revision": "2026-10-10 qualified transport and daemon v4; 2026-10-11 protected-default SPA-JSON integration candidate"
 }
