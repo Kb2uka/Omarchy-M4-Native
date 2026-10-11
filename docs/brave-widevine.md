@@ -104,3 +104,71 @@ python3 -m unittest discover -s tests -p 'test_setup_brave_widevine.py' -v
 ```
 
 Development tests for this repository run on the shared remote test hosts.
+
+## Consented first-owner bootstrap
+
+`bootstrap-brave-widevine.py` is an optional owner-side entry for an installer that
+has **already obtained that owner's choice**. Brave describes Widevine as disabled
+by default and explains that allowing it accepts Google's terms; see
+[Brave's DRM explanation](https://support.brave.app/hc/en-us/articles/360023851591-How-do-I-view-DRM-protected-content).
+A future public image must not seed this request for every owner without that
+choice. The private requested install may record the owner's prior authorization.
+No component binary is bundled, and this does not promise all streaming services
+or hardware decoding of protected content.
+
+Proposed installed paths (both regular root-owned files, mode0644):
+
+- `/usr/lib/omarchy/bootstrap-brave-widevine.py`
+- `/usr/lib/omarchy/setup-brave-widevine.py`
+
+Call as the desktop owner, before the browser launcher execs the actual browser:
+
+```sh
+/usr/bin/python3 /usr/lib/omarchy/bootstrap-brave-widevine.py --profile Brave-Browser
+```
+
+The caller must keep launching Brave on a nonzero bootstrap result. It must skip
+bootstrap for help/version queries and custom `--user-data-dir` selections. The
+separate supported `Brave-Browser-M4` name has its own request. The helper never
+stops or starts a browser; closure is checked by the setup helper. A waiting Python
+launcher named `brave` is not the Brave binary when its readable executable proves
+Python. An unreadable Brave candidate still refuses.
+
+For the standard profile, the explicit pending request is
+`~/.config/omarchy/pending/widevine-Brave-Browser.json`, containing:
+
+```json
+{"schema":1,"profile":"Brave-Browser","consent":"owner-requested"}
+```
+
+For the M4 profile, use `widevine-Brave-Browser-M4.json` with the matching profile
+value. Keep the marker outside the browser profile. Its directories and file must
+be real owner-controlled paths, without group/world write permissions. No marker
+means no setup, no network and no new state for an existing owner. An invalid
+marker refuses; it never implies consent. The fixed marker location does not
+follow `XDG_CONFIG_HOME`; selected profile resolution still follows the setup
+helper's documented rules.
+
+The bootstrap acquires a nonblocking owner lock shared by both profile requests,
+then calls the setup helper with `--initialize --timeout 15`. The direct child has
+a 20-second outer lifetime bound. Failure, offline status, another setup, or a live
+Brave leaves the request pending and returns 1 with a retry hint. There is no
+background retry or network-connectivity service. On success only the exact,
+unchanged request is removed. Later launches do not invoke the download helper.
+The private lock file remains for future requests; it contains no credentials.
+
+For an offline private image, the existing `prepare-image.py` boundary already
+requires a loop-backed, owner-free pending image. That is the appropriate place to
+install the two helper files and seed an explicitly authorized request under
+`/etc/skel/.config/omarchy/pending/`, so account creation copies it to the actual
+owner. The recorded `omarchy-provision-user` source leaves shipped configurations
+to skel and performs user setup before default-browser finalization. This change
+adds the callable entry and tests only: image seeding and launcher wiring remain
+separate integration work. Config resync must not recreate a consumed consent
+request or override an owner's later Widevine choice.
+
+Run both focused suites on a remote development test host:
+
+```sh
+python3 -m unittest discover -s tests -p 'test_*brave_widevine.py' -v
+```

@@ -108,7 +108,7 @@ def browser_closed(profile, proc=Path('/proc')):
                 pass
             try:
                 executable = Path(str((process / 'exe').readlink()).removesuffix(' (deleted)'))
-                candidate |= executable.name in names
+                candidate = executable.name in names
             except PermissionError as error:
                 require(not candidate, 'Cannot verify Brave process is closed: ' + process.name)
                 # Normal non-dumpable owner services (including systemd --user) deny exe reads.

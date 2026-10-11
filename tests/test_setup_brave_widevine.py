@@ -10,6 +10,7 @@ from pathlib import Path
 import signal
 import stat
 import struct
+import subprocess
 import tempfile
 import time
 import unittest
@@ -267,6 +268,13 @@ class WidevineTests(unittest.TestCase):
             self.invoke(error='Close all Brave processes')
         self.assertFalse(self.component.exists())
 
+    def test_readable_python_brave_launcher_is_not_a_running_browser(self):
+        self.process('/usr/bin/python3.14')
+        # A shebang launcher can retain comm=brave until it execs the real browser.
+        (self.proc / '1234/cmdline').write_bytes(b'/usr/bin/python3\0/usr/local/bin/brave\0')
+        self.invoke()
+        self.assertTrue(self.component.is_dir())
+
     def test_unreadable_unrelated_systemd_exe_does_not_block_cli(self):
         self.process('/usr/lib/systemd/systemd')
         (self.proc / '1234/status').write_text('Name:\tsystemd\nUid:\t' +
@@ -403,6 +411,42 @@ class WidevineTests(unittest.TestCase):
                 w.main(['--profile', 'Brave-Browser', '--timeout', value])
             self.assertEqual(caught.exception.code, 2)
         self.assertFalse(self.component.exists())
+
+    def test_bootstrap_dispatches_real_setup_offline_then_success_then_no_work(self):
+        spec = importlib.util.spec_from_file_location('bootstrap_entry', Path(__file__).resolve().parents[1] /
+                                                     'tools/bootstrap-brave-widevine.py')
+        bootstrap = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bootstrap)
+        profile = self.fresh()
+        marker = self.home / '.config/omarchy/pending/widevine-Brave-Browser.json'
+        marker.parent.mkdir(parents=True)
+        for directory in (marker.parent, *marker.parents):
+            directory.chmod(0o700)
+            if directory == self.home:
+                break
+        marker.write_text(json.dumps({'schema': 1, 'profile': 'Brave-Browser', 'consent': 'owner-requested'}))
+        marker.chmod(0o600)
+        raw = marker.read_bytes()
+        def actual_setup(command, **kwargs):
+            try:
+                w.main(command[2:])
+                return subprocess.CompletedProcess(command, 0)
+            except SystemExit as error:
+                return subprocess.CompletedProcess(command, error.code)
+        with patch.object(bootstrap.subprocess, 'run', side_effect=actual_setup) as child:
+            self.opener.open.side_effect = OSError('offline fixture')
+            with redirect_stderr(io.StringIO()), redirect_stdout(io.StringIO()):
+                self.assertEqual(bootstrap.main(['--profile', 'Brave-Browser']), 1)
+            self.assertEqual(marker.read_bytes(), raw)
+            self.assertFalse(profile.exists())
+            self.opener.open.side_effect = lambda *a, **kw: Response(self.payload)
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(bootstrap.main(['--profile', 'Brave-Browser']), 0)
+                self.assertEqual(bootstrap.main(['--profile', 'Brave-Browser']), 0)
+            self.assertEqual(child.call_count, 2)
+        self.assertFalse(marker.exists())
+        self.assertTrue(json.loads((profile / 'Local State').read_text())['brave']['widevine_opted_in'])
+        self.assertEqual(self.opener.open.call_count, 2)
 
     def test_root_and_wrong_platform_refused(self):
         with patch.object(w.os, 'getuid', return_value=0):
