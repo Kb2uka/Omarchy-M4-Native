@@ -141,8 +141,12 @@ class ImageTests(unittest.TestCase):
         }
         binary = 'usr/lib/modules/exact/fixture.ko'
         put(self.package / binary, b'qualified module input')
+        executable = 'usr/lib/fixture-daemon'
+        put(self.package / executable, b'qualified executable input')
         spec = dict(files={binary: dict(sha256=digest(b'qualified module input'),
-                                       size=len(b'qualified module input'), mode=0o644)},
+                                       size=len(b'qualified module input'), mode=0o644),
+                           executable: dict(sha256=digest(b'qualified executable input'),
+                                            size=len(b'qualified executable input'), mode=0o755)},
                     readiness_inputs={}, module_artifacts={})
         for name in names:
             data = ('qualified ' + name).encode()
@@ -169,6 +173,20 @@ class ImageTests(unittest.TestCase):
             self.assertEqual((output / 'root' / installed).read_bytes(), ('qualified ' + name).encode())
         self.assertEqual((self.package / binary).read_bytes(), b'swapped after verification')
         self.assertEqual((output / 'root' / binary).read_bytes(), b'qualified module input')
+        executable = 'usr/lib/fixture-daemon'
+        self.assertEqual((self.package / executable).read_bytes(), b'swapped after verification')
+        self.assertEqual((output / 'root' / executable).read_bytes(), b'qualified executable input')
+        manifest = json.loads((output / 'manifest.json').read_text())
+        for name, entry in spec['files'].items():
+            self.assertEqual(manifest['file_metadata'][name], entry)
+            self.assertEqual(manifest['files']['/' + name], entry['sha256'])
+            self.assertEqual((output / 'root' / name).stat().st_mode & 0o777, entry['mode'])
+        self.assertEqual(manifest['symlinks'], {
+            'etc/systemd/system/multi-user.target.wants/m4-j713-audio-register.service':
+                '/usr/lib/systemd/system/m4-j713-audio-register.service',
+            'etc/systemd/system/multi-user.target.wants/speakersafetyd-j713.service':
+                '/usr/lib/systemd/system/speakersafetyd-j713.service',
+        })
 
     def test_assembly_requires_each_readiness_pin(self):
         repo, readiness, output, names, spec, binary = self.assembly_inputs()
@@ -198,10 +216,12 @@ class ImageTests(unittest.TestCase):
         for values in (dict(board='apple,j413'), dict(kernel_release='other')):
             with self.subTest(values=values), self.assertRaises(ValueError):
                 self.configure(**values)
-        put(self.image / 'usr/lib/libc.so.6', b'new')
-        with self.assertRaisesRegex(ValueError, 'Hash/size'):
-            self.configure()
-        self.assert_no_install()
+        for changed in (b'new', b'y'):
+            with self.subTest(changed=changed):
+                put(self.image / 'usr/lib/libc.so.6', changed)
+                with self.assertRaisesRegex(ValueError, 'Hash/size'):
+                    self.configure()
+                self.assert_no_install()
 
     def test_qualified_board_dtb_both_compat_and_hash(self):
         self.dtb.write_bytes(tree(b'apple,j413\0apple,t8132\0'))
@@ -217,10 +237,12 @@ class ImageTests(unittest.TestCase):
     def test_package_pin_and_payload_corruption(self):
         with self.assertRaisesRegex(ValueError, 'pin'):
             self.configure(package_sha256='0' * 64)
-        put(self.package / 'root/usr/lib/omarchy/example', b'changed')
-        with self.assertRaisesRegex(ValueError, 'Hash/size'):
-            self.configure()
-        self.assert_no_install()
+        for changed in (b'changed', b'qualifieX'):
+            with self.subTest(changed=changed):
+                put(self.package / 'root/usr/lib/omarchy/example', changed)
+                with self.assertRaisesRegex(ValueError, 'Hash/size'):
+                    self.configure()
+                self.assert_no_install()
 
     def test_custom_file_refuses_before_any_write(self):
         put(self.image / 'usr/lib/systemd/system/example.service', b'owner customization')

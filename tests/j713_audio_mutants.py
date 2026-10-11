@@ -32,6 +32,10 @@ cases = [
     ('tools/package-j713-audio.py', "set(readiness_sources.values()) == set(spec['readiness_inputs'])", "set(readiness_sources.values()) <= set(spec['readiness_inputs'])", 'test_assembly_requires_each_readiness_pin'),
     ('tests/test_j713_audio_installer.py', "target = (self.package / 'root/usr/lib/omarchy/example').resolve()", "target = self.package / 'root/usr/lib/omarchy/example'", 'test_apply_consumes_verified_payload_snapshot'),
 
+    ('tools/m4_audio_package.py', 'len(data) == entry["size"] and digest(data) == entry["sha256"]', 'len(data) == entry["size"]', 'test_package_pin_and_payload_corruption'),
+    ('tools/package-j713-audio.py', "payload[name] = (verified(origin, entry.get('source', name), entry), entry['mode'])", "payload[name] = (verified(origin, entry.get('source', name), entry), 0o644)", 'test_assembly_consumes_verified_readiness_snapshot'),
+    ('tools/package-j713-audio.py', "('m4-j713-audio-register.service', 'speakersafetyd-j713.service')", "('m4-j713-audio-register.service',)", 'test_assembly_consumes_verified_readiness_snapshot'),
+
 ]
 for number, (filename, before, after, test) in enumerate(cases):
     path = root / filename
