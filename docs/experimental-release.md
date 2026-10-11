@@ -1,6 +1,7 @@
 # Experimental release qualification
 
 This is a private, pre-release integration by **studioxradio aka kb2uka**.
+The first candidate is **v0.1.0-alpha.1**, based on **Omarchy 4.0.4**.
 It is **experimental on M4 Air** and **very experimental on all other M4
 machines**. Only the 13-inch M4 Air, Mac16,12 / J713 / T8132, has the tested
 installer profile. No result here qualifies M4 Pro, M4 Max or another board.

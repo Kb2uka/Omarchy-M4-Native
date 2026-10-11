@@ -16,6 +16,8 @@ contributors. Their authorship and licenses remain theirs.
 
 ## Private experimental installer preparation
 
+First candidate: **v0.1.0-alpha.1**, based on **Omarchy 4.0.4**.
+
 This repository is private while the first experimental installer is prepared.
 The maintainer will perform a fresh installation on the test Air **before any
 public release**. That fresh-install qualification has not happened yet. The
