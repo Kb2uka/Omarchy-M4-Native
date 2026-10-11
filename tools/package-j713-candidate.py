@@ -67,7 +67,7 @@ def finalize(baseline, kit, kit_pin, image, approval, approval_pin, checks, chec
     mount = subprocess.run(['findmnt', '--noheadings', '--source', str(image.resolve())],
                            capture_output=True, text=True)
     require(mount.returncode == 1, 'Image mount state could not be excluded')
-    loops = subprocess.check_output(['losetup', '--json', '--associated', str(image.resolve())], text=True)
+    loops = subprocess.check_output(['losetup', '--json', '--list', '--associated', str(image.resolve())], text=True)
     require(not read_json(loops).get('loopdevices'), 'Image is still attached to a loop device')
     definition = pinned_json(kit / 'manifest.json', kit_pin)
     require(definition['release_version'] == VERSION and definition['private_build'] == 2 and

@@ -6,12 +6,14 @@ import os
 from pathlib import Path
 import stat
 import struct
+import subprocess
 import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest import mock
 
+REAL_RUN = subprocess.run
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
 from m4_audio_package import digest
@@ -544,6 +546,16 @@ class FinalizerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'still attached'):
                 self.package()
         self.assertFalse(self.final.exists())
+
+    def test_unattached_image_with_actual_losetup_output(self):
+        self.package_setup()
+        def commands(args, **kwargs):
+            if args[0] == 'losetup':
+                return REAL_RUN(args, check=True, capture_output=True, text=True).stdout
+            return self.source_bytes(args)
+        with mock.patch.object(finalizer.subprocess, 'check_output', side_effect=commands):
+            result = self.package()
+        self.assertEqual(result['private_build'], 2)
 
 
 if __name__ == '__main__':
