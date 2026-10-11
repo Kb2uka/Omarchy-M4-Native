@@ -1,0 +1,158 @@
+--- a/drivers/hid/dockchannel-hid/dockchannel-hid.c
++++ b/drivers/hid/dockchannel-hid/dockchannel-hid.c
+@@ -28,6 +28,7 @@
+ 
+ #define COMMAND_TIMEOUT_MS 1000
+ #define START_TIMEOUT_MS 2000
++#define J713_START_ATTEMPTS 3U
+ 
+ #define MAX_INTERFACES 16
+ 
+@@ -164,6 +165,13 @@
+ 	bool starting;
+ 	bool open;
+ 	struct completion ready;
++	struct mutex start_mutex;
++
++	/* Retained for the interface lifetime, including failed startup attempts. */
++	void *startup_firmware;
++	size_t startup_firmware_size;
++	void *startup_dma;
++	dma_addr_t startup_dma_addr;
+ 
+ 	void *hid_desc;
+ 	size_t hid_desc_len;
+@@ -237,6 +245,7 @@
+ 	init_completion(&iface->out_complete);
+ 	init_completion(&iface->ready);
+ 	mutex_init(&iface->out_mutex);
++	mutex_init(&iface->start_mutex);
+ 	iface->wq = alloc_ordered_workqueue("dchid-%s", WQ_MEM_RECLAIM, iface->name);
+ 	if (!iface->wq)
+ 		return NULL;
+@@ -409,6 +418,13 @@
+ 	return ret;
+ }
+ 
++static bool dchid_start_retry_enabled(struct dchid_iface *iface)
++{
++	return m4_power_v2 && of_machine_is_compatible("apple,j713") &&
++	       of_machine_is_compatible("apple,t8132") &&
++	       !strcmp(iface->name, "multi-touch");
++}
++
+ static int dchid_send_firmware(struct dchid_iface *iface, void *firmware, size_t size)
+ {
+ 	struct {
+@@ -425,15 +441,25 @@
+ 		.iface = iface->index,
+ 		.size = size,
+ 	};
++	bool retry = dchid_start_retry_enabled(iface);
+ 	dma_addr_t addr;
+-	void *buf = dmam_alloc_coherent(iface->dchid->dev, size, &addr, GFP_KERNEL);
+-
+-	if (IS_ERR_OR_NULL(buf))
+-		return buf ? PTR_ERR(buf) : -ENOMEM;
+-
++	void *buf;
++
++	if (retry && iface->startup_dma) {
++		addr = iface->startup_dma_addr;
++	} else {
++		buf = dmam_alloc_coherent(iface->dchid->dev, size, &addr, GFP_KERNEL);
++		if (IS_ERR_OR_NULL(buf))
++			return buf ? PTR_ERR(buf) : -ENOMEM;
++
++		memcpy(buf, firmware, size);
++		wmb();
++		if (retry) {
++			iface->startup_dma = buf;
++			iface->startup_dma_addr = addr;
++		}
++	}
+ 	msg.addr = addr;
+-	memcpy(buf, firmware, size);
+-	wmb();
+ 
+ 	return dchid_comm_cmd(iface->dchid, &msg, sizeof(msg));
+ }
+@@ -445,6 +471,12 @@
+ 	const struct firmware *fw;
+ 	struct fw_header *hdr;
+ 	u8 *fw_data;
++
++	if (dchid_start_retry_enabled(iface) && iface->startup_firmware) {
++		*firmware = iface->startup_firmware;
++		*size = iface->startup_firmware_size;
++		return 0;
++	}
+ 
+ 	ret = of_property_read_string(iface->of_node, "firmware-name", &fw_name);
+ 	if (ret) {
+@@ -482,6 +514,10 @@
+ 
+ 	*firmware = fw_data;
+ 	*size = hdr->data_length;
++	if (dchid_start_retry_enabled(iface)) {
++		iface->startup_firmware = fw_data;
++		iface->startup_firmware_size = hdr->data_length;
++	}
+ 
+ done:
+ 	release_firmware(fw);
+@@ -589,10 +625,54 @@
+ 		device_remove_file(&hdev->dev, &dev_attr_apple_layout_id);
+ }
+ 
++static int dchid_open_retry(struct dchid_iface *iface)
++{
++	int ret = -ETIMEDOUT;
++	unsigned int attempt;
++
++	/* READY handling must remain independent of this sleeping lock. */
++	mutex_lock(&iface->start_mutex);
++	for (attempt = 0; attempt < J713_START_ATTEMPTS; attempt++) {
++		/* Keep late READY events: the protocol has no attempt identifier. */
++		if (completion_done(&iface->ready)) {
++			ret = 0;
++			break;
++		}
++
++		ret = dchid_start_interface(iface);
++		if (ret < 0)
++			goto done;
++
++		if (wait_for_completion_timeout(&iface->ready,
++						msecs_to_jiffies(START_TIMEOUT_MS))) {
++			ret = 0;
++			break;
++		}
++
++		iface->starting = false;
++		ret = -ETIMEDOUT;
++		dev_warn(iface->dchid->dev, "iface %s READY timed out (attempt %u/%u)\n",
++			 iface->name, attempt + 1, J713_START_ATTEMPTS);
++	}
++
++	/* Also accept READY concurrent with the last wait's timeout. */
++	if (ret == -ETIMEDOUT && completion_done(&iface->ready))
++		ret = 0;
++done:
++	iface->starting = false;
++	if (!ret)
++		iface->open = true;
++	mutex_unlock(&iface->start_mutex);
++	return ret;
++}
++
+ static int dchid_open(struct hid_device *hdev)
+ {
+ 	struct dchid_iface *iface = hdev->driver_data;
+ 	int ret;
++
++	if (dchid_start_retry_enabled(iface))
++		return dchid_open_retry(iface);
+ 
+ 	if (!completion_done(&iface->ready)) {
+ 		ret = dchid_start_interface(iface);
