@@ -60,8 +60,10 @@ class WidevineTests(unittest.TestCase):
         patch.object(w.platform, 'system', return_value='Linux').start()
         patch.object(w.platform, 'machine', return_value='aarch64').start()
         patch.dict(os.environ, {'XDG_CONFIG_HOME': '', 'XDG_DATA_HOME': ''}).start()
+        for key in ('CHROME_CONFIG_HOME', 'CHROME_USER_DATA_DIR'):
+            os.environ.pop(key, None)
         original_closed = w.browser_closed
-        self.closed = patch.object(w, 'browser_closed', side_effect=lambda p: original_closed(p, self.proc)).start()
+        self.closed = patch.object(w, 'browser_closed', side_effect=lambda p, **kw: original_closed(p, self.proc, **kw)).start()
         self.payload = self.archive()
         self.response_url = w.URL
         test = self
@@ -447,6 +449,73 @@ class WidevineTests(unittest.TestCase):
         self.assertFalse(marker.exists())
         self.assertTrue(json.loads((profile / 'Local State').read_text())['brave']['widevine_opted_in'])
         self.assertEqual(self.opener.open.call_count, 2)
+
+    def chromium(self, existing=True):
+        profile = self.home / '.config/chromium'
+        profile.mkdir(mode=0o700)
+        if existing:
+            (profile / 'Local State').write_bytes(b'{"chromium_owner": true, "brave": "unrelated"}\n')
+            (profile / 'Local State').chmod(0o600)
+        return profile
+
+    def test_chromium_registers_shared_cdm_without_brave_preference_or_state_rewrite(self):
+        self.invoke()
+        profile = self.chromium()
+        state = profile / 'Local State'
+        before = state.read_bytes(), state.stat().st_mtime_ns
+        self.invoke('Chromium')
+        self.assertEqual((state.read_bytes(), state.stat().st_mtime_ns), before)
+        marker = profile / 'WidevineCdm/latest-component-updated-widevine-cdm'
+        self.assertEqual(json.loads(marker.read_text()), {'Path': str(self.component)})
+        self.assertEqual(list(profile.glob('Local State.before-*')), [])
+        self.invoke('Chromium')
+        self.assertEqual(self.opener.open.call_count, 1)
+
+    def test_chromium_initialization_and_xdg_profile(self):
+        config = self.home / 'alternate-config'
+        with patch.dict(os.environ, {'XDG_CONFIG_HOME': str(config)}):
+            self.invoke('Chromium', extra=['--initialize'])
+        profile = config / 'chromium'
+        self.assertEqual((profile / 'Local State').read_bytes(), b'{}\n')
+        self.assertTrue((profile / 'WidevineCdm/latest-component-updated-widevine-cdm').exists())
+        self.assertFalse((config / 'BraveSoftware').exists())
+
+    def test_chromium_custom_profile_environment_refuses_before_download(self):
+        for name in ('CHROME_CONFIG_HOME', 'CHROME_USER_DATA_DIR'):
+            with patch.dict(os.environ, {name: str(self.home / 'custom')}):
+                self.invoke('Chromium', extra=['--initialize'], error='requires manual registration')
+        self.opener.open.assert_not_called()
+        self.assertFalse((self.home / '.config/chromium').exists())
+
+    def test_chromium_process_refusal_is_scoped_and_catches_unreadable_flattened_child(self):
+        self.chromium()
+        self.process('/opt/brave-bin/brave')
+        self.invoke('Chromium')
+        executable = self.proc / '1234/exe'
+        executable.unlink()
+        executable.symlink_to('/usr/lib/chromium/chromium')
+        (self.proc / '1234/status').write_text('Name:\tchromium\nUid:\t' +
+                                             '\t'.join([str(os.getuid())] * 4) + '\n')
+        (self.proc / '1234/cmdline').write_bytes(b'/usr/lib/chromium/chromium --type=renderer\0')
+        self.invoke('Chromium', error='Close all Chromium processes')
+        original = Path.readlink
+        def readlink(path):
+            if path == executable:
+                raise PermissionError('non-dumpable Chromium')
+            return original(path)
+        with patch.object(Path, 'readlink', readlink):
+            self.invoke('Chromium', error='Cannot verify Chromium process')
+        self.assertEqual(self.opener.open.call_count, 1)
+
+    def test_chromium_existing_conflicting_registration_is_preserved(self):
+        profile = self.chromium()
+        marker = profile / 'WidevineCdm/latest-component-updated-widevine-cdm'
+        marker.parent.mkdir(mode=0o700)
+        marker.write_text('{"Path":"/existing/cdm"}')
+        marker.chmod(0o600)
+        self.invoke('Chromium', error='Another Widevine registration')
+        self.assertEqual(marker.read_text(), '{"Path":"/existing/cdm"}')
+        self.opener.open.assert_not_called()
 
     def test_root_and_wrong_platform_refused(self):
         with patch.object(w.os, 'getuid', return_value=0):

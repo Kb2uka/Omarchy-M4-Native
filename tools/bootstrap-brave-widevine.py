@@ -56,13 +56,13 @@ def bootstrap(profile):
 
 def main(arguments=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--profile', required=True, choices=('Brave-Browser', 'Brave-Browser-M4'))
+    parser.add_argument('--profile', required=True, choices=setup.PROFILES)
     args = parser.parse_args(arguments)
     try:
         return bootstrap(args.profile)
     except (OSError, ValueError, subprocess.TimeoutExpired) as error:
         print('Widevine setup remains pending: ' + str(error) +
-              '. Continue opening Brave; retry on a later closed-browser launch. '
+              '. Continue opening the browser; retry on a later closed-browser launch. '
               'For details, run setup-brave-widevine.py --profile ' + args.profile +
               ' --initialize --timeout 15 while Brave is closed.', file=sys.stderr)
         return 1

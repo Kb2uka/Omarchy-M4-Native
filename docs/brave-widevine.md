@@ -172,3 +172,51 @@ Run both focused suites on a remote development test host:
 ```sh
 python3 -m unittest discover -s tests -p 'test_*brave_widevine.py' -v
 ```
+
+## Chromium on the shipped ARM64 image
+
+The shared helper also supports the shipped Chromium153 build:
+
+```sh
+python3 tools/setup-brave-widevine.py --profile Chromium
+```
+
+For an explicitly authorized first profile, add `--initialize --timeout 15`.
+The compatibility filenames remain `setup-brave-widevine.py` and
+`bootstrap-brave-widevine.py`; neither means Chromium uses Brave's profile or
+preference scheme. Chromium's selected directory is `$XDG_CONFIG_HOME/chromium`,
+defaulting to `~/.config/chromium`. A custom `CHROME_CONFIG_HOME` or
+`CHROME_USER_DATA_DIR` environment is refused rather than registering the wrong
+profile. Custom command-line user-data directories still require manual setup.
+
+Chromium reads the same `WidevineCdm/latest-component-updated-widevine-cdm`
+`{"Path":"..."}` hint. The setup helper registers the shared verified component
+but does **not** add `brave.widevine_opted_in` or rewrite existing Chromium
+`Local State`, preferences, flags or protected-content choices. For an absent or
+empty initialized Chromium profile it creates only minimal `{}` Local State and
+the component hint. A conflicting existing component registration is preserved
+and refused. Same-owner Chromium processes and its SingletonLock must be absent;
+a live Brave process alone does not prevent Chromium registration.
+
+The bootstrap command accepts `--profile Chromium` and uses the independent
+`~/.config/omarchy/pending/widevine-Chromium.json` prior-consent request:
+
+```json
+{"schema":1,"profile":"Chromium","consent":"owner-requested"}
+```
+
+The same consent, failure, concurrency and retry rules apply. Both browsers share
+one verified component cache; completing the other browser's registration does
+not download it again. There is no generic Chrome or Firefox support claim:
+neither is installed in the audited image. Other Chromium versions/builds require
+checking that library CDMs and Widevine component registration are enabled.
+
+This contract follows Chromium153's
+[Linux hint-file implementation](https://github.com/chromium/chromium/blob/153.0.8010.36/chrome/common/media/component_widevine_cdm_hint_file_linux.cc),
+[profile-relative path](https://github.com/chromium/chromium/blob/153.0.8010.36/chrome/common/chrome_paths.cc),
+[Linux profile selection](https://github.com/chromium/chromium/blob/153.0.8010.36/chrome/common/chrome_paths_linux.cc)
+and [CDM registration](https://github.com/chromium/chromium/blob/153.0.8010.36/chrome/common/media/cdm_registration.cc).
+Linux resolves the CDM before its zygote sandbox starts, so a later registration
+requires a normal full browser restart. A valid marker, source support or library
+file alone is not proof of EME negotiation, licensed playback or hardware decoding;
+those require separate native verification. No DRM policy is bypassed.

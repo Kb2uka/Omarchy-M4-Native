@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 studioxradio aka kb2uka
-"""Explicit, owner-side installation of the pinned Linux ARM64 Widevine component."""
+"""Explicit owner-side Widevine setup for shipped Linux ARM64 Brave and Chromium."""
 import argparse
 import hashlib
 import io
@@ -18,6 +18,7 @@ import time
 import urllib.request
 import zipfile
 
+PROFILES = ('Brave-Browser', 'Brave-Browser-M4', 'Chromium')
 VERSION = '4.10.3057.0'
 URL = ('https://dl.google.com/release2/chrome_component/'
        'bar3g6bc54wcbgowdtlox2l3sa_4.10.3057.0/'
@@ -85,11 +86,12 @@ def json_value(data):
     return json.loads(data, object_pairs_hook=unique_object)
 
 
-def browser_closed(profile, proc=Path('/proc')):
+def browser_closed(profile, proc=Path('/proc'), browser='Brave'):
     lock = profile / 'SingletonLock'
     require(not lock.exists() and not lock.is_symlink(),
-            'Close all Brave windows first; the selected profile still has SingletonLock.')
-    names = ('brave', 'brave-browser', 'brave-browser-stable', 'brave_crashpad_handler')
+            'Close all ' + browser + ' windows first; the selected profile still has SingletonLock.')
+    names = (('chromium', 'chrome', 'chrome_crashpad_handler') if browser == 'Chromium' else
+             ('brave', 'brave-browser', 'brave-browser-stable', 'brave_crashpad_handler'))
     for process in proc.iterdir():
         if not process.name.isdecimal():
             continue
@@ -100,7 +102,7 @@ def browser_closed(profile, proc=Path('/proc')):
                 continue
             name = next((line.split(':', 1)[1].strip() for line in status
                          if line.startswith('Name:')), '')
-            candidate = name.startswith('brave')
+            candidate = name.startswith('chrom' if browser == 'Chromium' else 'brave')
             try:
                 command = (process / 'cmdline').read_bytes().replace(b'\0', b' ').split()
                 candidate |= bool(command and Path(os.fsdecode(command[0])).name in names)
@@ -110,10 +112,10 @@ def browser_closed(profile, proc=Path('/proc')):
                 executable = Path(str((process / 'exe').readlink()).removesuffix(' (deleted)'))
                 candidate = executable.name in names
             except PermissionError as error:
-                require(not candidate, 'Cannot verify Brave process is closed: ' + process.name)
+                require(not candidate, 'Cannot verify ' + browser + ' process is closed: ' + process.name)
                 # Normal non-dumpable owner services (including systemd --user) deny exe reads.
                 continue
-            require(not candidate, 'Close all Brave processes first; this tool never stops browsers.')
+            require(not candidate, 'Close all ' + browser + ' processes first; this tool never stops browsers.')
         except (FileNotFoundError, ProcessLookupError):
             continue
         except PermissionError as error:
@@ -238,7 +240,7 @@ def unchanged(profile, state_path, original, home):
         pristine(profile, home)
     else:
         require(read_file(state_path, home) == original,
-                'Preferences changed during download or setup; close Brave and retry')
+                'Preferences changed during download or setup; close the browser and retry')
 
 
 def setup(profile_name, initialize=False, timeout=180):
@@ -250,9 +252,15 @@ def setup(profile_name, initialize=False, timeout=180):
     # The dedicated hardware launcher uses this fixed directory even with XDG_CONFIG_HOME set.
     if profile_name == 'Brave-Browser-M4':
         config = home / '.config'
-    profile = config / 'BraveSoftware' / profile_name
+    browser = 'Chromium' if profile_name == 'Chromium' else 'Brave'
+    if browser == 'Chromium':
+        require(not any(key in os.environ for key in ('CHROME_CONFIG_HOME', 'CHROME_USER_DATA_DIR')),
+                'Custom CHROME_CONFIG_HOME/CHROME_USER_DATA_DIR requires manual registration')
+        profile = config / 'chromium'
+    else:
+        profile = config / 'BraveSoftware' / profile_name
     owned(profile, home, directory=True, missing=initialize)
-    browser_closed(profile)
+    browser_closed(profile, browser=browser)
     state_path = profile / 'Local State'
     if initialize and not state_path.exists() and not state_path.is_symlink():
         pristine(profile, home)
@@ -261,9 +269,12 @@ def setup(profile_name, initialize=False, timeout=180):
     else:
         original = read_file(state_path, home)
         state = json_value(original)
-    require(isinstance(state, dict) and isinstance(state.get('brave', {}), dict), 'Unexpected Local State schema')
-    value = state.get('brave', {}).get('widevine_opted_in', False)
-    require(isinstance(value, bool), 'Unexpected Widevine preference value')
+    require(isinstance(state, dict), 'Unexpected Local State schema')
+    value = True
+    if browser == 'Brave':
+        require(isinstance(state.get('brave', {}), dict), 'Unexpected Local State schema')
+        value = state.get('brave', {}).get('widevine_opted_in', False)
+        require(isinstance(value, bool), 'Unexpected Widevine preference value')
     store = Path(os.environ.get('XDG_DATA_HOME') or home / '.local/share') / 'omarchy/widevine'
     component = store / VERSION
     marker = profile / 'WidevineCdm/latest-component-updated-widevine-cdm'
@@ -276,7 +287,7 @@ def setup(profile_name, initialize=False, timeout=180):
         installed(component, home)
     else:
         files = unpack(download(timeout))
-        browser_closed(profile)
+        browser_closed(profile, browser=browser)
         unchanged(profile, state_path, original, home)
         directories(store, home)
         with tempfile.TemporaryDirectory(prefix='.' + VERSION + '.', dir=store) as temporary:
@@ -290,7 +301,7 @@ def setup(profile_name, initialize=False, timeout=180):
             require(not component.exists() and not component.is_symlink(), 'Component appeared; refusing overwrite')
             staging.rename(component)
         installed(component, home)
-    browser_closed(profile)
+    browser_closed(profile, browser=browser)
     unchanged(profile, state_path, original, home)
     if original is None:
         directories(profile, home)
@@ -301,7 +312,7 @@ def setup(profile_name, initialize=False, timeout=180):
         directories(marker.parent, home)
         atomic(marker, (json.dumps({'Path': str(component)}) + '\n').encode(), home)
     if value is not True:
-        browser_closed(profile)
+        browser_closed(profile, browser=browser)
         state.setdefault('brave', {})['widevine_opted_in'] = True
         with tempfile.NamedTemporaryFile(prefix='Local State.before-widevine-', dir=profile, delete=False) as backup:
             backup.write(original)
@@ -309,12 +320,12 @@ def setup(profile_name, initialize=False, timeout=180):
             os.fsync(backup.fileno())
         atomic(state_path, (json.dumps(state, ensure_ascii=False, indent=2) + '\n').encode(), home,
                previous=original, mode=stat.S_IMODE(state_path.stat().st_mode))
-    print('Widevine ' + VERSION + ' registered for ' + profile_name + '. Start Brave normally.')
+    print('Widevine ' + VERSION + ' registered for ' + profile_name + '. Start ' + browser + ' normally.')
 
 
 def main(arguments=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--profile', required=True, choices=('Brave-Browser', 'Brave-Browser-M4'))
+    parser.add_argument('--profile', required=True, choices=PROFILES)
     parser.add_argument('--initialize', action='store_true',
                         help='Allow an absent or empty selected profile before first launch')
     parser.add_argument('--timeout', type=int, default=180, metavar='SECONDS',

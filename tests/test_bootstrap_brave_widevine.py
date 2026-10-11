@@ -74,7 +74,7 @@ class BootstrapTests(unittest.TestCase):
         self.child.return_value.returncode = 1
         result, error = self.invoke()
         self.assertEqual(result, 1)
-        self.assertIn('Continue opening Brave', error)
+        self.assertIn('Continue opening the browser', error)
         self.assertEqual(self.marker.read_bytes(), raw)
         self.child.return_value.returncode = 0
         self.assertEqual(self.invoke(), (0, ''))
@@ -123,6 +123,18 @@ class BootstrapTests(unittest.TestCase):
         (self.marker.parent / '.widevine-setup.lock').symlink_to(target)
         self.assertEqual(self.invoke()[0], 1)
         self.child.assert_not_called()
+
+    def test_chromium_consent_dispatch_is_separate_from_brave(self):
+        self.seed()
+        brave_marker = self.marker
+        self.marker = self.marker.with_name('widevine-Chromium.json')
+        self.seed(profile='Chromium')
+        self.assertEqual(self.invoke('Chromium'), (0, ''))
+        self.child.assert_called_once_with(
+            [b.sys.executable, str(b.SETUP), '--profile', 'Chromium', '--initialize', '--timeout', '15'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+        self.assertFalse(self.marker.exists())
+        self.assertTrue(brave_marker.exists())
 
     def test_profile_markers_are_independent_and_root_refuses(self):
         self.seed()
