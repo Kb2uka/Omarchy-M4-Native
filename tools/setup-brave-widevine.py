@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import signal
 import stat
 import struct
 import sys
@@ -88,21 +89,35 @@ def browser_closed(profile, proc=Path('/proc')):
     lock = profile / 'SingletonLock'
     require(not lock.exists() and not lock.is_symlink(),
             'Close all Brave windows first; the selected profile still has SingletonLock.')
+    names = ('brave', 'brave-browser', 'brave-browser-stable', 'brave_crashpad_handler')
     for process in proc.iterdir():
         if not process.name.isdecimal():
             continue
         try:
-            uid = next(line for line in (process / 'status').read_text().splitlines()
-                       if line.startswith('Uid:')).split()[1:]
+            status = (process / 'status').read_text().splitlines()
+            uid = next(line for line in status if line.startswith('Uid:')).split()[1:]
             if str(os.getuid()) not in uid:
                 continue
-            executable = Path(str((process / 'exe').readlink()).removesuffix(' (deleted)'))
-            require(executable.name not in ('brave', 'brave-browser', 'brave-browser-stable'),
-                    'Close all Brave processes first; this tool never stops browsers.')
+            name = next((line.split(':', 1)[1].strip() for line in status
+                         if line.startswith('Name:')), '')
+            candidate = name.startswith('brave')
+            try:
+                command = (process / 'cmdline').read_bytes().replace(b'\0', b' ').split()
+                candidate |= bool(command and Path(os.fsdecode(command[0])).name in names)
+            except PermissionError:
+                pass
+            try:
+                executable = Path(str((process / 'exe').readlink()).removesuffix(' (deleted)'))
+                candidate |= executable.name in names
+            except PermissionError as error:
+                require(not candidate, 'Cannot verify Brave process is closed: ' + process.name)
+                # Normal non-dumpable owner services (including systemd --user) deny exe reads.
+                continue
+            require(not candidate, 'Close all Brave processes first; this tool never stops browsers.')
         except (FileNotFoundError, ProcessLookupError):
             continue
         except PermissionError as error:
-            raise ValueError('Cannot verify owner processes are closed: ' + process.name) from error
+            raise ValueError('Cannot inspect owner process: ' + process.name) from error
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -110,19 +125,33 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         raise ValueError('Widevine download redirect refused')
 
 
-def download():
+def download(timeout=180):
+    require(1 <= timeout <= 180, 'Download timeout must be between 1 and 180 seconds')
+    require(signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0), 'An existing process timer is active')
     opener = urllib.request.build_opener(NoRedirect())
-    deadline = time.monotonic() + 180
+    deadline = time.monotonic() + timeout
     data = bytearray()
-    with opener.open(URL, timeout=30) as response:
-        require(response.status == 200 and response.geturl() == URL, 'Unexpected download response')
-        while True:
-            require(time.monotonic() < deadline, 'Widevine download exceeded time limit')
-            chunk = response.read(min(65536, ARCHIVE_SIZE + 1 - len(data)))
-            if not chunk:
-                break
-            data.extend(chunk)
-            require(len(data) <= ARCHIVE_SIZE, 'Widevine download exceeds pinned size')
+
+    def expired(signum, frame):
+        raise TimeoutError('Widevine download exceeded time limit')
+
+    previous_handler = signal.signal(signal.SIGALRM, expired)
+    try:
+        # The timer also bounds DNS, connection setup and a blocked body read on Linux.
+        signal.setitimer(signal.ITIMER_REAL, timeout)
+        with opener.open(URL, timeout=min(30, timeout)) as response:
+            require(response.status == 200 and response.geturl() == URL, 'Unexpected download response')
+            while True:
+                require(time.monotonic() < deadline, 'Widevine download exceeded time limit')
+                chunk = response.read(min(65536, ARCHIVE_SIZE + 1 - len(data)))
+                require(time.monotonic() < deadline, 'Widevine download exceeded time limit')
+                if not chunk:
+                    break
+                data.extend(chunk)
+                require(len(data) <= ARCHIVE_SIZE, 'Widevine download exceeds pinned size')
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
     require(len(data) == ARCHIVE_SIZE, 'Widevine download size mismatch')
     require(hashlib.sha512(data).hexdigest() == ARCHIVE_SHA512, 'Widevine download SHA-512 mismatch')
     return bytes(data)
@@ -198,7 +227,21 @@ def atomic(path, data, home, previous=None, mode=0o600):
             temporary.unlink(missing_ok=True)
 
 
-def setup(profile_name):
+def pristine(profile, home):
+    owned(profile, home, directory=True, missing=True)
+    require(not profile.exists() or not any(profile.iterdir()),
+            'Initialization requires an absent or empty profile; leaving existing files untouched')
+
+
+def unchanged(profile, state_path, original, home):
+    if original is None:
+        pristine(profile, home)
+    else:
+        require(read_file(state_path, home) == original,
+                'Preferences changed during download or setup; close Brave and retry')
+
+
+def setup(profile_name, initialize=False, timeout=180):
     require(os.getuid() != 0 and os.geteuid() == os.getuid(), 'Run as the desktop owner, without sudo')
     require(platform.system() == 'Linux' and platform.machine() in ('aarch64', 'arm64'),
             'This component requires Linux ARM64')
@@ -208,11 +251,16 @@ def setup(profile_name):
     if profile_name == 'Brave-Browser-M4':
         config = home / '.config'
     profile = config / 'BraveSoftware' / profile_name
-    owned(profile, home, directory=True)
+    owned(profile, home, directory=True, missing=initialize)
     browser_closed(profile)
     state_path = profile / 'Local State'
-    original = read_file(state_path, home)
-    state = json_value(original)
+    if initialize and not state_path.exists() and not state_path.is_symlink():
+        pristine(profile, home)
+        original = None
+        state = {}
+    else:
+        original = read_file(state_path, home)
+        state = json_value(original)
     require(isinstance(state, dict) and isinstance(state.get('brave', {}), dict), 'Unexpected Local State schema')
     value = state.get('brave', {}).get('widevine_opted_in', False)
     require(isinstance(value, bool), 'Unexpected Widevine preference value')
@@ -227,9 +275,9 @@ def setup(profile_name):
     if component.exists():
         installed(component, home)
     else:
-        files = unpack(download())
+        files = unpack(download(timeout))
         browser_closed(profile)
-        require(read_file(state_path, home) == original, 'Preferences changed during download; retry after closing Brave')
+        unchanged(profile, state_path, original, home)
         directories(store, home)
         with tempfile.TemporaryDirectory(prefix='.' + VERSION + '.', dir=store) as temporary:
             staging = Path(temporary) / VERSION
@@ -243,7 +291,12 @@ def setup(profile_name):
             staging.rename(component)
         installed(component, home)
     browser_closed(profile)
-    require(read_file(state_path, home) == original, 'Preferences changed; close Brave and retry')
+    unchanged(profile, state_path, original, home)
+    if original is None:
+        directories(profile, home)
+        pristine(profile, home)
+        original = b'{}\n'
+        atomic(state_path, original, home)
     if not marker.exists():
         directories(marker.parent, home)
         atomic(marker, (json.dumps({'Path': str(component)}) + '\n').encode(), home)
@@ -262,10 +315,16 @@ def setup(profile_name):
 def main(arguments=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--profile', required=True, choices=('Brave-Browser', 'Brave-Browser-M4'))
+    parser.add_argument('--initialize', action='store_true',
+                        help='Allow an absent or empty selected profile before first launch')
+    parser.add_argument('--timeout', type=int, default=180, metavar='SECONDS',
+                        help='Download time limit, 1 to 180 seconds (default: 180)')
     args = parser.parse_args(arguments)
+    if not 1 <= args.timeout <= 180:
+        parser.error('--timeout must be between 1 and 180 seconds')
     previous_mask = os.umask(0o077)
     try:
-        setup(args.profile)
+        setup(args.profile, args.initialize, args.timeout)
     except (OSError, ValueError, KeyError, StopIteration, zipfile.BadZipFile) as error:
         parser.exit(1, 'Widevine setup refused: ' + str(error) + '\n')
     finally:

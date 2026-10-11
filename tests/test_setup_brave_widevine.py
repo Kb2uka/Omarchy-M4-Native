@@ -7,9 +7,11 @@ import io
 import json
 import os
 from pathlib import Path
+import signal
 import stat
 import struct
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -87,20 +89,20 @@ class WidevineTests(unittest.TestCase):
         patch.object(w, 'ARCHIVE_SHA512', hashlib.sha512(self.payload).hexdigest()).start()
         patch.object(w, 'FILES', {n: hashlib.sha256(b).hexdigest() for n, b in self.files.items()}).start()
 
-    def invoke(self, name='Brave-Browser', error=None):
+    def invoke(self, name='Brave-Browser', error=None, extra=()):
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as errors:
             if error:
                 with self.assertRaises(SystemExit) as caught:
-                    w.main(['--profile', name])
+                    w.main(['--profile', name, *extra])
                 self.assertEqual(caught.exception.code, 1)
                 self.assertIn(error, errors.getvalue())
             else:
-                w.main(['--profile', name])
+                w.main(['--profile', name, *extra])
 
     def process(self, executable='/opt/brave-bin/brave'):
         p = self.proc / '1234'
         p.mkdir()
-        (p / 'status').write_text('Uid:\t' + '\t'.join([str(os.getuid())] * 4) + '\n')
+        (p / 'status').write_text('Name:\tbrave\nUid:\t' + '\t'.join([str(os.getuid())] * 4) + '\n')
         (p / 'exe').symlink_to(executable)
         # The observed browser rewrites its command line. The guard uses exe instead.
         (p / 'cmdline').write_bytes(b'/opt/brave-bin/brave --user-data-dir=flattened\0')
@@ -248,8 +250,8 @@ class WidevineTests(unittest.TestCase):
 
     def test_preferences_or_browser_changed_during_download_refused(self):
         original_download = w.download
-        def changed():
-            result = original_download()
+        def changed(timeout):
+            result = original_download(timeout)
             (self.profiles['Brave-Browser'] / 'Local State').write_text('{"changed":true}')
             return result
         with patch.object(w, 'download', side_effect=changed):
@@ -259,10 +261,147 @@ class WidevineTests(unittest.TestCase):
 
     def test_browser_starts_during_download_refused(self):
         original_download = w.download
-        def started():
-            result = original_download(); self.process(); return result
+        def started(timeout):
+            result = original_download(timeout); self.process(); return result
         with patch.object(w, 'download', side_effect=started):
             self.invoke(error='Close all Brave processes')
+        self.assertFalse(self.component.exists())
+
+    def test_unreadable_unrelated_systemd_exe_does_not_block_cli(self):
+        self.process('/usr/lib/systemd/systemd')
+        (self.proc / '1234/status').write_text('Name:\tsystemd\nUid:\t' +
+                                             '\t'.join([str(os.getuid())] * 4) + '\n')
+        (self.proc / '1234/cmdline').write_bytes(b'/usr/lib/systemd/systemd\0--user\0')
+        original = Path.readlink
+        def readlink(path):
+            if path == self.proc / '1234/exe':
+                raise PermissionError('non-dumpable systemd --user')
+            return original(path)
+        with patch.object(Path, 'readlink', readlink):
+            self.invoke()
+        self.assertTrue(self.component.is_dir())
+
+    def test_unreadable_brave_exe_still_refuses_name_or_flattened_command(self):
+        self.process()
+        original = Path.readlink
+        def readlink(path):
+            if path == self.proc / '1234/exe':
+                raise PermissionError('non-dumpable Brave')
+            return original(path)
+        with patch.object(Path, 'readlink', readlink):
+            self.invoke(error='Brave process is closed')
+            (self.proc / '1234/status').write_text('Name:\tChrome_ChildIOT\nUid:\t' +
+                                                 '\t'.join([str(os.getuid())] * 4) + '\n')
+            self.invoke(error='Brave process is closed')
+        self.opener.open.assert_not_called()
+
+    def fresh(self, name='Brave-Browser', absent=True):
+        profile = self.profiles[name]
+        (profile / 'Local State').unlink()
+        if absent:
+            profile.rmdir()
+        return profile
+
+    def test_initialize_missing_and_empty_profiles_then_idempotence(self):
+        for name, absent in (('Brave-Browser', True), ('Brave-Browser-M4', False)):
+            with self.subTest(name=name):
+                profile = self.fresh(name, absent)
+                self.invoke(name, extra=['--initialize', '--timeout', '15'])
+                self.assertEqual(json.loads((profile / 'Local State').read_text()),
+                                 {'brave': {'widevine_opted_in': True}})
+                self.assertEqual(stat.S_IMODE(profile.stat().st_mode), 0o700)
+                snapshot = {p: (p.read_bytes(), p.stat().st_mtime_ns)
+                            for p in profile.rglob('*') if p.is_file()}
+                self.invoke(name, extra=['--initialize'])
+                self.assertEqual(snapshot, {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in snapshot})
+        self.opener.open.assert_called_once_with(w.URL, timeout=15)
+
+    def test_default_still_refuses_missing_or_empty_profile(self):
+        for name, absent in (('Brave-Browser', True), ('Brave-Browser-M4', False)):
+            profile = self.fresh(name, absent)
+            self.invoke(name, error='Required path is missing')
+            self.assertFalse((profile / 'Local State').exists())
+        self.opener.open.assert_not_called()
+
+    def test_initialize_offline_or_bad_archive_leaves_no_profile_state(self):
+        profile = self.fresh()
+        self.opener.open.side_effect = OSError('offline fixture')
+        self.invoke(extra=['--initialize', '--timeout', '15'], error='offline fixture')
+        self.assertFalse(profile.exists())
+        self.assertFalse(self.component.exists())
+        self.opener.open.side_effect = lambda *a, **kw: Response(self.payload)
+        with patch.object(w, 'ARCHIVE_SHA512', '0' * 128):
+            self.invoke(extra=['--initialize'], error='SHA-512 mismatch')
+        self.assertFalse(profile.exists())
+
+    def test_initialize_refuses_populated_stateless_or_changed_profile(self):
+        profile = self.fresh(absent=False)
+        sentinel = profile / 'Preferences'
+        sentinel.write_text('owner-data')
+        sentinel.chmod(0o600)
+        self.invoke(extra=['--initialize'], error='absent or empty profile')
+        self.assertEqual(sentinel.read_text(), 'owner-data')
+        self.opener.open.assert_not_called()
+        sentinel.unlink()
+        original = w.download
+        def changed(timeout):
+            data = original(timeout)
+            sentinel.write_text('created-during-download')
+            return data
+        with patch.object(w, 'download', changed):
+            self.invoke(extra=['--initialize'], error='absent or empty profile')
+        self.assertFalse((profile / 'Local State').exists())
+        self.assertFalse(self.component.exists())
+
+    def test_initialize_keeps_existing_preferences_and_checks_browser_after_download(self):
+        self.invoke(extra=['--initialize'])
+        state = json.loads((self.profiles['Brave-Browser'] / 'Local State').read_text())
+        self.assertEqual(state['owner_pref'], self.state['owner_pref'])
+        profile = self.fresh('Brave-Browser-M4')
+        self.process()
+        self.invoke('Brave-Browser-M4', extra=['--initialize'], error='Close all Brave processes')
+        self.assertFalse(profile.exists())
+
+    def test_initialize_refuses_browser_start_during_download_before_state_creation(self):
+        profile = self.fresh()
+        original = w.download
+        def started(timeout):
+            data = original(timeout)
+            self.process()
+            return data
+        with patch.object(w, 'download', started):
+            self.invoke(extra=['--initialize'], error='Close all Brave processes')
+        self.assertFalse(profile.exists())
+        self.assertFalse(self.component.exists())
+
+    def test_timeout_interrupts_blocked_connect_and_read_without_state(self):
+        profile = self.fresh()
+        previous = signal.getsignal(signal.SIGALRM)
+        for phase in ('connect', 'read'):
+            with self.subTest(phase=phase):
+                def blocked(*args, **kwargs):
+                    time.sleep(2)
+                    return Response(self.payload)
+                class SlowResponse(Response):
+                    def read(inner, size):
+                        time.sleep(2)
+                        return super().read(size)
+                self.opener.open.side_effect = (blocked if phase == 'connect' else
+                                                lambda *a, **kw: SlowResponse(self.payload))
+                start = time.monotonic()
+                self.invoke(extra=['--initialize', '--timeout', '1'], error='time limit')
+                self.assertLess(time.monotonic() - start, 1.8)
+                self.assertFalse(profile.exists())
+                self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0.0, 0.0))
+                self.assertEqual(signal.getsignal(signal.SIGALRM), previous)
+
+    def test_timeout_monotonic_limit_and_argument_validation(self):
+        with patch.object(w.time, 'monotonic', side_effect=[100, 100, 116]):
+            self.invoke(extra=['--timeout', '15'], error='time limit')
+        for value in ('0', '-1', '181', '1.5', 'invalid'):
+            with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as caught:
+                w.main(['--profile', 'Brave-Browser', '--timeout', value])
+            self.assertEqual(caught.exception.code, 2)
         self.assertFalse(self.component.exists())
 
     def test_root_and_wrong_platform_refused(self):

@@ -19,6 +19,28 @@ For the separate experimental hardware-browser profile:
 python3 tools/setup-brave-widevine.py --profile Brave-Browser-M4
 ```
 
+Before the first launch, an explicit initialization command can instead prepare an
+absent or completely empty selected profile:
+
+```sh
+python3 tools/setup-brave-widevine.py --profile Brave-Browser --initialize --timeout 15
+```
+
+The same options support `Brave-Browser-M4`. Initialization never accepts a populated
+profile without `Local State`. The component must validate successfully and Brave
+must still be closed before the helper creates minimal profile state. An offline
+or rejected download leaves a missing profile and `Local State` absent. Without
+`--initialize`, missing owner state remains an error. Existing profiles keep their
+unrelated preferences even when this option is supplied.
+
+`--timeout` accepts 1–180 seconds and defaults to 180. It bounds the network transfer,
+including blocking connection and read operations, with socket and Linux process
+timers plus monotonic checks. It is not a bound on all local validation or disk
+operations. The helper is a standalone Linux command and refuses an already active
+process timer. A failed setup exits nonzero; a first-launch caller may leave its
+retry marker and continue launching Brave for clear content. This helper neither
+creates that marker nor retries or launches the browser itself.
+
 These commands are run from the repository checkout. First-owner integration is
 separate; this source change does not install a service, run automatically, change
 the default browser, restart Brave or modify decoder settings. Start Brave normally
@@ -52,7 +74,11 @@ inside your home. Symlinked, foreign-owned or group/world-writable paths are ref
 
 The helper refuses a live same-owner Brave executable or a selected profile's
 `SingletonLock`, including a dangling lock. It never kills a process or deletes
-a browser lock. It also refuses another registration, a changed component, or
+a browser lock. An unreadable executable link on an unrelated non-dumpable owner
+service, such as `systemd --user`, is not evidence of a live browser. Process name
+and the first command token also identify Brave candidates; an unreadable Brave
+candidate is refused. This check is not a boundary against a malicious process
+running as the same owner. It also refuses another registration, a changed component, or
 preferences changed during download. Those cases require resolving the reported
 conflict; setup does not overwrite the owner's existing component choice. If a
 late refusal leaves the verified component or registration present, a later run
