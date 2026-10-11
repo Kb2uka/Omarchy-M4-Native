@@ -143,3 +143,11 @@ configuration, firmware updates, Limine/snapshot integration and ordinary rollin
 updates are not handled by this prototype. Exact ABI refusal makes such a change
 visible instead of silently loading an unqualified stack. Current Omarchy package
 parity is a separate installer audit, not a claim made by this audio package.
+
+## Clean-owner default policy
+
+The separate [protected-default policy](../../docs/j713-audio-default.md) excludes
+the hidden raw speaker parent from normal default selection while preserving
+existing output choices. Its source and regression tests are included here; it
+is not yet part of the 27-file qualified manifest above. Installer integration
+and native component-loading validation remain separate.
