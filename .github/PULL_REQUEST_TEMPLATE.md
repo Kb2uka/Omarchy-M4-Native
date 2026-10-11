@@ -11,6 +11,7 @@ not verified.
 ## Contribution checklist
 
 - [ ] This contribution targets `develop` and follows [CONTRIBUTING.md](https://github.com/Kb2uka/Omarchy-M4-Native/blob/develop/CONTRIBUTING.md).
+- [ ] PR text and commit metadata credit human contributors only and follow the attribution policy.
 - [ ] Existing upstream attribution and license notices are preserved.
 - [ ] Evidence is concise and contains no credentials or personal machine data.
 

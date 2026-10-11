@@ -4,9 +4,11 @@ build/
 .artifacts/
 .claude/worktrees/
 
-# Local workflow instructions and private hardware captures
+# Keep nested workflow instructions private; publish reviewed root guidance.
 AGENTS.md
 CLAUDE.md
+!/AGENTS.md
+!/CLAUDE.md
 # Publish only the reviewed derived research files, regardless of capture naming.
 recon/*
 !recon/README.md
