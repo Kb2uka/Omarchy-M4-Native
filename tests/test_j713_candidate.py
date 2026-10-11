@@ -291,32 +291,99 @@ class CandidateTests(unittest.TestCase):
             self.assemble()
         self.assertFalse(self.output.exists())
 
-    def test_unprepared_browser_default_refuses_before_component_writes(self):
-        root = self.base / 'image'
-        provision = root / 'usr/bin/omarchy-provision-user'
-        write(provision, b'known original default', 0o755)
-        name = 'usr/share/applications/brave-m4-hardware.desktop'
-        write(root / name, b'qualified desktop')
-        write(self.kit / 'packages/video/root' / name, b'qualified desktop')
-        write(root / 'usr/share/applications/chromium.desktop', self.desktop_raw)
-        write(self.kit / 'inputs/chromium.desktop', self.desktop_raw)
-        calls = []
+
+
+class BrowserDefaultTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.base = Path(temp.name)
+        self.root, self.kit = self.base / 'root', self.base / 'kit'
+        self.path = self.root / 'usr/bin/omarchy-provision-user'
+        self.old = b'#!/bin/bash\n# fixture\nenv -u BROWSER xdg-settings set default-web-browser brave-m4-hardware.desktop\n'
+        self.new = self.old.replace(b'brave-m4-hardware.desktop', b'brave-browser.desktop')
+        self.desktop = b'[Desktop Entry]\nExec=brave %U\n[Desktop Action new]\nExec=brave\n[Desktop Action private]\nExec=brave --incognito\n'
+        write(self.path, self.old, 0o755)
+        write(self.root / 'usr/share/applications/brave-browser.desktop', self.desktop)
+        for name in ('packages/audio/manifest.json', 'packages/video/manifest.json', 'manifest.json'):
+            write(self.kit / name, b'{}')
+        for root, name in ((self.root, 'usr/share/applications/chromium.desktop'),
+                           (self.kit, 'inputs/chromium.desktop')):
+            write(root / name, b'chromium desktop')
+        self.calls = []
         def configure(*args, **kwargs):
-            calls.append((args, kwargs))
+            self.calls.append((args, kwargs, self.path.read_bytes()))
         components = {
             'desktop': SimpleNamespace(planned_files=lambda root: None, configure=configure),
             'audio': SimpleNamespace(configure=configure),
             'video': SimpleNamespace(configure=configure),
             'mpv_install': SimpleNamespace(operate=configure),
         }
-        with mock.patch.object(image, 'HERE', self.kit), \
-             mock.patch.object(image, 'owner_free'), \
-             mock.patch.object(image, 'browser_plan', return_value=(provision, b'prepared default')), \
-             mock.patch.object(image, 'load', side_effect=lambda name, path: components[name]):
-            with self.assertRaisesRegex(ValueError, 'Browser finalization differs'):
-                image.configure(root, self.base / 'firmware', apply=True)
-        self.assertEqual(calls, [], 'Component checks/writes began before required browser preflight')
-        self.assertEqual(provision.read_bytes(), b'known original default')
+        for patch in (mock.patch.object(image, 'HERE', self.kit),
+                      mock.patch.object(image, 'owner_free'),
+                      mock.patch.object(image, 'PREPARED_PROVISION_SHA', digest(self.old)),
+                      mock.patch.object(image, 'ORDINARY_BRAVE_DESKTOP_SHA', digest(self.desktop)),
+                      mock.patch.object(image, 'load', side_effect=lambda name, path: components[name])):
+            patch.start(); self.addCleanup(patch.stop)
+
+    def configure(self, apply=False):
+        return image.configure(self.root, self.base / 'firmware', apply=apply)
+
+    def test_exact_prepared_transition_idempotence_and_normal_profile(self):
+        with self.assertRaisesRegex(ValueError, 'Browser finalization differs'):
+            self.configure()
+        self.assertEqual(self.path.read_bytes(), self.old)
+        self.calls.clear()
+        self.configure(apply=True)
+        self.assertEqual(self.path.read_bytes(), self.new)
+        self.assertTrue(self.calls)
+        self.assertTrue(all(raw == self.old for _, _, raw in self.calls), 'Browser changed before component preflights/apply')
+        self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o755)
+        before = self.path.stat().st_mtime_ns
+        self.configure(apply=True)
+        self.configure()
+        self.assertEqual(self.path.stat().st_mtime_ns, before)
+        self.assertIn(b'default-web-browser brave-browser.desktop\n', self.path.read_bytes())
+        self.assertNotIn(b'--user-data-dir', self.desktop)
+        self.assertNotIn(b'brave-m4-hardware', self.desktop)
+        self.assertEqual((self.root / 'usr/share/applications/brave-browser.desktop').read_bytes(), self.desktop)
+
+    def test_unknown_source_or_unprepared_default_refuses_before_components(self):
+        for raw in (self.old + b'# customization\n', self.old.replace(b'brave-m4-hardware.desktop', b'chromium.desktop'),
+                    self.old.replace(b'brave-m4-hardware.desktop', b'custom.desktop')):
+            with self.subTest(raw=raw):
+                self.path.write_bytes(raw)
+                with self.assertRaisesRegex(ValueError, '(Unknown owner|Unexpected browser)'):
+                    self.configure(apply=True)
+                self.assertEqual(self.calls, [])
+                self.assertEqual(self.path.read_bytes(), raw)
+
+    def test_wrong_ordinary_desktop_refuses_before_components(self):
+        desktop = self.root / 'usr/share/applications/brave-browser.desktop'
+        desktop.write_bytes(self.desktop.replace(b'Exec=brave', b'Exec=brave-m4-hardware'))
+        with self.assertRaisesRegex(ValueError, 'Ordinary Brave desktop'):
+            self.configure(apply=True)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.path.read_bytes(), self.old)
+
+    def test_component_preflight_failure_does_not_change_default(self):
+        def load(name, path):
+            if name == 'desktop':
+                return SimpleNamespace(planned_files=lambda root: None)
+            if name == 'audio':
+                return SimpleNamespace(configure=mock.Mock(side_effect=ValueError('customized audio')))
+            return SimpleNamespace()
+        with mock.patch.object(image, 'load', side_effect=load):
+            with self.assertRaisesRegex(ValueError, 'customized audio'):
+                self.configure(apply=True)
+        self.assertEqual(self.path.read_bytes(), self.old)
+
+    def test_existing_owner_refusal_precedes_browser_mutation(self):
+        with mock.patch.object(image, 'owner_free', side_effect=ValueError('Owner account remains')):
+            with self.assertRaisesRegex(ValueError, 'Owner account remains'):
+                self.configure(apply=True)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.path.read_bytes(), self.old)
 
 
 class FinalizerTests(unittest.TestCase):
@@ -370,7 +437,7 @@ class FinalizerTests(unittest.TestCase):
                             'hardware_accelerated': False, 'evidence_sha256': 'd' * 64}}}))
         write(self.checked, builder.serialized({'schema': 1, 'kit_sha256': self.kit_pin,
               'root_sha256': digest(self.disk.read_bytes()), 'root_uuid': self.root_uuid,
-              'passed': ['offline-apply-check','owner-free','locale-utf8','sudo','base-packages','e2fsck']}))
+              'passed': dict.fromkeys(['offline-apply-check','owner-free','locale-utf8','sudo','base-packages','e2fsck'], True)}))
         def commands(args, **kwargs):
             if args[0] == 'losetup':
                 return '{"loopdevices": []}'
@@ -451,11 +518,25 @@ class FinalizerTests(unittest.TestCase):
 
     def test_missing_validation_gate_refuses_before_output(self):
         self.package_setup()
-        raw = json.loads(self.checked.read_text()); raw['passed'].remove('owner-free')
+        raw = json.loads(self.checked.read_text()); del raw['passed']['owner-free']
         self.checked.write_bytes(builder.serialized(raw))
         with self.assertRaisesRegex(ValueError, 'Incomplete image validation'):
             self.package()
         self.assertFalse(self.final.exists())
+
+    def test_validation_gates_require_dictionary_and_true_values(self):
+        self.package_setup()
+        raw = json.loads(self.checked.read_text())
+        names = list(raw['passed'])
+        for index, passed in enumerate((dict.fromkeys(names, False), dict.fromkeys(names, 1), names,
+                       {**dict.fromkeys(names, True), 'sudo': 'passed'})):
+            with self.subTest(passed=passed):
+                self.final = self.base / ('refused-output-' + str(index))
+                changed = {**raw, 'passed': passed}
+                self.checked.write_bytes(builder.serialized(changed))
+                with self.assertRaisesRegex(ValueError, 'Incomplete image validation'):
+                    self.package()
+                self.assertFalse(self.final.exists())
 
     def test_attached_image_refuses_before_output(self):
         self.package_setup()

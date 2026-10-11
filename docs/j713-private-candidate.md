@@ -48,8 +48,14 @@ manifest. The kernel prerequisite and installed manifest change together.
 A customized or foreign file is never accepted merely because its destination
 appears in the update map.
 
-The prior pending image already has its reviewed first-owner default-browser
-line. The successor checks it and does not change Omarchy core. A Chromium
+The prior pending image has the reviewed dedicated-launcher first-owner default.
+After all component preflights pass, the successor changes only that known line
+to `brave-browser.desktop`. The normalized full provisioner hash and ordinary
+Brave desktop hash must match the retained image; customized or original stock
+Chromium defaults refuse before any component writes. Reapplying is idempotent.
+The ordinary icon and default shortcut therefore use the normal Brave profile,
+while the optional dedicated launcher remains separate. The owner-free pending
+image guard excludes existing installations from this transition. A Chromium
 desktop override is generated under `/etc/skel/.local/share/applications` by
 changing only the executable token in every original `Exec` line; names,
 translations, actions and other fields are retained. The stock desktop remains
@@ -95,8 +101,9 @@ gate. The native receipt is exactly:
 ```
 
 The image receipt contains `schema: 1`, `kit_sha256`, `root_sha256`, `root_uuid`
-and `passed`, naming exactly `offline-apply-check`, `owner-free`, `locale-utf8`,
-`sudo`, `base-packages`, and `e2fsck`. These receipts record actual coordinator
+and `passed`, a dictionary with exactly `offline-apply-check`, `owner-free`,
+`locale-utf8`, `sudo`, `base-packages`, and `e2fsck` as keys. Each value must be
+JSON `true`; a list, false, integer, or string result is refused. These receipts record actual coordinator
 observations; generating a JSON file does not perform or substitute for the
 checks. Both browser playback results are mandatory even if the overall native
 approval is true. Each records the observed decoder, hardware-acceleration status

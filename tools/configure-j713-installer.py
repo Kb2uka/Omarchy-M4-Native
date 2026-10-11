@@ -17,6 +17,9 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / 'tools'))
 from m4_audio_package import image_path, require
 
+PREPARED_PROVISION_SHA = '1761b562ab066d2a6eafb0fed2640c3388b146113289940d0e3f1c4cbfa520b4'
+ORDINARY_BRAVE_DESKTOP_SHA = 'c07276b69c7304981525ecb022f92daf7ae125a4fb05ac3442157b50826e257a'
+
 
 def load(name, relative):
     spec = importlib.util.spec_from_file_location(name, HERE / relative)
@@ -92,23 +95,24 @@ def acceptable_missing(function, prefix):
 def browser_plan(root):
     path = image_path(root, 'usr/bin/omarchy-provision-user')
     raw = path.read_bytes()
-    old = b'env -u BROWSER xdg-settings set default-web-browser chromium.desktop\n'
-    new = b'env -u BROWSER xdg-settings set default-web-browser brave-m4-hardware.desktop\n'
+    old = b'env -u BROWSER xdg-settings set default-web-browser brave-m4-hardware.desktop\n'
+    new = b'env -u BROWSER xdg-settings set default-web-browser brave-browser.desktop\n'
     require(raw.count(old) + raw.count(new) == 1, 'Unexpected browser finalization source')
     original = raw.replace(new, old)
-    require(hashlib.sha256(original).hexdigest() ==
-            '324a7a6d589dda2052eaf35e335c002f2a26c65c818c69a1711f20595fa0b91d',
+    require(hashlib.sha256(original).hexdigest() == PREPARED_PROVISION_SHA,
             'Unknown owner finalization source')
     require(stat.S_IMODE(path.stat().st_mode) == 0o755, 'Unexpected finalizer mode')
+    desktop = image_path(root, 'usr/share/applications/brave-browser.desktop')
+    require(sha(desktop) == ORDINARY_BRAVE_DESKTOP_SHA and
+            stat.S_IMODE(desktop.stat().st_mode) == 0o644,
+            'Ordinary Brave desktop is unavailable to the Omarchy launcher')
     return path, original.replace(old, new)
 
 
-def browser_configure(root):
+def browser_configure(root, apply=False):
     path, expected = browser_plan(root)
-    desktop = image_path(root, 'usr/share/applications/brave-m4-hardware.desktop')
-    require(desktop.read_bytes() ==
-            (HERE / 'packages/video/root/usr/share/applications/brave-m4-hardware.desktop').read_bytes(),
-            'Default browser desktop is unavailable to the Omarchy launcher')
+    if apply and path.read_bytes() != expected:
+        path.write_bytes(expected)
     require(path.read_bytes() == expected, 'Browser finalization differs')
 
 
@@ -122,7 +126,7 @@ def configure(root, firmware, apply=False):
     audio_package, video_package = HERE / 'packages/audio', HERE / 'packages/video'
     ap, vp = sha(audio_package / 'manifest.json'), sha(video_package / 'manifest.json')
     desktop.planned_files(root)
-    browser_configure(root)
+    browser_plan(root)
     require(image_path(root, 'usr/share/applications/chromium.desktop').read_bytes() ==
             (HERE / 'inputs/chromium.desktop').read_bytes(), 'Unknown shipped Chromium desktop')
     audio_args = dict(root=root, package=audio_package, board='apple,j713',
@@ -148,7 +152,7 @@ def configure(root, firmware, apply=False):
     audio.configure(**audio_args, apply=True)
     video.configure(**video_args, apply=True)
     mpv.operate('apply', root)
-    browser_configure(root)
+    browser_configure(root, apply=True)
     return {'status': 'applied', 'scope': 'Offline image only; no device, service, browser, boot or disk-partition action'}
 
 

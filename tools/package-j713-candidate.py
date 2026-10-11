@@ -86,7 +86,9 @@ def finalize(baseline, kit, kit_pin, image, approval, approval_pin, checks, chec
     required = {'offline-apply-check', 'owner-free', 'locale-utf8', 'sudo', 'base-packages', 'e2fsck'}
     require(set(checked) == {'schema', 'kit_sha256', 'root_sha256', 'root_uuid', 'passed'} and
             checked['schema'] == 1 and checked['kit_sha256'] == kit_pin and
-            set(checked['passed']) == required, 'Incomplete image validation receipt')
+            isinstance(checked['passed'], dict) and set(checked['passed']) == required and
+            all(value is True for value in checked['passed'].values()),
+            'Incomplete image validation receipt')
     root_sha = file_sha(image)
     require(root_sha == checked['root_sha256'], 'Image changed after validation')
     with image.open('rb') as stream:
