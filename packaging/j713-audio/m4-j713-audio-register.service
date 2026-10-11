@@ -1,0 +1,17 @@
+[Unit]
+Description=Qualified J713 speaker providers and protected sound card
+After=systemd-udev-settle.service
+Before=speakersafetyd-j713.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+RuntimeDirectory=omarchy/j713-audio-registration
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+ExecStart=/usr/bin/python3 /usr/lib/omarchy/m4-j713-audio-register.py
+TimeoutStartSec=120
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

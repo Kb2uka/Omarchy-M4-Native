@@ -127,8 +127,11 @@ The upstream ISO's
 install core packages, early owner defaults and hardware-selected applications;
 Tailscale is conditional on an autoinstall key. This port still differs in its
 custom M4 kernel/boot chain and ext4 root. Snapper/Limine rollback, the normal
-update path and internal-audio support are not qualified. Installing unrelated
-driver packages would not establish those missing capabilities.
+update path are not qualified. The separate [J713 audio source package](j713-audio.md)
+records owner-confirmed speaker playback and automatic startup of an exact pinned
+runtime; it does not qualify fresh-image installation, audio suspend/resume or a
+general runtime release. Installing unrelated driver packages would not establish
+those missing capabilities.
 
 The installed desktop created EGL contexts reporting Apple M4 (G16G B1) for
 Wayland, GBM and the device platform. That demonstrates driver selection and
@@ -327,9 +330,10 @@ The running kernel has zram and zstd support, and the candidate contains their
 modules, but swap activation still needs the native check above. The power
 daemon currently uses a placeholder driver, and the kernel exposes no CPU
 frequency policies; hardware power/performance profiles remain unfinished.
-Internal audio, repeated cold boots, quiet boot, safe updates and native
-first-owner qualification of the rebuilt candidate remain open. None of these
-observations qualifies another Mac model or the M4 Pro.
+Repeated cold boots, quiet boot, safe updates, audio suspend/resume and native
+first-owner qualification of the rebuilt candidate remain open. Internal speaker
+playback is covered by the [separate pinned audio qualification](j713-audio.md).
+None of these observations qualifies another Mac model or the M4 Pro.
 
 Run the configuration regressions on a leased Linux test host using discovery
 (the platform skip in the placement suite relies on this invocation):

@@ -1,0 +1,85 @@
+{
+  "activated": false,
+  "profile_accepted": false,
+  "card": {
+    "id": "AppleJ713",
+    "longname": "Apple J713",
+    "driver": "macaudio"
+  },
+  "pcm": {
+    "device": 0,
+    "playback": {
+      "channels": 4,
+      "format": "S32_LE",
+      "rate": 48000
+    },
+    "feedback": {
+      "channels": 8,
+      "format": "S16_LE",
+      "rate": 48000
+    }
+  },
+  "lane_order": [
+    {
+      "slot": 0,
+      "i2c": "0x38",
+      "label": "left woofer (physical role inferred)"
+    },
+    {
+      "slot": 1,
+      "i2c": "0x3b",
+      "label": "right woofer"
+    },
+    {
+      "slot": 2,
+      "i2c": "0x39",
+      "label": "left tweeter"
+    },
+    {
+      "slot": 3,
+      "i2c": "0x3c",
+      "label": "right tweeter"
+    }
+  ],
+  "graph_gain": 0.38,
+  "max_finite_fir_l1": 2.5673178917309922,
+  "dsp_scope": "Measured native HP-only subsets Tone1 filter0 and Tone2 filter5, then exact Tone3; SystemVolume=1 at every stage",
+  "omits": "All other Tone1/Tone2 filters and dynamic effects, Norm/VirtBass/XTC/Comp/volume taper/ControlFreak/LSM",
+  "source_accuracy_max_absolute_fs": 6.765093164301517e-06,
+  "source_accuracy_max_relative_peak": 0.0001686136755702217,
+  "native_strict_relative_threshold": 0.0001,
+  "native_strict_threshold_all_pass": false,
+  "requirements": [
+    "Exact separately reviewed kernel and daemon revisions implementing a 0 dB minimum digital attenuation floor and a maximum analog level of 21 dBV",
+    "Active feedback validity and thermal protection with independent generation-tagged lease expiry/reset",
+    "Daemon opens exclusive PCM0 capture 8xS16 before playback readiness",
+    "Unchanged measured high-pass/crossover FIR assets, input clamps, common graph gain 0.38 and unity maximum post-filter software gain",
+    "No raw feedback microphone exposed",
+    "No automatic activation based on daemon process or control presence"
+  ],
+  "installation": "Metadata-only candidate. Replacement of the historical contract and promotion of any configuration requires matching independently qualified kernel/daemon revisions and coordinator review. No graph, FIR, UCM or policy bytes are changed here.",
+  "contract_version": 2,
+  "state_scope": "Standalone candidate metadata, not a live-state query. activated/profile_accepted=false do not describe the already-running native system; this artifact alone does not authorize installation or playback.",
+  "protection_contract": {
+    "status": "pending exact joined kernel/daemon revision qualification by coordinator",
+    "minimum_digital_attenuation_db": 0.0,
+    "maximum_analog_level_dbv": 21.0,
+    "thermal_attenuation": "Dynamic model-requested attenuation remains active; zero mandatory attenuation is not a promise of zero applied attenuation.",
+    "required_runtime": [
+      "Continuous exclusive valid 8xS16_LE/48000 feedback on PCM0 before playback",
+      "Exact current-generation, strictly increasing protection lease with independent expiry/reset",
+      "Joined kernel ownership, transport and codec guards",
+      "Thermal model and feedback-validity checks remain active; normal volume cannot bypass them"
+    ],
+    "qualification_limits": [
+      "No full absolute feedback calibration or acoustic SPL/loudness proof is claimed by this metadata.",
+      "No complete stock nonlinear DSP reproduction is claimed.",
+      "The historical 30 dB test-floor qualification is not reused as qualification of the revised floor."
+    ]
+  },
+  "historical_protection_contract": {
+    "minimum_digital_attenuation_db": 30.0,
+    "contract_sha256": "9654e2dc1b5f28d801240362265ba45a056b2802b60e30d57ddb56ce5c818040",
+    "scope": "Preserved original integration/test contract. It is historical after separately qualified floor removal."
+  }
+}
