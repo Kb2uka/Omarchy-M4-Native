@@ -49,6 +49,14 @@
       "size": 59,
       "source": "policy/etc/wireplumber/wireplumber.conf.d/81-j713-busy-discovery.conf"
     },
+    "etc/wireplumber/wireplumber.conf.d/82-j713-protected-default.conf": {
+      "license": "MIT",
+      "mode": 420,
+      "origin": "original-source-policy",
+      "sha256": "df15ec5d79de4a2935d2a7a03c341ad64582d09967d994a6667a9dfe7ec992c0",
+      "size": 323,
+      "source": "policy/etc/wireplumber/wireplumber.conf.d/82-j713-protected-default.conf"
+    },
     "usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/apple-admac.ko": {
       "license": "GPL-2.0-only",
       "mode": 420,
@@ -196,6 +204,14 @@
       "sha256": "6cd4e035c6efcf8483ece2efcf0ad3b8116fe358943aa632670089747bad2fbd",
       "size": 1104,
       "source": "j713.conf"
+    },
+    "usr/share/wireplumber/scripts/default-nodes/j713-protected.lua": {
+      "license": "MIT",
+      "mode": 420,
+      "origin": "original-source-policy",
+      "sha256": "d58c69a722c4472e43e9f9ffc7e4d59705362ee7d042ce82703dbd4043cbb303",
+      "size": 1203,
+      "source": "policy/usr/share/wireplumber/scripts/default-nodes/j713-protected.lua"
     }
   },
   "kernel_release": "7.1.9-m4-gpu-backport-20261008",
@@ -267,5 +283,5 @@
   "schema": 1,
   "service": "speakersafetyd-j713.service",
   "soc": "apple,t8132",
-  "source_revision": "qualified 2026-10-10 transport and daemon v4"
+  "source_revision": "2026-10-10 qualified transport and daemon v4; 2026-10-11 protected-default integration candidate"
 }

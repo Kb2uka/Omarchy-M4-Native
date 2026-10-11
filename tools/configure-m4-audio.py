@@ -12,6 +12,24 @@ from m4_audio_package import digest, dtb_compatible, image_path, load_package, r
 
 
 MANIFEST = "etc/omarchy/j713-audio-manifest.json"
+DEFAULT_POLICY_ADDITIONS = {
+    "etc/wireplumber/wireplumber.conf.d/82-j713-protected-default.conf",
+    "usr/share/wireplumber/scripts/default-nodes/j713-protected.lua",
+}
+
+
+def closed_default_transition(previous, current):
+    """The default-policy join adds two files; every prior runtime pin stays exact."""
+    changed_fields = {"file_metadata", "files", "source_revision"}
+    old_identity = {key: value for key, value in previous.items() if key not in changed_fields}
+    new_identity = {key: value for key, value in current.items() if key not in changed_fields}
+    require(old_identity == new_identity, "Closed audio default transition: package identity changed")
+    old_files, new_files = previous["file_metadata"], current["file_metadata"]
+    require(set(new_files) - set(old_files) == DEFAULT_POLICY_ADDITIONS and
+            all(new_files.get(name) == entry for name, entry in old_files.items()),
+            "Closed audio default transition: payload set or metadata changed")
+    require(previous["files"] == {"/" + name: entry["sha256"] for name, entry in old_files.items()},
+            "Closed audio default transition: previous file maps disagree")
 
 
 
@@ -32,12 +50,23 @@ def public_parents(root, name, create=False):
             current.chmod(0o755)
 
 
-def configure(root, package, board, kernel_release, base_dtb, package_sha256, apply=False):
+def configure(root, package, board, kernel_release, base_dtb, package_sha256, apply=False,
+              previous_package_sha256=None):
     require(not any(p.is_symlink() for p in (root, *root.parents)), "Symlink image root")
     root = root.resolve(strict=True)
     require(root != Path(root.anchor), "Offline image required; refusing live root")
     raw, manifest, planned = load_package(package.resolve(strict=True))
     require(digest(raw) == package_sha256, "Package manifest pin mismatch")
+    previous_raw = None
+    if previous_package_sha256 is not None:
+        installed_manifest = image_path(root, MANIFEST)
+        require(installed_manifest.is_file(), "Previous package manifest missing")
+        installed_raw = installed_manifest.read_bytes()
+        if installed_raw != raw:
+            require(digest(installed_raw) == previous_package_sha256,
+                    "Previous package manifest pin mismatch")
+            closed_default_transition(json.loads(installed_raw), manifest)
+            previous_raw = installed_raw
     require(board == manifest["board"] == "apple,j713", "Unsupported board")
     require(kernel_release == manifest["kernel_release"], "Kernel ABI mismatch")
     base = base_dtb.read_bytes()
@@ -84,12 +113,14 @@ def configure(root, package, board, kernel_release, base_dtb, package_sha256, ap
         require(not path.exists() or path.is_file(), "Non-file destination: " + name)
         if path.exists():
             require(path.stat().st_uid == os.geteuid(), "Foreign image file owner: " + name)
-            require(path.read_bytes() == content, "Conflicting existing audio file: " + name)
-        if not path.exists() or stat.S_IMODE(path.stat().st_mode) != modes[name]:
+            expected = previous_raw if name == MANIFEST and previous_raw is not None else content
+            require(path.read_bytes() == expected, "Conflicting existing audio file: " + name)
+        if (not path.exists() or stat.S_IMODE(path.stat().st_mode) != modes[name] or
+                name == MANIFEST and previous_raw is not None):
             changes.append(name)
     require(apply or not changes, "Audio image configuration differs: " + ", ".join(changes))
     if apply:
-        for name in sorted(changes, key=lambda item: item in symlinks):
+        for name in sorted(changes, key=lambda item: (item in symlinks, item == MANIFEST, item)):
             if name in symlinks:
                 path = image_path(root, str(Path(name).parent)) / Path(name).name
                 public_parents(root, name, create=True)
@@ -125,6 +156,8 @@ if __name__ == "__main__":
     parser.add_argument("--board", required=True)
     parser.add_argument("--kernel-release", required=True)
     parser.add_argument("--package-sha256", required=True)
+    parser.add_argument("--previous-package-sha256",
+                        help="Allow only the pinned two-file protected-default addition")
     parser.add_argument("--base-dtb", type=Path, required=True)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--apply", action="store_true")
@@ -133,4 +166,5 @@ if __name__ == "__main__":
     require(os.geteuid() == 0, "Root required for mounted image apply/check")
     mounted_image_root(args.root)
     print(json.dumps(configure(args.root, args.package, args.board, args.kernel_release,
-                               args.base_dtb, args.package_sha256, args.apply), indent=2))
+                               args.base_dtb, args.package_sha256, args.apply,
+                               args.previous_package_sha256), indent=2))

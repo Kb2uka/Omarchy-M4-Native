@@ -38,11 +38,22 @@ defaults are unchanged. The existing protection-readiness gate and raw-node
 permission hiding remain necessary; this default policy is not an access-control
 or speaker-protection replacement.
 
-`qualified.json` and the previously qualified 27-file runtime are unchanged by
-this source-only addition. The assembler will not include these files until the
-installer integration refreshes its exact qualified input and runtime manifest.
-Do not append untracked files to an installed manifest and describe it as the
-previously qualified package.
+`qualified.json` pins both source files. The assembler includes them together in
+a new 29-file integration candidate; all 27 previous payload hashes and modes,
+module notes, ABI inputs, service links and protection settings remain unchanged.
+The candidate is a different package from the previously qualified 27-file
+runtime. Its source receipt identifies the default-policy addition without
+claiming native qualification.
+
+For a cloned pending-owner image, `configure-m4-audio.py` accepts the explicit
+`--previous-package-sha256` option alongside the new `--package-sha256` pin. The
+installed old manifest must match its pin. The transition permits only these
+two added files and a source-receipt update; existing payload metadata and every
+other package field must remain exact. Ordinary apply/check still refuse changed
+existing manifests. Customized installed files remain a conflict even with the
+transition option. The manifest is replaced after both policy files, and a retry
+accepts already installed exact additions. This option remains offline-only and
+requires the usual board, DTB, kernel, ABI and pending-owner checks.
 
 ## Validation
 
@@ -51,6 +62,8 @@ On a leased Linux test host with Lua 5.4 available:
 ```sh
 LUA=/path/to/lua python3 -m unittest discover -s tests -p 'test_j713_audio_default.py' -v
 python3 tests/j713_audio_default_mutants.py --lua /path/to/lua
+python3 -m unittest discover -s tests -p 'test_j713_audio_package_join.py' -v
+python3 tests/j713_audio_package_join_mutants.py
 ```
 
 The fixture executes unchanged WirePlumber 0.5.18 collection, selected/stored
@@ -63,3 +76,10 @@ baseline without the new hook fails the clean-owner and raw-fallback assertions.
 Actual WirePlumber component loading and a controlled fresh-selection check on
 the Air are still required before claiming a native durable fix. The current
 owner's successful playback must not be interrupted merely to run this test.
+An installed manifest change also invalidates the digest in the readiness
+record. With playback stopped and TX closed, re-run the existing root startup
+qualification against the new manifest and publish a new record before starting
+WirePlumber. Preserve the running protection daemon and its lease; do not unload
+modules or restart protection to install a routing policy. A failed qualification
+must leave WirePlumber stopped until the exact previous package and a fresh
+previous-manifest attestation are restored or the failure is resolved.
