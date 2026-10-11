@@ -21,6 +21,19 @@ Merging a contribution into `develop` does not publish an installer, tag a
 release or qualify another Mac model. Release promotion and publication remain
 the maintainer's decisions.
 
+## Attribution policy
+
+This rule applies to **every contributor and every pull request**. Do not name
+or credit AI assistants, models, tools or vendors in pull request titles,
+descriptions, comments or reviews, or in commit messages, author credits or
+co-author trailers. Do not add generated-by signatures or automated assistant
+credits. Attribute contributions to the actual human contributors only.
+
+Before submitting or updating a pull request, check its text and commit
+metadata for compliance. Correct noncompliant attribution before review or
+merge. Preserve all required upstream copyright and license notices; this
+policy does not authorize removing or replacing another author's credit.
+
 ## Preparing a contribution
 
 - Keep the change focused and explain the problem and resulting behavior.
