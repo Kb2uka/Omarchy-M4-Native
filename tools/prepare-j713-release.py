@@ -165,7 +165,7 @@ def prepare_root(source, image, root, tree, identity):
             'usr/lib/systemd/system/m4-j713-audio-register.service.d/10-owner-assets.conf':
                 'packaging/j713-owner-assets-audio.conf',
             'usr/lib/systemd/system/systemd-user-sessions.service.d/10-owner-assets.conf':
-                'packaging/j713-owner-assets-audio.conf',
+                'packaging/j713-owner-assets-session.conf',
             'usr/lib/systemd/system/omarchy-provision-owner.service.d/10-owner-assets.conf':
                 'packaging/j713-owner-assets-audio.conf',
         }

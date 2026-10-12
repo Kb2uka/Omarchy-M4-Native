@@ -45,7 +45,7 @@ python="$work/Frameworks/Python.framework/Versions/3.13/bin/python3.13"
 /usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$HOME" \
   DYLD_LIBRARY_PATH="$work/Frameworks/Python.framework/Versions/Current/lib" \
   DYLD_FRAMEWORK_PATH="$work/Frameworks" \
-  "$python" "$kit/owner-audio/m4-j713-fir-owner.py" \
+  "$python" -I -B "$kit/owner-audio/m4-j713-fir-owner.py" \
   --bundle "$kit/owner-audio/bundle" --output "$work/owner-firs"
 args=(/usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME=/var/root \
   TERM="${TERM:-xterm-256color}" LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 \

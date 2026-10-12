@@ -61,7 +61,8 @@ def prepare_for_installer():
     """Read all owner inputs before the installer's first partition operation."""
     directory = os.environ.get('M4_OWNER_FIRS', '')
     widevine = os.environ.get('M4_OWNER_WIDEVINE', '')
-    require(widevine in ('yes', 'no'), 'Missing explicit protected-media choice')
+    require(directory and widevine in ('yes', 'no'),
+            'Launch this installer through bash Install.command --install to prepare owner inputs')
     payload = filters(Path(directory))
     return payload, widevine == 'yes'
 
