@@ -7,7 +7,7 @@ import sys
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-JOBS = {'ci.yml': {'policy', 'tests', 'macos'},
+JOBS = {'ci.yml': {'policy', 'tests', 'speaker-daemon', 'macos'},
         'security.yml': {'secrets', 'malware', 'workflow-lint', 'dependencies'},
         'codeql.yml': {'analyze'}}
 ACTIONS = {'actions/checkout', 'actions/setup-python',
