@@ -22,15 +22,22 @@ source archives and the macOS framework bundle retain their bytes. A ZIP of
 
 For release tag `v0.1.0-alpha.1`, upload:
 
-- `download-manifest.tsv` and the reviewed `download-j713.command`;
+- `download-manifest.tsv`, the generated `download-j713.command`, and
+  `DOWNLOAD-SHA256SUMS`;
 - `omarchy-j713-v0.1.0-alpha.1-os.part001`, `.part002`, and so on;
 - `omarchy-j713-v0.1.0-alpha.1-companion.tar`.
 
 Publish the manifest SHA-256 and downloader SHA-256 in the trusted release
 announcement. A manifest downloaded without an independently trusted pin does
-not authenticate itself. The downloader requires the manifest pin on its command
-line. It checks ordered part hashes and sizes, the concatenated ZIP hash, every
+not authenticate itself. The release downloader embeds the manifest pin and
+release URL after the manifest is frozen. Running it without arguments selects
+those exact files and the default Downloads directory; explicit options require
+their own pin. It checks ordered part hashes and sizes, the concatenated ZIP hash, every
 reconstructed file, and the original `SHA256SUMS` inventory before completion.
+`DOWNLOAD-SHA256SUMS` covers all transport assets except itself. The returned
+packaging receipt records every asset's size, mode and checksum, including that
+checksum file. These generated files stay outside the kit, avoiding circular
+checksums and preserving every installer byte.
 
 The maintainer command, on a build host with room for another copy of the kit:
 
@@ -53,7 +60,16 @@ Use stock Bash and the system curl, tar, awk and SHA-256 utilities. No Python,
 package installation or administrator access is required by the downloader.
 The script uses Bash 3.2-compatible constructs; native macOS execution of this
 new transport has not been performed. This is separate from the previous
-macOS verification of the unchanged private installer entrypoint.
+macOS verification of the earlier private installer entrypoint.
+
+The generated release asset supports the documented default:
+
+```sh
+bash "$HOME/Downloads/download-j713.command"
+```
+
+The repository template has no embedded release defaults. Its explicit form,
+also accepted by the generated release copy, is:
 
 ```sh
 bash download-j713.command \
