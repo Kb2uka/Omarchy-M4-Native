@@ -1,0 +1,30 @@
+{
+  "inspect_strip.py": {
+    "sha256": "0cbce09a45bcc23e272e5095a0df13fb862814f999290947d3eaad064b301436",
+    "size": 2586
+  },
+  "measure-transfer.c": {
+    "sha256": "fbaf00d036045e9ded76cc567ffb65612fcd9285ef9d8c6cb86ebb8b7f1673a4",
+    "size": 8435
+  },
+  "run-transfer.py": {
+    "sha256": "29991f3340489c95db3ab66325b91ef63707f9f408446febe34462dcc1e0e992",
+    "size": 1231
+  },
+  "measure-memory.c": {
+    "sha256": "3782bb93b362f326832e620a424f5e6fa3f7a91cff9b38d8e3932965a3885227",
+    "size": 10981
+  },
+  "run-memory.py": {
+    "sha256": "dbce703e2b5dc4c7e29ce11949dcd3501d1a8b86cf628572a066abcf46f94bda",
+    "size": 2638
+  },
+  "analyze_transfer.py": {
+    "sha256": "5cb851762b73577826b24c18ab01762cfdf16aaa2e26fa33d3247cd4732b7620",
+    "size": 5522
+  },
+  "qualify_memory.py": {
+    "sha256": "90075f9fa228792a83900b7dd57eb88b1e0783ca4f74c43cc123baafc876c72a",
+    "size": 5656
+  }
+}
