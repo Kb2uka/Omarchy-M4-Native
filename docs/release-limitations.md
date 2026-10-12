@@ -13,7 +13,7 @@
   recovery; the progress bar alone is insufficient evidence.
 - **Final packaging not hardware retested.** Two attended private installations
   preceded this release; the final build changes owner-local audio preparation,
-  consent and delivery packaging. Further testing was waived by the maintainer.
+  consent and delivery packaging. The maintainer's final installation is pending.
   Code review and checksums do not prove successful installation on another Mac.
 - **macOS audio inputs are pinned.** The local generator refuses unknown Apple
   AudioDSP/tuning hashes or unequal filter output before disk changes. Minimum

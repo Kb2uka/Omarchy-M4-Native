@@ -13,10 +13,9 @@ not captured in that final report, so it does not prove hardware decode.
 
 Final release packaging removes preset personal consent and prepares exact
 speaker filters on each owner's Mac. **This final packaging was not hardware
-retested.** On October 11, the maintainer explicitly waived further testing and
-authorized this experimental release after code review. That decision supersedes
-the earlier exact-final-installer acceptance gate; it does not turn the private
-trial into evidence for unexecuted changes.
+retested.** The maintainer initially waived further tests, then reinstated the
+final attended installation before publication. That installation is pending.
+The private trial is not evidence for unexecuted changes.
 
 ## Three different kinds of evidence
 
@@ -107,5 +106,5 @@ macOS build. The firmware minimum and audio-input compatibility are separate.
 No new native installation, playback, reboot or test-suite result is claimed for
 the final release packaging. Asset hashes and image readbacks identify what is
 shipped; they do not substitute for those tests. The download is an experimental
-release under the maintainer's explicit waiver. It retains all board checks and
+candidate awaiting the maintainer's final install. It retains all board checks and
 requires the owner's local Apple startup authorization.

@@ -280,7 +280,7 @@ def assemble(args):
         'audio_manifest_sha256': old_image['audio_manifest_sha256'],
         'video_manifest_sha256': old_image['video_manifest_sha256'],
         'fresh_install_qualified': False,
-        'qualification': 'Earlier private build installed on the Air; final owner-input packaging has not been hardware retested. Further tests waived by maintainer.',
+        'qualification': 'Earlier private build installed on the Air; final owner-input packaging has not been hardware retested at build time. Final owner-install confirmation is pending.',
         'owner_inputs': 'Speaker filters generated from installed macOS and hash checked before partitioning; Widevine requires each owner choice.',
         'baseline_root_sha256': BASE_ROOT,
     }

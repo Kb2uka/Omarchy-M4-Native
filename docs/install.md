@@ -99,8 +99,9 @@ than erasing partitions or repeating installation. Report recurrence with logs.
 
 Once setup completes and the desktop works, eject and remove the USB. The
 keyboard, trackpad, audio and video worked on the maintainer's preceding private
-build. The final owner-input packaging was reviewed but not hardware retested;
-it is an alpha, with the limitations described alongside it.
+build. The final owner-input packaging is undergoing review and awaits the maintainer's
+final installation before publication. It remains an alpha with the limitations
+described alongside it.
 
 For Wi-Fi, open a terminal and run `nmtui`. Widevine acquisition needs internet
 access and a closed browser; finish that setup before expecting protected movies.

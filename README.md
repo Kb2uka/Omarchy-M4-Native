@@ -55,8 +55,8 @@ Two attended private installations preceded this release. On the second,
 keyboard, trackpad, audio and video worked after a setup stall and restart.
 The final delivery changes owner-local speaker-filter preparation and browser
 consent, preserving the working kernel and driver payloads. **That final
-packaging has not been hardware retested; further tests were waived by the
-maintainer.** See the [qualification record](docs/experimental-release.md) and
+packaging has not been hardware retested; the maintainer will install this
+exact candidate before publication.** See the [qualification record](docs/experimental-release.md) and
 [known limitations](docs/release-limitations.md).
 
 **Read the [update policy](docs/updates.md) before accepting system updates.**
