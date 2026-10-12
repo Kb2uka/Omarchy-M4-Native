@@ -31,6 +31,31 @@ BASE_AUDIO_REGISTER = 'aa3f9f8b4c6c08ce3e088442168d5e80d9a59aa1b0e6d1449f6943829
 BASE_AUDIO_UNIT = 'bfa2e740cc4ff8aa03246f97bcbf85f92528b11fea22100ad8a3c312c7cb0ddf'
 BASE_VIDEO = '8e1607e29174987e90f0f1cd0361786f894b239ad54fba08067ce1da54ec2331'
 BASE_VIDEO_START = 'c613d8a3b48021204538fc0dd766a523b2ddb4c0ed4d2a26bb21259ba285c85d'
+BASE_KERNEL = '2ddab32174f5a0d1153b177bb9fabc645e8d9f72d09d2fa523e78758f05290b9'
+KERNEL_IDENTITY = {
+    'kernel': {'sha256': 'c3704cfd2afb7760e73f0b9939a68864a30bd916fcd478bd960e538373123dc9',
+               'bytes': 18901266},
+    'build': {
+        'kernel_release': '7.1.9-m4-gpu-backport-20261008',
+        'config_sha256': '14b4437b2b195e912a2ab614d28761acd3dc79f886d4487964aa0912616a3a6e',
+        'dockchannel_hid_sha256': 'e4eebbee612eee32bd51ce370d412afc8cf62a9a7e087a3797c2c29306cedfb4',
+        'macsmc_sha256': '0cbe1eaf11e473336bfc24d5036a4a15586f21c868e8fedd21aeb1ce8bcaa9d6',
+        'module_symvers_sha256': '5e3c2624c6a991bae503336137ce15071e51ef043edcd20ba1ad19df4e23d67c',
+        'vmlinux_symvers_sha256': '5e3c2624c6a991bae503336137ce15071e51ef043edcd20ba1ad19df4e23d67c',
+        'export_rows': 16412, 'exports_unchanged': True,
+    },
+}
+KERNEL_PATCHES = {
+    'patches-kernel/j713-input/dockchannel-start-retry.patch':
+        'f3b1cacd0f1704e60edbadba714ac052959356446e5e059ad345fddc1d501967',
+    'patches-kernel/j713-input/macsmc-key-info-lock.patch':
+        '47a09e2b804b156c8ee5e26a025980caca7a10c4f0c0ef0bcdd8baf8b3b912f4',
+    'patches-kernel/j713-input/dockchannel-afe-action.patch':
+        '8f9ab49462a5076b7345aa465cef99696f29cbf4d23ab5bfa629acfebee8ed89',
+}
+NATIVE_KERNEL_CHECKS = {'boot', 'touch_mt_ready', 'keyboard_registered', 'trackpad_registered',
+                        'gpu_service_integrity', 'video_service_integrity',
+                        'audio_service_integrity', 'repeat_boot'}
 POWEROFF_DTB = '67dc61458b03c0fad1156994ad85a85f9f8612cac2996eb684609b0455ebf547'
 FIRS = ('j713-static-minimal-lane0-48000.wav', 'j713-static-minimal-lane1-48000.wav',
         'j713-static-minimal-lane2-48000.wav', 'j713-static-minimal-lane3-48000.wav')
@@ -61,6 +86,80 @@ def source_revision(tree):
     require(not status, 'Release source has tracked changes; commit before assembly')
     return subprocess.check_output(
         ['git', '-C', str(tree), 'rev-parse', '--verify', 'HEAD'], text=True).strip()
+
+
+def unique_receipt_object(pairs):
+    value = {}
+    for key, item in pairs:
+        require(key not in value, 'Duplicate kernel receipt key')
+        value[key] = item
+    return value
+
+
+def kernel_input(kernel, receipt_path, tree, revision):
+    """Accept the exact build only with recorded native startup evidence."""
+    require((kernel is None) == (receipt_path is None),
+            '--kernel and --kernel-receipt must be supplied together')
+    if kernel is None:
+        return None
+    require(kernel.is_file() and not kernel.is_symlink() and
+            kernel.stat().st_size == KERNEL_IDENTITY['kernel']['bytes'], 'Unknown kernel input')
+    require(receipt_path.is_file() and not receipt_path.is_symlink() and
+            0 < receipt_path.stat().st_size <= 65536, 'Invalid kernel receipt input')
+    raw = receipt_path.read_bytes()
+    receipt = json.loads(raw, object_pairs_hook=unique_receipt_object)
+    fields = {'schema', 'kind', 'board', 'soc', 'source_revision', 'kernel', 'build', 'patches',
+              'native_startup_qualified', 'native_checks', 'evidence_sha256',
+              'fresh_install_qualified', 'physical_acceptance'}
+    require(type(receipt) is dict and set(receipt) == fields, 'Unknown kernel receipt schema')
+    require(type(receipt['schema']) is int and receipt['schema'] == 1 and
+            receipt['kind'] == 'j713-afe-action-kernel' and receipt['board'] == 'apple,j713' and
+            receipt['soc'] == 'apple,t8132', 'Unsupported kernel receipt board/schema')
+    require(receipt['source_revision'] == revision, 'Kernel receipt source revision mismatch')
+    require(type(receipt['kernel']) is dict and type(receipt['kernel'].get('bytes')) is int and
+            type(receipt['build']) is dict and type(receipt['build'].get('export_rows')) is int and
+            receipt['kernel'] == KERNEL_IDENTITY['kernel'] and
+            receipt['build'] == KERNEL_IDENTITY['build'] and
+            receipt['build']['exports_unchanged'] is True, 'Unrecognized kernel build identity')
+    checks = receipt['native_checks']
+    require(receipt['native_startup_qualified'] is True and
+            type(checks) is dict and set(checks) == NATIVE_KERNEL_CHECKS and
+            all(value is True for value in checks.values()), 'Kernel native startup evidence is incomplete')
+    require(receipt['fresh_install_qualified'] is False and
+            receipt['physical_acceptance'] == 'not_performed', 'Kernel receipt exceeds startup scope')
+    require(isinstance(receipt['evidence_sha256'], str) and
+            re.fullmatch('[0-9a-f]{64}', receipt['evidence_sha256']) is not None,
+            'Kernel evidence hash is missing')
+    require(receipt['patches'] == KERNEL_PATCHES, 'Kernel source patch identities differ')
+    for name in (*KERNEL_PATCHES, 'docs/j713-afe-native-action.md', 'docs/release-source.md'):
+        path = image_path(tree, name)
+        require(path.is_file(), 'Missing kernel source: ' + name)
+        data = path.read_bytes()
+        if name in KERNEL_PATCHES:
+            require(hashlib.sha256(data).hexdigest() == KERNEL_PATCHES[name],
+                    'Kernel source patch changed: ' + name)
+        committed = subprocess.check_output(['git', '-C', str(tree), 'show', revision + ':' + name])
+        require(data == committed, 'Kernel source is not frozen in the release revision: ' + name)
+    data = kernel.read_bytes()
+    require(len(data) == receipt['kernel']['bytes'] and
+            hashlib.sha256(data).hexdigest() == receipt['kernel']['sha256'], 'Kernel input hash mismatch')
+    return {'data': data, 'receipt': receipt, 'receipt_bytes': raw}
+
+
+def release_boot(original, kernel):
+    boot = copy.deepcopy(original)
+    boot['dtb']['sha256'] = POWEROFF_DTB
+    if kernel is not None:
+        require(boot['kernel']['sha256'] == BASE_KERNEL, 'Unknown retained kernel prerequisite')
+        args = boot['bootargs'].split()
+        require(args.count('dockchannel_hid.m4_power_v2=1') == 1 and
+                sum(arg.startswith('dockchannel_hid.m4_power_v2=') for arg in args) == 1 and
+                not any(arg.startswith(('dockchannel_hid.m4_afe_action=',
+                                        'dockchannel_hid.m4_afe_power=')) for arg in args),
+                'Unexpected retained input boot arguments')
+        boot['kernel']['sha256'] = kernel['receipt']['kernel']['sha256']
+        boot['bootargs'] += ' dockchannel_hid.m4_afe_action=1'
+    return boot
 
 
 def patch_main(data):
@@ -205,7 +304,7 @@ def prepare_startup(root, tree, raw):
     return (json.dumps(manifest, indent=2, sort_keys=True) + '\n').encode()
 
 
-def prepare_decoder(root, tree):
+def prepare_decoder(root, tree, kernel=None):
     """Replace the retained decoder wait and carry its exact identity forward."""
     name = 'usr/local/bin/m4-video-start'
     path = image_path(root, name)
@@ -216,6 +315,12 @@ def prepare_decoder(root, tree):
     manifest = json.loads(metadata.read_bytes())
     require(manifest['files'][name] == dict(sha256=BASE_VIDEO_START, size=path.stat().st_size, mode=0o755),
             'Retained decoder identity map disagrees')
+    if kernel is not None:
+        require(manifest['board'] == 'apple,j713' and
+                manifest['boot_kernel_sha256'] == BASE_KERNEL and
+                manifest['kernel_release'] == kernel['receipt']['build']['kernel_release'],
+                'Retained decoder kernel identity mismatch')
+        manifest['boot_kernel_sha256'] = kernel['receipt']['kernel']['sha256']
     replacement = image_path(tree, 'packaging/j713-startup/m4-video-start').read_bytes()
     path.write_bytes(replacement)
     path.chmod(0o755)
@@ -225,7 +330,7 @@ def prepare_decoder(root, tree):
     return sha(metadata)
 
 
-def prepare_root(source, image, root, tree, identity):
+def prepare_root(source, image, root, tree, identity, kernel=None):
     require(sha(source) == BASE_ROOT, 'Retained root image changed')
     command('cp', '--reflink=auto', '--sparse=always', source, image)
     root.mkdir()
@@ -240,7 +345,8 @@ def prepare_root(source, image, root, tree, identity):
         audio_manifest = root / 'etc/omarchy/j713-audio-manifest.json'
         native_audio = owner_audio_manifest(audio_manifest.read_bytes(), BASE_AUDIO, manifest)
         native_audio = prepare_startup(root, tree, native_audio)
-        video_pin = prepare_decoder(root, tree)
+        video_pin = (prepare_decoder(root, tree) if kernel is None else
+                     prepare_decoder(root, tree, kernel=kernel))
         for name in FIRS:
             path = root / 'usr/share/asahi-audio/j713' / name
             require(path.is_file() and not path.is_symlink() and
@@ -293,6 +399,8 @@ def assemble(args):
     require(os.geteuid() == 0, 'Build on a Linux host through its scoped root job')
     tree, baseline = args.source_tree.resolve(), args.baseline.resolve()
     revision = source_revision(tree)
+    kernel = kernel_input(getattr(args, 'kernel', None), getattr(args, 'kernel_receipt', None),
+                          tree, revision)
     require(args.output.is_absolute() and not args.output.exists() and
             not args.output.is_symlink(), 'A new absolute build output is required')
     require(shutil.disk_usage(args.output.parent).free > 40 * 1024**3,
@@ -318,19 +426,20 @@ def assemble(args):
     require(handoff == {name: (record['size'], record['sha256'])
                         for name, record in owner_profile['outputs'].items()},
             'Owner generation and installer handoff identities disagree')
-    args.output.mkdir(mode=0o700)
-    output = args.output / 'delivery'
-    output.mkdir()
-    image = args.output / 'root.ext4'
-    identity = str(uuid.uuid4())
-    manifest_pins = prepare_root(args.root_image.resolve(), image, args.output / 'mounted-root', tree, identity)
     config = json.loads((baseline / 'installer_data.json').read_bytes())
     old_image = json.loads((baseline / 'IMAGE.json').read_bytes())
     require(old_image['audio_manifest_sha256'] == BASE_AUDIO, 'Baseline audio identity changed')
     require(old_image['video_manifest_sha256'] == BASE_VIDEO, 'Baseline video identity changed')
     require(config['os_list'][0]['m4_boot'] == old_image['boot'], 'Baseline boot pins disagree')
-    boot = copy.deepcopy(old_image['boot'])
-    boot['dtb']['sha256'] = POWEROFF_DTB
+    boot = release_boot(old_image['boot'], kernel)
+    args.output.mkdir(mode=0o700)
+    output = args.output / 'delivery'
+    output.mkdir()
+    image = args.output / 'root.ext4'
+    identity = str(uuid.uuid4())
+    root_args = (args.root_image.resolve(), image, args.output / 'mounted-root', tree, identity)
+    manifest_pins = (prepare_root(*root_args) if kernel is None else
+                     prepare_root(*root_args, kernel=kernel))
     old_package = config['os_list'][0]['package']
     new_package = 'omarchy-j713-' + VERSION + '.zip'
     skipped = {'SHA256SUMS', 'KIT.json', 'IMAGE.json', 'installer_data.json', 'Install.command',
@@ -360,6 +469,8 @@ def assemble(args):
             require(hashlib.sha256(data).hexdigest() == entry['sha256'], 'Boot payload changed')
             if kind == 'dtb':
                 data = args.poweroff_dtb.read_bytes()
+            elif kind == 'kernel' and kernel is not None:
+                data = kernel['data']
             require(hashlib.sha256(data).hexdigest() == boot[kind]['sha256'],
                     'Release boot payload pin mismatch')
             new.writestr(entry['file'], data)
@@ -405,6 +516,8 @@ def assemble(args):
             if Path(name).name in ('AGENTS.md', 'CLAUDE.md'):
                 continue
             archive.add(tree / name, arcname=name, recursive=False)
+    if kernel is not None:
+        (output / 'source/j713-kernel-receipt.json').write_bytes(kernel['receipt_bytes'])
     config['os_list'][0]['package'] = new_package
     config['os_list'][0]['name'] = 'Omarchy M4 Native ' + VERSION + ' (experimental J713)'
     config['os_list'][0]['m4_boot'] = boot
@@ -427,6 +540,12 @@ def assemble(args):
         'poweroff': {'change': 'Enable existing SMC handler through its missing device-tree child',
                     'hardware_verified': False, 'issue': 24},
     }
+    if kernel is not None:
+        metadata.update(kernel_receipt_sha256=hashlib.sha256(kernel['receipt_bytes']).hexdigest(),
+                        kernel_native_startup_qualified=True,
+                        qualification='Candidate kernel passed the objective native startup checks recorded '
+                        'in source/j713-kernel-receipt.json. Physical acceptance and an attended fresh '
+                        'installation remain unverified; this is not publication qualification.')
     document(output / 'IMAGE.json', metadata)
     files = {}
     for path in sorted(output.rglob('*')):
@@ -452,6 +571,8 @@ def main():
     for name in ('source-tree', 'baseline', 'root-image', 'owner-bundle', 'numpy-source', 'cargo-source',
                  'sound-exports', 'reconstruction', 'poweroff-dtb', 'output'):
         parser.add_argument('--' + name, required=True, type=Path)
+    parser.add_argument('--kernel', type=Path, help='Exact startup-qualified J713 AFE action Image.gz')
+    parser.add_argument('--kernel-receipt', type=Path, help='Matching build and native startup receipt')
     assemble(parser.parse_args())
 
 

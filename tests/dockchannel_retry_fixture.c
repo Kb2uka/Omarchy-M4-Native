@@ -95,6 +95,9 @@ static void *devm_kmemdup(struct device *d, const void *p, size_t n, int g) {
 static void *dmam_alloc_coherent(struct device *d,size_t n,dma_addr_t *addr,int g) {
  (void)d;(void)g;dmas++;if(fail_dma)return NULL;void *b=malloc(n);assert(b);*addr=(uintptr_t)b;return b;
 }
+/* The separate AFE fixture exercises the opt-in host sequence. */
+static __attribute__((unused)) int dchid_prepare_afe(struct dchid_iface *i) { (void)i;return 0; }
+static __attribute__((unused)) int dchid_afe_action(struct dchid_iface *i, int state) { (void)i;(void)state;return 0; }
 static int dchid_request_gpio(struct dchid_iface *i) { (void)i;return 0; }
 static int dchid_comm_cmd(struct dockchannel_hid *d, void *v, size_t n) {
  (void)d;assert(commands<64 && n<=16);memcpy(packets[commands],v,n);packet_sizes[commands]=n;

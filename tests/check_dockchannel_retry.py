@@ -66,8 +66,17 @@ with tempfile.TemporaryDirectory(prefix="dchid-retry-") as temp:
     run("before", before, ("first_timeout", "all_timeout"), False)
     run("after", after, cases, True)
     for name, (old, new, case) in mutations.items():
-        assert after.count(old) == 1, (name, "non-unique mutation")
-        mutated = after.replace(old, new)
+        # Other opt-in helpers can contain the same board predicates. Mutate
+        # the actual retry guard, not an unrelated helper with matching text.
+        if name in {"board_guard", "chip_guard", "interface_guard"}:
+            start = after.index("static bool dchid_start_retry_enabled(")
+            end = after.index("\nstatic int dchid_send_firmware", start)
+            body = after[start:end]
+            assert body.count(old) == 1, (name, "non-unique guard mutation")
+            mutated = after[:start] + body.replace(old, new) + after[end:]
+        else:
+            assert after.count(old) == 1, (name, "non-unique mutation")
+            mutated = after.replace(old, new)
         # A removed lock must not fail by unlocking an unowned pthread mutex.
         if name == "serialization":
             mutated = mutated.replace("\tmutex_unlock(&iface->start_mutex);", "\t/* omitted unlock */")

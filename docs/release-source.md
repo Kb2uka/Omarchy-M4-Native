@@ -59,6 +59,89 @@ build was incremental; the archives omit compiled objects, so rebuilding from
 them entails more work. Build timestamps can change the output hash. The final
 installed Image.gz hash is in IMAGE.json; a byte-identical rebuild is not claimed.
 
+### Optional J713 AFE action kernel
+
+The release assembler retains that kernel when neither `--kernel` nor
+`--kernel-receipt` is supplied. Supplying either requires both. This optional
+path accepts only the exact AFE action build pinned in
+`tools/prepare-j713-release.py`, together with its build and native startup
+receipt. It does not qualify another kernel or observe the target itself.
+
+After the startup-retry patch, apply
+`patches-kernel/j713-input/macsmc-key-info-lock.patch` and
+`patches-kernel/j713-input/dockchannel-afe-action.patch`. The resulting source
+identities are:
+
+- `drivers/hid/dockchannel-hid/dockchannel-hid.c`:
+  `e4eebbee612eee32bd51ce370d412afc8cf62a9a7e087a3797c2c29306cedfb4`
+- `drivers/mfd/macsmc.c`:
+  `0cbe1eaf11e473336bfc24d5036a4a15586f21c868e8fedd21aeb1ce8bcaa9d6`
+
+The retained build used the configuration above, the same compiler versions,
+and this command:
+
+```sh
+make ARCH=arm64 LLVM=1 LOCALVERSION= KBUILD_BUILD_VERSION=18 -j8 Image.gz
+```
+
+Its compressed image is 18,901,266 bytes, SHA-256
+`c3704cfd2afb7760e73f0b9939a68864a30bd916fcd478bd960e538373123dc9`.
+The release remains `7.1.9-m4-gpu-backport-20261008`; all 16,412 export rows and
+the module ABI are retained. This records the build identity, not native
+acceptance. A later rebuilt image requires its own reviewed pins and evidence.
+
+The receipt is a closed JSON object with these fields; additional fields and
+duplicate keys at any depth are rejected so private transcripts and machine
+identities do not enter the kit:
+
+| Field | Required value |
+| --- | --- |
+| `schema`, `kind` | `1`, `"j713-afe-action-kernel"` |
+| `board`, `soc` | `"apple,j713"`, `"apple,t8132"` |
+| `source_revision` | Full commit of the clean integration checkout being assembled |
+| `kernel` | Exact `sha256` and integer `bytes` from `KERNEL_IDENTITY.kernel` |
+| `build` | Exact object from `KERNEL_IDENTITY.build`, including release, configuration, both driver hashes, both export-table hashes, integer `export_rows` and `exports_unchanged: true` |
+| `patches` | Exact path-to-SHA-256 map from `KERNEL_PATCHES`; each patch must also match the committed checkout |
+| `native_startup_qualified` | `true` only after every objective check below has been observed |
+| `native_checks` | Exactly the eight boolean checks below, all `true` |
+| `evidence_sha256` | SHA-256 of the retained, redacted native startup evidence |
+| `fresh_install_qualified` | `false` |
+| `physical_acceptance` | `"not_performed"` |
+
+The checks are `boot`, `touch_mt_ready`, `keyboard_registered`,
+`trackpad_registered`, `gpu_service_integrity`, `video_service_integrity`,
+`audio_service_integrity`, and `repeat_boot`. The service checks cover successful
+startup and their existing integrity/readiness guards. Device registration does
+not mean physical pointer movement, click feel, heard audio or browser visual
+acceptance. Those checks and an attended fresh installation remain pending.
+An incomplete receipt must retain false checks and is rejected by assembly;
+neither a successful compile nor offline tests authorize changing them to true.
+The assembler validates the receipt's declared identity and scope; the recorded
+native observations remain the maintainer's responsibility.
+
+Use the ordinary release command with these two additional arguments:
+
+```sh
+  --kernel /job/qualified/Image.gz \
+  --kernel-receipt /job/qualified/j713-kernel-receipt.json
+```
+
+The assembler snapshots the verified kernel and receipt before creating an
+image. It replaces only the portable kernel, records its hash in the video
+manifest and both boot descriptions, and appends
+`dockchannel_hid.m4_afe_action=1` alongside the retained power-v2 option. The
+installer's Mac16,12 restriction and the driver's J713/T8132/multi-touch guards
+remain in place. GPU, audio, video, browser payloads, loader, DTB and base
+initramfs retain the ordinary release path. The installer still collects each
+owner's firmware; a private composed boot object must not be distributed.
+
+The three patches and `docs/j713-afe-native-action.md` must be committed in that
+revision so `source/release-integration.tar.gz` contains the corresponding
+source. `source/j713-kernel-receipt.json` preserves the exact receipt, whose hash
+is recorded in `IMAGE.json`. Historical prepared kernel archives and build
+inputs remain unchanged; this patch chain describes their join to the new
+image. `fresh_install_qualified` remains false in image and kit metadata.
+
 For the audio build helper, copy `vendor-registry` from the Cargo packet into
 `audio/j713/speakersafetyd/vendor-registry`. Supply a new Cargo home containing:
 
@@ -95,8 +178,8 @@ Other audio payloads and protection settings are retained. The GPU service now
 waits only for its scanout device. Offline configurators install the independent
 recovery console, setup console controls, a bounded desktop-failure report and
 the arm64 guard for an unrelated Framework audio probe. See [j713-owner-fir-native.md](j713-owner-fir-native.md).
-Kernel,
-initramfs and loader bytes are preserved; the DTB checksum is updated in both
+Without the optional kernel pair, kernel bytes are preserved. Initramfs and
+loader bytes are preserved in both paths; the DTB checksum is updated in both
 the image metadata and installer definition. Its pinned private base
 is a historical build input, not a public download promise. The distributed
 source and installer are versioned separately from future main-branch changes.
