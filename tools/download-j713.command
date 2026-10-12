@@ -123,7 +123,7 @@ function path(s) { return length(s)<=240 && s ~ /^[A-Za-z0-9_-][A-Za-z0-9._-]*(\
 function asset(s) { return path(s) && s !~ /\// }
 NR==1 { if(NF!=2 || $1!="format" || $2!="j713-download-v1") bad(); next }
 NR==2 { if(NF!=2 || $1!="release" || $2!~/^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$/) bad(); tag=$2; next }
-NR==3 { if(NF!=4 || $1!="archive" || !path($2) || $2!~/^os\/[^/]+\.zip$/ || !num($3) || $3<1 || !hash($4)) bad(); archive=$2; size=$3; pin=$4; next }
+NR==3 { if(NF!=4 || $1!="archive" || !path($2) || $2!~/^os\/[^\/]+\.zip$/ || !num($3) || $3<1 || !hash($4)) bad(); archive=$2; size=$3; pin=$4; next }
 NR==4 { if(NF!=4 || $1!="companion" || $2!="omarchy-j713-" tag "-companion.tar" || !num($3) || $3<1 || $3>2147483647 || !hash($4)) bad(); companion=$2; next }
 $1=="part" {
   if(phase || NF!=5 || !num($2) || $2!=++parts || parts>99 || !asset($3) ||
