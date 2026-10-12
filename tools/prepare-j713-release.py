@@ -257,6 +257,10 @@ def assemble(args):
     with tarfile.open(args.owner_bundle) as archive:
         archive.extractall(owner, filter='data')
     (owner / 'owner-fir').rename(owner / 'bundle')
+    # Checkout formatting metadata stays in the source archive, not the runtime bundle.
+    attributes = owner / 'bundle/.gitattributes'
+    require(attributes.is_file() and not attributes.is_symlink(), 'Owner bundle metadata changed')
+    attributes.unlink()
     shutil.copyfile(tree / 'tools/m4-j713-fir-owner.py', owner / 'm4-j713-fir-owner.py')
     shutil.copyfile(args.numpy_source, output / 'source/numpy-2.5.3.tar.gz')
     shutil.copyfile(args.cargo_source, output / 'source/j713-audio-cargo-sources.tar.gz')
