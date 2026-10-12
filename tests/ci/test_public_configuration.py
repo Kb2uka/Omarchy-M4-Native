@@ -47,6 +47,19 @@ class PublicConfigurationTests(unittest.TestCase):
         self.assertEqual(main['conditions']['ref_name']['include'], ['refs/heads/main'])
         self.assertEqual(main['bypass_actors'], [{'actor_type': 'User', 'actor_id': 42, 'bypass_mode': 'pull_request'}])
 
+    def test_private_settings_do_not_call_public_only_api(self):
+        calls = []
+        def api(gh, endpoint, method='GET', body=None):
+            calls.append((endpoint, method))
+            suffix = endpoint.removeprefix(settings.BASE)
+            if suffix in settings.SETTINGS:
+                return settings.SETTINGS[suffix]
+            return None
+        with patch.object(settings, 'api', side_effect=api):
+            settings.apply_settings('/gh')
+        self.assertFalse(any('fork-pr-contributor' in path for path, _ in calls))
+        self.assertEqual(settings.FORK_APPROVAL['approval_policy'], 'all_external_contributors')
+
     def test_readback_mismatch_fails(self):
         with self.assertRaises(ValueError):
             settings.require_subset({'a': {'b': True}}, {'a': {'b': False}}, 'test')

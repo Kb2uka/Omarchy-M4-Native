@@ -17,9 +17,9 @@ SETTINGS = {
     '/actions/permissions': {'enabled': True, 'allowed_actions': 'selected', 'sha_pinning_required': True},
     '/actions/permissions/selected-actions': {'github_owned_allowed': True, 'verified_allowed': False, 'patterns_allowed': []},
     '/actions/permissions/workflow': {'default_workflow_permissions': 'read', 'can_approve_pull_request_reviews': False},
-    '/actions/permissions/fork-pr-contributor-approval': {'approval_policy': 'all_external_contributors'},
 }
 
+FORK_APPROVAL = {'approval_policy': 'all_external_contributors'}
 
 def rules(owner_id):
     bypass = [{'actor_type': 'User', 'actor_id': owner_id, 'bypass_mode': 'pull_request'}]
@@ -89,6 +89,10 @@ def apply_settings(gh):
 
 def activate(gh, repo, desired):
     activation_preflight(gh, repo)
+    apply_settings(gh)
+    endpoint = BASE + '/actions/permissions/fork-pr-contributor-approval'
+    api(gh, endpoint, 'PUT', FORK_APPROVAL)
+    require_subset(FORK_APPROVAL, api(gh, endpoint), 'fork approval')
     existing = api(gh, BASE + '/rulesets?per_page=100')
     for body in desired:
         matches = [r for r in existing if r['name'] == body['name']]
@@ -130,7 +134,7 @@ def main():
     elif args.apply_settings:
         apply_settings(args.gh)
     print(json.dumps({'repository': REPO, 'visibility': repo['visibility'],
-                      'settings': SETTINGS, 'rulesets': desired,
+                      'settings': SETTINGS, 'public_fork_approval': FORK_APPROVAL, 'rulesets': desired,
                       'settings_applied': args.apply_settings,
                       'public_activation_applied': args.activate_public}, indent=2))
 

@@ -63,10 +63,11 @@ python3 tools/ci/configure-public-security.py --gh /absolute/path/to/gh
 ```
 
 `--apply-settings` sets read-only workflow tokens, SHA pinning, an official-action
-allowlist, approval for all external contributors and dependency alerts. It
+allowlist and dependency alerts. It
 never changes visibility. Once the owner makes the repo public, run
 `--activate-public` to require the CI checks, CODEOWNER review and CodeQL results,
-restrict `main` updates to KB2UKA, enable push protection/private vulnerability
+require approval for all external contributors, restrict `main` updates to KB2UKA,
+enable push protection/private vulnerability
 reports, and verify the settings by reading them back. No other settings or
 rulesets are replaced. This helper must run from a reviewed checkout with the
 owner's authenticated CLI, never inside an untrusted PR workflow.
