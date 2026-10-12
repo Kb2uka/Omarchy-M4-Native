@@ -14,7 +14,8 @@ not captured in that final report, so it does not prove hardware decode.
 Final release packaging removes preset personal consent and prepares exact
 speaker filters on each owner's Mac. **This final packaging was not hardware
 retested.** The maintainer initially waived further tests, then reinstated the
-final attended installation before publication. That installation is pending.
+final attended installation before publication. That installation is pending,
+including the candidate SMC poweroff device-tree correction and stay-off check.
 The private trial is not evidence for unexecuted changes.
 
 ## Three different kinds of evidence

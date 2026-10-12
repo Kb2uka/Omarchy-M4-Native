@@ -85,6 +85,9 @@ part of release qualification.
 
 The assembler `tools/prepare-j713-release.py` records how the retained private
 root was copied, owner-specific payloads removed, freed blocks overwritten,
-new service installed and boot/kernel bytes preserved. Its pinned private base
+new service installed and the existing SMC poweroff handler enabled through the
+device-tree child described in [j713-poweroff.md](j713-poweroff.md). Kernel,
+initramfs and loader bytes are preserved; the DTB checksum is updated in both
+the image metadata and installer definition. Its pinned private base
 is a historical build input, not a public download promise. The distributed
 source and installer are versioned separately from future main-branch changes.

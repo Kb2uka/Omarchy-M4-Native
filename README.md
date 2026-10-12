@@ -77,7 +77,10 @@ the machine off. Holding the power button while the Omarchy desktop is still
 running instead made the Air loop and start back up. The order matters for the
 reported workaround; it is a forced power-off, not a normal shutdown fix.
 
-The cause and a reliable shutdown fix remain unverified. Working login,
+The next candidate enables the existing SMC poweroff handler by adding its
+missing device-tree child. [Source and evidence](docs/j713-poweroff.md) explain
+the narrow change and its limits. Physical poweroff and staying off remain
+unverified; issue #24 stays open until the attended check. Working login,
 trackpad, audio and video do not establish working shutdown.
 
 ## What has been observed on the test Air

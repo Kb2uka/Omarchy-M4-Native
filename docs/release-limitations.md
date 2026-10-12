@@ -8,12 +8,16 @@
   the desktop was still running instead caused a restart loop. This forced
   power-off is not a fix or proof that writes are complete. See
   https://github.com/Kb2uka/Omarchy-M4-Native/issues/24.
+  The final candidate adds the missing device-tree child for the existing SMC
+  poweroff handler. Its physical shutdown and stay-off behavior await the
+  maintainer's check; the issue remains open.
 - **First setup may stall near completion.** One attended private installation
   reached login after a restart. Allow for ongoing writes before considering
   recovery; the progress bar alone is insufficient evidence.
 - **Final packaging not hardware retested.** Two attended private installations
   preceded this release; the final build changes owner-local audio preparation,
-  consent and delivery packaging. The maintainer's final installation is pending.
+  consent, delivery packaging and the SMC poweroff device-tree child. The
+  maintainer's final installation is pending.
   Code review and checksums do not prove successful installation on another Mac.
 - **macOS audio inputs are pinned.** The local generator refuses unknown Apple
   AudioDSP/tuning hashes or unequal filter output before disk changes. Minimum

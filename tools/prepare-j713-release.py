@@ -19,6 +19,7 @@ import zipfile
 VERSION = '0.1.0-alpha.1'
 BASE_SUMS = '95c8125fdd054ebcabbfc490e34ced0ee1b2e5293a3980aba383c54623fe121d'
 BASE_ROOT = 'b2beef5d2d1c1370e6d6911a3ff6f1d4ddc1e7c992a444f90283491dd8440836'
+POWEROFF_DTB = '67dc61458b03c0fad1156994ad85a85f9f8612cac2996eb684609b0455ebf547'
 FIRS = ('j713-static-minimal-lane0-48000.wav', 'j713-static-minimal-lane1-48000.wav',
         'j713-static-minimal-lane2-48000.wav', 'j713-static-minimal-lane3-48000.wav')
 PROFILES = ('Brave-Browser', 'Brave-Browser-M4', 'Chromium')
@@ -131,6 +132,9 @@ def prepare_root(source, image, root, tree, identity):
     try:
         command('mount', '-o', 'loop,nodev,nosuid', image, root)
         mounted = True
+        completion = root / 'etc/m4-install-complete'
+        require(not completion.exists() and not completion.is_symlink(),
+                'Retained root must not have completed first boot')
         manifest = json.loads((tree / 'audio/j713/owner-fir/manifest.json').read_text())
         for name in FIRS:
             path = root / 'usr/share/asahi-audio/j713' / name
@@ -152,6 +156,8 @@ def prepare_root(source, image, root, tree, identity):
             'usr/lib/systemd/system/m4-j713-audio-register.service.d/10-owner-assets.conf':
                 'packaging/j713-owner-assets-audio.conf',
             'usr/lib/systemd/system/systemd-user-sessions.service.d/10-owner-assets.conf':
+                'packaging/j713-owner-assets-audio.conf',
+            'usr/lib/systemd/system/omarchy-provision-owner.service.d/10-owner-assets.conf':
                 'packaging/j713-owner-assets-audio.conf',
         }
         for target, source_name in additions.items():
@@ -196,6 +202,8 @@ def assemble(args):
             'Unknown supplemental sound exports')
     require(sha(args.reconstruction) == '47c144a606c13f218b1bd84d8a1b86d6d9ac281a58a04d0c191e0508221b1e7c',
             'Unknown source reconstruction guidance')
+    require(args.poweroff_dtb.is_file() and not args.poweroff_dtb.is_symlink() and
+            sha(args.poweroff_dtb) == POWEROFF_DTB, 'Unknown SMC poweroff device tree')
     args.output.mkdir(mode=0o700)
     output = args.output / 'delivery'
     output.mkdir()
@@ -204,6 +212,9 @@ def assemble(args):
     prepare_root(args.root_image.resolve(), image, args.output / 'mounted-root', tree, identity)
     config = json.loads((baseline / 'installer_data.json').read_bytes())
     old_image = json.loads((baseline / 'IMAGE.json').read_bytes())
+    require(config['os_list'][0]['m4_boot'] == old_image['boot'], 'Baseline boot pins disagree')
+    boot = copy.deepcopy(old_image['boot'])
+    boot['dtb']['sha256'] = POWEROFF_DTB
     old_package = config['os_list'][0]['package']
     new_package = 'omarchy-j713-' + VERSION + '.zip'
     skipped = {'SHA256SUMS', 'KIT.json', 'IMAGE.json', 'installer_data.json', 'Install.command',
@@ -231,6 +242,10 @@ def assemble(args):
                 continue
             data = old.read(entry['file'])
             require(hashlib.sha256(data).hexdigest() == entry['sha256'], 'Boot payload changed')
+            if kind == 'dtb':
+                data = args.poweroff_dtb.read_bytes()
+            require(hashlib.sha256(data).hexdigest() == boot[kind]['sha256'],
+                    'Release boot payload pin mismatch')
             new.writestr(entry['file'], data)
     module = (tree / 'tools/m4-j713-owner-assets.py').read_bytes()
     repack_installer(baseline / 'installer-macos.tar.gz', output / 'installer-macos.tar.gz', module)
@@ -252,6 +267,7 @@ def assemble(args):
             ('docs/install.md', 'START-HERE.md'),
             ('docs/release-limitations.md', 'KNOWN-LIMITATIONS.md'),
             ('docs/updates.md', 'UPDATES.md'),
+            ('docs/j713-poweroff.md', 'source/j713-poweroff.md'),
             ('docs/release-source.md', 'source/README.md')):
         shutil.copyfile(tree / source_name, output / destination)
     # The current repository sources are a separate exact archive; private build
@@ -267,6 +283,7 @@ def assemble(args):
             archive.add(tree / name, arcname=name, recursive=False)
     config['os_list'][0]['package'] = new_package
     config['os_list'][0]['name'] = 'Omarchy M4 Native ' + VERSION + ' (experimental J713)'
+    config['os_list'][0]['m4_boot'] = boot
     roots = [p for p in config['os_list'][0]['partitions'] if 'rootfs_uuid' in p]
     require(len(roots) == 1, 'Unexpected root layout')
     roots[0].update(rootfs_uuid=identity, size=str(image.stat().st_size) + 'B')
@@ -275,7 +292,7 @@ def assemble(args):
     metadata = {
         'release_version': VERSION, 'private_only': False, 'source_revision': revision,
         'credit': 'studioxradio aka kb2uka', 'base_omarchy_version': '4.0.4',
-        'boot': old_image['boot'],
+        'boot': boot,
         'root': {'bytes': image.stat().st_size, 'sha256': sha(image), 'filesystem_uuid': identity},
         'audio_manifest_sha256': old_image['audio_manifest_sha256'],
         'video_manifest_sha256': old_image['video_manifest_sha256'],
@@ -283,6 +300,8 @@ def assemble(args):
         'qualification': 'Earlier private build installed on the Air; final owner-input packaging has not been hardware retested at build time. Final owner-install confirmation is pending.',
         'owner_inputs': 'Speaker filters generated from installed macOS and hash checked before partitioning; Widevine requires each owner choice.',
         'baseline_root_sha256': BASE_ROOT,
+        'poweroff': {'change': 'Enable existing SMC handler through its missing device-tree child',
+                    'hardware_verified': False, 'issue': 24},
     }
     document(output / 'IMAGE.json', metadata)
     files = {}
@@ -307,7 +326,7 @@ def assemble(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('source-tree', 'baseline', 'root-image', 'owner-bundle', 'numpy-source', 'cargo-source',
-                 'sound-exports', 'reconstruction', 'output'):
+                 'sound-exports', 'reconstruction', 'poweroff-dtb', 'output'):
         parser.add_argument('--' + name, required=True, type=Path)
     assemble(parser.parse_args())
 

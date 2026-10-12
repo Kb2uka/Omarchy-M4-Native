@@ -17,7 +17,9 @@ import tempfile
 import zipfile
 
 
-DEFAULT_BUNDLE = Path(__file__).resolve().parents[1] / 'audio/j713/owner-fir'
+SCRIPT_DIR = Path(__file__).resolve().parent
+DEFAULT_BUNDLE = (SCRIPT_DIR / 'bundle' if (SCRIPT_DIR / 'bundle').is_dir()
+                  else SCRIPT_DIR.parent / 'audio/j713/owner-fir')
 SOURCE_NAMES = {
     'inspect_strip.py', 'measure-transfer.c', 'run-transfer.py',
     'measure-memory.c', 'run-memory.py', 'analyze_transfer.py', 'qualify_memory.py',
