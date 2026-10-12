@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('scan', ROOT / 'tools/ci/scan-source.py')
 scan = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(scan)
+REAL_RUN = subprocess.run
 
 
 class AntivirusTests(unittest.TestCase):
@@ -31,15 +32,23 @@ class AntivirusTests(unittest.TestCase):
     def test_scan_fails_on_detection_and_scanner_error(self):
         self.add('file', b'data')
         for code in (1, 2):
-            with self.subTest(code=code), patch.object(scan.subprocess, 'run',
-                    side_effect=subprocess.CalledProcessError(code, ['clamscan'])):
+            invoked = []
+            def failing_scanner(command, **kwargs):
+                if command[0] != 'clamscan':
+                    return REAL_RUN(command, **kwargs)
+                invoked.append(command)
+                raise subprocess.CalledProcessError(code, command)
+            with self.subTest(code=code), patch.object(scan.subprocess, 'run', side_effect=failing_scanner):
                 with self.assertRaises(subprocess.CalledProcessError):
                     scan.scan(self.root)
+                self.assertEqual(len(invoked), 1)
 
     def test_success_scans_explicit_inventory_with_strict_limits(self):
         self.add('file', b'data')
-        def scanner(command, check):
-            self.assertTrue(check)
+        def scanner(command, **kwargs):
+            if command[0] != 'clamscan':
+                return REAL_RUN(command, **kwargs)
+            self.assertTrue(kwargs['check'])
             self.assertIn('--alert-exceeds-max=yes', command)
             self.assertIn('--alert-encrypted=yes', command)
             listing = next(x.split('=', 1)[1] for x in command if x.startswith('--file-list='))
