@@ -1,10 +1,19 @@
 # J713 SMC poweroff handler
 
 The portable J713 device tree omitted the SMC reboot child. A retained native
-boot log records `macsmc-reboot: Failed to locate of_node [id: -1]`. The
-configuration includes `CONFIG_POWER_RESET_MACSMC=m`, and the installer already
-contains `macsmc-reboot.ko`. The module's probe refuses a device without its OF
-node, so this combination cannot register that driver's poweroff handler.
+boot log records `macsmc-reboot: Failed to locate of_node [id: -1]`. This warning
+comes from MFD device creation in `drivers/mfd/mfd-core.c`; it does not establish
+that the reboot module loaded or its probe ran. The probe's source separately
+shows that it returns `-ENODEV` without an OF node, before registering handlers.
+That rejection is a source inference, not an observed probe result.
+
+The retained configuration includes `CONFIG_POWER_RESET_MACSMC=m`. The retained
+build2 root contains the 21,136-byte module at
+`/usr/lib/modules/7.1.9-m4-gpu-backport-20261008/kernel/drivers/power/reset/macsmc-reboot.ko`.
+Its `modules.alias` contains both `of:N*T*Capple,smc-reboot` and
+`of:N*T*Capple,smc-rebootC*`, targeting `macsmc_reboot`. These are the installed
+module and alias prerequisites for the new child's OF autoload path; they do
+not prove that autoload and successful probe have occurred on the candidate.
 
 The portable tree has no PSCI node, and the retained boot reports no UEFI
 services. Linux converts a poweroff syscall to halt when no poweroff handler is
@@ -23,22 +32,36 @@ service or device-shutdown stall remains possible.
 };
 ```
 
-The existing driver sends the SMC `MBSE=offw` warning, enters atomic mode and
-sends `MBSE=off1` at final poweroff. The same child also enables its existing
-restart handler (`MBSE=rest`, then `MBSE=phra`). There is no new SMC command,
-GPIO write, delay, kernel configuration change or kernel rebuild.
+If the driver binds, its existing poweroff sequence sends the SMC `MBSE=offw`
+warning, enters atomic mode and sends `MBSE=off1` at final poweroff. The same
+child also enables its existing restart sequence (`MBSE=rest`, then
+`MBSE=phra`). No new driver code, SMC command, GPIO write, delay or kernel
+configuration is introduced, and no kernel rebuild is needed. These existing
+sequences become active on this board, so restart behavior changes as well.
+
+The SMC restart handler uses priority 192 (`SYS_OFF_PRIO_HIGH`), ahead of the
+Apple watchdog's priority 128. Its `NOTIFY_OK` return permits the notifier chain
+to continue to the watchdog only if the SMC call returns. The existing atomic
+SMC write polls `atomic_pending` without a timeout; a stalled exchange can
+therefore prevent that fallback. This candidate does not change that loop or
+establish that the SMC restart sequence works on Abbey.
 
 Abbey's shutdown-state NVMEM offsets are not established. The driver explicitly
 tolerates missing cells and guards their accesses. No offsets from another PMIC
-are supplied. Its binding schema still made those properties mandatory;
-`patches-kernel/j713-smc-reboot-optional-nvmem.patch` aligns the schema with the
-existing runtime behavior while requiring both properties together if supplied.
-That schema patch does not change executable code.
+are supplied. The retained binding schema makes those properties mandatory.
+`patches-kernel/j713-smc-reboot-optional-nvmem.patch` is unapplied source guidance,
+not a validated schema change or a prerequisite used to build this DTB. It
+proposes allowing neither property or both properties with the existing
+four-cell layout. It does not cover every partial-cell combination tolerated
+by the driver, and it does not change executable code. Schema validation has
+not been performed.
 
-The driver's own comment warns that older hardware reboots without its shutdown
-flag. Whether Abbey stays powered off using this supported missing-cell path
-has **not** been established. This candidate repairs the missing handler; it
-does not establish successful physical poweroff or close issue #24.
+The driver's comment says, "Without this, the device will just reboot." It
+makes the flag optional in case newer hardware no longer needs it; that
+exception has not been verified on Abbey. The missing-cell path is accepted
+by the driver, but physical poweroff, reboot or a hang remain possible outcomes.
+This candidate supplies the missing node; it does not establish successful
+physical poweroff or close issue #24.
 
 ## Exact portable build
 
@@ -62,11 +85,32 @@ The recorded DTC 1.8.1 build produced 46,402 bytes, SHA256
 `67dc61458b03c0fad1156994ad85a85f9f8612cac2996eb684609b0455ebf547`.
 The decompiled diff contains only the four-line reboot child. Kernel image
 `2ddab32174f5a0d1153b177bb9fabc645e8d9f72d09d2fa523e78758f05290b9`
-and the module export table are unchanged.
+and the module export table are independently retained unchanged inputs.
+The builder receipt's `kernel_changed: false` means the builder does not write
+a kernel image; it is not a kernel comparison performed by that builder.
 
 Installer integration must update the portable DTB input and its package/source
 pins together. Per-device bootargs and identities are still generated by the
 normal installer. This task does not replace a running machine's boot file.
+The base DTB hash above is the recovery reference for that normal installer
+path, not an instruction to write a DTB or boot image manually.
+
+## Pending owner checks
+
+When hardware checks are authorized, first boot the candidate through the
+normal installer path and confirm successful probe: the driver should report
+`Missing NVMEM cell` for `shutdown_flag`, `boot_stage`, `boot_error_count` and
+`panic_count`, then `Handling reboot and poweroff requests via SMC`. The final
+message is emitted only after the poweroff and restart handlers and reboot
+notifier have registered. A module file, alias or missing-cell warning alone
+does not establish success.
+
+Next check a normal restart and successful return to the system. Only after
+that check, perform normal poweroff and confirm the machine stays off rather
+than rebooting or hanging; finally confirm it can boot again. These checks
+have not been performed for this candidate. Preserve the final console output
+if any step stalls, since an earlier shutdown stall remains a separate possible
+cause of issue #24.
 
 ## Evidence limits
 
