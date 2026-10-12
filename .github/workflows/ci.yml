@@ -67,6 +67,33 @@ jobs:
           PYTHONDONTWRITEBYTECODE: '1'
         run: python -m unittest discover -s tests -p 'test_*.py' -v
 
+  speaker-daemon:
+    name: Speaker daemon (Rust)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify pinned audio source
+        working-directory: audio/j713
+        run: sha256sum --check --strict imported-source.sha256
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev pkg-config
+      - name: Build speakersafetyd
+        working-directory: audio/j713/speakersafetyd
+        run: |
+          cargo --version
+          cargo build --locked --release
+      - name: Test speakersafetyd
+        working-directory: audio/j713/speakersafetyd
+        # The pinned test reads the profile from its original staging path;
+        # j713.conf is that profile and is itself hash-pinned above.
+        run: |
+          mkdir -p ../candidate
+          cp ../j713.conf ../candidate/j713.conf
+          cargo test --locked
+
   macos:
     name: Installer transport (macOS)
     runs-on: macos-14
