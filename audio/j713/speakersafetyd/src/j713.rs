@@ -159,7 +159,7 @@ mod tests {
     #[test]
     fn candidate_profile_geometry_and_models() {
         let mut c = configparser::ini::Ini::new_cs();
-        c.read(include_str!("../../candidate/j713.conf").to_string()).unwrap();
+        c.read(include_str!("../../j713.conf").to_string()).unwrap();
         let g = crate::types::Globals::parse(&c);
         assert_eq!((g.channels, g.period, g.visense_pcm), (8, 1024, 0));
         assert_eq!(g.t_ambient, 50.0);

@@ -87,12 +87,7 @@ jobs:
           cargo build --locked --release
       - name: Test speakersafetyd
         working-directory: audio/j713/speakersafetyd
-        # The pinned test reads the profile from its original staging path;
-        # j713.conf is that profile and is itself hash-pinned above.
-        run: |
-          mkdir -p ../candidate
-          cp ../j713.conf ../candidate/j713.conf
-          cargo test --locked
+        run: cargo test --locked
 
   macos:
     name: Installer transport (macOS)
