@@ -42,9 +42,22 @@ The final private-build-2 kernel adds the startup-retry patch to the archived
 controller tree. In a new extracted controller tree, apply
 `patches-kernel/j713-input/dockchannel-start-retry.patch` from the current
 integration source with `patch -p1 < /path/to/dockchannel-start-retry.patch`.
-Use the retained compiler/config and build command documented with that patch
-and the input-retry build receipt. Do not apply the patch a second time to an
-already patched tree. The final installed Image.gz hash is in IMAGE.json.
+The prepared driver's original SHA-256 is
+`77ef81abc66a61d08818142895bc02bec2b01abe9461195c3c575799da91d1eb`;
+after this patch it is
+`3e779d232c2aab7263af15bc2fb9f77fa9532dec7e64a4de0b71ec61c1d8bc46`.
+Keep the supplied configuration (SHA-256
+`14b4437b2b195e912a2ab614d28761acd3dc79f886d4487964aa0912616a3a6e`)
+and use Clang/LLD 21.1.8 with Rust 1.93.1:
+
+```sh
+make ARCH=arm64 LLVM=1 LOCALVERSION= -j8 Image.gz
+```
+
+Do not apply the patch a second time to an already patched tree. The retained
+build was incremental; the archives omit compiled objects, so rebuilding from
+them entails more work. Build timestamps can change the output hash. The final
+installed Image.gz hash is in IMAGE.json; a byte-identical rebuild is not claimed.
 
 For the audio build helper, copy `vendor-registry` from the Cargo packet into
 `audio/j713/speakersafetyd/vendor-registry`. Supply a new Cargo home containing:
