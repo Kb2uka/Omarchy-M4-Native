@@ -1,71 +1,64 @@
 # J713 SMC poweroff handler
 
-The portable J713 device tree omitted the SMC reboot child. A retained native
-boot log records `macsmc-reboot: Failed to locate of_node [id: -1]`. This warning
-comes from MFD device creation in `drivers/mfd/mfd-core.c`; it does not establish
-that the reboot module loaded or its probe ran. The probe's source separately
-shows that it returns `-ENODEV` without an OF node, before registering handlers.
-That rejection is a source inference, not an observed probe result.
+## Symptom and cause (issue #24)
 
-The retained configuration includes `CONFIG_POWER_RESET_MACSMC=m`. The retained
-build2 root contains the 21,136-byte module at
-`/usr/lib/modules/7.1.9-m4-gpu-backport-20261008/kernel/drivers/power/reset/macsmc-reboot.ko`.
-Its `modules.alias` contains both `of:N*T*Capple,smc-reboot` and
-`of:N*T*Capple,smc-rebootC*`, targeting `macsmc_reboot`. These are the installed
-module and alias prerequisites for the new child's OF autoload path; they do
-not prove that autoload and successful probe have occurred on the candidate.
+Builds without an SMC reboot child had no poweroff handler, so Linux halted
+instead of powering off and the Air appeared to hang. v0.1.0-alpha.1 added the
+child, `/soc/smc@38c600000/reboot { compatible = "apple,smc-reboot"; }`, with
+no NVMEM cells. On that build, choosing Shut Down restarts the Air.
 
-The portable tree has no PSCI node, and the retained boot reports no UEFI
-services. Linux converts a poweroff syscall to halt when no poweroff handler is
-registered. Its terminal message is `Power off not available: System halted
-instead`; arm64 then disables interrupts, stops other CPUs and loops. The last
-console line of the reported shutdown hang has not been captured, so an earlier
-service or device-shutdown stall remains possible.
+The installed alpha.1 kernel logs, on every boot:
 
-## Candidate change
-
-`patches/j713-smc-poweroff.dtso` adds only this child:
-
-```dts
-/soc/smc@38c600000/reboot {
-    compatible = "apple,smc-reboot";
-};
+```text
+macsmc-reboot macsmc-reboot: Missing NVMEM cell shutdown_flag (-2)
+macsmc-reboot macsmc-reboot: Missing NVMEM cell boot_stage (-2)
+macsmc-reboot macsmc-reboot: Missing NVMEM cell boot_error_count (-2)
+macsmc-reboot macsmc-reboot: Missing NVMEM cell panic_count (-2)
+macsmc-reboot macsmc-reboot: Handling reboot and poweroff requests via SMC
 ```
 
-If the driver binds, its existing poweroff sequence sends the SMC `MBSE=offw`
-warning, enters atomic mode and sends `MBSE=off1` at final poweroff. The same
-child also enables its existing restart sequence (`MBSE=rest`, then
-`MBSE=phra`). No new driver code, SMC command, GPIO write, delay or kernel
-configuration is introduced, and no kernel rebuild is needed. These existing
-sequences become active on this board, so restart behavior changes as well.
+`drivers/power/reset/macsmc-reboot.c` (identical in the retained 7.1.9 backport
+and Asahi) writes `MBSE=offw`, sets `boot_stage` to 0 and `shutdown_flag` to 1,
+then sends `MBSE=off1`. Its comments say `off1` "needs PMU bit set to stay on"
+and, for a missing flag, "the device will just reboot". With no cells the two
+NVMEM writes are skipped silently, so only `offw` and `off1` reach the SMC.
 
-The SMC restart handler uses priority 192 (`SYS_OFF_PRIO_HIGH`), ahead of the
-Apple watchdog's priority 128. Its `NOTIFY_OK` return permits the notifier chain
-to continue to the watchdog only if the SMC call returns. The existing atomic
-SMC write polls `atomic_pending` without a timeout; a stalled exchange can
-therefore prevent that fallback. This candidate does not change that loop or
-establish that the SMC restart sequence works on Abbey.
+## Abbey shutdown-state cells
 
-Abbey's shutdown-state NVMEM offsets are not established. The driver explicitly
-tolerates missing cells and guards their accesses. No offsets from another PMIC
-are supplied. The retained binding schema makes those properties mandatory.
-`patches-kernel/j713-smc-reboot-optional-nvmem.patch` is unapplied source guidance,
-not a validated schema change or a prerequisite used to build this DTB. It
-proposes allowing neither property or both properties with the existing
-four-cell layout. It does not cover every partial-cell combination tolerated
-by the driver, and it does not change executable code. Schema validation has
-not been performed.
+The J713 PMU is Abbey (`pmu,abbey`, USID `0xe`). Its ADT declares
+`info-leg_scrpad = 0xf800`, `info-pm_setting = 0x2001` and
+`info-rtc_scrpad = 0x2100`. That triple is exactly mainline T6030 Chapel's
+layout (`arch/arm64/boot/dts/apple/t6030.dtsi`), whose state cells sit at the
+legacy scratchpad base:
 
-The driver's comment says, "Without this, the device will just reboot." It
-makes the flag optional in case newer hardware no longer needs it; that
-exception has not been verified on Abbey. The missing-cell path is accepted
-by the driver, but physical poweroff, reboot or a hang remain possible outcomes.
-This candidate supplies the missing node; it does not establish successful
-physical poweroff or close issue #24.
+| Cell | Address | Bits |
+| --- | --- | --- |
+| `boot_stage` | `0xf801` | byte |
+| `boot_error_count` | `0xf802` | 0..3 |
+| `panic_count` | `0xf802` | 4..7 |
+| `shutdown_flag` | `0xf80f` | 3 |
+
+Every in-tree family places the same cells at `leg_scrpad + 1/+2/+0xf`. For
+T8103 (`0x9f00`) and T6000 (`0x6000`), public ADTs show `info-leg_scrpad` equal
+to the DT base. m1n1 clears the counter byte at `leg_scrpad + 2` on the primary
+PMU. A read-only dump of the Air's PMU at `0xf800` on alpha.1 returned
+`20 30 02 30 00 …`: `boot_stage` 0x30 (kernel started), two recorded boot
+errors, error stage 0x30, and `shutdown_flag` clear. That is consistent with
+unclean shutdowns on this layout. It is inference from consistent evidence, not
+Apple documentation.
+
+## Change
+
+`patches/j713-smc-poweroff.dtso` adds the four cells to the Abbey fixed NVMEM
+layout and wires them to the reboot child in the driver's order and names, as
+T6030 does. It adds no driver code, SMC command, kernel option or kernel
+rebuild. The driver now also writes `boot_stage` 0x30 at probe and clears
+non-zero error counters, as on other Apple machines. All writes land in
+Abbey's legacy scratchpad.
 
 ## Exact portable build
 
-On a leased Linux build host with `dtc` and `fdtoverlay`:
+On a Linux host with `dtc` and `fdtoverlay`:
 
 ```bash
 python3 tools/build-j713-poweroff-dtb.py \
@@ -74,49 +67,33 @@ python3 tools/build-j713-poweroff-dtb.py \
 ```
 
 The builder accepts only base SHA256
-`3ba58a528c3c1f07bbde6704231689a8a9eba1b4a3cc9a73f62654544b11e5e3`.
-It refuses an existing output and verifies the candidate's complete node/property
-map, memory reservations and boot CPU against the base plus exactly one new
-child. All existing board identity, boot arguments, graphics and input properties
-must remain byte-identical. It is an offline image builder, not a live overlay
-loader or device-unbind tool.
+`3ba58a528c3c1f07bbde6704231689a8a9eba1b4a3cc9a73f62654544b11e5e3`. It refuses
+an existing output. It verifies that the result equals the base plus exactly the
+reboot child and the four cells: the expected `reg`/`bits`, fresh phandles, and
+`nvmem-cells` resolving to those cells in order. Memory reservations and the
+boot CPU must be unchanged.
 
-The recorded DTC 1.8.1 build produced 46,402 bytes, SHA256
-`67dc61458b03c0fad1156994ad85a85f9f8612cac2996eb684609b0455ebf547`.
-The decompiled diff contains only the four-line reboot child. Kernel image
-`2ddab32174f5a0d1153b177bb9fabc645e8d9f72d09d2fa523e78758f05290b9`
-and the module export table are independently retained unchanged inputs.
-The builder receipt's `kernel_changed: false` means the builder does not write
-a kernel image; it is not a kernel comparison performed by that builder.
+DTC 1.8.1 produced 46,823 bytes, SHA256
+`e54c77a760a5b696486f9d80c7c83ca4295d641113bb9e54d13e259863bf9b07`. The
+decompiled diff against the base contains only the reboot child and the four
+cell nodes. `tools/prepare-j713-release.py` pins this hash for the next release.
 
-Installer integration must update the portable DTB input and its package/source
-pins together. Per-device bootargs and identities are still generated by the
-normal installer. This task does not replace a running machine's boot file.
-The base DTB hash above is the recovery reference for that normal installer
-path, not an instruction to write a DTB or boot image manually.
+## Installed alpha.1 machines
 
-## Pending owner checks
+`tools/m4-j713-update-boot-dtb.py` replaces only this devicetree inside
+`/boot/efi/omarchy/boot.bin`; see [updates](updates.md#shutdown-fix-for-alpha1).
+m1n1 and the gravity loader advance past a devicetree by its own `totalsize`
+(`src/payload.c` `load_fdt`), so the larger tree needs no padding.
 
-When hardware checks are authorized, first boot the candidate through the
-normal installer path and confirm successful probe: the driver should report
-`Missing NVMEM cell` for `shutdown_flag`, `boot_stage`, `boot_error_count` and
-`panic_count`, then `Handling reboot and poweroff requests via SMC`. The final
-message is emitted only after the poweroff and restart handlers and reboot
-notifier have registered. A module file, alias or missing-cell warning alone
-does not establish success.
+## Owner verification
 
-Next check a normal restart and successful return to the system. Only after
-that check, perform normal poweroff and confirm the machine stays off rather
-than rebooting or hanging; finally confirm it can boot again. These checks
-have not been performed for this candidate. Preserve the final console output
-if any step stalls, since an earlier shutdown stall remains a separate possible
-cause of issue #24.
+1. Boot once after the update. `journalctl -k -b | grep macsmc-reboot` should
+   show only `Handling reboot and poweroff requests via SMC`, with no
+   `Missing NVMEM cell` lines. `/sys/bus/nvmem/devices/spmi_nvmem0/cells/` should
+   list the four new cells.
+2. Choose Shut Down. The Air should stay off.
+3. Power on and confirm a normal boot.
+4. Choose Restart and confirm it returns.
 
-## Evidence limits
-
-The source trace and DTB compilation/readback were performed. Focused builder
-regression cases were added but **not run**, honoring the maintainer's explicit
-no-further-tests instruction. Binding-schema validation, driver binding on the
-Air, SMC key capability readback, restart, normal poweroff and the following boot
-were **not performed**. No runtime service, power state or installed file was
-changed by this work.
+Physical poweroff with these cells has not been observed on any Abbey machine.
+Issue #24 stays open until steps 2–4 pass on the Air.
