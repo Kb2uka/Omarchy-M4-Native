@@ -51,3 +51,14 @@ policy does not authorize removing or replacing another author's credit.
 Fresh installation, repeat boot and hardware behavior must be verified on the
 supported target before they are described as working. A passing offline check
 does not establish support for another board, codec or power state.
+
+## Automated checks and security review
+
+PRs run on standard GitHub-hosted runners. External contributors need maintainer
+approval before their workflow runs. See [CI and security](docs/ci-security.md)
+for tests, security checks, limits and the public-repository activation status.
+
+Every contribution needs maintainer review, including edits to workflows,
+scanner configuration, dependency files and CODEOWNERS. Explain any new external
+download, executable payload or install hook. Do not weaken a check to obtain a
+green result. Report security problems through [SECURITY.md](SECURITY.md).
