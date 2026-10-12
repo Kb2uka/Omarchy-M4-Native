@@ -21,8 +21,9 @@
   Code review and checksums do not prove successful installation on another Mac.
 - **macOS audio inputs are pinned.** The local generator refuses unknown Apple
   AudioDSP/tuning hashes or unequal filter output before disk changes. Minimum
-  macOS version alone does not guarantee those files match. The new ARM64 filter
-  generation pipeline has not been executed end to end for this release.
+  macOS version alone does not guarantee those files match. The ARM64 filter
+  generation pipeline passed end to end on macOS 26.5.1 and 26.5.2 with identical
+  output hashes. The rebuilt installer's physical audio check remains pending.
 - **Video acceleration is selective.** Brave and mpv have used hardware H264
   8-bit / VP9 Profile 0 decoding with the pinned stack. The shipped Chromium build
   and some protected movies use CPU decoding while the desktop uses GPU rendering.

@@ -10,6 +10,8 @@ import io
 import json
 import os
 from pathlib import Path
+import re
+import runpy
 import shutil
 import subprocess
 import sys
@@ -20,6 +22,7 @@ import zipfile
 VERSION = '0.1.0-alpha.1'
 BASE_SUMS = '95c8125fdd054ebcabbfc490e34ced0ee1b2e5293a3980aba383c54623fe121d'
 BASE_ROOT = 'b2beef5d2d1c1370e6d6911a3ff6f1d4ddc1e7c992a444f90283491dd8440836'
+BASE_AUDIO = 'ffa147b80173ede85be61b8b1a5431edcd8d605a740962da2dfa65ba189dcc6a'
 POWEROFF_DTB = '67dc61458b03c0fad1156994ad85a85f9f8612cac2996eb684609b0455ebf547'
 FIRS = ('j713-static-minimal-lane0-48000.wav', 'j713-static-minimal-lane1-48000.wav',
         'j713-static-minimal-lane2-48000.wav', 'j713-static-minimal-lane3-48000.wav')
@@ -133,6 +136,31 @@ def fill_free_space(root):
     os.sync()
 
 
+def owner_audio_manifest(raw, previous_pin, profile):
+    """Replace only the four measured FIR identities in the retained manifest."""
+    require(hashlib.sha256(raw).hexdigest() == previous_pin,
+            'Unexpected retained audio manifest')
+    require(set(profile['outputs']) == set(FIRS) == set(profile['reference_outputs']),
+            'Unexpected owner filter set')
+    manifest = json.loads(raw)
+    require(manifest['schema'] == 1 and manifest['board'] == 'apple,j713',
+            'Unexpected retained audio manifest board/schema')
+    for name in FIRS:
+        previous, native = profile['reference_outputs'][name], profile['outputs'][name]
+        key = 'usr/share/asahi-audio/j713/' + name
+        require(manifest['files']['/' + key] == previous['sha256'] and
+                manifest['file_metadata'][key] == {**previous, 'mode': 0o644},
+                'Unexpected reference filter: ' + name)
+        require(set(native) == {'size', 'sha256'} and
+                type(native['size']) is int and native['size'] == previous['size'] and
+                isinstance(native['sha256'], str) and
+                re.fullmatch('[0-9a-f]{64}', native['sha256']),
+                'Invalid native filter identity: ' + name)
+        manifest['files']['/' + key] = native['sha256']
+        manifest['file_metadata'][key]['sha256'] = native['sha256']
+    return (json.dumps(manifest, indent=2, sort_keys=True) + '\n').encode()
+
+
 def prepare_root(source, image, root, tree, identity):
     require(sha(source) == BASE_ROOT, 'Retained root image changed')
     command('cp', '--reflink=auto', '--sparse=always', source, image)
@@ -145,13 +173,16 @@ def prepare_root(source, image, root, tree, identity):
         require(not completion.exists() and not completion.is_symlink(),
                 'Retained root must not have completed first boot')
         manifest = json.loads((tree / 'audio/j713/owner-fir/manifest.json').read_text())
+        audio_manifest = root / 'etc/omarchy/j713-audio-manifest.json'
+        native_audio = owner_audio_manifest(audio_manifest.read_bytes(), BASE_AUDIO, manifest)
         for name in FIRS:
             path = root / 'usr/share/asahi-audio/j713' / name
             require(path.is_file() and not path.is_symlink() and
-                    sha(path) == manifest['outputs'][name]['sha256'], 'Unexpected original FIR')
+                    sha(path) == manifest['reference_outputs'][name]['sha256'], 'Unexpected original FIR')
             with path.open('r+b') as stream:
                 stream.write(bytes(path.stat().st_size)); stream.flush(); os.fsync(stream.fileno())
             path.unlink()
+        audio_manifest.write_bytes(native_audio)
         for profile in PROFILES:
             path = root / ('etc/skel/.config/omarchy/pending/widevine-' + profile + '.json')
             require(json.loads(path.read_bytes()) == {'schema': 1, 'profile': profile,
@@ -188,6 +219,7 @@ def prepare_root(source, image, root, tree, identity):
     command('tune2fs', '-U', identity, image)
     # The installer requires a clean ext4 image checked after its last write mount.
     command('e2fsck', '-f', '-p', image)
+    return hashlib.sha256(native_audio).hexdigest()
 
 
 def assemble(args):
@@ -215,14 +247,20 @@ def assemble(args):
             'Unknown source reconstruction guidance')
     require(args.poweroff_dtb.is_file() and not args.poweroff_dtb.is_symlink() and
             sha(args.poweroff_dtb) == POWEROFF_DTB, 'Unknown SMC poweroff device tree')
+    owner_profile = json.loads((tree / 'audio/j713/owner-fir/manifest.json').read_bytes())
+    handoff = runpy.run_path(str(tree / 'tools/m4-j713-owner-assets.py'))['FIRS']
+    require(handoff == {name: (record['size'], record['sha256'])
+                        for name, record in owner_profile['outputs'].items()},
+            'Owner generation and installer handoff identities disagree')
     args.output.mkdir(mode=0o700)
     output = args.output / 'delivery'
     output.mkdir()
     image = args.output / 'root.ext4'
     identity = str(uuid.uuid4())
-    prepare_root(args.root_image.resolve(), image, args.output / 'mounted-root', tree, identity)
+    audio_pin = prepare_root(args.root_image.resolve(), image, args.output / 'mounted-root', tree, identity)
     config = json.loads((baseline / 'installer_data.json').read_bytes())
     old_image = json.loads((baseline / 'IMAGE.json').read_bytes())
+    require(old_image['audio_manifest_sha256'] == BASE_AUDIO, 'Baseline audio identity changed')
     require(config['os_list'][0]['m4_boot'] == old_image['boot'], 'Baseline boot pins disagree')
     boot = copy.deepcopy(old_image['boot'])
     boot['dtb']['sha256'] = POWEROFF_DTB
@@ -272,6 +310,10 @@ def assemble(args):
     attributes = owner / 'bundle/.gitattributes'
     require(attributes.is_file() and not attributes.is_symlink(), 'Owner bundle metadata changed')
     attributes.unlink()
+    # Retain the pinned native helpers/dependency, but carry this revision's
+    # output identities and documentation into the runtime bundle as well.
+    for name in ('manifest.json', 'README.md'):
+        shutil.copyfile(tree / 'audio/j713/owner-fir' / name, owner / 'bundle' / name)
     shutil.copyfile(tree / 'tools/m4-j713-fir-owner.py', owner / 'm4-j713-fir-owner.py')
     shutil.copyfile(args.numpy_source, output / 'source/numpy-2.5.3.tar.gz')
     shutil.copyfile(args.cargo_source, output / 'source/j713-audio-cargo-sources.tar.gz')
@@ -309,7 +351,7 @@ def assemble(args):
         'credit': 'studioxradio aka kb2uka', 'base_omarchy_version': '4.0.4',
         'boot': boot,
         'root': {'bytes': image.stat().st_size, 'sha256': sha(image), 'filesystem_uuid': identity},
-        'audio_manifest_sha256': old_image['audio_manifest_sha256'],
+        'audio_manifest_sha256': audio_pin,
         'video_manifest_sha256': old_image['video_manifest_sha256'],
         'fresh_install_qualified': False,
         'qualification': 'Earlier private build installed on the Air; final owner-input packaging has not been hardware retested at build time. Final owner-install confirmation is pending.',

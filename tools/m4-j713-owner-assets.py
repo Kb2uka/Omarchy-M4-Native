@@ -11,10 +11,10 @@ import stat
 import tempfile
 
 FIRS = {
-    'j713-static-minimal-lane0-48000.wav': (16440, 'aef7e77552a656bec7e91703cb189701d38f34e9ad39d4ea6cf28d78ebcc0e64'),
-    'j713-static-minimal-lane1-48000.wav': (16440, '1eb0b0c9c1c741ae0686453ef46367d5946740001d0d7a50b4fa9c382f1f271e'),
-    'j713-static-minimal-lane2-48000.wav': (4152, 'aded8f7baf203291404261909a16d41b791abc14315bca3efef8db8e2acc8f0c'),
-    'j713-static-minimal-lane3-48000.wav': (4152, 'aded8f7baf203291404261909a16d41b791abc14315bca3efef8db8e2acc8f0c'),
+    'j713-static-minimal-lane0-48000.wav': (16440, 'cddb9a1c2aa29a8271526ca954ddbcdc15dcd09e6f546b72c45b2643f7d3e484'),
+    'j713-static-minimal-lane1-48000.wav': (16440, 'c398560bb45bc12932b4c9516ed5b9812aeeefb64f9bdb4f28814c0ea2f6a188'),
+    'j713-static-minimal-lane2-48000.wav': (4152, 'c02bbed34a37a496103cb75ede1ccaa872ac6bb2dff0023b8601397cd582d5f6'),
+    'j713-static-minimal-lane3-48000.wav': (4152, 'c02bbed34a37a496103cb75ede1ccaa872ac6bb2dff0023b8601397cd582d5f6'),
 }
 FIRMWARE = 'apple/j713-owner-audio'
 OPTIONS = 'omarchy/j713-owner-options.json'
