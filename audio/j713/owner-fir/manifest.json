@@ -1,0 +1,107 @@
+{
+  "board": "apple,j713",
+  "generation_status": "not re-executed on owner ARM64 pipeline; exact output hashes are mandatory",
+  "helpers": {
+    "measure-memory": {
+      "sha256": "165806c5d08e5a907ded58d20e2955030f44ebe7b1ea515b3dd0c7cc0f7bded4",
+      "size": 35760
+    },
+    "measure-transfer": {
+      "sha256": "ffbd3d9f74ef5eafadda1cacca492d5e20cf2749bfc3798e26343b8d7b4d3bcc",
+      "size": 35616
+    }
+  },
+  "numpy": {
+    "filename": "numpy-2.5.3-cp313-cp313-macosx_14_0_arm64.whl",
+    "sha256": "f9a2353b37a1a9e78fd82b27ad7e2a32a2d036604d18f02b05e3136c62ca3b09",
+    "size": 5439695,
+    "url": "https://files.pythonhosted.org/packages/ab/2a/98282aa5b8f58b1157d440bb6282eed47e3632a5de53a714fbab17e659fe/numpy-2.5.3-cp313-cp313-macosx_14_0_arm64.whl"
+  },
+  "numpy_source": {
+    "filename": "numpy-2.5.3.tar.gz",
+    "sha256": "df2d5874ff183595a4ba404edd04f6bd9b5505c1d7708573f6a6c17489a67563",
+    "size": 20791231,
+    "url": "https://files.pythonhosted.org/packages/13/01/11703282db468b85f6f7b8c7f22d058de5970d5c7e60a3a8aaa313c3de36/numpy-2.5.3.tar.gz"
+  },
+  "outputs": {
+    "j713-static-minimal-lane0-48000.wav": {
+      "sha256": "aef7e77552a656bec7e91703cb189701d38f34e9ad39d4ea6cf28d78ebcc0e64",
+      "size": 16440
+    },
+    "j713-static-minimal-lane1-48000.wav": {
+      "sha256": "1eb0b0c9c1c741ae0686453ef46367d5946740001d0d7a50b4fa9c382f1f271e",
+      "size": 16440
+    },
+    "j713-static-minimal-lane2-48000.wav": {
+      "sha256": "aded8f7baf203291404261909a16d41b791abc14315bca3efef8db8e2acc8f0c",
+      "size": 4152
+    },
+    "j713-static-minimal-lane3-48000.wav": {
+      "sha256": "aded8f7baf203291404261909a16d41b791abc14315bca3efef8db8e2acc8f0c",
+      "size": 4152
+    }
+  },
+  "owner_inputs": {
+    "AudioDSP": {
+      "path": "/System/Library/Components/AudioDSP.component/Contents/MacOS/AudioDSP",
+      "sha256": "5c52d15a92f505524fa6c09e5cacbbb31062c3135768835149be409d9591b4bd",
+      "size": 17360016
+    },
+    "builtin_speaker_out_general.austrip": {
+      "path": "/System/Library/Audio/Tunings/AID37/DSP/Strips/builtin_speaker_out_general.austrip",
+      "sha256": "e00d739a98d7b99dff22481204e45e2da9389c0a929cf712e5695f679c542723",
+      "size": 69286
+    },
+    "builtin_speaker_out_general.propstrip": {
+      "path": "/System/Library/Audio/Tunings/AID37/DSP/Strips/builtin_speaker_out_general.propstrip",
+      "sha256": "0400c4af65410bd224b9cb1502e227b2e976efea6d55012ae37a54d4933298d8",
+      "size": 209
+    }
+  },
+  "presets": {
+    "Tone1.aupreset": {
+      "sha256": "6c90f3d56b362ac1833ade1684cc63a77dbb126130fe803d36d6c414294e98c1",
+      "size": 6336
+    },
+    "Tone2.aupreset": {
+      "sha256": "d0924cea31ddd106155f67d8856d667b804fcfd59439c5c0e8ff645258159f57",
+      "size": 6336
+    },
+    "Tone3.aupreset": {
+      "sha256": "0a6db4c22206053c84477fbd67c640f3e12fc132a4de17ef42fe8a3d4dae1c5b",
+      "size": 6334
+    }
+  },
+  "python_version": "3.13.9",
+  "schema": 1,
+  "sources": {
+    "analyze_transfer.py": {
+      "sha256": "eea23caaf17d66a74079f8b62a71c11bcead275febbca5082efba3ff01339bf6",
+      "size": 5581
+    },
+    "inspect_strip.py": {
+      "sha256": "7f3ab0382ec9d50909fc4d4d40ece89cbc2644e61b1f76de5c20215291713e6e",
+      "size": 2645
+    },
+    "measure-memory.c": {
+      "sha256": "8d79449649f446b92c92fdbee1e10a35280c27ec7a9079a3317350be0a9c560b",
+      "size": 11042
+    },
+    "measure-transfer.c": {
+      "sha256": "0fd2357fa95bec944db248a8d10a4c1e717ebf1a46a010ea4d1842f0eb0e81f4",
+      "size": 8496
+    },
+    "qualify_memory.py": {
+      "sha256": "d5d7fa5d0f42150e6147f99246c4e8fd77256870fd35c953cb151389be15fa14",
+      "size": 5715
+    },
+    "run-memory.py": {
+      "sha256": "ce25a5f831a7839a350c9a97e496e9828d59f2e0d9984144d713d1548159ab2d",
+      "size": 2697
+    },
+    "run-transfer.py": {
+      "sha256": "18ffaabc254e1d09b621ec6a9034d4a661c613df487568cd561a219455c1d9b7",
+      "size": 1290
+    }
+  }
+}

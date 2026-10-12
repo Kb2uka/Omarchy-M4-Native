@@ -1,14 +1,22 @@
 # Experimental release qualification
 
-This is a private, pre-release integration by **studioxradio aka kb2uka**.
-The first candidate is **v0.1.0-alpha.1**, based on **Omarchy 4.0.4**.
+This is an independent integration by **studioxradio aka kb2uka**.
+The first experimental release is **v0.1.0-alpha.1**, based on **Omarchy 4.0.4**.
 It is **experimental on M4 Air** and **very experimental on all other M4
 machines**. Only the 13-inch M4 Air, Mac16,12 / J713 / T8132, has the tested
 installer profile. No result here qualifies M4 Pro, M4 Max or another board.
 
-The maintainer intends to fresh-install the complete candidate on the test Air
-before any public release. **That fresh installation is pending.** An existing
-installation repaired over multiple development sessions cannot satisfy that gate.
+The maintainer completed two private fresh-install trials on the Air. The second
+reached login after a setup stall and restart; keyboard, trackpad, audio and video
+were owner-confirmed. Normal shutdown still failed. Browser/codec identity was
+not captured in that final report, so it does not prove hardware decode.
+
+Final release packaging removes preset personal consent and prepares exact
+speaker filters on each owner's Mac. **This final packaging was not hardware
+retested.** The maintainer initially waived further tests, then reinstated the
+final attended installation before publication. That installation is pending,
+including the candidate SMC poweroff device-tree correction and stay-off check.
+The private trial is not evidence for unexecuted changes.
 
 ## Three different kinds of evidence
 
@@ -21,8 +29,8 @@ installation repaired over multiple development sessions cannot satisfy that gat
    These facts do not mean every corresponding component has been joined into a
    complete installer image or tested from a new owner's first login.
 3. **Installer release:** a complete, hash-identified image and install path,
-   including required provenance, redistribution rights, first-owner provisioning,
-   repeat boot, ordinary usage and recovery evidence. This remains pending.
+   including its sources, notices and owner-input path. Its manifest distinguishes
+   the earlier native observations from the final untested packaging changes.
 
 Do not silently promote a result from one category to another. The main branch
 and open source-package changes must be reviewed at their actual revisions;
@@ -88,15 +96,16 @@ not resolve those rights. Keep raw device trees, personal browser state, account
 credentials, machine identities, build-host paths and unredacted native logs out
 of installable artifacts and any public tree.
 
-## Fresh-install acceptance still required
+## Final packaging evidence boundary
 
-The maintainer's fresh Air installation must use the exact assembled candidate,
-with a recoverable backup and the supported board/firmware checks intact. Record
-which stage creates partitions or changes boot policy. Qualify first-owner setup,
-automatic audio/video startup, normal keyboard/trackpad/Wi-Fi/Bluetooth use,
-repeat boots, normal browser launch, local mpv hardware playback and unsupported
-codec fallback. Retain failure and recovery observations as well as successes.
+The new per-owner ARM64 filter generation path has not been executed end to end.
+It checks the installed Apple input identities and all four resulting WAV hashes,
+refusing mismatches before the installer's partitioning flow. A clean source
+review cannot establish that its numerical output will match on every supported
+macOS build. The firmware minimum and audio-input compatibility are separate.
 
-A passing fixture or image build does not substitute for these native checks.
-No unattended public install command, general supported-model claim or public
-release should be inferred from this preparation document.
+No new native installation, playback, reboot or test-suite result is claimed for
+the final release packaging. Asset hashes and image readbacks identify what is
+shipped; they do not substitute for those tests. The download is an experimental
+candidate awaiting the maintainer's final install. It retains all board checks and
+requires the owner's local Apple startup authorization.

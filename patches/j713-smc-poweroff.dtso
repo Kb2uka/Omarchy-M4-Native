@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
+// Copyright (c) 2026 KB2UKA
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target-path = "/soc/smc@38c600000";
+		__overlay__ {
+			reboot {
+				compatible = "apple,smc-reboot";
+			};
+		};
+	};
+};
