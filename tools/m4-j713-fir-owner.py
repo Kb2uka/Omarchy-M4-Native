@@ -69,6 +69,17 @@ def run_script(source, work, dependencies, name):
     environment = {key: value for key, value in os.environ.items()
                    if not key.startswith(('PYTHON', 'DYLD_'))}
     environment.update(PATH='/usr/bin:/bin', OPENBLAS_NUM_THREADS='1', OMP_NUM_THREADS='1')
+    # The relocated executable has an absolute Python.framework load command.
+    # Derive its search paths from the running bundle, never inherited overrides.
+    versions = [parent for parent in Path(sys.executable).resolve().parents
+                if parent.name == '3.13' and parent.parent.name == 'Versions'
+                and parent.parent.parent.name == 'Python.framework']
+    require(len(versions) == 1, 'Run with the bundled framework Python.')
+    version = versions[0]
+    require((version / 'Python').is_file() and (version / 'lib').is_dir(),
+            'Incomplete bundled Python framework.')
+    environment.update(DYLD_FRAMEWORK_PATH=str(version.parent.parent.parent),
+                       DYLD_LIBRARY_PATH=str(version / 'lib'))
     result = subprocess.run(
         [sys.executable, '-I', '-B', '-c', bootstrap, str(source), str(dependencies),
          str(source / name)], cwd=work, env=environment,

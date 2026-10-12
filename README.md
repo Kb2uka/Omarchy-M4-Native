@@ -35,21 +35,33 @@ Project integration and original contributions by **studioxradio aka kb2uka**.
 Built on the work of Asahi Linux, Gravity Linux, Omarchy and many other upstream
 contributors. Their authorship and licenses remain theirs.
 
-## Private experimental installer preparation
+## Download and install
 
-First candidate: **v0.1.0-alpha.1**, based on **Omarchy 4.0.4**.
+**[v0.1.0-alpha.1 release and installer](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1)**,
+based on **Omarchy 4.0.4**. Download the release's `download-j713.command` and
+run it from macOS Terminal:
 
-This repository is private while the first experimental installer is prepared.
-The maintainer will perform a fresh installation on the test Air **before any
-public release**. That fresh-install qualification has not happened yet. The
-working, incrementally repaired installation is evidence for particular runtime
-components; it is not proof that a clean checkout produces a working fresh install.
+```sh
+bash "$HOME/Downloads/download-j713.command"
+```
 
-There is no supported public download or unattended installation command here.
-The current source tree contains selected patches, tools and reproducible checks;
-assembling a complete installer still requires separately qualified kernel,
-firmware, graphics and audio inputs. See the
-[release qualification boundary](docs/experimental-release.md).
+The downloader reassembles the installer and verifies the release checksums.
+Then follow the **[step-by-step installation guide](docs/install.md)**. This
+installer starts in macOS; it is not a bootable PC ISO. GitHub's automatic
+“Source code” ZIP is not the installer. Release downloads require repository
+access while this repository is private.
+
+Two attended private installations preceded this release. On the second,
+keyboard, trackpad, audio and video worked after a setup stall and restart.
+The final delivery changes owner-local speaker-filter preparation and browser
+consent, preserving the working kernel and driver payloads. **That final
+packaging has not been hardware retested; further tests were waived by the
+maintainer.** See the [qualification record](docs/experimental-release.md) and
+[known limitations](docs/release-limitations.md).
+
+**Read the [update policy](docs/updates.md) before accepting system updates.**
+There is no coordinated M4 update channel in this alpha. A push to `main` does
+not update installed machines.
 
 ## Known shutdown issue
 
@@ -74,7 +86,7 @@ As of October 11, 2026, with the pinned experimental runtime:
 
 | Area | Observed result and limit |
 | --- | --- |
-| Installed desktop | Omarchy runs from an internal SSD ext4 root; normal boot and graphical login have worked. Fresh-install and general update reliability remain unqualified. |
+| Installed desktop | Two private installer trials reached the desktop; the second required a restart after setup stalled. The final owner-input packaging and general updates remain unqualified. |
 | Keyboard, trackpad, Wi-Fi | Used in the native desktop. These observations do not qualify every peripheral or power state. |
 | Bluetooth | A paired mouse reconnected after an observed reboot. General Bluetooth audio and every device are not qualified. |
 | Graphics | Experimental Apple M4 GPU rendering is active. Scanout still uses simpledrm; this is not complete display-controller support or proof of physical panel timing. |
@@ -92,17 +104,18 @@ The current desktop integration restricts only the compositor's main thread to
 the measured performance-core set; browser/decoder worker threads remain
 unrestricted. Do not substitute the older broad session-placement experiment.
 
-## What remains before release
+## Release scope
 
-- Assemble and identify the complete candidate, including licenses, corresponding
-  source and every external input; preserve all upstream notices.
-- Finish the fresh-owner installer path and test it on the Air from a fresh
-  installation, including repeat boots, ordinary applications and recovery.
-- Resolve or explicitly exclude assets whose redistribution rights are unknown.
-  In particular, measured speaker FIR assets are not made redistributable by
-  recording their hashes or by keeping this repository private.
-- Keep unsupported models, codecs and power states explicit. Do not turn a
-  bounded hardware test into a daily-driver, safe-update or all-M4 claim.
+The download includes the installer, image, checksums, source archives and
+upstream notices. It excludes Apple components, generated speaker-filter WAVs,
+Widevine binaries and preset personal consent. Speaker filters are prepared
+from the owner's installed macOS components and must match the expected hashes
+before partitioning begins. Unrecognized inputs are refused.
+
+Shutdown, the front USB port, camera, suspend/resume, broad hardware coverage
+and coordinated updates remain open work. This alpha is not a daily-driver,
+safe-update or all-M4 compatibility promise. See the
+[source package guide](docs/release-source.md) for source/build boundaries.
 
 ## Source and historical research
 

@@ -1,0 +1,12 @@
+[Unit]
+Description=Install locally prepared M4 Air speaker filters and owner options
+Before=m4-j713-audio-register.service systemd-user-sessions.service getty.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/python3 /usr/lib/omarchy/m4-j713-owner-assets.py install
+TimeoutStartSec=30
+
+[Install]
+WantedBy=multi-user.target
