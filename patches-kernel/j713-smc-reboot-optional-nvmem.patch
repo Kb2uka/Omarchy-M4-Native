@@ -1,0 +1,22 @@
+From: KB2UKA <kb2uka@users.noreply.github.com>
+Subject: [PATCH] dt-bindings: power: reset: match optional SMC state cells
+
+The current macsmc-reboot driver accepts absent state cells. It explicitly
+allows shutdown_flag to be missing for newer hardware and guards each cell
+access. Keep the four-cell layout when supplied, but allow the pair of
+properties to be omitted. J713 Abbey offsets have not been established;
+this does not copy another PMIC family's offsets or assert stay-off behavior.
+
+This binding-only change does not alter the kernel binary or its ABI.
+
+--- a/Documentation/devicetree/bindings/power/reset/apple,smc-reboot.yaml
++++ b/Documentation/devicetree/bindings/power/reset/apple,smc-reboot.yaml
+@@ -35,4 +35,6 @@
++dependencies:
++  nvmem-cells: [ nvmem-cell-names ]
++  nvmem-cell-names: [ nvmem-cells ]
++
+ required:
+   - compatible
+-  - nvmem-cells
+-  - nvmem-cell-names
