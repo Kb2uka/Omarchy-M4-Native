@@ -1,3 +1,24 @@
+# ⚠️ EXPERIMENTAL — USE AT YOUR OWN RISK
+
+> [!WARNING]
+> **This is experimental software with unfinished hardware support and known bugs.**
+> Installing, updating or running it can cause **hardware damage, data loss or
+> corruption, boot failures, and loss of access to macOS**. Keep backups and a
+> working recovery path. You are responsible for your installation and recovery.
+>
+> **This is an independent community project. It is not an official release and
+> is not sponsored, approved or endorsed by Omarchy / Basecamp, Asahi Linux,
+> Gravity Linux, Apple, or the other upstream projects whose work it uses.**
+> Upstream credits and project names do not imply endorsement or support for
+> this build.
+>
+> **Provided “AS IS,” without warranty of any kind, express or implied. To the
+> maximum extent permitted by applicable law, the maintainers and contributors
+> are not liable for hardware damage, data loss, loss of use, recovery costs, or
+> other damages arising from installing, updating or using this project.**
+> The applicable [licenses](LICENSE.md) and
+> [third-party notices](THIRD_PARTY_NOTICES.md) remain in effect.
+
 ![Experimental Omarchy M4 Air concept artwork](docs/images/omarchy-m4-native.png)
 
 # Omarchy on Apple M4 — experimental
@@ -29,6 +50,23 @@ The current source tree contains selected patches, tools and reproducible checks
 assembling a complete installer still requires separately qualified kernel,
 firmware, graphics and audio inputs. See the
 [release qualification boundary](docs/experimental-release.md).
+
+## Known shutdown issue
+
+**Normal shutdown can hang without powering off the Air.** The owner reproduced
+this on the fresh **v0.1.0-alpha.1 private build 2** installation: Omarchy closes
+and shutdown messages appear, but the machine stays powered on. The same symptom
+was reported on the earlier installation. Follow
+[issue #24](https://github.com/Kb2uka/Omarchy-M4-Native/issues/24).
+
+**Owner-observed workaround on this Air:** save your work, choose **Shut Down**
+in Omarchy, wait until shutdown has stalled, then hold the power button to turn
+the machine off. Holding the power button while the Omarchy desktop is still
+running instead made the Air loop and start back up. The order matters for the
+reported workaround; it is a forced power-off, not a normal shutdown fix.
+
+The cause and a reliable shutdown fix remain unverified. Working login,
+trackpad, audio and video do not establish working shutdown.
 
 ## What has been observed on the test Air
 
