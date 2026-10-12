@@ -14,6 +14,10 @@ import tarfile
 ASSET_LIMIT = 2**31 - 1
 PART_BYTES = 1_900_000_000
 MANIFEST = 'download-manifest.tsv'
+DOWNLOADER = 'download-j713.command'
+DOWNLOAD_SUMS = 'DOWNLOAD-SHA256SUMS'
+RELEASE_URL = 'https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/'
+RELEASE_DEFAULTS = "release_base=''\nrelease_pin=''\nrelease_tag=''\n"
 SAFE_PATH = re.compile(r'[A-Za-z0-9_-][A-Za-z0-9._-]*(?:/[A-Za-z0-9_-][A-Za-z0-9._-]*)*\Z')
 SHA = re.compile(r'[0-9a-f]{64}\Z')
 TAG = re.compile(r'v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?\Z')
@@ -162,18 +166,41 @@ def package(delivery, kit_pin, sums_pin, tag, output, part_bytes=PART_BYTES):
                         'Companion input changed while copying: ' + name)
         companion_size = (output / companion).stat().st_size
         require(companion_size <= ASSET_LIMIT, 'Companion exceeds asset limit')
+        companion_pin = digest(output / companion)
         rows = [('format', 'j713-download-v1'), ('release', tag),
                 ('archive', archive, files[archive]['bytes'], files[archive]['sha256']),
-                ('companion', companion, companion_size, digest(output / companion))]
+                ('companion', companion, companion_size, companion_pin)]
         rows += [('part', *part) for part in parts]
         rows += [('file', name, format(entry['mode'], '03o'), entry['bytes'], entry['sha256'])
                  for name, entry in files.items()]
         manifest = ''.join('\t'.join(map(str, row)) + '\n' for row in rows).encode('ascii')
         require(len(manifest) <= 128 * 1024, 'Oversized transport manifest')
         (output / MANIFEST).write_bytes(manifest)
+        manifest_pin = hashlib.sha256(manifest).hexdigest()
+        template = Path(__file__).with_name(DOWNLOADER).read_text(encoding='ascii')
+        require(template.count(RELEASE_DEFAULTS) == 1, 'Unexpected downloader template')
+        release_url = RELEASE_URL + tag
+        defaults = (f"release_base='{release_url}'\n"
+                    f"release_pin='{manifest_pin}'\n"
+                    f"release_tag='{tag}'\n")
+        downloader = template.replace(RELEASE_DEFAULTS, defaults).encode('ascii')
+        (output / DOWNLOADER).write_bytes(downloader)
+        # These transport assets remain outside the frozen kit and its manifest.
+        pins = {name: pin for _, name, _, pin in parts}
+        pins.update({companion: companion_pin, MANIFEST: manifest_pin,
+                     DOWNLOADER: hashlib.sha256(downloader).hexdigest()})
+        sums = ''.join(pins[name] + '  ' + name + '\n' for name in sorted(pins)).encode('ascii')
+        (output / DOWNLOAD_SUMS).write_bytes(sums)
+        pins[DOWNLOAD_SUMS] = hashlib.sha256(sums).hexdigest()
         for path in output.iterdir():
-            path.chmod(0o644)
-        return {'manifest': MANIFEST, 'manifest_sha256': digest(output / MANIFEST),
+            path.chmod(0o755 if path.name == DOWNLOADER else 0o644)
+        artifacts = {name: {'bytes': (output / name).stat().st_size, 'sha256': pin,
+                            'mode': stat.S_IMODE((output / name).stat().st_mode)}
+                     for name, pin in sorted(pins.items())}
+        return {'manifest': MANIFEST, 'manifest_sha256': manifest_pin,
+                'downloader': DOWNLOADER, 'downloader_sha256': pins[DOWNLOADER],
+                'download_checksums': DOWNLOAD_SUMS, 'download_checksums_sha256': pins[DOWNLOAD_SUMS],
+                'release_url': release_url, 'artifacts': artifacts,
                 'release_tag': tag, 'part_count': len(parts), 'kit_sha256': kit_pin,
                 'checksums_sha256': sums_pin, 'published': False}
     except BaseException:

@@ -11,6 +11,9 @@ fail() { printf '%s\n' "$*" >&2; exit 1; }
 usage() {
   cat <<'HELP'
 Download an exact J713 installer kit without launching it.
+The generated release copy needs no arguments and writes to
+  $HOME/Downloads/Omarchy-M4-RELEASE_TAG
+Explicit options use only the supplied values:
   bash download-j713.command --base-url HTTPS_RELEASE_DIRECTORY \
     --manifest-sha256 PIN --output NEW_DIRECTORY
 Offline/private-auth readback (assets acquired separately):
@@ -20,17 +23,26 @@ The manifest pin must come from the trusted release announcement. Read the
 reconstructed installer/START-HERE.md before any installation action.
 HELP
 }
+# Set by the transport packager only after the release manifest is frozen.
+release_base=''
+release_pin=''
+release_tag=''
 base=''; assets=''; pin=''; output=''
+if (( $# == 0 )) && [[ -n "$release_tag" ]]; then
+  base="$release_base"
+  pin="$release_pin"
+  output="${HOME:?HOME is required}/Downloads/Omarchy-M4-$release_tag"
+fi
 while (( $# )); do
   case "$1" in
     --help|-h) usage; exit 0 ;;
     --base-url|--asset-directory|--manifest-sha256|--output)
       (( $# >= 2 )) || fail "Missing value for $1"
       case "$1" in
-        --base-url) [[ -z "$base" ]] || fail 'Duplicate option'; base=$2 ;;
-        --asset-directory) [[ -z "$assets" ]] || fail 'Duplicate option'; assets=$2 ;;
-        --manifest-sha256) [[ -z "$pin" ]] || fail 'Duplicate option'; pin=$2 ;;
-        --output) [[ -z "$output" ]] || fail 'Duplicate option'; output=$2 ;;
+        --base-url) [[ -z "$base" ]] || fail 'Duplicate option'; base="$2" ;;
+        --asset-directory) [[ -z "$assets" ]] || fail 'Duplicate option'; assets="$2" ;;
+        --manifest-sha256) [[ -z "$pin" ]] || fail 'Duplicate option'; pin="$2" ;;
+        --output) [[ -z "$output" ]] || fail 'Duplicate option'; output="$2" ;;
       esac
       shift 2 ;;
     *) fail "Unknown option: $1" ;;
@@ -42,7 +54,7 @@ if [[ -n "$base" ]]; then
   [[ "$base" =~ ^https://[A-Za-z0-9.-]+(/[A-Za-z0-9._~-]+)+$ ]] || fail 'Use an HTTPS release directory without credentials, query or fragment'
 fi
 no_links() {
-  local p=$1
+  local p="$1"
   [[ "$p" == /* && "$p" != *$'\n'* && "$p" != *$'\t'* && "$p" != *$'\r'* ]] || fail 'Absolute ordinary paths required'
   [[ "$p" != */../* && "$p" != */./* && "$p" != */.. && "$p" != */. && "$p" != *//* ]] || fail 'Noncanonical path refused'
   while [[ "$p" != / ]]; do
@@ -79,7 +91,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 mkdir -m 700 "$work" "$work/kit"
 fetch() {
-  local name=$1 limit=$2 dest=$3 expected=${4:-}
+  local name="$1" limit="$2" dest="$3" expected="${4:-}"
   [[ "$name" =~ ^[A-Za-z0-9_-][A-Za-z0-9._-]*$ ]] || fail 'Unsafe asset name'
   if [[ -n "$assets" ]]; then
     [[ -f "$assets/$name" && ! -L "$assets/$name" ]] || fail "Missing regular asset: $name"

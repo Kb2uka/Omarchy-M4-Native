@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import tarfile
@@ -61,11 +62,38 @@ class DownloadTests(unittest.TestCase):
         args.update(changes)
         return packager.package(**args)
 
-    def run_download(self):
+    def run_download(self, script=None):
         manifest = self.assets / packager.MANIFEST
-        return subprocess.run(['bash', str(ROOT / 'tools/download-j713.command'),
+        return subprocess.run(['bash', str(script or ROOT / 'tools/download-j713.command'),
             '--asset-directory', str(self.assets), '--manifest-sha256', sha(manifest.read_bytes()),
             '--output', str(self.output)], capture_output=True, text=True)
+
+    def run_release(self, *args):
+        home = self.root / 'owner home'
+        (home / 'Downloads').mkdir(parents=True, exist_ok=True)
+        self.release_output = home / 'Downloads/Omarchy-M4-v0.1.0-alpha.1'
+        self.requests = self.root / 'requests'
+        self.release_url = 'https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/v0.1.0-alpha.1'
+        environment = self.root / 'shell-environment'
+        environment.write_text('''curl() {
+  local url='' name=''
+  while (( $# )); do
+    case "$1" in
+      --url) url="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  [[ "$url" == "$DOWNLOAD_TEST_BASE/"* ]] || return 91
+  name="${url#"$DOWNLOAD_TEST_BASE/"}"
+  [[ -n "$name" && "$name" != */* ]] || return 92
+  printf '%s\\n' "$url" >> "$DOWNLOAD_TEST_REQUESTS"
+  cat "$DOWNLOAD_TEST_ASSETS/$name"
+}
+''')
+        return subprocess.run(['bash', str(self.assets / packager.DOWNLOADER), *args],
+            env={**os.environ, 'HOME': str(home), 'BASH_ENV': str(environment),
+                 'DOWNLOAD_TEST_BASE': self.release_url, 'DOWNLOAD_TEST_ASSETS': str(self.assets),
+                 'DOWNLOAD_TEST_REQUESTS': str(self.requests)}, capture_output=True, text=True)
 
     def rows(self):
         return [line.split('\t') for line in (self.assets / packager.MANIFEST).read_text().splitlines()]
@@ -92,6 +120,71 @@ class DownloadTests(unittest.TestCase):
                     for p in self.delivery.rglob('*') if p.is_file()}
         self.assertEqual(actual, expected)
         self.assertFalse((self.output / '.partial').exists())
+
+    def test_release_assets_and_receipt_close_inventory_without_changing_kit(self):
+        before = {p.relative_to(self.delivery).as_posix(): p.read_bytes()
+                  for p in self.delivery.rglob('*') if p.is_file()}
+        receipt = self.package()
+        after = {p.relative_to(self.delivery).as_posix(): p.read_bytes()
+                 for p in self.delivery.rglob('*') if p.is_file()}
+        self.assertEqual(before, after)
+        actual = {p.name: {'bytes': p.stat().st_size, 'sha256': sha(p.read_bytes()),
+                           'mode': p.stat().st_mode & 0o777} for p in self.assets.iterdir()}
+        self.assertEqual(receipt['artifacts'], actual)
+        self.assertEqual(actual[packager.DOWNLOADER]['mode'], 0o755)
+        self.assertEqual(receipt['downloader_sha256'], actual[packager.DOWNLOADER]['sha256'])
+        self.assertEqual(receipt['download_checksums_sha256'], actual[packager.DOWNLOAD_SUMS]['sha256'])
+        expected = ''.join(actual[name]['sha256'] + '  ' + name + '\n'
+                           for name in sorted(set(actual) - {packager.DOWNLOAD_SUMS}))
+        self.assertEqual((self.assets / packager.DOWNLOAD_SUMS).read_text(), expected)
+        self.assertEqual({r[1] for r in self.rows() if r[0] == 'file'}, set(before))
+        with tarfile.open(self.assets / self.rows()[3][1]) as tar:
+            self.assertEqual(set(tar.getnames()), set(before) - {self.archive})
+
+    def test_generated_release_shell_uses_pinned_no_argument_defaults(self):
+        receipt = self.package()
+        run = self.run_release()
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn(receipt['manifest_sha256'], run.stdout)
+        self.assertNotIn('MUST_NOT_RUN', run.stdout)
+        actual = {p.relative_to(self.release_output / 'installer').as_posix(): p.read_bytes()
+                  for p in (self.release_output / 'installer').rglob('*') if p.is_file()}
+        expected = {p.relative_to(self.delivery).as_posix(): p.read_bytes()
+                    for p in self.delivery.rglob('*') if p.is_file()}
+        self.assertEqual(actual, expected)
+        requested = [packager.MANIFEST] + [r[2] for r in self.rows() if r[0] == 'part'] + [self.rows()[3][1]]
+        self.assertEqual(self.requests.read_text().splitlines(),
+                         [self.release_url + '/' + name for name in requested])
+
+    def test_generated_release_rejects_changed_manifest_before_downloading_parts(self):
+        self.package()
+        manifest = self.assets / packager.MANIFEST
+        manifest.write_bytes(manifest.read_bytes() + b'changed\n')
+        run = self.run_release()
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('Transport manifest SHA-256 mismatch', run.stderr)
+        self.assertFalse(self.release_output.exists())
+        self.assertEqual(self.requests.read_text().splitlines(), [self.release_url + '/' + packager.MANIFEST])
+
+    def test_generated_release_preserves_explicit_offline_mode(self):
+        self.package()
+        run = self.run_download(self.assets / packager.DOWNLOADER)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn('Public HTTPS availability was not checked', run.stdout)
+        self.assertEqual((self.output / 'installer/KIT.json').read_bytes(), (self.delivery / 'KIT.json').read_bytes())
+
+    def test_partial_explicit_options_do_not_inherit_release_defaults(self):
+        self.package()
+        run = self.run_release('--output', str(self.output))
+        self.assertEqual(run.returncode, 2, run.stderr)
+        self.assertFalse(self.output.exists())
+        self.assertFalse(self.release_output.exists())
+        self.assertFalse(self.requests.exists())
+
+    def test_release_tag_must_be_safe_before_embedding(self):
+        with self.assertRaisesRegex(ValueError, 'Invalid release tag'):
+            self.package(tag='v0.1.0-alpha.1/other')
+        self.assertFalse(self.assets.exists())
 
     def test_private_delivery_cannot_be_publicized_by_transport(self):
         self.seal(private=True)
