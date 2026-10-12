@@ -1,7 +1,7 @@
 # J713 first-boot recovery corrections
 
 The October 12 owner installation completed provisioning at 09:27:45 local time.
-Five captured boots failed graphics and speaker startup. These observations
+Four captured boots failed graphics and speaker startup. These observations
 come from persistent journals read from the failed installation while macOS was
 running; no failed Linux filesystem write was needed to retrieve them.
 
@@ -24,8 +24,11 @@ running; no failed Linux filesystem write was needed to retrieve them.
 The GPU pre-start waits for initialized `/dev/dri/card0`, retaining the board,
 kernel, file-integrity, firmware-handshake and Apple M4 renderer checks. Audio
 registration uses its existing exact provider/module/readiness checks without
-waiting for unrelated device events. Protection and one-attempt failure latching
-are unchanged. The release assembler updates both audio integrity maps.
+waiting for unrelated device events. Its service orders after event submission
+instead of global queue completion. Decoder startup also waits for its own
+device nodes rather than the global queue. Protection and one-attempt failure
+latching are unchanged. The release assembler updates both audio integrity maps
+and the decoder helper identity in the video manifest.
 
 An authenticated tty2 is enabled independently of graphics. A small bounded
 status report and a text-mode-only notice cover failed desktop handoff without

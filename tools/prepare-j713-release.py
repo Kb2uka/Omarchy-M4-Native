@@ -28,6 +28,9 @@ BASE_ROOT = 'b2beef5d2d1c1370e6d6911a3ff6f1d4ddc1e7c992a444f90283491dd8440836'
 BASE_AUDIO = 'ffa147b80173ede85be61b8b1a5431edcd8d605a740962da2dfa65ba189dcc6a'
 BASE_GPU_UNIT = 'f4e62aa8a1a5782e1c27928e06f72e64ecfb630fee621a585db80837fb1c0671'
 BASE_AUDIO_REGISTER = 'aa3f9f8b4c6c08ce3e088442168d5e80d9a59aa1b0e6d1449f6943829ae1a65d'
+BASE_AUDIO_UNIT = 'bfa2e740cc4ff8aa03246f97bcbf85f92528b11fea22100ad8a3c312c7cb0ddf'
+BASE_VIDEO = '8e1607e29174987e90f0f1cd0361786f894b239ad54fba08067ce1da54ec2331'
+BASE_VIDEO_START = 'c613d8a3b48021204538fc0dd766a523b2ddb4c0ed4d2a26bb21259ba285c85d'
 POWEROFF_DTB = '67dc61458b03c0fad1156994ad85a85f9f8612cac2996eb684609b0455ebf547'
 FIRS = ('j713-static-minimal-lane0-48000.wav', 'j713-static-minimal-lane1-48000.wav',
         'j713-static-minimal-lane2-48000.wav', 'j713-static-minimal-lane3-48000.wav')
@@ -169,18 +172,22 @@ def owner_audio_manifest(raw, previous_pin, profile):
 def prepare_startup(root, tree, raw):
     """Carry startup repairs into the image and both runtime integrity maps."""
     gpu = image_path(root, 'etc/systemd/system/m4-gpu.service')
-    name = 'usr/lib/omarchy/m4-j713-audio-register.py'
-    register = image_path(root, name)
     require(gpu.is_file() and sha(gpu) == BASE_GPU_UNIT, 'Unknown retained graphics unit')
-    require(register.is_file() and sha(register) == BASE_AUDIO_REGISTER,
-            'Unknown retained audio registration helper')
     manifest = json.loads(raw)
-    previous = dict(sha256=BASE_AUDIO_REGISTER, size=register.stat().st_size, mode=0o644)
-    require(manifest['files']['/' + name] == BASE_AUDIO_REGISTER and
-            manifest['file_metadata'][name] == previous and
-            register.stat().st_mode & 0o777 == 0o644,
-            'Retained audio registration identity maps disagree')
-    replacement = image_path(tree, 'tools/m4-j713-audio-register.py').read_bytes()
+    replacements = {}
+    for name, pin, source in (
+            ('usr/lib/omarchy/m4-j713-audio-register.py', BASE_AUDIO_REGISTER,
+             'tools/m4-j713-audio-register.py'),
+            ('usr/lib/systemd/system/m4-j713-audio-register.service', BASE_AUDIO_UNIT,
+             'packaging/j713-audio/m4-j713-audio-register.service')):
+        path = image_path(root, name)
+        require(path.is_file() and sha(path) == pin, 'Unknown retained audio registration file: ' + name)
+        previous = dict(sha256=pin, size=path.stat().st_size, mode=0o644)
+        require(manifest['files']['/' + name] == pin and
+                manifest['file_metadata'][name] == previous and
+                path.stat().st_mode & 0o777 == 0o644,
+                'Retained audio registration identity maps disagree: ' + name)
+        replacements[name] = image_path(tree, source).read_bytes()
     gpu_replacement = image_path(tree, 'packaging/j713-startup/m4-gpu.service').read_bytes()
     configure = runpy.run_path(str(tree / 'tools/configure-j713-first-boot.py'))['apply']
     configure(root, tree)
@@ -188,12 +195,34 @@ def prepare_startup(root, tree, raw):
     owner_setup(root, apply=True)
     gpu.write_bytes(gpu_replacement)
     gpu.chmod(0o644)
-    register.write_bytes(replacement)
-    register.chmod(0o644)
-    pin = hashlib.sha256(replacement).hexdigest()
-    manifest['files']['/' + name] = pin
-    manifest['file_metadata'][name] = dict(sha256=pin, size=len(replacement), mode=0o644)
+    for name, replacement in replacements.items():
+        path = image_path(root, name)
+        path.write_bytes(replacement)
+        path.chmod(0o644)
+        pin = hashlib.sha256(replacement).hexdigest()
+        manifest['files']['/' + name] = pin
+        manifest['file_metadata'][name] = dict(sha256=pin, size=len(replacement), mode=0o644)
     return (json.dumps(manifest, indent=2, sort_keys=True) + '\n').encode()
+
+
+def prepare_decoder(root, tree):
+    """Replace the retained decoder wait and carry its exact identity forward."""
+    name = 'usr/local/bin/m4-video-start'
+    path = image_path(root, name)
+    metadata = image_path(root, 'etc/omarchy/j713-video-manifest.json')
+    require(metadata.is_file() and sha(metadata) == BASE_VIDEO, 'Unknown retained video manifest')
+    require(path.is_file() and sha(path) == BASE_VIDEO_START and
+            path.stat().st_mode & 0o777 == 0o755, 'Unknown retained decoder startup helper')
+    manifest = json.loads(metadata.read_bytes())
+    require(manifest['files'][name] == dict(sha256=BASE_VIDEO_START, size=path.stat().st_size, mode=0o755),
+            'Retained decoder identity map disagrees')
+    replacement = image_path(tree, 'packaging/j713-startup/m4-video-start').read_bytes()
+    path.write_bytes(replacement)
+    path.chmod(0o755)
+    manifest['files'][name] = dict(sha256=hashlib.sha256(replacement).hexdigest(),
+                                 size=len(replacement), mode=0o755)
+    document(metadata, manifest)
+    return sha(metadata)
 
 
 def prepare_root(source, image, root, tree, identity):
@@ -211,6 +240,7 @@ def prepare_root(source, image, root, tree, identity):
         audio_manifest = root / 'etc/omarchy/j713-audio-manifest.json'
         native_audio = owner_audio_manifest(audio_manifest.read_bytes(), BASE_AUDIO, manifest)
         native_audio = prepare_startup(root, tree, native_audio)
+        video_pin = prepare_decoder(root, tree)
         for name in FIRS:
             path = root / 'usr/share/asahi-audio/j713' / name
             require(path.is_file() and not path.is_symlink() and
@@ -255,7 +285,7 @@ def prepare_root(source, image, root, tree, identity):
     command('tune2fs', '-U', identity, image)
     # The installer requires a clean ext4 image checked after its last write mount.
     command('e2fsck', '-f', '-p', image)
-    return hashlib.sha256(native_audio).hexdigest()
+    return {'audio': hashlib.sha256(native_audio).hexdigest(), 'video': video_pin}
 
 
 def assemble(args):
@@ -293,10 +323,11 @@ def assemble(args):
     output.mkdir()
     image = args.output / 'root.ext4'
     identity = str(uuid.uuid4())
-    audio_pin = prepare_root(args.root_image.resolve(), image, args.output / 'mounted-root', tree, identity)
+    manifest_pins = prepare_root(args.root_image.resolve(), image, args.output / 'mounted-root', tree, identity)
     config = json.loads((baseline / 'installer_data.json').read_bytes())
     old_image = json.loads((baseline / 'IMAGE.json').read_bytes())
     require(old_image['audio_manifest_sha256'] == BASE_AUDIO, 'Baseline audio identity changed')
+    require(old_image['video_manifest_sha256'] == BASE_VIDEO, 'Baseline video identity changed')
     require(config['os_list'][0]['m4_boot'] == old_image['boot'], 'Baseline boot pins disagree')
     boot = copy.deepcopy(old_image['boot'])
     boot['dtb']['sha256'] = POWEROFF_DTB
@@ -387,8 +418,8 @@ def assemble(args):
         'credit': 'studioxradio aka kb2uka', 'base_omarchy_version': '4.0.4',
         'boot': boot,
         'root': {'bytes': image.stat().st_size, 'sha256': sha(image), 'filesystem_uuid': identity},
-        'audio_manifest_sha256': audio_pin,
-        'video_manifest_sha256': old_image['video_manifest_sha256'],
+        'audio_manifest_sha256': manifest_pins['audio'],
+        'video_manifest_sha256': manifest_pins['video'],
         'fresh_install_qualified': False,
         'qualification': 'The preceding owner-input candidate failed fresh startup. This image includes startup and recovery corrections; a successful owner installation is still required before publication.',
         'owner_inputs': 'Speaker filters generated from installed macOS and hash checked before partitioning; Widevine requires each owner choice.',

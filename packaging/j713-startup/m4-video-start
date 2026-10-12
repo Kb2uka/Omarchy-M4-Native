@@ -1,0 +1,46 @@
+#!/bin/bash
+set -euo pipefail
+export PATH=/usr/bin:/bin
+prefix=/opt/m4-video/20261011
+state=/run/m4-video
+fail() { printf 'M4 video startup: %s\n' "$*" >&2; exit 1; }
+[ "$(id -u)" = 0 ] || fail 'root is required'
+exec 9>/run/lock/m4-avd-test.lock
+flock -n 9 || fail 'decoder maintenance is in progress'
+install -d -m 0755 "$state"
+rm -f "$state/ready"
+[ "$(uname -r)" = 7.1.9-m4-gpu-backport-20261008 ] || fail 'kernel revision mismatch'
+grep -zFxq apple,j713 /sys/firmware/devicetree/base/compatible || fail 'unsupported board'
+grep -zFxq apple,t8132 /sys/firmware/devicetree/base/compatible || fail 'unsupported SoC'
+[ -s /run/m4/root-verified ] || fail 'native root is not verified'
+[ -c /dev/dri/renderD128 ] || fail 'desktop GPU is not ready'
+(cd "$prefix" && sha256sum --quiet -c kernel.sha256)
+printf '%s  %s\n' 0685d0d64ad658114637c3f9f3f39aa4a81924754f18e42d6401cb3e68ba3c29 /usr/lib/firmware/apple/avd-start-probe.bin | sha256sum --quiet -c -
+if [ ! -d /sys/module/avd_trial_controller ] && [ ! -d /sys/module/apple_avd ]; then
+    [ ! -e /dev/video0 ] && [ ! -e /dev/media0 ] || fail 'video nodes already exist'
+    [ ! -e /sys/bus/platform/devices/3a1020000.iommu ] || fail 'decoder DART already exists'
+    insmod "$prefix/kernel/avd-controller.ko"
+    [ "$(cat /dev/m4-avd-trial)" = 'dart_id=0 decoder_id=0' ] || fail 'controller initial state differs'
+    for dependency in videobuf2-v4l2 videodev v4l2-mem2mem mc videobuf2-dma-contig videobuf2-common v4l2-h264 v4l2-vp9; do
+        modprobe "$dependency"
+    done
+    insmod "$prefix/kernel/apple-avd.ko"
+    printf 'dart-on\n' > /dev/m4-avd-trial
+    [ "$(basename "$(readlink -f /sys/bus/platform/devices/3a1020000.iommu/driver)")" = apple-dart ] || fail 'decoder DART is not bound'
+    printf 'decoder-on\n' > /dev/m4-avd-trial
+    udevadm wait --timeout=10 /dev/video0 /dev/media0
+fi
+printf '%s  %s\n' 1c0965d95236f84d950e5d9dda893cf62be3e5dcd78492e2996c063fe2070378 /sys/module/apple_avd/notes/.note.gnu.build-id | sha256sum --quiet -c -
+printf '%s  %s\n' 04e0187941600504bf740d712e7e2146003838fb13a67cb0626c756ea36d895e /sys/module/avd_trial_controller/notes/.note.gnu.build-id | sha256sum --quiet -c -
+[ -c /dev/video0 ] && [ -c /dev/media0 ] || fail 'decoder nodes are missing'
+[ "$(cat /sys/class/video4linux/video0/name)" = avd ] || fail 'unexpected video device'
+[ "$(readlink -f /sys/class/video4linux/video0/device)" = /sys/devices/platform/soc/3a1080000.avd ] || fail 'unexpected decoder binding'
+[ "$(basename "$(readlink -f /sys/bus/platform/devices/3a1020000.iommu/driver)")" = apple-dart ] || fail 'decoder DART is not bound'
+grep -zFxq okay /sys/firmware/devicetree/base/soc/avd@3a0000000/status || fail 'decoder node disabled'
+case "$(cat /sys/bus/platform/devices/3a1080000.avd/power/runtime_status)" in
+    active|suspended) ;;
+    *) fail 'decoder runtime power state is not healthy' ;;
+esac
+cat /proc/sys/kernel/random/boot_id > "$state/ready"
+chmod 0644 "$state/ready"
+printf 'M4_VIDEO_READY: H264 and VP9 hardware decoder registered\n'
