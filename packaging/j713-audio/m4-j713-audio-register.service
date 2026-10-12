@@ -1,6 +1,6 @@
 [Unit]
 Description=Qualified J713 speaker providers and protected sound card
-After=systemd-udev-settle.service
+After=systemd-udev-trigger.service
 Before=speakersafetyd-j713.service
 
 [Service]

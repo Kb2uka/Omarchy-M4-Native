@@ -164,12 +164,16 @@ class OwnerFilterReleaseTests(unittest.TestCase):
             with mock.patch.object(release, 'BASE_ROOT', hashlib.sha256(source.read_bytes()).hexdigest()), \
                     mock.patch.object(release, 'BASE_AUDIO', hashlib.sha256(raw).hexdigest()), \
                     mock.patch.object(release, 'command', side_effect=command), \
+                    mock.patch.object(release, 'prepare_startup', side_effect=lambda r, t, a: a) as startup, \
+                    mock.patch.object(release, 'prepare_decoder', return_value='v' * 64) as decoder, \
                     mock.patch.object(release, 'fill_free_space'):
                 pin = release.prepare_root(source, image, root, tree, 'new-root-id')
+            startup.assert_called_once_with(root, tree, self.convert())
+            decoder.assert_called_once_with(root, tree)
             actual = (root / 'etc/omarchy/j713-audio-manifest.json').read_bytes()
-            self.assertEqual(pin, hashlib.sha256(actual).hexdigest())
+            self.assertEqual(pin, {'audio': hashlib.sha256(actual).hexdigest(), 'video': 'v' * 64})
             self.assertEqual(actual, self.convert())
-            self.assertNotEqual(pin, hashlib.sha256(raw).hexdigest())
+            self.assertNotEqual(pin['audio'], hashlib.sha256(raw).hexdigest())
             self.assertEqual((root / 'etc/m4-root-id').read_text(), 'new-root-id\n')
             self.assertTrue((root / 'etc/systemd/system/multi-user.target.wants/j713-owner-assets.service').is_symlink())
             for name in release.FIRS:

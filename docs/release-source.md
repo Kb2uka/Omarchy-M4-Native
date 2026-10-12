@@ -89,8 +89,12 @@ root was copied, owner-specific payloads removed, freed blocks overwritten,
 new service installed and the existing SMC poweroff handler enabled through the
 device-tree child described in [j713-poweroff.md](j713-poweroff.md).
 The four native filter identities replace the historical x86_64 calculation's
-identities in the installed audio manifest; all other audio payloads and
-protection settings are retained. See [j713-owner-fir-native.md](j713-owner-fir-native.md).
+identities in the installed audio manifest. The audio registration helper drops
+unrelated global device waits, and both integrity maps record its new identity.
+Other audio payloads and protection settings are retained. The GPU service now
+waits only for its scanout device. Offline configurators install the independent
+recovery console, setup console controls, a bounded desktop-failure report and
+the arm64 guard for an unrelated Framework audio probe. See [j713-owner-fir-native.md](j713-owner-fir-native.md).
 Kernel,
 initramfs and loader bytes are preserved; the DTB checksum is updated in both
 the image metadata and installer definition. Its pinned private base
