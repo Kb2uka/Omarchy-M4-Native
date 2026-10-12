@@ -1,0 +1,3 @@
+# CPython 3.13, macOS 14+ arm64 wheel; installer ships this wheel unchanged.
+# Runtime unpacks the pinned wheel without invoking pip or using the network.
+numpy==2.5.3 --hash=sha256:f9a2353b37a1a9e78fd82b27ad7e2a32a2d036604d18f02b05e3136c62ca3b09

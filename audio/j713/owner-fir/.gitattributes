@@ -1,0 +1,3 @@
+# Preserve the exact upstream license text shipped inside the pinned wheel.
+licenses/numpy/random/LICENSE.md whitespace=-blank-at-eol
+licenses/numpy/random/src/pcg64/LICENSE.md whitespace=-blank-at-eol
