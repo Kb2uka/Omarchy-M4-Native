@@ -91,3 +91,6 @@ initramfs and loader bytes are preserved; the DTB checksum is updated in both
 the image metadata and installer definition. Its pinned private base
 is a historical build input, not a public download promise. The distributed
 source and installer are versioned separately from future main-branch changes.
+Assembly requires Python 3.12 or newer and a clean, isolated checkout at the
+intended release revision. Tracked changes are rejected before assembly, and
+the checkout must still be clean at the same revision when metadata is written.

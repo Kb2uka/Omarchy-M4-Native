@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tarfile
 import uuid
 import zipfile
@@ -41,6 +42,14 @@ def document(path, value):
 
 def command(*args):
     subprocess.run(list(map(str, args)), check=True)
+
+
+def source_revision(tree):
+    status = subprocess.check_output(
+        ['git', '-C', str(tree), 'status', '--porcelain', '--untracked-files=no'], text=True)
+    require(not status, 'Release source has tracked changes; commit before assembly')
+    return subprocess.check_output(
+        ['git', '-C', str(tree), 'rev-parse', '--verify', 'HEAD'], text=True).strip()
 
 
 def patch_main(data):
@@ -182,8 +191,10 @@ def prepare_root(source, image, root, tree, identity):
 
 
 def assemble(args):
+    require(sys.version_info >= (3, 12), 'Build requires Python 3.12 or newer')
     require(os.geteuid() == 0, 'Build on a Linux host through its scoped root job')
     tree, baseline = args.source_tree.resolve(), args.baseline.resolve()
+    revision = source_revision(tree)
     require(args.output.is_absolute() and not args.output.exists() and
             not args.output.is_symlink(), 'A new absolute build output is required')
     require(shutil.disk_usage(args.output.parent).free > 40 * 1024**3,
@@ -292,7 +303,7 @@ def assemble(args):
     require(len(roots) == 1, 'Unexpected root layout')
     roots[0].update(rootfs_uuid=identity, size=str(image.stat().st_size) + 'B')
     document(output / 'installer_data.json', config)
-    revision = subprocess.check_output(['git', '-C', str(tree), 'rev-parse', 'HEAD'], text=True).strip()
+    require(source_revision(tree) == revision, 'Release source revision changed during assembly')
     metadata = {
         'release_version': VERSION, 'private_only': False, 'source_revision': revision,
         'credit': 'studioxradio aka kb2uka', 'base_omarchy_version': '4.0.4',
