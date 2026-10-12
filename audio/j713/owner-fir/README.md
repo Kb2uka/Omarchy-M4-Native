@@ -1,6 +1,6 @@
 # Owner-local J713 audio filters
 
-This tool prepares the four existing J713 FIR files from the owner's installed
+This tool prepares four J713 FIR files from the owner's installed
 macOS AudioDSP component and AID37 tuning strip. The distributed bundle contains
 the generator, two native helpers, and NumPy. It must not contain Apple presets,
 tuning strips, AudioDSP, measured responses, or generated WAV files.
@@ -23,7 +23,7 @@ owner's Mac. The native helpers are built in advance.
 All input, extracted-preset, helper, dependency and output hashes are pinned in
 `manifest.json`. Generation requires native arm64 macOS and the installer's
 CPython 3.13.9 without optimization. The current installed system input hashes
-were observed on macOS 26.5.2 (25F84). A different input or output is a refusal,
+were verified on macOS 26.5.1 (25F80) and 26.5.2 (25F84). A different input or output is a refusal,
 not permission to use a substitute filter. No compatibility claim is made for
 other macOS inputs.
 
@@ -32,8 +32,9 @@ Success creates exactly four `j713-static-minimal-laneN-48000.wav` files and
 four hashes **before offering partition changes**. The receipt describes asset
 generation, not installation or hardware qualification. Temporary presets,
 responses and extracted NumPy files are removed when the command exits normally
-or reports an error. The generator does not change audio package pins or speaker
-protection policy.
+or reports an error. The release builder carries the native output pins into
+the installer handoff and installed audio manifest. Speaker protection policy
+is unchanged.
 
 ## Assembly and source
 
@@ -74,11 +75,21 @@ archive were downloaded from the pinned PyPI links and their hashes verified.
 The build host's installed AID37 inputs and AudioDSP match the retained source
 inputs. A second arm64 Mac has the same AudioDSP hash.
 
-The owner-generation command has **not been executed**. The earlier pipeline
-combined native macOS responses using NumPy 2.5.3 on x86_64 Linux. Exact output
-equality after the FFT stage on arm64 macOS is unverified. A queued validation
-job was cancelled before it began; no tests or native qualification were run for
-this change. The four existing qualified output hashes remain mandatory.
+The complete owner-generation command succeeded on the J713 Air running macOS
+26.5.1 and an arm64 Mac Studio running 26.5.2, using the bundled CPython 3.13.9,
+helpers and NumPy 2.5.3. Both produced the exact same four output hashes.
+
+The earlier reference combined native macOS responses using NumPy 2.5.3 on
+x86_64 Linux. The ARM64 results differ at 57 of 10,240 float32 samples, with a
+maximum absolute difference of 3.553e-15 and a per-filter sum of absolute
+differences below 3.584e-15. Tap counts and peak coefficients are unchanged.
+The old hashes remain in `reference_outputs`; `outputs` identifies the measured
+native results. No numerical tolerance replaces the four exact hash checks.
+See `docs/j713-owner-fir-native.md` in the repository or the included
+`source/release-integration.tar.gz` archive.
+
+This verifies local generation and its byte identities. Physical playback of
+the rebuilt installer remains part of the maintainer's final installation.
 
 The existing measured WAV assets have no established redistribution license.
 This arrangement avoids including them in a download. It does not establish

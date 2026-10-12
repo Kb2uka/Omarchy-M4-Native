@@ -79,14 +79,19 @@ The historical ARM64 sysroot came from glibc `2.43+r22+g8362e8ce10b2-2`, alsa-li
 Rust/Cargo 1.93.1, LLVM/Clang 21.1.8 and GCC 15.2.0. Reconstruct those external
 toolchain/sysroot inputs using the retained recipes and package versions; local
 Docker image hashes alone are not public download locations. This source packet
-does not claim a fully self-contained or byte-identical clean rebuild. The final
-owner-input pipeline and reconstructed build environments were not executed as
-part of release qualification.
+does not claim a fully self-contained or byte-identical clean rebuild. The
+owner-input pipeline passed on native ARM64 macOS 26.5.1 and 26.5.2 with matching
+output hashes. Reconstructed kernel and userspace build environments have not
+been qualified as a complete clean rebuild.
 
 The assembler `tools/prepare-j713-release.py` records how the retained private
 root was copied, owner-specific payloads removed, freed blocks overwritten,
 new service installed and the existing SMC poweroff handler enabled through the
-device-tree child described in [j713-poweroff.md](j713-poweroff.md). Kernel,
+device-tree child described in [j713-poweroff.md](j713-poweroff.md).
+The four native filter identities replace the historical x86_64 calculation's
+identities in the installed audio manifest; all other audio payloads and
+protection settings are retained. See [j713-owner-fir-native.md](j713-owner-fir-native.md).
+Kernel,
 initramfs and loader bytes are preserved; the DTB checksum is updated in both
 the image metadata and installer definition. Its pinned private base
 is a historical build input, not a public download promise. The distributed

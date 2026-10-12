@@ -164,7 +164,7 @@ def generate(bundle, output):
             'numpy_version': '2.5.3',
             'owner_inputs': manifest['owner_inputs'],
             'files': manifest['outputs'],
-            'exact_qualified_outputs': True,
+            'exact_native_outputs': True,
             'hardware_playback_performed': False,
         }
         output.mkdir(mode=0o700)
