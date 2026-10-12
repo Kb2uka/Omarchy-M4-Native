@@ -31,7 +31,7 @@ def base_nodes():
     }
 
 
-def candidate_nodes(**changes):
+def candidate_nodes(changes=None):
     nodes = base_nodes()
     handles = {}
     for index, (name, (node, reg, bits)) in enumerate(MODULE.CELLS.items()):
@@ -45,7 +45,7 @@ def candidate_nodes(**changes):
         'compatible': b'apple,smc-reboot\0',
         'nvmem-cells': b''.join(handles[n] for n in names),
         'nvmem-cell-names': b''.join(n.encode() + b'\0' for n in names)}
-    for path, props in changes.items():
+    for path, props in (changes or {}).items():
         if props is None:
             nodes.pop(path)
         else:
@@ -111,7 +111,7 @@ class BuildGuards(unittest.TestCase):
         self.assertFalse(receipt['hardware_poweroff_verified'])
 
     def test_bare_reboot_child_refused(self):
-        nodes = candidate_nodes(**{LAYOUT + (c[0],): None for c in MODULE.CELLS.values()})
+        nodes = candidate_nodes({LAYOUT + (c[0],): None for c in MODULE.CELLS.values()})
         nodes[SMC + ('reboot',)] = {'compatible': b'apple,smc-reboot\0'}
         self.refused(nodes)
 
@@ -119,23 +119,23 @@ class BuildGuards(unittest.TestCase):
         self.refused(base_nodes())
 
     def test_missing_shutdown_flag_refused(self):
-        self.refused(candidate_nodes(**{LAYOUT + ('shutdown-flag@f80f,3',): None}))
+        self.refused(candidate_nodes({LAYOUT + ('shutdown-flag@f80f,3',): None}))
 
     def test_wrong_shutdown_bit_refused(self):
-        self.refused(candidate_nodes(**{LAYOUT + ('shutdown-flag@f80f,3',): {'bits': U32(2, 1)}}))
+        self.refused(candidate_nodes({LAYOUT + ('shutdown-flag@f80f,3',): {'bits': U32(2, 1)}}))
 
     def test_wrong_scratchpad_offset_refused(self):
-        self.refused(candidate_nodes(**{LAYOUT + ('boot-stage@f801',): {'reg': U32(0xf701, 1)}}))
+        self.refused(candidate_nodes({LAYOUT + ('boot-stage@f801',): {'reg': U32(0xf701, 1)}}))
 
     def test_reused_phandle_refused(self):
-        self.refused(candidate_nodes(**{LAYOUT + ('boot-stage@f801',): {'phandle': U32(0x6d)}}))
+        self.refused(candidate_nodes({LAYOUT + ('boot-stage@f801',): {'phandle': U32(0x6d)}}))
 
     def test_cells_in_wrong_order_refused(self):
         cells = candidate_nodes()[SMC + ('reboot',)]['nvmem-cells']
-        self.refused(candidate_nodes(**{SMC + ('reboot',): {'nvmem-cells': cells[4:] + cells[:4]}}))
+        self.refused(candidate_nodes({SMC + ('reboot',): {'nvmem-cells': cells[4:] + cells[:4]}}))
 
     def test_other_property_change_refused(self):
-        self.refused(candidate_nodes(**{SMC: {'status': b'disabled\0'}}))
+        self.refused(candidate_nodes({SMC: {'status': b'disabled\0'}}))
 
     def test_unqualified_base_before_compiler(self):
         with patch.object(MODULE.subprocess, 'run') as command:
