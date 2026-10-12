@@ -20,13 +20,14 @@ See [GitHub runner pricing](https://docs.github.com/en/actions/how-tos/write-wor
 | --- | --- |
 | PR policy | Contributor target is `develop`; maintainer release PRs are `develop` to `main` in this repository. |
 | Tests (Linux) | Offline Python regressions and the Lua policy fixture. No image installation, speaker pulse or hardware reboot. |
+| Speaker daemon (Rust) | Verifies every hash in `audio/j713/imported-source.sha256`, then builds and unit-tests `speakersafetyd` with its locked dependencies. No audio device or speaker is touched. |
 | Installer transport (macOS) | Downloader and packaging regressions on macOS, including its shell and archive tools. |
 | Secrets | Gitleaks default rules across fetched history and current files; supported encoded/archive content is also scanned. Findings are redacted. |
 | Malware | Updated ClamAV definitions; every tracked regular file, including archives. Detections, scanner errors, encrypted archives and scan-limit exhaustion fail. Git export exclusions cannot hide files. Symlinks, submodules, oversized files and unresolved LFS pointers require review. |
 | Workflow lint | Actionlint plus security-policy assertions and negative tests for unsafe workflow changes. |
 | Dependency review | On public PRs, block newly introduced moderate-or-higher advisories in supported dependency manifests, including development and unknown scopes. |
 | CodeQL | Python, C/C++, Rust and Actions source with extended security queries; public PRs, branch pushes and weekly scans. No repository build scripts are executed in the scanner job. |
-| Dependabot | Weekly Actions, Cargo and owner-filter Python dependency update PRs into `develop`; updates are reviewed, never automatically merged. |
+| Dependabot | Weekly GitHub Actions update PRs into `develop`; updates are reviewed, never automatically merged. The speaker daemon's `Cargo.lock` and the owner-filter numpy wheel are hash-pinned parts of the qualified audio payload, so they get no automatic version-update PRs: changing them means re-pinning and requalifying the audio build. |
 
 CodeQL does not parse kernel patches as complete kernel translation units or
 qualify hardware. Its build-free C/C++ analysis can miss context supplied by

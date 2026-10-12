@@ -43,11 +43,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.13'
       - name: Install test tools
@@ -67,15 +67,42 @@ jobs:
           PYTHONDONTWRITEBYTECODE: '1'
         run: python -m unittest discover -s tests -p 'test_*.py' -v
 
+  speaker-daemon:
+    name: Speaker daemon (Rust)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify pinned audio source
+        working-directory: audio/j713
+        run: sha256sum --check --strict imported-source.sha256
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev pkg-config
+      - name: Build speakersafetyd
+        working-directory: audio/j713/speakersafetyd
+        run: |
+          cargo --version
+          cargo build --locked --release
+      - name: Test speakersafetyd
+        working-directory: audio/j713/speakersafetyd
+        # The pinned test reads the profile from its original staging path;
+        # j713.conf is that profile and is itself hash-pinned above.
+        run: |
+          mkdir -p ../candidate
+          cp ../j713.conf ../candidate/j713.conf
+          cargo test --locked
+
   macos:
     name: Installer transport (macOS)
     runs-on: macos-14
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.13'
       - name: Run downloader and packaging regressions on macOS
