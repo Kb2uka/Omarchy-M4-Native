@@ -1,0 +1,288 @@
+--- a/drivers/hid/dockchannel-hid/dockchannel-hid.c
++++ b/drivers/hid/dockchannel-hid/dockchannel-hid.c
+@@ -13,6 +13,8 @@
+ #include <linux/firmware.h>
+ #include <linux/module.h>
+ #include <linux/gpio/consumer.h>
++#include <linux/mfd/macsmc.h>
++#include <linux/of_platform.h>
+ #include <linux/hid.h>
+ #include <linux/platform_device.h>
+ #include <linux/slab.h>
+@@ -25,6 +27,10 @@
+ static bool m4_power_v2;
+ module_param(m4_power_v2, bool, 0444);
+ MODULE_PARM_DESC(m4_power_v2, "Test J713 MTP version-2 interface power requests");
++
++static bool m4_afe_action;
++module_param(m4_afe_action, bool, 0444);
++MODULE_PARM_DESC(m4_afe_action, "Test J713 AFE native power actions");
+ 
+ #define COMMAND_TIMEOUT_MS 1000
+ #define START_TIMEOUT_MS 2000
+@@ -196,6 +202,11 @@
+ 	struct dockchannel *dc;
+ 	struct device_link *helper_link;
+ 
++	struct gpio_desc *afe_gpio;
++	struct apple_smc *afe_smc;
++	bool afe_ready;
++	struct mutex afe_mutex;
++
+ 	bool id_ready;
+ 	struct dchid_stm_id device_id;
+ 	char serial[64];
+@@ -381,6 +392,146 @@
+ 	u8 msg[] = { CMD_ENABLE_INTERFACE, iface->index };
+ 
+ 	return dchid_comm_cmd(iface->dchid, msg, sizeof(msg));
++}
++
++static bool dchid_afe_action_enabled(struct dchid_iface *iface)
++{
++	return m4_afe_action && m4_power_v2 &&
++		of_machine_is_compatible("apple,j713") &&
++		of_machine_is_compatible("apple,t8132") &&
++		!strcmp(iface->name, "multi-touch");
++}
++
++static void dchid_put_afe_smc(void *data)
++{
++	put_device(data);
++}
++
++static int dchid_prepare_afe(struct dchid_iface *iface)
++{
++	struct dockchannel_hid *dchid = iface->dchid;
++	struct apple_smc_key_info info;
++	struct of_phandle_args args;
++	struct platform_device *pdev;
++	struct device_node *smc_node;
++	struct device_link *link;
++	struct apple_smc *smc;
++	struct gpio_desc *gpio;
++	int ret = 0;
++
++	if (!dchid_afe_action_enabled(iface))
++		return 0;
++	if (!IS_REACHABLE(CONFIG_MFD_MACSMC))
++		return -EOPNOTSUPP;
++
++	mutex_lock(&dchid->afe_mutex);
++	if (dchid->afe_ready)
++		goto out;
++	if (!dchid->afe_smc) {
++		ret = of_parse_phandle_with_args(dchid->dev->of_node,
++				"apple,afe-reset-gpios", "#gpio-cells", 0, &args);
++		if (ret)
++			goto out;
++		ret = args.args_count == 2 && args.args[0] == 28 &&
++			args.args[1] == 1 &&
++			of_device_is_compatible(args.np, "apple,smc-gpio") ? 0 : -EINVAL;
++		smc_node = ret ? NULL : of_get_parent(args.np);
++		of_node_put(args.np);
++		if (ret)
++			goto out;
++		if (!smc_node || !of_device_is_compatible(smc_node, "apple,t8132-smc")) {
++			of_node_put(smc_node);
++			ret = -EINVAL;
++			goto out;
++		}
++		pdev = of_find_device_by_node(smc_node);
++		of_node_put(smc_node);
++		if (!pdev) {
++			ret = -EPROBE_DEFER;
++			goto out;
++		}
++		smc = platform_get_drvdata(pdev);
++		if (!smc) {
++			put_device(&pdev->dev);
++			ret = -EPROBE_DEFER;
++			goto out;
++		}
++		if (!dchid->afe_gpio) {
++			/* Reserve ownership without changing the inherited line state. */
++			gpio = devm_gpiod_get_index(dchid->dev, "apple,afe-reset", 0, GPIOD_ASIS);
++			if (IS_ERR(gpio)) {
++				ret = PTR_ERR(gpio);
++				put_device(&pdev->dev);
++				goto out;
++			}
++			dchid->afe_gpio = gpio;
++		}
++		link = device_link_add(dchid->dev, &pdev->dev, DL_FLAG_AUTOREMOVE_CONSUMER);
++		if (!link) {
++			put_device(&pdev->dev);
++			ret = -ENOMEM;
++			goto out;
++		}
++		ret = devm_add_action_or_reset(dchid->dev, dchid_put_afe_smc, &pdev->dev);
++		if (ret)
++			goto out;
++		dchid->afe_smc = smc;
++	}
++
++	ret = apple_smc_get_key_info(dchid->afe_smc, SMC_KEY(gP1c), &info);
++	if (ret < 0)
++		goto out;
++	dev_info(dchid->dev, "M4INPUT AFE key size=%u flags=0x%02x type=0x%08x\n",
++		 info.size, info.flags, info.type_code);
++	if (info.size != sizeof(__le32) || !(info.flags & APPLE_SMC_WRITABLE)) {
++		ret = -EINVAL;
++		goto out;
++	}
++	dchid->afe_ready = true;
++	ret = 0;
++out:
++	mutex_unlock(&dchid->afe_mutex);
++	if (ret)
++		dev_err(dchid->dev, "M4INPUT AFE action preparation failed: %d\n", ret);
++	return ret;
++}
++
++static int dchid_afe_write(struct dockchannel_hid *dchid, unsigned int argument)
++{
++	__le32 payload;
++	int ret;
++
++	if (!IS_REACHABLE(CONFIG_MFD_MACSMC))
++		return -EOPNOTSUPP;
++	lockdep_assert_held(&dchid->afe_mutex);
++	if (!dchid->afe_ready || !dchid->afe_smc || argument > 1)
++		return -EINVAL;
++
++	/* Board function template and argument; these are not GPIO voltage levels. */
++	payload = cpu_to_le32(0x00010000 | argument);
++	ret = apple_smc_write(dchid->afe_smc, SMC_KEY(gP1c), &payload, sizeof(payload));
++	dev_info(dchid->dev, "M4INPUT AFE action argument=%u result=%d\n", argument, ret);
++	if (ret < 0)
++		return ret;
++	if (argument == 1)
++		msleep(50);
++	return 0;
++}
++
++static int dchid_afe_action(struct dchid_iface *iface, int state)
++{
++	struct dockchannel_hid *dchid = iface->dchid;
++	int ret;
++
++	if (!dchid_afe_action_enabled(iface))
++		return 0;
++	if (state != 0 && state != 2)
++		return -EINVAL;
++
++	mutex_lock(&dchid->afe_mutex);
++	ret = dchid_afe_write(dchid, state == 0);
++	mutex_unlock(&dchid->afe_mutex);
++	return ret;
+ }
+ 
+ static int dchid_reset_interface(struct dchid_iface *iface, int state)
+@@ -401,7 +552,7 @@
+ 		.phase = 0,
+ 		.status = cpu_to_le32(0),
+ 	};
+-	int ret;
++	int ret, host_ret;
+ 
+ 	if (!m4_power_v2 || !of_machine_is_compatible("apple,j713") ||
+ 	    !of_machine_is_compatible("apple,t8132"))
+@@ -410,12 +561,14 @@
+ 	ret = dchid_comm_cmd(iface->dchid, &request, sizeof(request));
+ 	if (ret < 0)
+ 		return ret;
++	host_ret = dchid_afe_action(iface, state);
++	request.status = cpu_to_le32(host_ret < 0 ? 0xe00002bc : 0);
+ 	request.phase = 1;
+ 	ret = dchid_comm_cmd(iface->dchid, &request, sizeof(request));
+ 	dev_info(iface->dchid->dev,
+ 		 "M4INPUT v2 power iface=%u state=%u bytes=%zu result=%d\n",
+ 		 iface->index, request.state, sizeof(request), ret);
+-	return ret;
++	return host_ret < 0 ? host_ret : ret;
+ }
+ 
+ static bool dchid_start_retry_enabled(struct dchid_iface *iface)
+@@ -528,6 +681,18 @@
+ {
+ 	char prop_name[MAX_GPIO_NAME + 16];
+ 
++	if (dchid_afe_action_enabled(iface)) {
++		int ret;
++
++		if (strcmp(iface->gpio_name, "afe-reset"))
++			return -EINVAL;
++		ret = dchid_prepare_afe(iface);
++		if (ret)
++			return ret;
++		iface->gpio = iface->dchid->afe_gpio;
++		return 0;
++	}
++
+ 	if (iface->gpio)
+ 		return 0;
+ 
+@@ -561,6 +726,10 @@
+ 	dev_info(iface->dchid->dev, "Starting interface %s\n", iface->name);
+ 
+ 	iface->starting = true;
++
++	ret = dchid_prepare_afe(iface);
++	if (ret)
++		goto err;
+ 
+ 	/* Look to see if we need firmware */
+ 	ret = dchid_get_firmware(iface, &fw, &size);
+@@ -987,6 +1156,7 @@
+ 	struct dchid_iface *iface;
+ 	u32 retcode = 0xe000f00d; /* Give it a random Apple-style error code */
+ 	struct dchid_gpio_ack *ack;
++	int ret;
+ 
+ 	if (length < sizeof(*cmd))
+ 		return;
+@@ -996,10 +1166,18 @@
+ 		goto err;
+ 	}
+ 
++	if (dchid_afe_action_enabled(iface) &&
++	    (length < 20 || get_unaligned_le16((u8 *)data + 2) != iface->gpio_id ||
++	     get_unaligned_le32((u8 *)data + 4) != 3)) {
++		dev_err(dchid->dev, "Invalid AFE external resource request\n");
++		goto err;
++	}
++
+ 	if (dchid_request_gpio(iface) < 0)
+ 		goto err;
+ 
+-	if (!iface->gpio || cmd->gpio != iface->gpio_id) {
++	if (!iface->gpio || (!dchid_afe_action_enabled(iface) &&
++			     cmd->gpio != iface->gpio_id)) {
+ 		dev_err(dchid->dev, "Got GPIO command for bad GPIO %s#%d\n",
+ 			iface->name, cmd->gpio);
+ 		goto err;
+@@ -1009,6 +1187,15 @@
+ 
+ 	switch (cmd->cmd) {
+ 	case 3:
++		if (dchid_afe_action_enabled(iface)) {
++			mutex_lock(&dchid->afe_mutex);
++			ret = dchid_afe_write(dchid, 1);
++			if (!ret)
++				ret = dchid_afe_write(dchid, 0);
++			mutex_unlock(&dchid->afe_mutex);
++			retcode = ret < 0 ? 0xe00002bc : 0;
++			break;
++		}
+ 		/* Pulse.  */
+ 		gpiod_set_value_cansleep(iface->gpio, 1);
+ 		msleep(10); /* Random guess... */
+@@ -1228,6 +1415,7 @@
+ 	}
+ 
+ 	dchid->dev = dev;
++	mutex_init(&dchid->afe_mutex);
+ 
+ 	/*
+ 	 * First make sure all the GPIOs are available, in cased we need to defer.
