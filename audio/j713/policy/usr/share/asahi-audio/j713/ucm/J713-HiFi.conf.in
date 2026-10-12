@@ -1,0 +1,9 @@
+SectionVerb { Value { TQ "HiFi" } }
+SectionDevice."Speaker" {
+ Comment "J713 protected speakers"
+ Value {
+  PlaybackPCM "hw:AppleJ713,0"
+  PlaybackChannels 4
+  PlaybackRate 48000
+ }
+}

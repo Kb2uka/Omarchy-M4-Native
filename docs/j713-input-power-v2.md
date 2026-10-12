@@ -119,3 +119,7 @@ and both transport failure positions. Four mutations of version, phase,
 packing and enable guard are rejected. Temporary executable fixtures are
 removed. This is a helper contract check, not an end-to-end driver simulator;
 hardware evidence above covers the successful real startup and input path.
+
+A later fresh-install READY-timeout recovery defect is addressed separately by
+[J713 trackpad startup retry](j713-input-startup-retry.md). The original power
+request evidence above is unchanged.

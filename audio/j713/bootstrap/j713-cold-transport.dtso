@@ -1,0 +1,86 @@
+/dts-v1/;
+/plugin/;
+/ {
+    fragment@0 {
+        target-path = "/soc";
+        __overlay__ {
+            #address-cells = <2>;
+            #size-cells = <2>;
+            power-management@388284000 {
+                compatible = "apple,t8132-pmgr", "apple,t8103-pmgr", "syscon", "simple-mfd";
+                #address-cells = <1>;
+                #size-cells = <1>;
+                reg = <3 0x88284000 0 0x4000>;
+                audio_a: power-controller@20 {
+                    compatible = "apple,t8132-pmgr-pwrstate", "apple,t8103-pmgr-pwrstate";
+                    reg = <0x20 4>;
+                    #power-domain-cells = <0>;
+                    #reset-cells = <0>;
+                    label = "audio_a";
+                };
+                audio_fr: power-controller@90 {
+                    compatible = "apple,t8132-pmgr-pwrstate", "apple,t8103-pmgr-pwrstate";
+                    reg = <0x90 4>;
+                    #power-domain-cells = <0>;
+                    #reset-cells = <0>;
+                    label = "audio_fr";
+                    power-domains = <&audio_a>;
+                };
+                audio_p: power-controller@b8 {
+                    compatible = "apple,t8132-pmgr-pwrstate", "apple,t8103-pmgr-pwrstate";
+                    reg = <0xb8 4>;
+                    #power-domain-cells = <0>;
+                    #reset-cells = <0>;
+                    label = "audio_p";
+                    power-domains = <&audio_fr>;
+                };
+                audio_base: power-controller@d8 {
+                    compatible = "apple,t8132-pmgr-pwrstate", "apple,t8103-pmgr-pwrstate";
+                    reg = <0xd8 4>;
+                    #power-domain-cells = <0>;
+                    #reset-cells = <0>;
+                    label = "audio_base_ns_a";
+                    power-domains = <&audio_p>;
+                };
+                audio_mca0: power-controller@e8 {
+                    compatible = "apple,t8132-pmgr-pwrstate", "apple,t8103-pmgr-pwrstate";
+                    reg = <0xe8 4>;
+                    #power-domain-cells = <0>;
+                    #reset-cells = <0>;
+                    label = "audio_mca0_m";
+                    power-domains = <&audio_p>;
+                };
+            };
+            admac: dma-controller@393800000 {
+                compatible = "apple,t8132-admac";
+                reg = <3 0x93800000 0 0x34000>;
+                #dma-cells = <1>;
+                dma-channels = <26>;
+                interrupts-extended = <0xd 0 475 4>, <0>, <0>, <0>;
+                iommus = <0x35 8>;
+                power-domains = <&audio_base>;
+            };
+            i2s@393600000 {
+                compatible = "apple,t8132-mca";
+                reg = <3 0x93600000 0 0xc000>;
+                #sound-dai-cells = <1>;
+                clocks = <0x2a>;
+                power-domains = <&audio_p>, <&audio_mca0>;
+                dmas = <&admac 0>, <&admac 1>;
+                dma-names = "tx0a", "rx0a";
+            };
+        };
+    };
+    fragment@1 {
+        target-path = "/soc/iommu@390f00000";
+        __overlay__ {
+            power-domains = <&audio_a>;
+            apple,dma-range = <0x100 0x10000000 0 0x10000000>;
+            status = "okay";
+        };
+    };
+    fragment@2 {
+        target-path = "/soc/i2c@3ad01c000";
+        __overlay__ { status = "okay"; };
+    };
+};
