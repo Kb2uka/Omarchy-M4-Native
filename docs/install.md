@@ -91,17 +91,31 @@ Create your own Linux username, full name and password. Git name is your desired
 commit author name; hostname is your choice (for example `omarchy-m4-air`). These
 are new Linux settings, not another person's saved account. Choose your timezone.
 
-The prior attended build stalled near the end of “Setting up machine”; one
-restart subsequently reached login. A stationary bar alone does not establish
-that writes have stopped. Allow setup to finish and inspect activity/errors
-before restarting. If login appears after a necessary restart, sign in rather
-than erasing partitions or repeating installation. Report recurrence with logs.
+The October 12 failed candidate finished account setup but could not start its
+desktop. Its progress screen therefore looked stuck even after provisioning
+completed. The replacement removes the confirmed unrelated-device waits and a
+30-second probe for another manufacturer's audio hardware. It also orders the
+form after startup jobs and pauses kernel console printing while the form owns
+the screen; diagnostics remain in the journal and console printing is restored
+on success or failure.
 
-Once setup completes and the desktop works, eject and remove the USB. The
-keyboard, trackpad, audio and video worked on the maintainer's preceding private
-build. The final owner-input packaging is undergoing review and awaits the maintainer's
-final installation before publication. It remains an alpha with the limitations
-described alongside it.
+If the desktop cannot start, use **Control + Option + F2** (also hold Fn if your
+keyboard treats F2 as a brightness key). Sign in with the username and password
+you just created. The replacement enables this independent recovery login and
+records a short status file at `/var/log/omarchy-m4-boot-status.json`. Inspect:
+
+```sh
+sudo journalctl -b -u m4-gpu -u m4-video -u m4-j713-audio-register --no-pager
+sudo cat /var/log/omarchy-provision-owner.log
+```
+
+A stationary bar does not prove disk writes have stopped. Do not erase the
+installation or repeatedly force power off to diagnose a stalled handoff.
+
+Once setup completes and the desktop works, eject and remove the USB. Earlier
+private installations had working keyboard, trackpad, audio and video. The
+replacement's attended installation is still pending; intermittent trackpad
+AFE startup and physical shutdown remain open qualification items.
 
 For Wi-Fi, open a terminal and run `nmtui`. Widevine acquisition needs internet
 access and a closed browser; finish that setup before expecting protected movies.

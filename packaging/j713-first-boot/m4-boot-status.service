@@ -1,0 +1,12 @@
+[Unit]
+Description=Report an unavailable M4 desktop after account setup
+After=omarchy-provision-owner.service display-manager.service
+ConditionPathExists=!/var/lib/omarchy/provisioning/pending
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/lib/omarchy/m4-boot-status.py
+TimeoutStartSec=25
+
+[Install]
+WantedBy=graphical.target

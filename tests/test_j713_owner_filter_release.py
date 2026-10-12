@@ -164,8 +164,10 @@ class OwnerFilterReleaseTests(unittest.TestCase):
             with mock.patch.object(release, 'BASE_ROOT', hashlib.sha256(source.read_bytes()).hexdigest()), \
                     mock.patch.object(release, 'BASE_AUDIO', hashlib.sha256(raw).hexdigest()), \
                     mock.patch.object(release, 'command', side_effect=command), \
+                    mock.patch.object(release, 'prepare_startup', side_effect=lambda r, t, a: a) as startup, \
                     mock.patch.object(release, 'fill_free_space'):
                 pin = release.prepare_root(source, image, root, tree, 'new-root-id')
+            startup.assert_called_once_with(root, tree, self.convert())
             actual = (root / 'etc/omarchy/j713-audio-manifest.json').read_bytes()
             self.assertEqual(pin, hashlib.sha256(actual).hexdigest())
             self.assertEqual(actual, self.convert())

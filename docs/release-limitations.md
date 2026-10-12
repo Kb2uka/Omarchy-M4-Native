@@ -11,13 +11,17 @@
   The final candidate adds the missing device-tree child for the existing SMC
   poweroff handler. Its physical shutdown and stay-off behavior await the
   maintainer's check; the issue remains open.
-- **First setup may stall near completion.** One attended private installation
-  reached login after a restart. Allow for ongoing writes before considering
-  recovery; the progress bar alone is insufficient evidence.
-- **Final packaging not hardware retested.** Two attended private installations
-  preceded this release; the final build changes owner-local audio preparation,
-  consent, delivery packaging and the SMC poweroff device-tree child. The
-  maintainer's final installation is pending.
+- **Replacement first boot still needs qualification.** The October 12 candidate
+  finished account setup but failed graphics and audio on global device waits;
+  the recovery console alias was also missing. The replacement corrects those
+  confirmed paths, restores an independent text login, protects setup from
+  kernel console messages, and skips an unrelated 30-second audio probe.
+  Its actual fresh installation and desktop handoff are still pending.
+- **Trackpad startup is intermittent.** The same retained kernel and matching
+  firmware have reached `Touch MT ready` on an earlier installation, but the
+  failed candidate repeatedly exhausted its bounded retries with `AFE: No HINT_L`.
+  Startup dependency changes do not establish a fix for that hardware condition.
+  Keep a USB or paired Bluetooth pointing device available for qualification.
   Code review and checksums do not prove successful installation on another Mac.
 - **macOS audio inputs are pinned.** The local generator refuses unknown Apple
   AudioDSP/tuning hashes or unequal filter output before disk changes. Minimum

@@ -1,0 +1,14 @@
+[Unit]
+Description=M4 Air experimental graphics initialization
+Requires=systemd-udev-trigger.service
+After=systemd-udev-trigger.service
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+ExecStartPre=/usr/bin/udevadm wait --timeout=10 /dev/dri/card0
+ExecStart=/usr/local/bin/m4-gpu-start
+RemainAfterExit=yes
+TimeoutStartSec=25
+StandardOutput=append:/tmp/m4-gpu-start.log
+StandardError=append:/tmp/m4-gpu-start.log

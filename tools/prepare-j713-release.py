@@ -19,10 +19,15 @@ import tarfile
 import uuid
 import zipfile
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from m4_audio_package import image_path
+
 VERSION = '0.1.0-alpha.1'
 BASE_SUMS = '95c8125fdd054ebcabbfc490e34ced0ee1b2e5293a3980aba383c54623fe121d'
 BASE_ROOT = 'b2beef5d2d1c1370e6d6911a3ff6f1d4ddc1e7c992a444f90283491dd8440836'
 BASE_AUDIO = 'ffa147b80173ede85be61b8b1a5431edcd8d605a740962da2dfa65ba189dcc6a'
+BASE_GPU_UNIT = 'f4e62aa8a1a5782e1c27928e06f72e64ecfb630fee621a585db80837fb1c0671'
+BASE_AUDIO_REGISTER = 'aa3f9f8b4c6c08ce3e088442168d5e80d9a59aa1b0e6d1449f6943829ae1a65d'
 POWEROFF_DTB = '67dc61458b03c0fad1156994ad85a85f9f8612cac2996eb684609b0455ebf547'
 FIRS = ('j713-static-minimal-lane0-48000.wav', 'j713-static-minimal-lane1-48000.wav',
         'j713-static-minimal-lane2-48000.wav', 'j713-static-minimal-lane3-48000.wav')
@@ -161,6 +166,36 @@ def owner_audio_manifest(raw, previous_pin, profile):
     return (json.dumps(manifest, indent=2, sort_keys=True) + '\n').encode()
 
 
+def prepare_startup(root, tree, raw):
+    """Carry startup repairs into the image and both runtime integrity maps."""
+    gpu = image_path(root, 'etc/systemd/system/m4-gpu.service')
+    name = 'usr/lib/omarchy/m4-j713-audio-register.py'
+    register = image_path(root, name)
+    require(gpu.is_file() and sha(gpu) == BASE_GPU_UNIT, 'Unknown retained graphics unit')
+    require(register.is_file() and sha(register) == BASE_AUDIO_REGISTER,
+            'Unknown retained audio registration helper')
+    manifest = json.loads(raw)
+    previous = dict(sha256=BASE_AUDIO_REGISTER, size=register.stat().st_size, mode=0o644)
+    require(manifest['files']['/' + name] == BASE_AUDIO_REGISTER and
+            manifest['file_metadata'][name] == previous and
+            register.stat().st_mode & 0o777 == 0o644,
+            'Retained audio registration identity maps disagree')
+    replacement = image_path(tree, 'tools/m4-j713-audio-register.py').read_bytes()
+    gpu_replacement = image_path(tree, 'packaging/j713-startup/m4-gpu.service').read_bytes()
+    configure = runpy.run_path(str(tree / 'tools/configure-j713-first-boot.py'))['apply']
+    configure(root, tree)
+    owner_setup = runpy.run_path(str(tree / 'tools/configure-j713-owner-setup.py'))['configure']
+    owner_setup(root, apply=True)
+    gpu.write_bytes(gpu_replacement)
+    gpu.chmod(0o644)
+    register.write_bytes(replacement)
+    register.chmod(0o644)
+    pin = hashlib.sha256(replacement).hexdigest()
+    manifest['files']['/' + name] = pin
+    manifest['file_metadata'][name] = dict(sha256=pin, size=len(replacement), mode=0o644)
+    return (json.dumps(manifest, indent=2, sort_keys=True) + '\n').encode()
+
+
 def prepare_root(source, image, root, tree, identity):
     require(sha(source) == BASE_ROOT, 'Retained root image changed')
     command('cp', '--reflink=auto', '--sparse=always', source, image)
@@ -175,6 +210,7 @@ def prepare_root(source, image, root, tree, identity):
         manifest = json.loads((tree / 'audio/j713/owner-fir/manifest.json').read_text())
         audio_manifest = root / 'etc/omarchy/j713-audio-manifest.json'
         native_audio = owner_audio_manifest(audio_manifest.read_bytes(), BASE_AUDIO, manifest)
+        native_audio = prepare_startup(root, tree, native_audio)
         for name in FIRS:
             path = root / 'usr/share/asahi-audio/j713' / name
             require(path.is_file() and not path.is_symlink() and
@@ -354,7 +390,7 @@ def assemble(args):
         'audio_manifest_sha256': audio_pin,
         'video_manifest_sha256': old_image['video_manifest_sha256'],
         'fresh_install_qualified': False,
-        'qualification': 'Earlier private build installed on the Air; final owner-input packaging has not been hardware retested at build time. Final owner-install confirmation is pending.',
+        'qualification': 'The preceding owner-input candidate failed fresh startup. This image includes startup and recovery corrections; a successful owner installation is still required before publication.',
         'owner_inputs': 'Speaker filters generated from installed macOS and hash checked before partitioning; Widevine requires each owner choice.',
         'baseline_root_sha256': BASE_ROOT,
         'poweroff': {'change': 'Enable existing SMC handler through its missing device-tree child',

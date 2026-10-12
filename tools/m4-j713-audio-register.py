@@ -165,7 +165,7 @@ class Registration:
         if not self.p('/sys/bus/platform/devices/393600000.i2s/driver').exists():
             self.p('/sys/bus/platform/drivers/apple-mca/bind').write_text('393600000.i2s\n')
         self.driver('393600000.i2s', 'apple-mca', 'snd_soc_apple_mca')
-        self.command(['udevadm', 'settle', '--timeout=10'])
+        # ALSA publishes this card after registering its control and PCM devices.
         for _ in range(50):
             if self.p('/proc/asound/AppleJ713').exists():
                 break
@@ -185,7 +185,6 @@ class Registration:
         bp = '/sys/module/j713_audio_bootstrap/parameters/'
         require(self.read(bp + 'result') == '0' and self.read(bp + 'stage') == '4'
                 and int(self.read(bp + 'overlay_id')) > 0, 'Bootstrap incomplete; retained')
-        self.command(['udevadm', 'settle', '--timeout=10'])
         bus = self.wait_providers()
         self.load('j713_audio_dt3', 'apply=1')
         bp = '/sys/module/j713_audio_dt3/parameters/'
