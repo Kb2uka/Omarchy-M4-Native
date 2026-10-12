@@ -21,11 +21,17 @@ running; no failed Linux filesystem write was needed to retrieve them.
 
 ## Replacement behavior
 
-The GPU pre-start waits for initialized `/dev/dri/card0`, retaining the board,
-kernel, file-integrity, firmware-handshake and Apple M4 renderer checks. Audio
+The GPU pre-start waits for initialized `/dev/dri/card0`, the existing simpledrm
+scanout device. The startup helper then inserts the GPU module and checks its
+render node, board, kernel, file integrity, firmware handshake and Apple M4
+renderer. Waiting for that render node before insertion would prevent startup.
+Audio
 registration uses its existing exact provider/module/readiness checks without
-waiting for unrelated device events. Its service orders after event submission
-instead of global queue completion. Decoder startup also waits for its own
+waiting for unrelated device events. Its explicit service ordering now names
+event submission. The shipped boot does not request the global settle service;
+if another package requests it, systemd's normal `sysinit.target` ordering still
+delays ordinary services. This repair does not bypass that global dependency.
+Decoder startup also waits for its own
 device nodes rather than the global queue. Protection and one-attempt failure
 latching are unchanged. The release assembler updates both audio integrity maps
 and the decoder helper identity in the video manifest.
