@@ -51,12 +51,15 @@ installer starts in macOS; it is not a bootable PC ISO. GitHub's automatic
 “Source code” ZIP is not the installer. Release downloads require repository
 access while this repository is private.
 
-Two attended private installations preceded this release. On the second,
-keyboard, trackpad, audio and video worked after a setup stall and restart.
-The final delivery changes owner-local speaker-filter preparation and browser
-consent, preserving the working kernel and driver payloads. **That final
-packaging has not been hardware retested; the maintainer will install this
-exact candidate before publication.** See the [qualification record](docs/experimental-release.md) and
+Two attended private installations reached the desktop. A later October 12
+candidate completed account setup but failed graphics and audio startup, leaving
+no desktop and no automatic recovery login. Its saved boot logs identified
+unrelated device waits as fatal prerequisites. The replacement corrects those
+startup dependencies, enables an authenticated recovery console, and keeps
+kernel messages from displacing the setup form. **The replacement still needs
+an attended installation before publication.** Intermittent trackpad AFE startup
+and physical shutdown remain unqualified. See the [startup repair record](docs/j713-first-boot-recovery.md),
+[qualification record](docs/experimental-release.md) and
 [known limitations](docs/release-limitations.md).
 
 **Read the [update policy](docs/updates.md) before accepting system updates.**

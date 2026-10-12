@@ -509,7 +509,7 @@ class RegistrationTests(unittest.TestCase):
         self.assertFalse(any('dt3' in p for p in loaded))
         self.assertEqual(self.commands[0][-1], 'invalidate')
 
-    def _complete_registration_population_order(self, delayed=False):
+    def _complete_registration_population_order(self, delayed=False, busy_udev=False):
         events = []
         pending = []
         sleeps = []
@@ -523,6 +523,8 @@ class RegistrationTests(unittest.TestCase):
                 (target / 'module').symlink_to(self.root / 'sys/module' / module)
         def command(argv):
             events.append(argv)
+            if busy_udev and argv[:2] == ['udevadm', 'settle']:
+                raise RuntimeError('Unrelated udev event did not finish before the global timeout')
             if argv[0] == 'modinfo':
                 return os.uname().release + ' SMP preempt mod_unload aarch64'
             if argv[0] == 'systemctl':
@@ -608,6 +610,9 @@ class RegistrationTests(unittest.TestCase):
 
     def test_deferred_provider_binds_without_reloading(self):
         self._complete_registration_population_order(delayed=True)
+
+    def test_registration_ignores_unrelated_udev_events(self):
+        self._complete_registration_population_order(busy_udev=True)
 
     def test_provider_wait_timeout_and_wrong_driver_refuse(self):
         sleeps = []
