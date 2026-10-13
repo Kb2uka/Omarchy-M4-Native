@@ -172,7 +172,7 @@ def setup(root, apply=False, server=SERVER, key=PUBLIC_KEY, fingerprint=FINGERPR
         require(machine.pacman_key('--lsign-key', fingerprint) == 0,
                 'pacman-key could not trust the channel key ' + fingerprint)
         if current != wanted:
-            write(root / SNIPPET, wanted, 0o644)
+            write(root / SNIPPET, wanted, conf.stat().st_mode & 0o777)  # readable like pacman.conf
         if updated is not None:
             backup = conf.with_name(conf.name + BACKUP)
             if not backup.exists():

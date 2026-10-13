@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import runpy
 import shutil
 import struct
 import subprocess
@@ -84,8 +85,7 @@ def makepkg(directory, recipe, output):
     directory.mkdir()
     (directory / 'PKGBUILD').write_text(recipe)
     config = directory / 'makepkg.conf'
-    config.write_text('CARCH="aarch64"\nPKGEXT=".pkg.tar.zst"\nBUILDENV=(!check !sign)\n'
-                      'OPTIONS=(!strip !debug)\nINTEGRITY_CHECK=(sha256)\n')
+    config.write_text(runpy.run_path(str(ROOT / 'tools/build-m4-packages.py'))['MAKEPKG_CONF'])
     run('makepkg', '--config', config, '--nodeps', '--noconfirm', cwd=directory,
         env=dict(os.environ, PKGDEST=str(output)))
 
@@ -211,6 +211,8 @@ def main():
                     'The installed kernel image is not the pinned kernel')
             require(len(list((root / 'usr/lib/modules' / RELEASE).rglob('*.ko'))) > 1000, 'Modules are missing')
             require(snapshot(root) == before, 'A protected file or boot.bin changed')
+            require((root / 'usr/lib/systemd/user/omarchy-m4-update-check.timer').is_file() and
+                    os.access(root / 'usr/bin/omarchy-m4-update-check', os.X_OK), 'The update notifier is missing')
             require((root / 'etc/pacman.conf.pre-omarchy-m4').is_file(), 'No pacman.conf backup')
             # A database signed by a key the machine does not trust must be refused.
             env2, other, _ = new_key(scratch / 'gnupg-untrusted', 'Untrusted <untrusted@invalid>')

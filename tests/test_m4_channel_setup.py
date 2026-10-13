@@ -103,6 +103,7 @@ class SetupTests(unittest.TestCase):
         conf = (self.root / MODULE.CONF).read_text()
         self.assertEqual(conf, AIR_CONF.replace('[core]\n', self.include + '\n\n[core]\n'))
         self.assertEqual((self.root / MODULE.CONF).stat().st_mode & 0o777, 0o640)
+        self.assertEqual((self.root / MODULE.SNIPPET).stat().st_mode & 0o777, 0o640)
         self.assertEqual((self.root / (MODULE.CONF + MODULE.BACKUP)).read_text(), AIR_CONF)
         self.assertEqual((self.root / MODULE.SNIPPET).read_text(),
                          '[omarchy-m4]\nSigLevel = Required DatabaseRequired\nServer = ' + CHANNEL['server'] + '\n')

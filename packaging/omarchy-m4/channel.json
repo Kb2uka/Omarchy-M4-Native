@@ -17,13 +17,17 @@
     "omarchy-m4-keyring": ["usr/share/pacman/keyrings/omarchy-m4.gpg", "usr/share/pacman/keyrings/omarchy-m4-trusted",
                            "usr/share/pacman/keyrings/omarchy-m4-revoked"],
     "omarchy-m4-boot": ["usr/bin/m4-boot-compose", "usr/share/libalpm/hooks/90-omarchy-m4-boot.hook",
-                        "usr/lib/omarchy-m4/j713.dtb", "usr/share/licenses/omarchy-m4-boot/"],
+                        "usr/lib/omarchy-m4/j713.dtb", "usr/bin/omarchy-m4-update-check",
+                        "usr/lib/systemd/user/omarchy-m4-update-check.service",
+                        "usr/lib/systemd/user/omarchy-m4-update-check.timer",
+                        "usr/share/licenses/omarchy-m4-boot/"],
     "linux-m4-omarchy": ["usr/lib/modules/7.1.9-m4-gpu-backport-20261008/", "usr/lib/omarchy-m4/Image.gz",
                          "usr/lib/omarchy-m4/kernel.config", "usr/share/licenses/linux-m4-omarchy/"]
   },
   "protected_paths": [
     "boot/", "etc/", "home/", "opt/", "root/", "usr/local/", "var/",
-    "usr/lib/firmware/", "usr/lib/omarchy/", "usr/lib/speakersafetyd-j713", "usr/lib/systemd/",
+    "usr/lib/firmware/", "usr/lib/omarchy/", "usr/lib/speakersafetyd-j713", "usr/lib/systemd/system/",
+    "usr/lib/systemd/system-", "usr/lib/systemd/user/pipewire", "usr/lib/systemd/user/wireplumber",
     "usr/share/alsa/", "usr/share/applications/", "usr/share/asahi-audio/", "usr/share/speakersafetyd/",
     "usr/share/wireplumber/"
   ]

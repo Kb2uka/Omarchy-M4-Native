@@ -1,30 +1,103 @@
 # Updates for the experimental M4 build
 
-**v0.1.0-alpha.1 has no coordinated M4 update channel.** Keep its working stack
-until a release explicitly provides an upgrade path. The normal Omarchy update
-command can upgrade distribution and desktop packages, but it does not currently
-coordinate this project's custom kernel, boot payload, Mesa, decoder and audio
-components. Compatibility after a general rolling update has not been qualified.
+M4 kernel, devicetree and boot fixes ship as **signed packages** from this
+project's `[omarchy-m4]` repository. Connect each Air once; after that they
+arrive with the normal `omarchy update`, and the boot object is updated for you.
+Nothing is reinstalled. How it works: [package-channel.md](package-channel.md).
 
-The image's package configuration does not pin these components as a coordinated
-set. `HoldPkg` is not version pinning. Do not treat a successful update command
-or a repository merge as proof that the resulting M4 stack works. Do not install
-isolated older core libraries to undo an update.
+## Connect once
 
-Releases are published from `main`; contributions target `develop`. Pushing to
-either branch does **not** update installed machines. The versioned installer
-and its hashes remain tied to their release, rather than following moving main.
+Every v0.1.0-alpha.1 Air needs this step once, including a fresh installation
+and an Air that already has update 1. Join Wi-Fi first (`nmtui`). Open a
+terminal, paste this whole block, press Enter, and type your password when
+asked:
 
-Future releases will state whether they offer an in-place update, its supported
-starting versions and recovery steps, or require another installation. A signed
-package channel and qualified Omarchy integration are open work. Until then,
-follow release notes and keep a recoverable copy of your working installation.
-No automatic M4 update command is promised by this first alpha.
+```bash
+cd ~ && rm -rf m4-updates && mkdir m4-updates && cd m4-updates &&
+base=https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages &&
+curl -fL -O "$base/omarchy-m4-setup.py" -O "$base/SETUP-SHA256SUMS" &&
+sha256sum -c SETUP-SHA256SUMS &&
+sudo python3 omarchy-m4-setup.py --apply
+```
+
+The block must print `omarchy-m4-setup.py: OK`. The last lines then show one of:
+
+- `"status": "connected; restart once to boot the updated boot.bin"`: restart
+  the Air once. This happens on an Air without update 1; it now gets the
+  shutdown fix.
+- `"status": "connected; future M4 fixes arrive with omarchy update"`: done,
+  nothing to restart. This is the normal result on an Air that has update 1.
+- `omarchy-m4-setup: refused: …`: the reason follows. A refusal before the
+  package step changes nothing. After it, your Air keeps booting exactly as
+  before. Report it in
+  [issue #49](https://github.com/Kb2uka/Omarchy-M4-Native/issues/49).
+
+What it does:
+
+- trusts the channel's signing key
+  (`578DF78177CF6DF29B888B8C9404F3CC90797A50`);
+- adds `/etc/pacman.d/omarchy-m4.conf` and one `Include` line above `[core]`
+  in `/etc/pacman.conf`, keeping the old file as `/etc/pacman.conf.pre-omarchy-m4`;
+- installs `omarchy-m4-keyring`, `omarchy-m4-boot` and `linux-m4-omarchy`.
+
+It refreshes only the M4 repository's database, so it is **not** a system
+upgrade. The kernel it installs is the one your Air already boots. It never
+touches the browser, Widevine, video, graphics, speaker or audio files, the
+boot options that the trackpad needs, or your Apple firmware.
+
+## Receiving fixes
+
+A connected Air checks the M4 repository once a day (read-only, nothing is
+installed) and shows a **"M4 update available"** desktop notification that
+lists the new M4 package versions. You get one notification per new release.
+This is separate from Omarchy's own update indicator, which only watches the
+`omarchy` package. Check by hand at any time with `omarchy-m4-update-check`.
+
+Run `omarchy update` as usual. When an M4 fix is included, pacman shows
+`Updating the M4 boot object (boot.bin)...` followed by
+`"status": "updated; takes effect at next boot"`. Restart once. If nothing in
+the boot object changed, it reports `"status": "current"`.
+
+The composer only installs kernels and devicetrees this project has qualified
+for the installed audio and video stacks. Anything else is refused with
+`m4-boot-compose: refused: … boot.bin was not changed.`, and the Air keeps
+booting what it booted before.
+
+Pushing to `main` or `develop` does not update installed machines; only
+packages published to the channel do. The rest of a general rolling update,
+from Arch Linux ARM and Omarchy, is still **not qualified** on this hardware.
+Do not install isolated older core libraries to undo an update.
+`omarchy refresh pacman` and Omarchy channel switching replace `/etc/pacman.conf`
+with x86 defaults and are not supported on M4. If one was run, run the connect
+step again.
+
+## Check and roll back
+
+See the boot object's state at any time (nothing is written):
+
+```bash
+sudo m4-boot-compose
+```
+
+Undo the last boot object change, then restart:
+
+```bash
+sudo m4-boot-compose --rollback --apply
+```
+
+The previous file is kept as `/boot/efi/omarchy/boot.bin.previous`. **If the
+Air does not boot:** hold the power button to reach startup options and start
+macOS. Mount the `EFI - OMARC` partition and copy `omarchy/boot.bin.previous`
+over `omarchy/boot.bin`. A rollback lasts until the next M4 package update
+composes the boot object again; report the problem in issue #49 before
+updating again.
 
 ## Shutdown fix for alpha.1
 
-**Who needs it:** every alpha.1 installation, new or old. **What it fixes:**
-Shut Down restarting the Air ([issue #24](https://github.com/Kb2uka/Omarchy-M4-Native/issues/24)).
+**Connecting to M4 updates (above) already applies this fix**; the composer
+produces the same boot object, byte for byte. This standalone update remains for
+anyone who prefers not to connect. **What it fixes:** Shut Down restarting the
+Air ([issue #24](https://github.com/Kb2uka/Omarchy-M4-Native/issues/24)).
 **Reinstall needed:** no.
 
 ### Quick version
@@ -67,11 +140,3 @@ lines.
 options, start macOS, mount the `EFI - OMARC` partition, and copy
 `omarchy/boot.bin.pre-shutdown-flag` over `omarchy/boot.bin`. From a working
 Omarchy session, run the rollback command from the receipt instead.
-
-### Future updates will be packages
-
-This updater is a one-off for this fix. M4 kernel, boot and driver fixes are
-planned to arrive as signed packages through the normal Omarchy/pacman update,
-with `boot.bin` rebuilt automatically and a rollback copy kept. That work is
-tracked in [issue #49](https://github.com/Kb2uka/Omarchy-M4-Native/issues/49).
-Until it lands, each fix's release notes say how to apply it.

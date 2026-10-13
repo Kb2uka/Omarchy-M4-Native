@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily check of the M4 package channel for updates
+
+[Timer]
+OnStartupSec=10min
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

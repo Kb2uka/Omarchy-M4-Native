@@ -21,6 +21,7 @@ PACKAGING = ROOT / 'packaging/omarchy-m4'
 # Repository files a PKGBUILD lists by bare name, staged next to it.
 STAGED = {
     'omarchy-m4-boot': {'m4-boot-compose.py': 'tools/m4-boot-compose.py',
+                        'm4-update-check.py': 'tools/m4-update-check.py',
                         'MIT.txt': 'LICENSES/MIT.txt',
                         'GPL-2.0-or-later.txt': 'LICENSES/GPL-2.0-or-later.txt'},
 }

@@ -52,6 +52,17 @@ Fresh installation, repeat boot and hardware behavior must be verified on the
 supported target before they are described as working. A passing offline check
 does not establish support for another board, codec or power state.
 
+## M4 packages
+
+M4 kernel, devicetree and boot changes ship through the signed package channel
+([package-channel.md](docs/package-channel.md)). Any change to a package's
+contents needs a new `pkgrel` or `pkgver`; CI refuses to rebuild a published
+file name with different contents. Packages may only install the paths listed
+for them in `packaging/omarchy-m4/channel.json` and never the protected video,
+Widevine, audio, speaker or boot paths. A new kernel or devicetree also needs
+its hash in `tools/m4-boot-compose.py`. For a kernel, it also needs a
+requalified audio and video stack. Include the hardware evidence.
+
 ## Automated checks and security review
 
 PRs run on standard GitHub-hosted runners. External contributors need maintainer

@@ -2,10 +2,11 @@
 
 - **Experimental J713 only.** Mac16,12 / 13-inch M4 Air is the only supported
   installer profile. M4 Pro, Max, mini, iMac and other Air boards are not qualified.
-- **Shut Down restarts the Air until update 1 is applied.** alpha.1 enables the
-  SMC poweroff driver without the PMU shutdown-state cells, so the firmware
-  starts the Air again. Update 1 fixes this in place, with no reinstall, and was
-  verified on the maintainer's Air:
+- **Shut Down restarts the Air until it is connected to M4 updates.** alpha.1
+  enables the SMC poweroff driver without the PMU shutdown-state cells, so the
+  firmware starts the Air again. Connecting to M4 updates (UPDATES.md) applies
+  the fix in place, with no reinstall, as does the standalone update 1 verified
+  on the maintainer's Air:
   https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1-update.1
   (issue #24). Without it, only holding the power button keeps the Air off, and
   a long press can still end in a restart depending on its timing.
@@ -38,9 +39,9 @@
   Bluetooth audio, arbitrary peripherals and fault recovery are not qualified.
   Speaker protection remains enabled; do not substitute unqualified filters or
   disable the protection services.
-- **Updates are not coordinated yet.** Read UPDATES.md. Ordinary rolling updates
-  can replace parts of the experimental stack; this alpha has no supported M4
-  upgrade channel or qualified in-place upgrade path.
+- **M4 updates need one connect step.** Read UPDATES.md. After it, M4 kernel
+  and boot fixes arrive as signed packages through `omarchy update`. Ordinary
+  rolling Arch Linux ARM and Omarchy updates remain unqualified on this hardware.
 
 This independent integration is not endorsed by Omarchy, Basecamp, Asahi Linux,
 Gravity Linux or Apple. It is supplied AS IS, without warranty. Installation or
