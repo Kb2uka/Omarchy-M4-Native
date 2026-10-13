@@ -23,14 +23,17 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 CHANNEL = json.loads((ROOT / 'packaging/omarchy-m4/channel.json').read_text())
 TAG, REPO, FPR = CHANNEL['release_tag'], CHANNEL['repository'], CHANNEL['signing_fingerprint']
 SETUP = 'omarchy-m4-setup.py'
+CONNECT = 'm4-connect.sh'
+CONNECT_HASH = '@SETUP_SHA256@'
 NOTES = ('Signed pacman repository for the experimental M4 build ([issue #49]'
          '(https://github.com/Kb2uka/Omarchy-M4-Native/issues/49)). Owners connect once with '
-         '`omarchy-m4-setup.py`; see docs/updates.md. Not an installer.')
+         '`m4-connect.sh` (it checks and runs `omarchy-m4-setup.py`); see docs/updates.md. Not an installer.')
 
 
 def require(condition, message):
@@ -101,6 +104,49 @@ def fetch(name, attempts=4):
             time.sleep(10 * (attempt + 1))
 
 
+def connect_script(setup_sha256):
+    """The one-paste connect script, carrying the published setup script's SHA256."""
+    template = (ROOT / 'tools' / CONNECT).read_text()
+    require(template.count(CONNECT_HASH) == 1, 'Connect script template needs exactly one hash slot')
+    return template.replace(CONNECT_HASH, setup_sha256)
+
+
+def served(name, accept, message, attempts=6):
+    """Download a release asset until accept(data) holds, and return it.
+
+    The release CDN can serve an object's previous bytes for a few seconds after
+    an upload, so a mismatch is retried before it counts as a failure.
+    """
+    for attempt in range(attempts):
+        data = fetch(name)
+        if accept(data):
+            return data
+        if attempt + 1 < attempts:
+            time.sleep(10)
+    require(False, message)
+
+
+def lists(desired):
+    """An accept() for served(): a database listing exactly these packages.
+
+    Truncated or corrupt bytes count as not served yet, so they are retried.
+    """
+    def accept(data):
+        try:  # parses in memory only, so an OSError here means bad bytes (BadGzipFile)
+            return database_entries(data) == desired
+        except (tarfile.TarError, zlib.error, EOFError, OSError):
+            return False
+    return accept
+
+
+def signs(signature_path, data_path):
+    """An accept() for served(): the bytes are a good signature of data_path."""
+    def accept(data):
+        signature_path.write_bytes(data)
+        return signed(signature_path, data_path)
+    return accept
+
+
 def sign(package):
     run('gpg', '--batch', '--yes', '--local-user', FPR, '--detach-sign', '--no-armor', package)
     verify(package.with_name(package.name + '.sig'), package)
@@ -151,8 +197,12 @@ def publish(directory):
         setup = scratch / SETUP
         shutil.copyfile(ROOT / 'tools/m4-channel-setup.py', setup)
         sums = scratch / 'SETUP-SHA256SUMS'
-        sums.write_text(hashlib.sha256(setup.read_bytes()).hexdigest() + '  ' + SETUP + '\n')
+        digest = hashlib.sha256(setup.read_bytes()).hexdigest()
+        sums.write_text(digest + '  ' + SETUP + '\n')
         run('gh', 'release', 'upload', TAG, '--clobber', setup, sums)
+        connect = scratch / CONNECT
+        connect.write_text(connect_script(digest))
+        run('gh', 'release', 'upload', TAG, '--clobber', connect)  # after the script it checks
         current = scratch / 'current'
         current.mkdir()
         if not database_published(assets, desired, current):
@@ -169,19 +219,17 @@ def publish(directory):
             print('database already published and verified')
         check = scratch / 'check'
         check.mkdir()
-        for name in (f'{REPO}.db', f'{REPO}.db.sig'):
-            (check / name).write_bytes(fetch(name))
-        verify(check / f'{REPO}.db.sig', check / f'{REPO}.db')
-        require(database_entries((check / f'{REPO}.db').read_bytes()) == desired,
-                'The published database does not match')
+        database = check / f'{REPO}.db'
+        database.write_bytes(served(database.name, lists(desired), 'The published database does not match'))
+        served(database.name + '.sig', signs(check / (database.name + '.sig'), database),
+               'Bad or foreign signature on ' + database.name)
         for name, digest in sorted(desired):
-            data = fetch(name)
-            require(hashlib.sha256(data).hexdigest() == digest, 'Published package differs: ' + name)
-            (check / name).write_bytes(data)
-            (check / (name + '.sig')).write_bytes(fetch(name + '.sig'))
-            verify(check / (name + '.sig'), check / name)
+            (check / name).write_bytes(served(name, lambda d, digest=digest: hashlib.sha256(d).hexdigest() == digest,
+                                              'Published package differs: ' + name))
+            served(name + '.sig', signs(check / (name + '.sig'), check / name), 'Bad or foreign signature on ' + name)
             print('verified ' + name)
-        require(fetch(SETUP) == setup.read_bytes(), 'Published setup script differs')
+        served(SETUP, lambda d: d == setup.read_bytes(), 'Published setup script differs')
+        served(CONNECT, lambda d: d == connect.read_bytes(), 'Published connect script differs')
 
 
 def main():
