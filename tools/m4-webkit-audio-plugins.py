@@ -8,7 +8,10 @@ and every WebKitGTK app (Zeus Link, for one) plays silence. The ARM mirrors
 no longer carry the build that matches the installed GStreamer, and the newer
 one needs a full system update. This builds only the autodetect and pulse
 plugins from the hash-pinned upstream source matching the installed GStreamer,
-and installs them for the current user. Inspection is the default.
+and installs them for the current user. WebKitGTK plays sound from a bubblewrap
+sandbox that hides the user plugin directory, so it also names that directory
+in GST_PLUGIN_PATH for the desktop session; WebKitGTK exposes the directories
+listed there. Inspection is the default.
 """
 import argparse
 import hashlib
@@ -35,7 +38,9 @@ MESON_OPTIONS = ('--buildtype=release', '-Dauto_features=disabled', '-Dautodetec
                  '-Dnls=disabled', '-Dorc=disabled', '-Dpackage-origin=omarchy-m4-native')
 PLUGINS = {'libgstautodetect.so': 'gst/autodetect', 'libgstpulseaudio.so': 'ext/pulse'}
 ELEMENTS = ('autoaudiosink', 'pulsesink')
+RESTART = 'log out and back in, then restart apps to get sound'
 RECEIPT = '.m4-webkit-audio.json'
+SESSION = '60-m4-webkit-audio.conf'
 
 
 def require(condition, message):
@@ -50,6 +55,46 @@ def sha(data):
 def plugin_dir(environment):
     data = environment.get('XDG_DATA_HOME') or str(Path(environment['HOME']) / '.local/share')
     return Path(data) / 'gstreamer-1.0/plugins'
+
+
+def session_file(environment):
+    config = environment.get('XDG_CONFIG_HOME') or str(Path(environment['HOME']) / '.config')
+    return Path(config) / 'environment.d' / SESSION
+
+
+def session_text(directory):
+    # environment.d expands $ and treats quotes and spaces specially; refuse those.
+    require(not set(str(directory)) & set('$\\"\' \t\n`'),
+            'Plugin directory has characters environment.d cannot hold: ' + str(directory))
+    # systemd reads environment.d at login; ${...:+...} keeps any existing value.
+    return ('# Written by m4-webkit-audio-plugins.py; removed by its --remove.\n'
+            '# WebKitGTK runs web content in a sandbox that only exposes GStreamer\n'
+            '# plugin directories listed in GST_PLUGIN_PATH.\n'
+            'GST_PLUGIN_PATH=' + str(directory) + '${GST_PLUGIN_PATH:+:$GST_PLUGIN_PATH}\n')
+
+
+def session_state(environment, directory):
+    """'present' when ours, 'missing', or 'foreign' when something else is there."""
+    path = session_file(environment)
+    if not path.exists() and not path.is_symlink():
+        return 'missing'
+    if path.is_file() and not path.is_symlink() and path.read_text() == session_text(directory):
+        return 'present'
+    return 'foreign'
+
+
+def own_session(environment, directory):
+    """The session state, refusing a file this tool did not write."""
+    state = session_state(environment, directory)
+    require(state != 'foreign', 'A session file this tool does not own already exists: ' +
+            str(session_file(environment)))
+    return state
+
+
+def write_session(environment, directory):
+    if own_session(environment, directory) == 'missing':
+        session_file(environment).parent.mkdir(parents=True, exist_ok=True)
+        write(session_file(environment), session_text(directory).encode())
 
 
 def package_version(run, name):
@@ -127,21 +172,31 @@ def write(path, data):
 def install(environment, run=subprocess.run, download=fetch, apply=False):
     require(os.getuid() != 0, 'Run as the desktop user, without sudo')
     directory = plugin_dir(environment)
-    report = {'plugin_dir': str(directory), 'applied': False}
+    report = {'plugin_dir': str(directory), 'session_file': str(session_file(environment)),
+              'applied': False}
     system = package_version(run, 'gst-plugins-good')
     receipt = read_receipt(directory)
     if system:
         report.update(status='not needed: gst-plugins-good ' + system + ' is installed')
-        if receipt:
+        if receipt or session_state(environment, directory) == 'present':
             report['note'] = 'remove the local plugins with --remove'
         return report
     full = package_version(run, 'gstreamer')
     require(full, 'GStreamer is not installed')
     version = full.split(':')[-1].rsplit('-', 1)[0]
     report['gstreamer'] = full
+    temp = session_file(environment).with_name(SESSION + '.new')
+    require(not temp.exists() and not temp.is_symlink(),
+            'Stale temporary file from an interrupted run; run --remove first: ' + str(temp))
     if receipt and receipt.get('gstreamer') == full and installed(directory, receipt):
         validate(run, 'run --remove, then --apply again')
-        report['status'] = 'already installed'
+        if own_session(environment, directory) == 'present':
+            report['status'] = 'already installed'
+        elif not apply:
+            report['status'] = 'plugins installed; session setting missing, run --apply'
+        else:
+            write_session(environment, directory)
+            report.update(applied=True, status='session setting added; ' + RESTART)
         return report
     require(version in SOURCES, 'No pinned source for GStreamer ' + version +
             '; update the whole system and install gst-plugins-good instead')
@@ -153,6 +208,7 @@ def install(environment, run=subprocess.run, download=fetch, apply=False):
         temp = directory / (name + '.new')
         require(not temp.exists() and not temp.is_symlink(),
                 'Stale temporary file from an interrupted run; run --remove first: ' + str(temp))
+    own_session(environment, directory)
     report['status'] = 'build available'
     if not apply:
         return report
@@ -167,10 +223,11 @@ def install(environment, run=subprocess.run, download=fetch, apply=False):
         for name, data in plugins.items():
             write(directory / name, data)
         validate(run, 'the plugins were removed again')
+        write_session(environment, directory)
     except BaseException:
         remove(environment)
         raise
-    report.update(applied=True, status='installed; restart apps to get sound', plugins=digests)
+    report.update(applied=True, status='installed; ' + RESTART, plugins=digests)
     return report
 
 
@@ -178,18 +235,23 @@ def remove(environment):
     require(os.getuid() != 0, 'Run as the desktop user, without sudo')
     directory = plugin_dir(environment)
     # Temporary files with these names are only ever this tool's interrupted writes.
-    for name in (*PLUGINS, RECEIPT):
-        temp = directory / (name + '.new')
+    session = session_file(environment)
+    for temp in (*(directory / (name + '.new') for name in (*PLUGINS, RECEIPT)),
+                 session.with_name(SESSION + '.new')):
         if temp.is_symlink() or temp.is_file():
             temp.unlink()  # removes a link itself, never its target
     receipt = read_receipt(directory)
-    if receipt is None:
-        return {'plugin_dir': str(directory), 'status': 'nothing to remove'}
-    for name, digest in receipt['plugins'].items():
+    for name, digest in (receipt or {'plugins': {}})['plugins'].items():
         path = directory / name
         require(not path.exists() or (path.is_file() and not path.is_symlink() and
                                       sha(path.read_bytes()) == digest),
                 'Plugin changed since install; leaving it: ' + str(path))
+    # A session file is ours only while it holds exactly what this tool writes.
+    ours = session_state(environment, directory) == 'present'
+    if ours:
+        session.unlink()
+    if receipt is None:
+        return {'plugin_dir': str(directory), 'status': 'removed' if ours else 'nothing to remove'}
     for name in (*receipt['plugins'], RECEIPT):
         (directory / name).unlink(missing_ok=True)
     return {'plugin_dir': str(directory), 'status': 'removed'}
