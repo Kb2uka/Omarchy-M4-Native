@@ -26,6 +26,7 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[1]
 CHANNEL = ROOT / 'packaging/omarchy-m4/channel.json'
 REALTIME = 'usr/lib/systemd/system/speakersafetyd-j713.service.d/50-realtime.conf'
+SPEAKER_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/20-m4-speaker-module.conf'
 
 
 def require(condition, message):
@@ -135,8 +136,18 @@ def check_package(channel, package, info, files, root):
         realtime = (ROOT / 'packaging/omarchy-m4/omarchy-m4-boot/speakersafetyd-j713-realtime.conf').read_bytes()
         require(files.get(REALTIME) == (0o644, sha(realtime)), 'Boot package lacks the real-time speaker setting')
         # No dependency on the sinks: a later gst-plugins-good must be able to replace them.
+        for path, source in (('usr/bin/omarchy-m4-update', 'tools/omarchy-m4-update'),
+                             ('usr/lib/omarchy-m4/m4-channel-setup.py', 'tools/m4-channel-setup.py')):
+            require(files.get(path, (0, ''))[1] == sha((ROOT / source).read_bytes()), 'Boot package differs: ' + path)
         names = [re.split('[<>=]', d, maxsplit=1)[0] for d in info.get('depend', [])]
         require('omarchy-m4-gst-audio' not in names, 'Boot package must not require the GStreamer sinks')
+    elif name == 'omarchy-m4-speaker':
+        for path, digest in channel['speaker_module'].items():
+            require(files.get(path, (0, ''))[1] == digest, 'Staged speaker module differs from the pin: ' + path)
+        tool = (ROOT / 'tools/m4-speaker-module.py').read_bytes()
+        require(files.get('usr/bin/m4-speaker-module') == (0o755, sha(tool)), 'Packaged speaker module tool differs')
+        drop_in = (ROOT / 'packaging/omarchy-m4/omarchy-m4-speaker/20-m4-speaker-module.conf').read_bytes()
+        require(files.get(SPEAKER_DROP_IN) == (0o644, sha(drop_in)), 'Speaker module drop-in differs')
     elif name == 'omarchy-m4-gst-audio':
         for path, digest in channel['gst_audio'].items():
             require(files.get(path, (0, ''))[1] == digest, 'GStreamer sink differs from the pin: ' + path)

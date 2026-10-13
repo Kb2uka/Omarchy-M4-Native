@@ -25,7 +25,7 @@ show one of:
 - `"status": "connected; restart once to boot the updated boot.bin"`: restart
   the Air once. This happens on an Air without update 1; it now gets the
   shutdown fix.
-- `"status": "connected; future M4 fixes arrive with omarchy update"`: done,
+- `"status": "connected; future M4 fixes arrive with omarchy-m4-update"`: done,
   nothing to restart. This is the normal result on an Air that has update 1.
 - `omarchy-m4-setup: refused: …`: the reason follows. If the download or
   installation failed, `pacman.conf` is put back as it was. In every case your
@@ -73,7 +73,13 @@ The check starts right after the connect step (otherwise at your next login).
 This is separate from Omarchy's own update indicator, which only watches the
 `omarchy` package. Check by hand at any time with `omarchy-m4-update-check`.
 
-Run `omarchy update` as usual. When an M4 fix is included, pacman shows
+Run **`omarchy-m4-update`** and type your password. It refreshes only the M4
+repository and installs or upgrades only the M4 packages, including any new
+one, the same way the connect step does; nothing else on the system changes.
+(`omarchy-m4-boot` 1-5 adds the command. On an Air with an older boot package,
+run the connect line once instead.) `omarchy update` also installs M4 fixes,
+but it updates the whole system as well, which is not qualified on this
+hardware (below). When an M4 fix is included, pacman shows
 `Updating the M4 boot object (boot.bin)...` followed by
 `"status": "updated; takes effect at next boot"`. Restart once. If nothing in
 the boot object changed, it reports `"status": "current"`.

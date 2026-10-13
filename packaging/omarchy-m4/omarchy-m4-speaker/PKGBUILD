@@ -1,0 +1,28 @@
+# Maintainer: KB2UKA
+# Built and signed by .github/workflows/packages.yml; see docs/package-channel.md.
+# m4-speaker-module.py, MIT.txt and GPL-2.0-only.txt are staged from tools/ and LICENSES/ by
+# tools/build-m4-packages.py. The module source is audio/j713/kernel/ in the repository.
+pkgname=omarchy-m4-speaker
+pkgver=1
+pkgrel=1
+pkgdesc='Applies the fixed J713 speaker protection module (#61) at the next boot'
+arch=('aarch64')
+url='https://github.com/Kb2uka/Omarchy-M4-Native'
+license=('GPL-2.0-only' 'MIT')
+depends=('python')
+options=('!strip' '!debug')
+source=('m4-speaker-module.py' '20-m4-speaker-module.conf' 'MIT.txt' 'GPL-2.0-only.txt'
+        "snd-soc-j713-group.ko::${url}/releases/download/package-inputs/snd-soc-j713-group-aaad802e.ko")
+sha256sums=('84adfb6b927e67ea9d87f045b1398e1e330134d9d9d03315c2149a4fb7613a12'
+            '30f71811f89039d0448b0186a7224f9545746690685eb7c0b3106467cbce65fc'
+            'b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5'
+            'aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3'
+            'aaad802eb136ff6cb915feaa123001b3eb848bc2f038d0a5b71c8e2ff35d2581')
+
+package() {
+  install -Dm755 m4-speaker-module.py "$pkgdir/usr/bin/m4-speaker-module"
+  install -Dm644 snd-soc-j713-group.ko "$pkgdir/usr/lib/omarchy-m4/j713-audio/snd-soc-j713-group.ko"
+  install -Dm644 20-m4-speaker-module.conf \
+    "$pkgdir/usr/lib/systemd/system/m4-j713-audio-register.service.d/20-m4-speaker-module.conf"
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" MIT.txt GPL-2.0-only.txt
+}

@@ -34,7 +34,7 @@ ACjuCm7/wS3BkXKT/XBLOSU61X3JF2UI
 =FvsK
 -----END PGP PUBLIC KEY BLOCK-----
 '''
-PACKAGES = ('omarchy-m4-keyring', 'omarchy-m4-boot', 'linux-m4-omarchy', 'omarchy-m4-gst-audio')
+PACKAGES = ('omarchy-m4-keyring', 'omarchy-m4-boot', 'linux-m4-omarchy', 'omarchy-m4-gst-audio', 'omarchy-m4-speaker')
 SINKS = 'omarchy-m4-gst-audio'  # gst-plugins-good already has both sinks and conflicts with it
 BOARD = b'apple,j713'
 CONF = 'etc/pacman.conf'
@@ -225,7 +225,7 @@ def setup(root, apply=False, server=SERVER, key=PUBLIC_KEY, fingerprint=FINGERPR
     restart = boot_digest(root) != before
     plan.update(applied=True, boot=boot, restart_needed=restart,
                 status=('connected; restart once to boot the updated boot.bin' if restart else
-                        'connected; future M4 fixes arrive with omarchy update'))
+                        'connected; future M4 fixes arrive with omarchy-m4-update'))
     return plan
 
 

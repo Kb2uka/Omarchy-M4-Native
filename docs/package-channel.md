@@ -40,9 +40,26 @@ reviewers.
   installs it; an Air connected before 1.28.7-1 was published gets it by running
   the connect line once more.
 - **Not in the channel:** the core-placement helper (per user, under `~/.local`;
-  an old copy refuses to pin on this devicetree) and the speaker protection
-  startup module ([#61](https://github.com/Kb2uka/Omarchy-M4-Native/pull/61)),
-  which still needs requalification at sustained listening level.
+  an old copy refuses to pin on this devicetree).
+
+### omarchy-m4-boot 1-5 and omarchy-m4-speaker 1-1
+
+- **`omarchy-m4-update`** (in `omarchy-m4-boot` 1-5, with a copy of the setup
+  script at `/usr/lib/omarchy-m4/m4-channel-setup.py`) runs the setup script
+  with `--apply`. It refreshes only `[omarchy-m4]` and installs or upgrades only
+  channel packages, never the rest of the system. The update notifier now says
+  to run it.
+- **`omarchy-m4-speaker`** delivers the speaker protection startup fix
+  ([#61](https://github.com/Kb2uka/Omarchy-M4-Native/pull/61)). The audio modules
+  stay manifest-managed outside pacman, so the package does not overwrite them.
+  It stages the fixed `snd-soc-j713-group.ko` (`aaad802e…`) under
+  `/usr/lib/omarchy-m4/`. A drop-in on `m4-j713-audio-register.service`
+  (`ExecStartPre=-`, the second `protected_exceptions` file) then runs
+  `m4-speaker-module --boot` before any audio module loads. It swaps the module
+  and exactly the six manifest values that pin it, only from the stock alpha.1
+  state, or to finish a swap a power cut interrupted. Everything else is
+  refused and left untouched, and a refusal never stops registration. Details:
+  [speaker protection startup](j713-protection-startup.md#existing-installs).
 
 At launch the channel delivers exactly what a fully updated alpha.1 Air already
 runs:
@@ -111,7 +128,7 @@ It runs ten minutes after login and daily after that. It downloads the
 channel's package list over HTTPS from the server in
 `/etc/pacman.d/omarchy-m4.conf`, compares it with the installed M4 packages
 (`pacman -Q`, `vercmp`), and shows one `notify-send` notification per new set
-of versions: "M4 update available … Run omarchy update, then restart." It is
+of versions: "M4 update available … Run omarchy-m4-update, then restart." It is
 unprivileged and read-only, and it never offers a package that is not
 installed. Offline or unconnected machines stay quiet. Signatures are still
 checked by pacman when the update is installed.

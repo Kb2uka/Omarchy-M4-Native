@@ -86,7 +86,7 @@ class SetupTests(unittest.TestCase):
         system = FakeSystem(self.root)
         result = self.setup_with(system)
         self.assertEqual((result['status'], result['restart_needed']),
-                         ('connected; future M4 fixes arrive with omarchy update', False))
+                         ('connected; future M4 fixes arrive with omarchy-m4-update', False))
         pacman = [c for c in system.commands if c[0] == 'pacman']
         self.assertEqual(pacman[0][-2:], ['-Q', 'linux-m4-omarchy'])
         self.assertEqual(pacman[1][-2:], ['-Q', 'gst-plugins-good'])
