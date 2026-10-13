@@ -57,6 +57,7 @@ class WebkitAudioPlugins(unittest.TestCase):
         self.home = Path(temp.name)
         self.env = {'HOME': str(self.home)}
         self.plugins = self.home / '.local/share/gstreamer-1.0/plugins'
+        self.session = self.home / '.config/environment.d/60-m4-webkit-audio.conf'
         self.source = tarball('1.28.7')
         patcher = patch.dict(MODULE.SOURCES, {'1.28.7': hashlib.sha256(self.source).hexdigest()})
         patcher.start()
@@ -75,11 +76,12 @@ class WebkitAudioPlugins(unittest.TestCase):
         system, report = self.run_install({'gstreamer': '1.28.7-2'}, apply=False)
         self.assertEqual(report['status'], 'build available')
         self.assertFalse(self.home.joinpath('.local').exists())
+        self.assertFalse(self.home.joinpath('.config').exists())
         self.assertEqual(self.downloads, [])
 
     def test_installs_only_autodetect_and_pulse_for_the_user(self):
         system, report = self.run_install({'gstreamer': '1.28.7-2'})
-        self.assertEqual(report['status'], 'installed; restart apps to get sound')
+        self.assertEqual(report['status'], 'installed; ' + MODULE.RESTART)
         self.assertEqual(sorted(p.name for p in self.plugins.iterdir()),
                          ['.m4-webkit-audio.json', 'libgstautodetect.so', 'libgstpulseaudio.so'])
         self.assertEqual(self.downloads, [MODULE.SOURCE_URL.format('1.28.7')])
@@ -161,7 +163,7 @@ class WebkitAudioPlugins(unittest.TestCase):
         self.assertEqual(MODULE.remove(self.env)['status'], 'nothing to remove')
         self.assertEqual(list(self.plugins.iterdir()), [])
         self.assertEqual(self.run_install({'gstreamer': '1.28.7-2'})[1]['status'],
-                         'installed; restart apps to get sound')
+                         'installed; ' + MODULE.RESTART)
         self.assertEqual(len(self.downloads), 1)
 
     def test_stale_temporary_link_is_cleared_without_touching_its_target(self):
@@ -213,6 +215,141 @@ class WebkitAudioPlugins(unittest.TestCase):
         with patch.object(MODULE.os, 'getuid', return_value=0):
             with self.assertRaisesRegex(RuntimeError, 'without sudo'):
                 self.run_install({'gstreamer': '1.28.7-2'})
+
+    def test_session_names_the_plugin_dir_for_the_webkit_sandbox(self):
+        self.run_install({'gstreamer': '1.28.7-2'})
+        lines = [l for l in self.session.read_text().splitlines() if not l.startswith('#')]
+        self.assertEqual(lines, ['GST_PLUGIN_PATH=' + str(self.plugins) +
+                                 '${GST_PLUGIN_PATH:+:$GST_PLUGIN_PATH}'])
+        self.assertEqual(self.session.stat().st_mode & 0o777, 0o600)
+
+    def test_existing_install_gets_the_session_setting_on_apply(self):
+        self.run_install({'gstreamer': '1.28.7-2'})
+        self.session.unlink()  # an install made before the session setting existed
+        report = self.run_install({'gstreamer': '1.28.7-2'}, apply=False)[1]
+        self.assertEqual(report['status'], 'plugins installed; session setting missing, run --apply')
+        self.assertFalse(self.session.exists())
+        report = self.run_install({'gstreamer': '1.28.7-2'})[1]
+        self.assertEqual((report['status'], report['applied']),
+                         ('session setting added; ' + MODULE.RESTART, True))
+        self.assertTrue(self.session.is_file())
+        self.assertEqual(len(self.downloads), 1)
+        self.assertEqual(self.run_install({'gstreamer': '1.28.7-2'})[1]['status'], 'already installed')
+
+    def test_foreign_session_file_is_left_alone(self):
+        self.session.parent.mkdir(parents=True)
+        self.session.write_text('GST_PLUGIN_PATH=/opt/mine\n')
+        with self.assertRaisesRegex(RuntimeError, 'session file this tool does not own'):
+            self.run_install({'gstreamer': '1.28.7-2'})
+        self.assertEqual(self.downloads, [])
+        self.assertFalse(self.plugins.exists())
+        self.assertEqual(MODULE.remove(self.env)['status'], 'nothing to remove')
+        self.assertEqual(self.session.read_text(), 'GST_PLUGIN_PATH=/opt/mine\n')
+
+    def test_foreign_session_file_blocks_completing_an_existing_install(self):
+        self.run_install({'gstreamer': '1.28.7-2'})
+        self.session.write_text('GST_PLUGIN_PATH=/opt/mine\n')
+        with self.assertRaisesRegex(RuntimeError, 'session file this tool does not own'):
+            self.run_install({'gstreamer': '1.28.7-2'})
+        MODULE.remove(self.env)
+        self.assertEqual(self.session.read_text(), 'GST_PLUGIN_PATH=/opt/mine\n')
+        self.assertEqual(list(self.plugins.iterdir()), [])
+
+    def test_remove_deletes_the_session_setting(self):
+        self.run_install({'gstreamer': '1.28.7-2'})
+        self.assertEqual(MODULE.remove(self.env)['status'], 'removed')
+        self.assertFalse(self.session.exists())
+
+    def test_remove_clears_only_the_session_setting_when_plugins_are_gone(self):
+        self.run_install({'gstreamer': '1.28.7-2'})
+        for path in self.plugins.iterdir():
+            path.unlink()
+        self.assertEqual(MODULE.remove(self.env)['status'], 'removed')
+        self.assertFalse(self.session.exists())
+
+    def test_refused_remove_keeps_the_session_setting(self):
+        self.run_install({'gstreamer': '1.28.7-2'})
+        (self.plugins / 'libgstautodetect.so').write_bytes(b'edited')
+        with self.assertRaisesRegex(RuntimeError, 'changed since install'):
+            MODULE.remove(self.env)
+        self.assertTrue(self.session.is_file())
+
+    def test_unloadable_plugin_leaves_no_session_setting(self):
+        system = FakeSystem({'gstreamer': '1.28.7-2'})
+        system.missing_elements.add('pulsesink')
+        with self.assertRaises(RuntimeError):
+            MODULE.install(self.env, run=system, download=self.download, apply=True)
+        self.assertFalse(self.session.exists())
+
+    def test_interrupted_session_write_is_finished_by_apply(self):
+        self.run_install({'gstreamer': '1.28.7-2'})
+        self.session.unlink()
+        temp = self.session.with_name(self.session.name + '.new')
+        temp.write_text('GST_PL')
+        report = self.run_install({'gstreamer': '1.28.7-2'}, apply=False)[1]
+        self.assertEqual(report['status'], 'plugins installed; session setting missing, run --apply')
+        self.assertTrue(temp.exists())
+        report = self.run_install({'gstreamer': '1.28.7-2'})[1]
+        self.assertEqual(report['status'], 'session setting added; ' + MODULE.RESTART)
+        self.assertEqual(list(self.session.parent.iterdir()), [self.session])
+        self.assertEqual(len(self.downloads), 1)
+
+    def test_interrupted_session_write_is_cleared_by_remove(self):
+        self.run_install({'gstreamer': '1.28.7-2'})
+        self.session.unlink()
+        self.session.with_name(self.session.name + '.new').write_text('GST_PL')
+        MODULE.remove(self.env)
+        self.assertEqual(list(self.session.parent.iterdir()), [])
+
+    def test_dangling_session_temp_link_is_cleared_by_apply(self):
+        self.run_install({'gstreamer': '1.28.7-2'})
+        self.session.unlink()
+        temp = self.session.with_name(self.session.name + '.new')
+        temp.symlink_to(self.home / 'missing')
+        self.assertEqual(self.run_install({'gstreamer': '1.28.7-2'})[1]['status'],
+                         'session setting added; ' + MODULE.RESTART)
+        self.assertFalse(temp.is_symlink())
+        self.assertFalse((self.home / 'missing').exists())
+
+    def test_remove_works_after_the_data_dir_moves_somewhere_unusable(self):
+        self.run_install({'gstreamer': '1.28.7-2'})
+        self.env['XDG_DATA_HOME'] = str(self.home / 'a:b')
+        self.assertEqual(MODULE.remove(self.env)['status'], 'nothing to remove')
+        self.assertTrue(self.session.is_file())  # names the old directory, so not ours here
+
+    def test_session_link_is_not_ours_even_with_our_text(self):
+        self.run_install({'gstreamer': '1.28.7-2'})
+        target = self.home / 'elsewhere.conf'
+        target.write_text(self.session.read_text())
+        self.session.unlink()
+        self.session.symlink_to(target)
+        with self.assertRaisesRegex(RuntimeError, 'session file this tool does not own'):
+            self.run_install({'gstreamer': '1.28.7-2'})
+        MODULE.remove(self.env)
+        self.assertTrue(self.session.is_symlink())
+        self.assertTrue(target.is_file())
+
+    def test_system_package_after_session_only_install_asks_for_removal(self):
+        self.run_install({'gstreamer': '1.28.7-2'})
+        for path in self.plugins.iterdir():
+            path.unlink()
+        report = self.run_install({'gstreamer': '1.28.8-1', 'gst-plugins-good': '1.28.8-1'})[1]
+        self.assertIn('--remove', report['note'])
+
+    def test_xdg_config_home_is_respected(self):
+        self.env['XDG_CONFIG_HOME'] = str(self.home / 'config')
+        self.run_install({'gstreamer': '1.28.7-2'})
+        self.assertTrue((self.home / 'config/environment.d/60-m4-webkit-audio.conf').is_file())
+        self.assertFalse(self.session.exists())
+
+    def test_plugin_dir_environment_d_cannot_hold_is_refused(self):
+        for data in ('my data', 'a:b', 'cost$x'):
+            with self.subTest(data=data):
+                self.env['XDG_DATA_HOME'] = str(self.home / data)
+                with self.assertRaisesRegex(RuntimeError, 'environment.d cannot hold'):
+                    self.run_install({'gstreamer': '1.28.7-2'})
+                self.assertEqual(self.downloads, [])
+                self.assertFalse(self.session.exists())
 
     def test_image_manifest_ships_the_plugins(self):
         manifest = SOURCE.with_name('m4-desktop.packages').read_text().split()
