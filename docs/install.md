@@ -133,6 +133,13 @@ The last lines it prints include
 Air once. From then on, Shut Down turns it off, and M4 fixes arrive with the
 normal `omarchy update`. [Details, messages and rollback](updates.md).
 
+Installers built after October 13, 2026 do this step on their own. Once your
+account exists and the Air is online, a background service
+(`m4-channel-connect.timer`) runs the same setup within about 20 minutes and
+retries until it succeeds; restart once afterwards. Check it with
+`systemctl status m4-channel-connect.service`. Running the line above yourself
+is still fine and only speeds it up.
+
 Widevine acquisition needs internet access and a closed browser; finish that
 setup before expecting protected movies. Ordinary browser video and protected
 movies may use different decoders.

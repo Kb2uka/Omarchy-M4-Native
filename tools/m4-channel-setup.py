@@ -11,6 +11,7 @@ Air that already has update 1 it changes nothing. Inspection is the default;
 --apply makes the changes.
 """
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -34,6 +35,7 @@ ACjuCm7/wS3BkXKT/XBLOSU61X3JF2UI
 =FvsK
 -----END PGP PUBLIC KEY BLOCK-----
 '''
+LOCK = 'run/lock/omarchy-m4-setup.lock'
 SPEAKER_STAGED = 'usr/lib/omarchy-m4/j713-audio/snd-soc-j713-group.ko'
 SPEAKER_MODULE = 'usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-j713-group.ko'
 SPEAKER_HOLD = 'var/lib/omarchy-m4/speaker-module/hold'
@@ -183,6 +185,18 @@ def preflight(root, machine):
 
 
 def setup(root, apply=False, server=SERVER, key=PUBLIC_KEY, fingerprint=FINGERPRINT, output=sys.stderr):
+    if not apply:
+        return connect(root, False, server, key, fingerprint, output)
+    # One run at a time: the first-boot service, a pasted connect line and
+    # omarchy-m4-update must not restore pacman.conf underneath each other.
+    lock_path = root / LOCK
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, 'a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return connect(root, True, server, key, fingerprint, output)
+
+
+def connect(root, apply, server, key, fingerprint, output):
     machine = Machine(root, output)
     preflight(root, machine)
     packages = [p for p in PACKAGES if p != SINKS or not machine.installed('gst-plugins-good')]

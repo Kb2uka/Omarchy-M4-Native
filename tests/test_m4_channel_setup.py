@@ -145,6 +145,23 @@ class SetupTests(unittest.TestCase):
         self.assertNotIn(MODULE.SINKS, install)
         self.assertIn('omarchy-m4-boot', install)
 
+    def test_apply_runs_one_at_a_time(self):
+        import fcntl, threading
+        lock = self.root / MODULE.LOCK
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        held = open(lock, 'a')
+        fcntl.flock(held, fcntl.LOCK_EX)
+        done = threading.Event()
+        system = FakeSystem(self.root)
+        thread = threading.Thread(target=lambda: (self.setup_with(system), done.set()))
+        thread.start()
+        self.assertFalse(done.wait(0.5), 'a second run must wait for the lock')
+        self.assertEqual(system.commands, [])
+        fcntl.flock(held, fcntl.LOCK_UN)
+        held.close()
+        self.assertTrue(done.wait(10))
+        thread.join()
+
     def test_restart_reported_when_boot_changes(self):
         result = self.setup_with(FakeSystem(self.root, change_boot=True))
         self.assertTrue(result['restart_needed'])
