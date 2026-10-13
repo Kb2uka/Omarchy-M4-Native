@@ -189,7 +189,7 @@ class PolicyTests(unittest.TestCase):
                 out.mkdir(exist_ok=True)
                 with self.assertRaisesRegex(ValueError, message):
                     CHECK.read_archive(path, out, 'bad')
-                self.assertFalse(outside.exists())
+                self.assertFalse(outside.exists() or (root / 'escape').exists(), 'nothing is written outside')
 
     def test_other_module_release_is_rejected(self):
         files = {'usr/lib/modules/7.2.0-other/kernel/x.ko': (0o644, '1' * 64)}
