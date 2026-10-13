@@ -134,7 +134,15 @@ the setting, started cleanly. One boot is not a boot-time qualification.
 
 ## Existing installs
 
-All three parts are needed together. Apply the devicetree update without the
+Build `j713-cpufreq.dtb` from the update 1 devicetree (the
+`j713-poweroff.dtb` asset of `v0.1.0-alpha.1-update.1`) on a Linux host with
+`dtc` and `fdtoverlay`, and check its SHA256 (`033025bb…` above):
+
+```bash
+python3 tools/build-j713-cpufreq-dtb.py --base j713-poweroff.dtb --output j713-cpufreq.dtb
+```
+
+A published update will replace this step. All three parts are needed together. Apply the devicetree update without the
 real-time protection setting and speaker protection can fail at boot.
 
 ```bash
@@ -175,3 +183,7 @@ then restart. From macOS, copy the same file on the `EFI - OMARC` partition.
 - No energy model is provided, so energy-aware scheduling stays off.
   Placement uses capacity only.
 - Battery life was not measured.
+- `--main-only restore` puts the clamp back but leaves the compositor's
+  reset-on-fork flag set; the kernel does not let a normal user clear it. For
+  the nice-0 compositor it only affects the clamp its new children start with,
+  which is the default.

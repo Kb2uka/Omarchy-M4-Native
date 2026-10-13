@@ -299,16 +299,20 @@ class BoostPlacementTests(MainPlacementTests):
 
     def test_unexpected_capacities_refused_before_clamp(self):
         cases = (("cpu1", "1024\n", "cpu0", "512\n"),   # a P core below full capacity
-                 ("cpu0", "331\n", "cpu2", "400\n"))    # E cores that disagree
+                 ("cpu0", "331\n", "cpu2", "400\n"),    # E cores that disagree
+                 ("cpu1", "1024\n", "cpu0", "1100\n"))  # E cores above P
         for p_cpu, p_value, e_cpu, e_value in cases:
             with self.subTest(p=p_value, e=e_value):
-                old = {c: (self.root / f"sys/devices/system/cpu/{c}/cpu_capacity").read_text() for c in (p_cpu, e_cpu)}
                 self.write(f"sys/devices/system/cpu/{p_cpu}/cpu_capacity", p_value)
                 self.write(f"sys/devices/system/cpu/{e_cpu}/cpu_capacity", e_value)
+                if e_value == "1100\n":
+                    for cpu in set(range(10)) - self.performance:
+                        self.write(f"sys/devices/system/cpu/cpu{cpu}/cpu_capacity", e_value)
                 with self.assertRaisesRegex(ValueError, "Unexpected scheduler capacities"):
                     self.cli()
-                for c, value in old.items():
-                    self.write(f"sys/devices/system/cpu/{c}/cpu_capacity", value)
+                for cpu in range(10):
+                    self.write(f"sys/devices/system/cpu/cpu{cpu}/cpu_capacity",
+                               "1024\n" if cpu in self.performance else "331\n")
         self.assertEqual(self.clamp_calls, [])
 
     # Affinity-only behaviors from the parent class do not apply to the clamp.
@@ -334,7 +338,7 @@ class SchedAttrEncoding(unittest.TestCase):
         with patch.object(placement, "sched_call", side_effect=call):
             placement.set_util_min(789, 1024)
         size, policy, flags, nice, priority, *_, low, high = requests[0]
-        self.assertEqual((size, policy, nice, low), (56, 0, -3, 1024))
+        self.assertEqual((size, policy, nice, low, high), (56, 0, -3, 1024, 1024))
         self.assertEqual(flags, placement.SCHED_FLAG_RESET_ON_FORK | placement.SCHED_FLAG_UTIL_CLAMP_MIN)
 
     def test_realtime_compositor_refused(self):

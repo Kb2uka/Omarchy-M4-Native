@@ -103,7 +103,12 @@ def util_min(pid):
 
 
 def set_util_min(pid, value):
-    """Set the compositor's minimum utilization clamp; children reset it on fork."""
+    """Set the compositor's minimum utilization clamp; children reset it on fork.
+
+    Unprivileged callers cannot clear reset-on-fork again, so restore leaves
+    that flag set. For a nice-0 SCHED_OTHER compositor it only resets the
+    clamp in new children, which is their default anyway.
+    """
     nice = sched_attr(pid)[3]
     attr = SCHED_ATTR.pack(SCHED_ATTR.size, 0, SCHED_FLAG_RESET_ON_FORK | SCHED_FLAG_UTIL_CLAMP_MIN,
                            nice, 0, 0, 0, 0, value, 1024)
