@@ -77,6 +77,18 @@ older `Image.gz` (`69b92b65…`) than the one in `boot.bin`. Version `-2` correc
 the package to match what boots. Nothing ever rebuilds `boot.bin` from the `-1`
 file.
 
+## Connecting new installs
+
+The release root builder (`tools/prepare-j713-release.py`) adds
+`/usr/lib/omarchy-m4/m4-channel-setup.py` (a copy of `tools/m4-channel-setup.py`)
+and enables `m4-channel-connect.timer`. Its service runs the setup script with
+`--apply` once the owner's account exists
+(`ConditionPathExists=!/var/lib/omarchy/provisioning/pending`). The timer
+retries every 20 minutes until the script succeeds, because Wi-Fi usually
+arrives after first login. Success writes `/var/lib/omarchy-m4/connected`, after
+which the service is skipped. The script refuses rather than half-connects, so a
+failed attempt leaves `pacman.conf` and `boot.bin` as they were.
+
 ## The boot object and its composer
 
 `/boot/efi/omarchy/boot.bin` is unique to each machine. It is the m1n1 loader,

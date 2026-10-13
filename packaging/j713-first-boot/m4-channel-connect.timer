@@ -1,0 +1,9 @@
+[Unit]
+Description=Retry connecting to signed M4 updates until it succeeds
+
+[Timer]
+OnBootSec=3min
+OnUnitInactiveSec=20min
+
+[Install]
+WantedBy=timers.target

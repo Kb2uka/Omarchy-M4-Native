@@ -79,6 +79,8 @@ installer starts in macOS; it is not a bootable PC ISO. GitHub's automatic
 
 **Every alpha.1 install needs this once, whether you installed today or earlier.**
 It turns on M4 updates and, if your Air does not have it yet, the shutdown fix.
+Installers built after October 13, 2026 connect by themselves once the Air is
+online ([details](docs/install.md#last-step-connect-to-m4-updates-required)).
 
 1. On the Air, join Wi-Fi (`nmtui`) and open a terminal in Omarchy.
 2. Paste this one line, press Enter, and type your password when asked:

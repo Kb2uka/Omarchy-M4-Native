@@ -1,0 +1,15 @@
+[Unit]
+Description=Connect this M4 Air to signed M4 updates
+Documentation=https://github.com/Kb2uka/Omarchy-M4-Native/blob/main/docs/updates.md
+# Only after the owner's account exists; Wi-Fi usually arrives later, so the
+# timer retries until the setup script succeeds once.
+After=network-online.target omarchy-provision-owner.service
+Wants=network-online.target
+ConditionPathExists=!/var/lib/omarchy/provisioning/pending
+ConditionPathExists=!/var/lib/omarchy-m4/connected
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/lib/omarchy-m4/m4-channel-setup.py --apply
+ExecStartPost=/usr/bin/install -D -m 0644 /dev/null /var/lib/omarchy-m4/connected
+TimeoutStartSec=15min

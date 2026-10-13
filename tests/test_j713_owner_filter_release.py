@@ -176,6 +176,14 @@ class OwnerFilterReleaseTests(unittest.TestCase):
             self.assertNotEqual(pin['audio'], hashlib.sha256(raw).hexdigest())
             self.assertEqual((root / 'etc/m4-root-id').read_text(), 'new-root-id\n')
             self.assertTrue((root / 'etc/systemd/system/multi-user.target.wants/j713-owner-assets.service').is_symlink())
+            timer = root / 'etc/systemd/system/timers.target.wants/m4-channel-connect.timer'
+            self.assertEqual(str(timer.readlink()), '/usr/lib/systemd/system/m4-channel-connect.timer')
+            self.assertEqual((root / 'usr/lib/omarchy-m4/m4-channel-setup.py').read_bytes(),
+                             (ROOT / 'tools/m4-channel-setup.py').read_bytes())
+            service = (root / 'usr/lib/systemd/system/m4-channel-connect.service').read_text()
+            self.assertIn('ExecStart=/usr/bin/python3 /usr/lib/omarchy-m4/m4-channel-setup.py --apply\n', service)
+            self.assertIn('ConditionPathExists=!/var/lib/omarchy/provisioning/pending\n', service)
+            self.assertIn('ConditionPathExists=!/var/lib/omarchy-m4/connected\n', service)
             for name in release.FIRS:
                 self.assertFalse((root / 'usr/share/asahi-audio/j713' / name).exists())
 
