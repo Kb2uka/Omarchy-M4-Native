@@ -1,0 +1,7 @@
+[Unit]
+Description=Check the M4 package channel for updates
+Documentation=https://github.com/Kb2uka/Omarchy-M4-Native/blob/main/docs/updates.md
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/omarchy-m4-update-check --notify

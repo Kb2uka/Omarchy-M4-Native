@@ -135,6 +135,16 @@ whose MIT notice credits David Heinemeier Hansson. That full notice remains in
 [omarchy-mac](https://github.com/omacom/omarchy-mac) integration is also credited
 where used; it is not represented as this project's original implementation.
 
+## Signed M4 packages
+
+The `[omarchy-m4]` packages redistribute Linux kernel binaries and modules
+(GPL-2.0-only) and a devicetree derived from Apple `.dts` sources
+(GPL-2.0-or-later OR MIT). Their corresponding source is the kernel tree,
+configuration and devicetree base published with v0.1.0-alpha.1 (see
+[release-source.md](docs/release-source.md)), plus `patches-kernel/j713-input/`
+and `patches/j713-smc-poweroff.dtso` in this repository. Each package carries
+its license texts. See [package-channel.md](docs/package-channel.md).
+
 ## Additional runtime components
 
 Native runtime candidates also use Gravity/Asahi kernel and decoder work, Mesa,
