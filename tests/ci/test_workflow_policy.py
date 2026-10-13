@@ -56,6 +56,9 @@ class WorkflowPolicyTests(unittest.TestCase):
             lambda f: f['packages.yml']['jobs']['publish']['steps'].append({'run': 'echo ${{ toJSON(secrets) }}'}),
             lambda f: f['ci.yml']['jobs']['tests']['steps'].append(
                 {'run': 'scanner', 'env': {'ALL': '${{ toJSON(secrets) }}'}}),
+            lambda f: f['packages.yml']['jobs']['build'].update({'strategy': {'matrix': {'k': '${{ secrets.X }}'}}}),
+            lambda f: f['packages.yml']['jobs']['publish'].update({'env': {'K': '${{ secrets.PACKAGE_SIGNING_KEY }}'}}),
+            lambda f: f['packages.yml'].update({'concurrency': {'group': '${{ secrets.PACKAGE_SIGNING_KEY }}'}}),
         ]
         for index, mutate in enumerate(mutations):
             with self.subTest(index=index):

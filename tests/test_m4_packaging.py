@@ -129,6 +129,15 @@ class PolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'pinned kernel'):
             CHECK.check_package(CHANNEL, *self.package('linux-m4-omarchy', files, version='7.1.9.m4.20261008-2'))
 
+    def test_republish_identity_covers_scripts_and_metadata(self):
+        info = {'pkgname': ['omarchy-m4-boot'], 'depend': ['python'], 'builddate': ['1'], 'packager': ['A'],
+                '.INSTALL': ['a' * 64]}
+        files = {'usr/bin/m4-boot-compose': (0o755, 'x')}
+        same = dict(info, builddate=['2'], packager=['B'])
+        self.assertEqual(CHECK.release_identity(info, files), CHECK.release_identity(same, files))
+        for change in ({'.INSTALL': ['b' * 64]}, {'depend': ['python', 'pacman']}):
+            self.assertNotEqual(CHECK.release_identity(info, files), CHECK.release_identity(dict(info, **change), files))
+
     def test_other_module_release_is_rejected(self):
         files = {'usr/lib/modules/7.2.0-other/kernel/x.ko': (0o644, '1' * 64)}
         with self.assertRaisesRegex(ValueError, 'unlisted path'):

@@ -148,9 +148,44 @@ class SetupTests(unittest.TestCase):
                 self.assertEqual((self.root / MODULE.CONF).read_text(), before)
                 self.assertFalse((self.root / MODULE.SNIPPET).exists())
 
-    def test_install_failure_is_reported(self):
-        with self.assertRaisesRegex(MODULE.Refused, 'Package installation failed'):
-            self.setup_with(FakeSystem(self.root, fail=('--needed',)))
+    def test_failed_download_or_install_restores_pacman_conf(self):
+        for word, message in (('-Sy', 'Could not download'), ('--needed', 'Package installation failed')):
+            with self.subTest(word):
+                self.setUp()
+                with self.assertRaisesRegex(MODULE.Refused, message + '.*pacman.conf was restored'):
+                    self.setup_with(FakeSystem(self.root, fail=(word,)))
+                self.assertEqual((self.root / MODULE.CONF).read_text(), AIR_CONF)
+                self.assertFalse((self.root / MODULE.SNIPPET).exists())
+
+    def test_existing_snippet_is_put_back_after_a_failure(self):
+        self.put(MODULE.SNIPPET, '[omarchy-m4]\nServer = https://old.invalid\n')
+        with self.assertRaises(MODULE.Refused):
+            self.setup_with(FakeSystem(self.root, fail=('-Sy',)))
+        self.assertEqual((self.root / MODULE.SNIPPET).read_text(), '[omarchy-m4]\nServer = https://old.invalid\n')
+
+    def test_retry_completes_the_boot_update(self):
+        system = FakeSystem(self.root, boot_status='updated; takes effect at next boot')
+        result = self.setup_with(system)
+        self.assertEqual(result['boot'], 'updated; takes effect at next boot')
+        compose = [c for c in system.commands if 'm4-boot-compose' in ' '.join(map(str, c))]
+        self.assertEqual(compose[0][-1], '--apply')
+
+    def test_production_commands(self):
+        machine = MODULE.Machine(Path('/'), io.StringIO())
+        system = FakeSystem(self.root)
+        with mock.patch.object(MODULE.subprocess, 'run', system), \
+             mock.patch.dict(MODULE.os.environ, {'SUDO_USER': 'owner'}):
+            machine.pacman('-S', '--needed', '--noconfirm', *MODULE.PACKAGES)
+            machine.pacman_key('--lsign-key', MODULE.FINGERPRINT)
+            machine.compose()
+            machine.start_notifier()
+        install, key, compose, timer = system.commands
+        self.assertEqual(install, ['pacman', '--config', '/etc/pacman.conf', '-S', '--needed', '--noconfirm',
+                                   *MODULE.PACKAGES])
+        self.assertEqual(key, ['pacman-key', '--config', '/etc/pacman.conf', '--lsign-key', MODULE.FINGERPRINT])
+        self.assertEqual(compose, ['/usr/bin/m4-boot-compose', '--apply'])
+        self.assertEqual(timer, ['systemctl', '--user', '--machine', 'owner@.host', 'start',
+                                 'omarchy-m4-update-check.timer'])
 
     def test_channel_constants_match_the_repository(self):
         keyring = ROOT / 'packaging/omarchy-m4/omarchy-m4-keyring/omarchy-m4.gpg'

@@ -46,12 +46,16 @@ def output(*command):
     return run(*command, capture_output=True, text=True).stdout
 
 
-def verify(signature, data_file):
-    """Require a good signature by the channel key, by fingerprint."""
+def signed(signature, data_file):
+    """Return whether data_file has a good signature by the channel key, by fingerprint."""
     status = subprocess.run(['gpg', '--batch', '--status-fd', '1', '--verify', str(signature), str(data_file)],
                             capture_output=True, text=True)
     valid = [line.split()[2] for line in status.stdout.splitlines() if line.startswith('[GNUPG:] VALIDSIG ')]
-    require(status.returncode == 0 and valid == [FPR], 'Bad or foreign signature on ' + data_file.name)
+    return status.returncode == 0 and valid == [FPR]
+
+
+def verify(signature, data_file):
+    require(signed(signature, data_file), 'Bad or foreign signature on ' + data_file.name)
 
 
 def database_entries(data):
@@ -70,6 +74,21 @@ def database_entries(data):
     return entries
 
 
+def database_published(assets, desired, directory):
+    """Return whether both signed databases are published, intact and list exactly desired."""
+    names = [f'{REPO}.{kind}{suffix}' for kind in ('db', 'files') for suffix in ('', '.sig')]
+    if not set(names) <= assets:
+        return False
+    try:
+        for name in names:
+            (directory / name).write_bytes(fetch(name))
+    except (OSError, urllib.error.URLError):
+        return False
+    return all(signed(directory / f'{REPO}.{kind}.sig', directory / f'{REPO}.{kind}') and
+               database_entries((directory / f'{REPO}.{kind}').read_bytes()) == desired
+               for kind in ('db', 'files'))
+
+
 def fetch(name, attempts=4):
     """Download a published file anonymously, as an owner's pacman would."""
     for attempt in range(attempts):
@@ -80,6 +99,11 @@ def fetch(name, attempts=4):
             if attempt == attempts - 1:
                 raise
             time.sleep(10 * (attempt + 1))
+
+
+def sign(package):
+    run('gpg', '--batch', '--yes', '--local-user', FPR, '--detach-sign', '--no-armor', package)
+    verify(package.with_name(package.name + '.sig'), package)
 
 
 def publish(directory):
@@ -100,29 +124,38 @@ def publish(directory):
         repo, uploads = scratch / 'repo', []
         repo.mkdir()
         for package in sorted(directory.glob('*.pkg.tar.zst')):
-            if package.name in assets:
-                require(package.name + '.sig' in assets, 'Published package has no signature: ' + package.name)
-                run('gh', 'release', 'download', TAG, '-D', repo, '-p', package.name, '-p', package.name + '.sig')
-                verify(repo / (package.name + '.sig'), repo / package.name)
-                print('kept published ' + package.name)
+            name, signature = package.name, repo / (package.name + '.sig')
+            if name in assets:
+                # The policy check already proved the published contents equal this build.
+                run('gh', 'release', 'download', TAG, '-D', repo, '-p', name)
+                if name + '.sig' in assets:
+                    run('gh', 'release', 'download', TAG, '-D', repo, '-p', name + '.sig')
+                    verify(signature, repo / name)
+                    print('kept published ' + name)
+                    continue
+                # An earlier run stopped between the package and its signature.
+                sign(repo / name)
+                run('gh', 'release', 'upload', TAG, '--clobber', signature)
+                print('signed published ' + name)
                 continue
-            shutil.copyfile(package, repo / package.name)
-            run('gpg', '--batch', '--yes', '--local-user', FPR, '--detach-sign', '--no-armor', repo / package.name)
-            verify(repo / (package.name + '.sig'), repo / package.name)
-            uploads += [repo / package.name, repo / (package.name + '.sig')]
+            shutil.copyfile(package, repo / name)
+            sign(repo / name)
+            uploads.append((repo / name, signature))
         packages = sorted(repo.glob('*.pkg.tar.zst'))
         run('repo-add', '--sign', '--key', FPR, repo / f'{REPO}.db.tar.gz', *packages)
         desired = database_entries((repo / f'{REPO}.db.tar.gz').read_bytes())
         require({name for name, _ in desired} == {p.name for p in packages}, 'Database does not list every package')
-        if uploads:
-            run('gh', 'release', 'upload', TAG, *uploads)
+        for package, signature in uploads:
+            run('gh', 'release', 'upload', TAG, package)  # never replaces a published package
+            run('gh', 'release', 'upload', TAG, '--clobber', signature)
         setup = scratch / SETUP
         shutil.copyfile(ROOT / 'tools/m4-channel-setup.py', setup)
         sums = scratch / 'SETUP-SHA256SUMS'
         sums.write_text(hashlib.sha256(setup.read_bytes()).hexdigest() + '  ' + SETUP + '\n')
         run('gh', 'release', 'upload', TAG, '--clobber', setup, sums)
-        published = database_entries(fetch(f'{REPO}.db')) if f'{REPO}.db' in assets else set()
-        if published != desired:
+        current = scratch / 'current'
+        current.mkdir()
+        if not database_published(assets, desired, current):
             names = []
             for kind in ('files', 'db'):  # the database a client reads first goes last
                 for suffix in ('', '.sig'):
@@ -133,7 +166,7 @@ def publish(directory):
             for target in names:
                 run('gh', 'release', 'upload', TAG, '--clobber', target)
         else:
-            print('database unchanged')
+            print('database already published and verified')
         check = scratch / 'check'
         check.mkdir()
         for name in (f'{REPO}.db', f'{REPO}.db.sig'):

@@ -222,7 +222,7 @@ def compose(root, apply=False):
         return receipt
     replace(boot_path, current, desired)
     receipt.update(applied=True, status='updated; takes effect at next boot', previous=str(previous),
-                   rollback='sudo m4-boot-compose --rollback')
+                   rollback='sudo m4-boot-compose --rollback --apply')
     return receipt
 
 

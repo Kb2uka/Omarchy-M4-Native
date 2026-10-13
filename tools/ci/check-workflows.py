@@ -43,6 +43,8 @@ def check(workflows):
                  f'{filename}: {event} must cover both branches without path filters')
         need(flow.get('permissions') == {'contents': 'read'}, f'{filename}: read-only default token required')
         need('env' not in flow, f'{filename}: workflow-wide environment not allowed')
+        need(not SECRETS.search(str({k: v for k, v in flow.items() if k != 'jobs'})),
+             f'{filename}: secrets are only allowed in the publish step')
         jobs = flow.get('jobs', {})
         need(set(jobs) == JOBS[filename], f'{filename}: required jobs changed')
         for job_id, job in jobs.items():
@@ -74,6 +76,8 @@ def check(workflows):
             else:
                 need(condition is None, label + ': required job cannot be conditional')
             need('env' not in job, label + ': job-wide environment not allowed')
+            need(not SECRETS.search(str({k: v for k, v in job.items() if k != 'steps'})),
+                 label + ': secrets are only allowed in the publish step')
             for step in job.get('steps', []):
                 need('if' not in step, label + ': checks must not be skipped')
                 need(step.get('continue-on-error', 'false') == 'false', label + ': step cannot ignore failure')

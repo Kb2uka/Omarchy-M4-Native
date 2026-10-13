@@ -115,11 +115,16 @@ class Machine:
             command += ['--gpgdir', str(self.root / 'etc/pacman.d/gnupg')]
         return self.run(command + list(args))
 
-    def boot_status(self):
-        """Return the composer's verdict on the installed boot.bin."""
+    def compose(self):
+        """Run the composer as the hook would and return its status.
+
+        The hook already ran when a package changed; this also completes a retry
+        after an earlier refusal, when --needed installs nothing and no hook runs.
+        """
         command = [sys.executable, str(self.root / 'usr/bin/m4-boot-compose'), '--root', str(self.root)]
         if not self.sandbox:
             command = ['/usr/bin/m4-boot-compose']
+        command.append('--apply')
         print('+ ' + ' '.join(command), file=self.output, flush=True)
         result = subprocess.run(command, check=False, capture_output=True, text=True)
         print(result.stdout + result.stderr, end='', file=self.output, flush=True)
@@ -127,6 +132,13 @@ class Machine:
             return json.loads(result.stdout)['status'] if result.returncode == 0 else 'refused'
         except (ValueError, KeyError):
             return 'unknown'
+
+    def start_notifier(self):
+        """Start the daily check now for the person running sudo; otherwise it starts at next login."""
+        user = os.environ.get('SUDO_USER')
+        if self.sandbox or not user or user == 'root':
+            return
+        self.run(['systemctl', '--user', '--machine', user + '@.host', 'start', 'omarchy-m4-update-check.timer'])
 
     def run(self, command):
         # Progress goes to stderr; stdout carries only the JSON result.
@@ -172,25 +184,36 @@ def setup(root, apply=False, server=SERVER, key=PUBLIC_KEY, fingerprint=FINGERPR
         require(machine.pacman_key('--add', str(key_file)) == 0, 'pacman-key could not add the channel key')
         require(machine.pacman_key('--lsign-key', fingerprint) == 0,
                 'pacman-key could not trust the channel key ' + fingerprint)
-        if current != wanted:
-            write(root / SNIPPET, wanted, conf.stat().st_mode & 0o777)  # readable like pacman.conf
-        if updated is not None:
-            backup = conf.with_name(conf.name + BACKUP)
-            if not backup.exists():
-                write(backup, text, conf.stat().st_mode & 0o777)
-            write(conf, updated, conf.stat().st_mode & 0o777)
-        # Refresh only the channel database; the distribution databases stay as they are.
-        only = scratch / 'pacman-omarchy-m4.conf'
-        only.write_text('[options]\nArchitecture = auto\nSigLevel = Required DatabaseRequired\n' +
-                        include_line(root) + '\n')
-        require(machine.pacman('-Sy', config=only) == 0, 'Could not download the M4 package database')
-        require(machine.pacman('-S', '--needed', '--noconfirm', *PACKAGES) == 0,
-                'Package installation failed; boot.bin is only changed by a successful composer run')
-    boot = machine.boot_status()
-    require(boot == 'current', 'The packages are installed, but boot.bin is not in step with them '
-            f'({boot}); boot.bin keeps booting what it booted before. See the message above')
+        try:
+            if current != wanted:
+                write(root / SNIPPET, wanted, conf.stat().st_mode & 0o777)  # readable like pacman.conf
+            if updated is not None:
+                backup = conf.with_name(conf.name + BACKUP)
+                if not backup.exists():
+                    write(backup, text, conf.stat().st_mode & 0o777)
+                write(conf, updated, conf.stat().st_mode & 0o777)
+            # Refresh only the channel database; the distribution databases stay as they are.
+            only = scratch / 'pacman-omarchy-m4.conf'
+            only.write_text('[options]\nArchitecture = auto\nSigLevel = Required DatabaseRequired\n' +
+                            include_line(root) + '\n')
+            require(machine.pacman('-Sy', config=only) == 0, 'Could not download the M4 package database')
+            require(machine.pacman('-S', '--needed', '--noconfirm', *PACKAGES) == 0, 'Package installation failed')
+        except (Refused, OSError) as error:
+            # A configured but unreachable repository would stop every later system update.
+            write(conf, text, conf.stat().st_mode & 0o777)
+            if current is None:
+                (root / SNIPPET).unlink(missing_ok=True)
+            elif current != wanted:
+                write(root / SNIPPET, current, conf.stat().st_mode & 0o777)
+            raise Refused(str(error) + '; pacman.conf was restored and boot.bin was not changed') from error
+    boot = machine.compose()
+    require(boot in ('current', 'updated; takes effect at next boot'),
+            'The packages are installed, but boot.bin is not in step with them '
+            f'({boot}); boot.bin keeps booting what it booted before. See the message above, '
+            'fix the cause, then run this again')
+    machine.start_notifier()
     restart = boot_digest(root) != before
-    plan.update(applied=True, boot='current', restart_needed=restart,
+    plan.update(applied=True, boot=boot, restart_needed=restart,
                 status=('connected; restart once to boot the updated boot.bin' if restart else
                         'connected; future M4 fixes arrive with omarchy update'))
     return plan

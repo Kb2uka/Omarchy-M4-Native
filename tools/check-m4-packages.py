@@ -51,7 +51,7 @@ def extract(package, destination):
     archive = destination.with_name(destination.name + '.tar')
     with archive.open('xb') as stream:
         subprocess.run(['zstd', '-dcq', str(package)], stdout=stream, check=True)
-    info, files = None, {}
+    info, files, scripts = None, {}, None
     with tarfile.open(archive) as tar:
         for member in tar:
             name = member.name.removeprefix('./')
@@ -64,6 +64,9 @@ def extract(package, destination):
             if name == '.PKGINFO':
                 info = pkginfo(data.decode())
                 continue
+            if name == '.INSTALL':
+                scripts = sha(data)
+                continue
             if len(parts) == 1 and name.startswith('.'):
                 continue
             require(name not in files, 'Duplicate member: ' + name)
@@ -73,7 +76,13 @@ def extract(package, destination):
             target.write_bytes(data)
     archive.unlink()
     require(info is not None, 'Package has no .PKGINFO: ' + package.name)
+    info['.INSTALL'] = [scripts]
     return info, files
+
+
+def release_identity(info, files):
+    """What a published file name promises: contents, install script and metadata."""
+    return {key: value for key, value in info.items() if key not in ('builddate', 'packager')}, files
 
 
 def allowed(name, prefixes):
@@ -158,9 +167,9 @@ def check(directory, compare_published=True):
                 if previous is not None:
                     other = scratch / ('published-root-' + package.name)
                     other.mkdir()
-                    _, old = extract(previous, other)
-                    require(old == files, package.name + ' is already published with different contents; '
-                            'bump pkgrel or pkgver')
+                    require(release_identity(*extract(previous, other)) == release_identity(info, files),
+                            package.name + ' is already published with different contents, install script '
+                            'or metadata; bump pkgrel or pkgver')
             print(f'{package.name}: {len(files)} files, policy passed')
     require(seen == set(channel['packages']), 'Missing packages: ' + ', '.join(set(channel['packages']) - seen))
 

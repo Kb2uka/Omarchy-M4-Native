@@ -27,9 +27,10 @@ The block must print `omarchy-m4-setup.py: OK`. The last lines then show one of:
   shutdown fix.
 - `"status": "connected; future M4 fixes arrive with omarchy update"`: done,
   nothing to restart. This is the normal result on an Air that has update 1.
-- `omarchy-m4-setup: refused: …`: the reason follows. A refusal before the
-  package step changes nothing. After it, your Air keeps booting exactly as
-  before. Report it in
+- `omarchy-m4-setup: refused: …`: the reason follows. If the download or
+  installation failed, `pacman.conf` is put back as it was. In every case your
+  Air keeps booting exactly as before. Fix the stated cause (for example free
+  space on the EFI partition) and run the block again, or report it in
   [issue #49](https://github.com/Kb2uka/Omarchy-M4-Native/issues/49).
 
 What it does:
@@ -50,6 +51,7 @@ boot options that the trackpad needs, or your Apple firmware.
 A connected Air checks the M4 repository once a day (read-only, nothing is
 installed) and shows a **"M4 update available"** desktop notification that
 lists the new M4 package versions. You get one notification per new release.
+The check starts right after the connect step (otherwise at your next login).
 This is separate from Omarchy's own update indicator, which only watches the
 `omarchy` package. Check by hand at any time with `omarchy-m4-update-check`.
 
@@ -61,7 +63,8 @@ the boot object changed, it reports `"status": "current"`.
 The composer only installs kernels and devicetrees this project has qualified
 for the installed audio and video stacks. Anything else is refused with
 `m4-boot-compose: refused: … boot.bin was not changed.`, and the Air keeps
-booting what it booted before.
+booting what it booted before. After fixing the stated cause, finish the update
+with `sudo m4-boot-compose --apply` (or run the connect block again).
 
 Pushing to `main` or `develop` does not update installed machines; only
 packages published to the channel do. The rest of a general rolling update,

@@ -143,8 +143,10 @@ package's contents without a new version.
 - **Publishing:** only the `publish` job, only on `main`, inside the
   `package-publish` environment (deployments restricted to `main`), receives
   the private key as `PACKAGE_SIGNING_KEY`. It keeps already-published package
-  files and verifies their signatures, then signs and uploads new ones. The
-  database goes up last and only when it changed. Everything is then
+  files and verifies their signatures, then signs and uploads new ones. It
+  repairs an interrupted earlier run by signing an unsigned published package.
+  The signed databases go up last, whenever they are missing, unsigned or out
+  of date. Everything is then
   downloaded anonymously and verified again. The
   [workflow policy](../tools/ci/check-workflows.py) allows a secret or write
   access nowhere else.
