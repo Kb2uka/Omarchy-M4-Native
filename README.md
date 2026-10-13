@@ -26,18 +26,18 @@
 >
 > Until you do, your Air **cannot receive M4 fixes**. If you never ran update 1,
 > **Shut Down still restarts it**. Join Wi-Fi, open a terminal on the Air, paste
-> this whole block, press Enter and type your password:
+> this one line, press Enter and type your password when asked:
 >
 > ```bash
-> cd ~ && rm -rf m4-updates && mkdir m4-updates && cd m4-updates &&
-> base=https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages &&
-> curl -fL -O "$base/omarchy-m4-setup.py" -O "$base/SETUP-SHA256SUMS" &&
-> sha256sum -c SETUP-SHA256SUMS &&
-> sudo python3 omarchy-m4-setup.py --apply
+> curl -fsSL --retry 5 --retry-all-errors https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages/m4-connect.sh | bash
 > ```
 >
+> It checks the setup script against its published checksum before running it.
+> If you prefer to download and inspect each file first, use the
+> [step-by-step version](docs/updates.md#step-by-step-instead).
+>
 > - It ends with **`restart once`**: restart the Air. That is all.
-> - It ends with **`future M4 fixes arrive with omarchy update`**: you are done.
+> - It ends with **`future M4 fixes arrive with omarchy-m4-update`**: you are done.
 >
 > From then on, M4 fixes arrive with the normal `omarchy update`, and a
 > **"M4 update available"** notification tells you when one is ready. Your
@@ -79,21 +79,19 @@ installer starts in macOS; it is not a bootable PC ISO. GitHub's automatic
 
 **Every alpha.1 install needs this once, whether you installed today or earlier.**
 It turns on M4 updates and, if your Air does not have it yet, the shutdown fix.
+Installers built after October 13, 2026 connect by themselves once the Air is
+online ([details](docs/install.md#last-step-connect-to-m4-updates-required)).
 
 1. On the Air, join Wi-Fi (`nmtui`) and open a terminal in Omarchy.
-2. Copy this whole block, paste it, press Enter, and type your password when asked:
+2. Paste this one line, press Enter, and type your password when asked:
 
 ```bash
-cd ~ && rm -rf m4-updates && mkdir m4-updates && cd m4-updates &&
-base=https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages &&
-curl -fL -O "$base/omarchy-m4-setup.py" -O "$base/SETUP-SHA256SUMS" &&
-sha256sum -c SETUP-SHA256SUMS &&
-sudo python3 omarchy-m4-setup.py --apply
+curl -fsSL --retry 5 --retry-all-errors https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages/m4-connect.sh | bash
 ```
 
-3. If it ends with `"status": "connected; restart once to boot the updated boot.bin"`,
+3. If it ends with `"status": "connected; restart once to apply the update"`,
    **restart the Air.** If it ends with
-   `"status": "connected; future M4 fixes arrive with omarchy update"`, you are done.
+   `"status": "connected; future M4 fixes arrive with omarchy-m4-update"`, you are done.
 
 If it prints `FAILED` or `omarchy-m4-setup: refused: …`, stop and
 [open an issue](https://github.com/Kb2uka/Omarchy-M4-Native/issues); your Air
@@ -122,24 +120,25 @@ Arch Linux ARM and Omarchy updates remain unqualified on this hardware; read the
 
 ### What `omarchy update` brings, and what is still manual
 
-After the connect step, `omarchy update` keeps the M4 kernel, the devicetree
-and the boot object (`boot.bin`) current, and restarting once applies them. It
-also keeps any later devicetree you applied by hand, such as the CPU frequency
-or CPU temperature one below; it never reverts those.
+After the connect step, `omarchy update` keeps these current, and restarting
+once applies them:
 
-These fixes are not in the M4 packages yet. Each is optional, and each guide
-has an inspect step, a rollback and the exact commands:
-
-| Fix | Apply it with |
+| Fix | Since |
 | --- | --- |
-| CPU frequency scaling, all ten cores ([#55](https://github.com/Kb2uka/Omarchy-M4-Native/pull/55)) | [CPU frequency scaling: existing installs](docs/j713-cpufreq.md#existing-installs) |
-| CPU die temperature ([#62](https://github.com/Kb2uka/Omarchy-M4-Native/pull/62)), applied after the CPU frequency one | [CPU temperature: existing installs](docs/j713-cpu-temperature.md#existing-installs) |
-| Sound in Zeus Link and other WebKitGTK apps ([#54](https://github.com/Kb2uka/Omarchy-M4-Native/pull/54), [#63](https://github.com/Kb2uka/Omarchy-M4-Native/pull/63)) | [WebKit audio: existing installs](docs/j713-webkit-audio.md#existing-installs), then log out and back in |
+| Shut Down turns the Air off ([#48](https://github.com/Kb2uka/Omarchy-M4-Native/pull/48)) | `omarchy-m4-boot` 1-1 |
+| CPU frequency scaling on all ten cores ([#55](https://github.com/Kb2uka/Omarchy-M4-Native/pull/55)), with the real-time speaker protection it needs | `omarchy-m4-boot` 1-4 |
+| CPU die temperature in Linux ([#62](https://github.com/Kb2uka/Omarchy-M4-Native/pull/62)) | `omarchy-m4-boot` 1-4 |
+| Speaker protection starts reliably at boot ([#61](https://github.com/Kb2uka/Omarchy-M4-Native/pull/61)); applied at the next boot ([details](docs/j713-protection-startup.md#existing-installs)) | `omarchy-m4-speaker` 1-1 |
+| Sound in Zeus Link and other WebKitGTK and GStreamer apps ([#54](https://github.com/Kb2uka/Omarchy-M4-Native/pull/54), [#63](https://github.com/Kb2uka/Omarchy-M4-Native/pull/63)) | `omarchy-m4-gst-audio` 1.28.7-1 |
 
-The speaker protection startup fix
-([#61](https://github.com/Kb2uka/Omarchy-M4-Native/pull/61)) has no install
-path for existing machines yet. The M4 packages deliberately exclude audio
-modules, and the fixed module still needs a speaker requalification.
+A devicetree you applied by hand from the guides is kept; the update never
+moves an Air back to an older one. An Air connected before
+`omarchy-m4-gst-audio` was published gets it by running the connect line once
+more.
+
+Get M4 fixes with **`omarchy-m4-update`**: it updates only the M4 packages.
+`omarchy update` updates the whole system too, which is not yet qualified on
+this hardware.
 
 ## Shutdown
 

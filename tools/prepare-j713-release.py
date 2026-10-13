@@ -371,6 +371,10 @@ def prepare_root(source, image, root, tree, identity, kernel=None):
                 'packaging/j713-owner-assets-session.conf',
             'usr/lib/systemd/system/omarchy-provision-owner.service.d/10-owner-assets.conf':
                 'packaging/j713-owner-assets-audio.conf',
+            # Connect to the signed M4 update channel once the owner is online.
+            'usr/lib/omarchy/m4-channel-connect.py': 'tools/m4-channel-setup.py',  # not the package's copy path
+            'usr/lib/systemd/system/m4-channel-connect.service': 'packaging/j713-first-boot/m4-channel-connect.service',
+            'usr/lib/systemd/system/m4-channel-connect.timer': 'packaging/j713-first-boot/m4-channel-connect.timer',
         }
         for target, source_name in additions.items():
             path = root / target
@@ -381,6 +385,10 @@ def prepare_root(source, image, root, tree, identity, kernel=None):
         link = root / 'etc/systemd/system/multi-user.target.wants/j713-owner-assets.service'
         require(not link.exists() and not link.is_symlink(), 'Owner service already enabled')
         link.symlink_to('/usr/lib/systemd/system/j713-owner-assets.service')
+        timer = root / 'etc/systemd/system/timers.target.wants/m4-channel-connect.timer'
+        require(not timer.exists() and not timer.is_symlink(), 'Channel connect timer already enabled')
+        timer.parent.mkdir(parents=True, exist_ok=True)
+        timer.symlink_to('/usr/lib/systemd/system/m4-channel-connect.timer')
         (root / 'etc/m4-root-id').write_text(identity + '\n')
         fill_free_space(root)
         command('umount', root)

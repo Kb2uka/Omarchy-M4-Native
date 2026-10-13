@@ -84,7 +84,7 @@ class UpdateCheckTests(unittest.TestCase):
         self.assertEqual(urlopen.call_args[0][0], 'https://example.invalid/packages/omarchy-m4.db')
         self.assertEqual(len(system.notifications), 1)
         self.assertEqual(system.notifications[0][2], 'M4 update available')
-        self.assertIn('Run omarchy update, then restart.', system.notifications[0][3])
+        self.assertIn('Run omarchy-m4-update, then restart.', system.notifications[0][3])
         self.assertNotIn('omarchy-m4-boot', system.notifications[0][3])
         _, _, again, _ = self.run_check(db, installed, '--notify')
         self.assertEqual(again.notifications, [])

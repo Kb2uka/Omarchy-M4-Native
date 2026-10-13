@@ -4,7 +4,7 @@
 # and LICENSES/ by tools/build-m4-packages.py.
 pkgname=omarchy-m4-boot
 pkgver=1
-pkgrel=3
+pkgrel=5
 pkgdesc='Keeps the J713 boot.bin in step with the packaged M4 kernel and devicetree'
 arch=('aarch64')
 url='https://github.com/Kb2uka/Omarchy-M4-Native'
@@ -12,24 +12,33 @@ license=('MIT' 'GPL-2.0-or-later OR MIT')
 depends=('python' 'pacman')
 install=omarchy-m4-boot.install
 options=('!strip' '!debug')
-_dtb_release=v0.1.0-alpha.1-update.1
+# The CPU frequency and CPU temperature devicetree (docs/j713-cpu-temperature.md), and the
+# real-time speaker protection setting it needs (docs/j713-cpufreq.md, "All three parts").
 source=('m4-boot-compose.py' '90-omarchy-m4-boot.hook' 'm4-update-check.py'
         'omarchy-m4-update-check.service' 'omarchy-m4-update-check.timer' 'MIT.txt' 'GPL-2.0-or-later.txt'
-        "j713-poweroff-${_dtb_release}.dtb::${url}/releases/download/${_dtb_release}/j713-poweroff.dtb")
+        'speakersafetyd-j713-realtime.conf' 'm4-channel-setup.py' 'omarchy-m4-update'
+        "j713-cputemp.dtb::${url}/releases/download/package-inputs/j713-cputemp.dtb")
 sha256sums=('67cbbe056e4e7b9193e3648ebfff78ae68316ca50a47e2676cd62c36a7918630'
             '22514358734721ffcb4478f9c3c2c91f55b858bbd40aba6278c395e7a35de810'
-            '97b8f5fff0feac4f0cb76ef188c90aa448a5764e520cc42f67b7f75e54f5e08d'
+            'bf06541caba3709e81b261c60563886e95fff902d811b74f2b49c03e70ee1685'
             '8ecdbfc8303276d8db5922f6a06aa945f58ebca27b83520f76e9155561b9c5b0'
             '2e920a979cdf4d8d2075f9f3ab513c5e614eaa126f74b2c01ea5ccf0ab8a9544'
             'b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5'
             'aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3'
-            'e54c77a760a5b696486f9d80c7c83ca4295d641113bb9e54d13e259863bf9b07')
+            'a116d5a6aa09bc2aec1393ef737f21d9cc0eaac474615cb215f48491b7db8a56'
+            '873addb721902519cddaeb6dc7f35a62e557fbac5c5e942f6bac0f84020a23d6'
+            'bde52f8012b209e06c0e2b41325413c642ae4c6e6eedce7ff04331ca4d50c0f1'
+            '08e8e719381f88a1e50d821c145dad5b2d97fd772609e13d7778e19795e9cad1')
 
 package() {
   install -Dm755 m4-boot-compose.py "$pkgdir/usr/bin/m4-boot-compose"
   install -Dm644 90-omarchy-m4-boot.hook "$pkgdir/usr/share/libalpm/hooks/90-omarchy-m4-boot.hook"
   install -Dm755 m4-update-check.py "$pkgdir/usr/bin/omarchy-m4-update-check"
+  install -Dm755 omarchy-m4-update "$pkgdir/usr/bin/omarchy-m4-update"
+  install -Dm644 m4-channel-setup.py "$pkgdir/usr/lib/omarchy-m4/m4-channel-setup.py"
   install -Dm644 -t "$pkgdir/usr/lib/systemd/user" omarchy-m4-update-check.service omarchy-m4-update-check.timer
-  install -Dm644 "j713-poweroff-${_dtb_release}.dtb" "$pkgdir/usr/lib/omarchy-m4/j713.dtb"
+  install -Dm644 j713-cputemp.dtb "$pkgdir/usr/lib/omarchy-m4/j713.dtb"
+  install -Dm644 speakersafetyd-j713-realtime.conf \
+    "$pkgdir/usr/lib/systemd/system/speakersafetyd-j713.service.d/50-realtime.conf"
   install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" MIT.txt GPL-2.0-or-later.txt
 }

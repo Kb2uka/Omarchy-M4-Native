@@ -11,6 +11,7 @@ Air that already has update 1 it changes nothing. Inspection is the default;
 --apply makes the changes.
 """
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -34,7 +35,12 @@ ACjuCm7/wS3BkXKT/XBLOSU61X3JF2UI
 =FvsK
 -----END PGP PUBLIC KEY BLOCK-----
 '''
-PACKAGES = ('omarchy-m4-keyring', 'omarchy-m4-boot', 'linux-m4-omarchy')
+LOCK = 'run/lock/omarchy-m4-setup.lock'
+SPEAKER_STAGED = 'usr/lib/omarchy-m4/j713-audio/snd-soc-j713-group.ko'
+SPEAKER_MODULE = 'usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-j713-group.ko'
+SPEAKER_HOLD = 'var/lib/omarchy-m4/speaker-module/hold'
+PACKAGES = ('omarchy-m4-keyring', 'omarchy-m4-boot', 'linux-m4-omarchy', 'omarchy-m4-gst-audio', 'omarchy-m4-speaker')
+SINKS = 'omarchy-m4-gst-audio'  # gst-plugins-good already has both sinks and conflicts with it
 BOARD = b'apple,j713'
 CONF = 'etc/pacman.conf'
 SNIPPET = 'etc/pacman.d/omarchy-m4.conf'
@@ -97,6 +103,12 @@ class Machine:
         self.sandbox = root != Path('/')
 
     def pacman(self, *args, config=None):
+        command = self.pacman_command(*args, config=config)
+        if self.sandbox and args[0] == '-S':
+            command.append('--noscriptlet')
+        return self.run(command)
+
+    def pacman_command(self, *args, config=None):
         command = ['pacman']
         if self.sandbox:
             command += ['--root', str(self.root), '--dbpath', str(self.root / 'var/lib/pacman'),
@@ -104,10 +116,12 @@ class Machine:
                         '--cachedir', str(self.root / 'var/cache/pacman/pkg'),
                         '--logfile', str(self.root / 'var/log/pacman.log'),
                         '--hookdir', str(self.root / 'etc/pacman.d/hooks')]
-        command += ['--config', str(config or self.root / CONF), *args]
-        if self.sandbox and args[0] == '-S':
-            command.append('--noscriptlet')
-        return self.run(command)
+        return command + ['--config', str(config or self.root / CONF), *args]
+
+    def installed(self, name):
+        """Whether a package is installed, without pacman's 'not found' error on screen."""
+        command = self.pacman_command('-Q', name)
+        return subprocess.run(command, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
 
     def pacman_key(self, *args):
         command = ['pacman-key', '--config', str(self.root / CONF)]
@@ -146,6 +160,14 @@ class Machine:
         return subprocess.run(command, check=False, stdout=sys.stderr).returncode
 
 
+def speaker_pending(root):
+    """Whether omarchy-m4-speaker staged a module that the next boot will swap in."""
+    staged, module = root / SPEAKER_STAGED, root / SPEAKER_MODULE
+    if not staged.is_file() or not module.is_file() or (root / SPEAKER_HOLD).exists():
+        return False
+    return hashlib.sha256(module.read_bytes()).digest() != hashlib.sha256(staged.read_bytes()).digest()
+
+
 def boot_digest(root):
     path = root / BOOT
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
@@ -163,15 +185,28 @@ def preflight(root, machine):
 
 
 def setup(root, apply=False, server=SERVER, key=PUBLIC_KEY, fingerprint=FINGERPRINT, output=sys.stderr):
+    if not apply:
+        return connect(root, False, server, key, fingerprint, output)
+    # One run at a time: the first-boot service, a pasted connect line and
+    # omarchy-m4-update must not restore pacman.conf underneath each other.
+    lock_path = root / LOCK
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, 'a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return connect(root, True, server, key, fingerprint, output)
+
+
+def connect(root, apply, server, key, fingerprint, output):
     machine = Machine(root, output)
     preflight(root, machine)
+    packages = [p for p in PACKAGES if p != SINKS or not machine.installed('gst-plugins-good')]
     conf = root / CONF
     text = conf.read_text()
     updated = with_include(text, include_line(root))
     wanted = snippet(server)
     current = (root / SNIPPET).read_text() if (root / SNIPPET).is_file() else None
     plan = {'trust_key': fingerprint, 'snippet': str(root / SNIPPET), 'snippet_changes': current != wanted,
-            'pacman_conf_changes': updated is not None, 'install': list(PACKAGES), 'applied': False}
+            'pacman_conf_changes': updated is not None, 'install': packages, 'applied': False}
     if not apply:
         plan['status'] = 'ready; rerun with --apply'
         return plan
@@ -197,7 +232,7 @@ def setup(root, apply=False, server=SERVER, key=PUBLIC_KEY, fingerprint=FINGERPR
             only.write_text('[options]\nArchitecture = auto\nSigLevel = Required DatabaseRequired\n' +
                             include_line(root) + '\n')
             require(machine.pacman('-Sy', config=only) == 0, 'Could not download the M4 package database')
-            require(machine.pacman('-S', '--needed', '--noconfirm', *PACKAGES) == 0, 'Package installation failed')
+            require(machine.pacman('-S', '--needed', '--noconfirm', *packages) == 0, 'Package installation failed')
         except (Refused, OSError) as error:
             # A configured but unreachable repository would stop every later system update.
             write(conf, text, conf.stat().st_mode & 0o777)
@@ -212,10 +247,10 @@ def setup(root, apply=False, server=SERVER, key=PUBLIC_KEY, fingerprint=FINGERPR
             f'({boot}); boot.bin keeps booting what it booted before. See the message above, '
             'fix the cause, then run this again')
     machine.start_notifier()
-    restart = boot_digest(root) != before
+    restart = boot_digest(root) != before or speaker_pending(root)
     plan.update(applied=True, boot=boot, restart_needed=restart,
-                status=('connected; restart once to boot the updated boot.bin' if restart else
-                        'connected; future M4 fixes arrive with omarchy update'))
+                status=('connected; restart once to apply the update' if restart else
+                        'connected; future M4 fixes arrive with omarchy-m4-update'))
     return plan
 
 

@@ -6,7 +6,7 @@
 Read-only and unprivileged: downloads the channel's package list, compares it
 with the installed M4 packages and, with --notify, shows one desktop
 notification per new set of versions. Installing still happens only through
-omarchy update, where pacman checks every signature.
+omarchy-m4-update, where pacman checks every signature.
 """
 import argparse
 import io
@@ -79,7 +79,7 @@ def notify(found, state):
         return False
     if shutil.which('notify-send'):
         subprocess.run(['notify-send', '--app-name=M4 updates', TITLE,
-                        '\n'.join(found) + '\nRun omarchy update, then restart.'], check=False)
+                        '\n'.join(found) + '\nRun omarchy-m4-update, then restart.'], check=False)
     state.parent.mkdir(parents=True, exist_ok=True)
     state.write_text(text)
     return True

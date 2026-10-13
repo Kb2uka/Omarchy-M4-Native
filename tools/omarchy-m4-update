@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 KB2UKA
+#
+# Update only the M4 packages. Refreshes only the [omarchy-m4] repository and
+# installs or upgrades only its packages, the same way the connect step does;
+# the rest of the system is not touched. Restart once afterwards.
+set -euo pipefail
+if [[ $EUID -ne 0 ]]; then
+  exec sudo /usr/bin/omarchy-m4-update "$@"
+fi
+exec python3 /usr/lib/omarchy-m4/m4-channel-setup.py --apply "$@"

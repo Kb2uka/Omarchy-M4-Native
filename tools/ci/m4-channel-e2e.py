@@ -30,7 +30,7 @@ STUB = '''pkgname=e2e-system
 pkgver=1
 pkgrel=1
 arch=(any)
-provides=(python coreutils kmod pacman)
+provides=(python coreutils kmod pacman gstreamer=1.28.7 gst-plugins-base-libs=1.28.7 libpulse)
 package() { mkdir -p "$pkgdir/usr/share/e2e-system"; }
 '''
 OLD_KERNEL = '''pkgname=linux-m4-omarchy
@@ -211,6 +211,16 @@ def main():
                     'The installed kernel image is not the pinned kernel')
             require(len(list((root / 'usr/lib/modules' / RELEASE).rglob('*.ko'))) > 1000, 'Modules are missing')
             require(snapshot(root) == before, 'A protected file or boot.bin changed')
+            for path, digest in CHANNEL['gst_audio'].items():
+                require(sha((root / path).read_bytes()) == digest, 'GStreamer sink missing or wrong: ' + path)
+            require((root / 'usr/lib/systemd/system/speakersafetyd-j713.service.d/50-realtime.conf').is_file(),
+                    'The real-time speaker setting is missing')
+            for path, digest in CHANNEL['speaker_module'].items():
+                require(sha((root / path).read_bytes()) == digest, 'Staged speaker module missing or wrong: ' + path)
+            require((root / 'usr/lib/systemd/system/m4-j713-audio-register.service.d/20-m4-speaker-module.conf').is_file()
+                    and os.access(root / 'usr/bin/m4-speaker-module', os.X_OK), 'The speaker module step is missing')
+            require(os.access(root / 'usr/bin/omarchy-m4-update', os.X_OK) and
+                    (root / 'usr/lib/omarchy-m4/m4-channel-setup.py').is_file(), 'omarchy-m4-update is missing')
             require((root / 'usr/lib/systemd/user/omarchy-m4-update-check.timer').is_file() and
                     os.access(root / 'usr/bin/omarchy-m4-update-check', os.X_OK), 'The update notifier is missing')
             require((root / 'etc/pacman.conf.pre-omarchy-m4').is_file(), 'No pacman.conf backup')

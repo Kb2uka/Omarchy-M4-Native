@@ -12,8 +12,54 @@ reviewers.
 | Package | Installs | Version at launch |
 | --- | --- | --- |
 | `omarchy-m4-keyring` | The channel's public signing key for `pacman-key` | `20261012-1` |
-| `omarchy-m4-boot` | `m4-boot-compose`, its pacman hook, the J713 devicetree, and the daily update notifier | `1-1` |
+| `omarchy-m4-boot` | `m4-boot-compose`, its pacman hook, the J713 devicetree, the daily update notifier and, from 1-4, the real-time speaker protection drop-in | `1-1`; `1-4` adds CPU frequency scaling and CPU temperature |
 | `linux-m4-omarchy` | The J713 kernel image and its modules | `7.1.9.m4.20261008-2` |
+| `omarchy-m4-gst-audio` | GStreamer's `autodetect` and `pulse` sinks in `/usr/lib/gstreamer-1.0`, for WebKitGTK and GStreamer apps | `1.28.7-1` |
+
+### omarchy-m4-boot 1-4 and omarchy-m4-gst-audio 1.28.7-1
+
+- **Devicetree:** `08e8e719…` (`j713-cpu-temperature`): update 1 plus [CPU
+  frequency scaling](j713-cpufreq.md) and [CPU die
+  temperature](j713-cpu-temperature.md). It was rebuilt byte for byte with DTC
+  1.8.1 and is pinned in the `package-inputs` release. The composer moves an Air
+  on alpha.1 or update 1 to it, and keeps it on an Air that already has it.
+- **Real-time speaker protection:**
+  `/usr/lib/systemd/system/speakersafetyd-j713.service.d/50-realtime.conf`
+  (`SCHED_FIFO` 20). The CPU frequency devicetree needs it, or speaker
+  protection can fail at boot. It is the one file a channel package may install
+  under a protected prefix (`protected_exceptions` in `channel.json`).
+- **GStreamer sinks:** alpha.1 has GStreamer 1.28.7-2 but no matching
+  `gst-plugins-good` on the mirrors, so WebKitGTK apps had no `autoaudiosink`.
+  `omarchy-m4-gst-audio` installs only `libgstautodetect.so` and
+  `libgstpulseaudio.so`. They are the files `tools/m4-webkit-audio-plugins.py`
+  built on the owner's Air (hashes pinned in `channel.json`), and the upstream
+  source is mirrored in `package-inputs`. Installing them system-wide lets the
+  WebKitGTK sandbox see them without `GST_PLUGIN_PATH`. The package conflicts
+  with `gst-plugins-good`, so a later full install of that package replaces it.
+  Nothing depends on it, so that replacement is never blocked. The connect step
+  installs it; an Air connected before 1.28.7-1 was published gets it by running
+  the connect line once more.
+- **Not in the channel:** the core-placement helper (per user, under `~/.local`;
+  an old copy refuses to pin on this devicetree).
+
+### omarchy-m4-boot 1-5 and omarchy-m4-speaker 1-1
+
+- **`omarchy-m4-update`** (in `omarchy-m4-boot` 1-5, with a copy of the setup
+  script at `/usr/lib/omarchy-m4/m4-channel-setup.py`) runs the setup script
+  with `--apply`. It refreshes only `[omarchy-m4]` and installs or upgrades only
+  channel packages, never the rest of the system. The update notifier now says
+  to run it.
+- **`omarchy-m4-speaker`** delivers the speaker protection startup fix
+  ([#61](https://github.com/Kb2uka/Omarchy-M4-Native/pull/61)). The audio modules
+  stay manifest-managed outside pacman, so the package does not overwrite them.
+  It stages the fixed `snd-soc-j713-group.ko` (`aaad802e…`) under
+  `/usr/lib/omarchy-m4/`. A drop-in on `m4-j713-audio-register.service`
+  (`ExecStartPre=-`, the second `protected_exceptions` file) then runs
+  `m4-speaker-module --boot` before any audio module loads. It swaps the module
+  and exactly the six manifest values that pin it, only from the stock alpha.1
+  state, or to finish a swap a power cut interrupted. Everything else is
+  refused and left untouched, and a refusal never stops registration. Details:
+  [speaker protection startup](j713-protection-startup.md#existing-installs).
 
 At launch the channel delivers exactly what a fully updated alpha.1 Air already
 runs:
@@ -30,6 +76,23 @@ The installed alpha.1 package `linux-m4-omarchy 7.1.9.m4.20261008-1` carries an
 older `Image.gz` (`69b92b65…`) than the one in `boot.bin`. Version `-2` corrects
 the package to match what boots. Nothing ever rebuilds `boot.bin` from the `-1`
 file.
+
+## Connecting new installs
+
+The release root builder (`tools/prepare-j713-release.py`) adds
+`/usr/lib/omarchy/m4-channel-connect.py` (a copy of `tools/m4-channel-setup.py`;
+`/usr/lib/omarchy-m4/` belongs to the channel packages) and enables
+`m4-channel-connect.timer`. Its service runs the setup script with
+`--apply` once the owner's account exists
+(`ConditionPathExists=!/var/lib/omarchy/provisioning/pending`). The timer
+fires every 20 minutes of wall-clock time until the script succeeds, because
+Wi-Fi usually arrives after first login. Success writes
+`/var/lib/omarchy-m4/connected` and disables the timer. The service has no
+timeout of its own, so it is never killed in the middle of its rollback. A
+failed attempt leaves `pacman.conf` and `boot.bin` as they were; the channel's
+signing key, imported before the network step, stays trusted. Setup takes an
+exclusive lock, so this service and a manual connect or `omarchy-m4-update` run
+one after the other.
 
 ## The boot object and its composer
 
@@ -82,7 +145,7 @@ It runs ten minutes after login and daily after that. It downloads the
 channel's package list over HTTPS from the server in
 `/etc/pacman.d/omarchy-m4.conf`, compares it with the installed M4 packages
 (`pacman -Q`, `vercmp`), and shows one `notify-send` notification per new set
-of versions: "M4 update available … Run omarchy update, then restart." It is
+of versions: "M4 update available … Run omarchy-m4-update, then restart." It is
 unprivileged and read-only, and it never offers a package that is not
 installed. Offline or unconnected machines stay quiet. Signatures are still
 checked by pacman when the update is installed.

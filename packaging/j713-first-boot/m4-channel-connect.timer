@@ -1,0 +1,12 @@
+[Unit]
+Description=Retry connecting to signed M4 updates until it succeeds
+
+[Timer]
+# Wall-clock retries keep firing even when a run was skipped because owner
+# setup was still pending. The service disables this timer once it connects.
+OnBootSec=3min
+OnCalendar=*:0/20
+RandomizedDelaySec=2min
+
+[Install]
+WantedBy=timers.target

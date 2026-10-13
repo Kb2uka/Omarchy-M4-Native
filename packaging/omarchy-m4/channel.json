@@ -4,31 +4,87 @@
   "release_tag": "packages",
   "server": "https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages",
   "signing_fingerprint": "578DF78177CF6DF29B888B8C9404F3CC90797A50",
-  "packages": ["omarchy-m4-keyring", "omarchy-m4-boot", "linux-m4-omarchy"],
+  "packages": [
+    "omarchy-m4-keyring",
+    "omarchy-m4-boot",
+    "linux-m4-omarchy",
+    "omarchy-m4-gst-audio",
+    "omarchy-m4-speaker"
+  ],
   "kernel": {
     "release": "7.1.9-m4-gpu-backport-20261008",
     "image_sha256": "c3704cfd2afb7760e73f0b9939a68864a30bd916fcd478bd960e538373123dc9",
     "image_bytes": 18901266
   },
   "devicetree": {
-    "sha256": "e54c77a760a5b696486f9d80c7c83ca4295d641113bb9e54d13e259863bf9b07"
+    "sha256": "08e8e719381f88a1e50d821c145dad5b2d97fd772609e13d7778e19795e9cad1"
   },
   "allowed_paths": {
-    "omarchy-m4-keyring": ["usr/share/pacman/keyrings/omarchy-m4.gpg", "usr/share/pacman/keyrings/omarchy-m4-trusted",
-                           "usr/share/pacman/keyrings/omarchy-m4-revoked"],
-    "omarchy-m4-boot": ["usr/bin/m4-boot-compose", "usr/share/libalpm/hooks/90-omarchy-m4-boot.hook",
-                        "usr/lib/omarchy-m4/j713.dtb", "usr/bin/omarchy-m4-update-check",
-                        "usr/lib/systemd/user/omarchy-m4-update-check.service",
-                        "usr/lib/systemd/user/omarchy-m4-update-check.timer",
-                        "usr/share/licenses/omarchy-m4-boot/"],
-    "linux-m4-omarchy": ["usr/lib/modules/7.1.9-m4-gpu-backport-20261008/", "usr/lib/omarchy-m4/Image.gz",
-                         "usr/lib/omarchy-m4/kernel.config", "usr/share/licenses/linux-m4-omarchy/"]
+    "omarchy-m4-keyring": [
+      "usr/share/pacman/keyrings/omarchy-m4.gpg",
+      "usr/share/pacman/keyrings/omarchy-m4-trusted",
+      "usr/share/pacman/keyrings/omarchy-m4-revoked"
+    ],
+    "omarchy-m4-boot": [
+      "usr/bin/m4-boot-compose",
+      "usr/share/libalpm/hooks/90-omarchy-m4-boot.hook",
+      "usr/lib/omarchy-m4/j713.dtb",
+      "usr/lib/systemd/system/speakersafetyd-j713.service.d/50-realtime.conf",
+      "usr/bin/omarchy-m4-update-check",
+      "usr/lib/systemd/user/omarchy-m4-update-check.service",
+      "usr/lib/systemd/user/omarchy-m4-update-check.timer",
+      "usr/share/licenses/omarchy-m4-boot/",
+      "usr/bin/omarchy-m4-update",
+      "usr/lib/omarchy-m4/m4-channel-setup.py"
+    ],
+    "linux-m4-omarchy": [
+      "usr/lib/modules/7.1.9-m4-gpu-backport-20261008/",
+      "usr/lib/omarchy-m4/Image.gz",
+      "usr/lib/omarchy-m4/kernel.config",
+      "usr/share/licenses/linux-m4-omarchy/"
+    ],
+    "omarchy-m4-gst-audio": [
+      "usr/lib/gstreamer-1.0/libgstautodetect.so",
+      "usr/lib/gstreamer-1.0/libgstpulseaudio.so",
+      "usr/share/licenses/omarchy-m4-gst-audio/"
+    ],
+    "omarchy-m4-speaker": [
+      "usr/bin/m4-speaker-module",
+      "usr/lib/omarchy-m4/j713-audio/snd-soc-j713-group.ko",
+      "usr/lib/systemd/system/m4-j713-audio-register.service.d/20-m4-speaker-module.conf",
+      "usr/share/licenses/omarchy-m4-speaker/"
+    ]
   },
   "protected_paths": [
-    "boot/", "etc/", "home/", "opt/", "root/", "usr/local/", "var/",
-    "usr/lib/firmware/", "usr/lib/omarchy/", "usr/lib/speakersafetyd-j713", "usr/lib/systemd/system/",
-    "usr/lib/systemd/system-", "usr/lib/systemd/user/pipewire", "usr/lib/systemd/user/wireplumber",
-    "usr/share/alsa/", "usr/share/applications/", "usr/share/asahi-audio/", "usr/share/speakersafetyd/",
+    "boot/",
+    "etc/",
+    "home/",
+    "opt/",
+    "root/",
+    "usr/local/",
+    "var/",
+    "usr/lib/firmware/",
+    "usr/lib/omarchy/",
+    "usr/lib/speakersafetyd-j713",
+    "usr/lib/systemd/system/",
+    "usr/lib/systemd/system-",
+    "usr/lib/systemd/user/pipewire",
+    "usr/lib/systemd/user/wireplumber",
+    "usr/share/alsa/",
+    "usr/share/applications/",
+    "usr/share/asahi-audio/",
+    "usr/share/speakersafetyd/",
     "usr/share/wireplumber/"
-  ]
+  ],
+  "gst_audio": {
+    "usr/lib/gstreamer-1.0/libgstautodetect.so": "ffb41a1812d1ea398b567692b730df0ea6bea5620511390d8731704eae7515b7",
+    "usr/lib/gstreamer-1.0/libgstpulseaudio.so": "3a303612b701477a5588c1f0f1d55ae2fe7c96100e0a5c8545659eb598be953a"
+  },
+  "protected_exceptions": {
+    "usr/lib/systemd/system/speakersafetyd-j713.service.d/50-realtime.conf": "real-time speaker protection required by the CPU frequency devicetree (docs/j713-cpufreq.md)",
+    "usr/lib/systemd/system/m4-j713-audio-register.service.d/20-m4-speaker-module.conf": "applies the fixed speaker module (#61) before registration loads any audio module"
+  },
+  "speaker_module": {
+    "usr/lib/omarchy-m4/j713-audio/snd-soc-j713-group.ko": "aaad802eb136ff6cb915feaa123001b3eb848bc2f038d0a5b71c8e2ff35d2581"
+  }
 }

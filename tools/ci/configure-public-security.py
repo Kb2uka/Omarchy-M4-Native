@@ -4,6 +4,7 @@
 import argparse
 import base64
 import json
+import time
 from pathlib import Path
 import subprocess
 
@@ -39,10 +40,10 @@ def rules(owner_id):
                  'required_status_checks': [{'context': name, 'integration_id': 15368} for name in CHECKS]}},
              {'type': 'code_scanning', 'parameters': {'code_scanning_tools': [
                  {'tool': 'CodeQL', 'alerts_threshold': 'errors', 'security_alerts_threshold': 'medium_or_higher'}]}}]},
-        {'name': 'Maintainer release promotion only', 'target': 'branch',
-         'enforcement': 'active', 'bypass_actors': bypass,
-         'conditions': {'ref_name': {'include': ['refs/heads/main'], 'exclude': []}},
-         'rules': [{'type': 'update', 'parameters': {'update_allows_fetch_and_merge': False}}]},
+        {'name': 'Maintainer merges only', 'target': 'branch',
+          'enforcement': 'active', 'bypass_actors': bypass,
+          'conditions': {'ref_name': {'include': ['refs/heads/develop', 'refs/heads/main'], 'exclude': []}},
+          'rules': [{'type': 'update', 'parameters': {'update_allows_fetch_and_merge': False}}]},
     ]
 
 
@@ -57,6 +58,19 @@ def api(gh, endpoint, method='GET', body=None):
 
 
 def require_subset(expected, actual, where):
+    # Normalize documented GitHub omitted defaults before strict comparison.
+    # GitHub omits false-valued `parameters.update_allows_fetch_and_merge`
+    # on `update` rules, returning just `{"type": "update"}`. Treat a missing
+    # field as False only when the expected value is explicitly False.
+    if isinstance(expected, dict) and isinstance(actual, dict):
+        if expected.get('type') == 'update' and actual.get('type') == 'update':
+            exp_params = expected.get('parameters')
+            if isinstance(exp_params, dict) and exp_params.get('update_allows_fetch_and_merge') is False:
+                act_params = actual.get('parameters')
+                if act_params is None:
+                    actual = dict(actual, parameters={'update_allows_fetch_and_merge': False})
+                elif isinstance(act_params, dict) and 'update_allows_fetch_and_merge' not in act_params:
+                    actual = dict(actual, parameters=dict(act_params, update_allows_fetch_and_merge=False))
     if isinstance(expected, dict):
         if not isinstance(actual, dict):
             raise ValueError('Unexpected response: ' + where)
@@ -64,6 +78,25 @@ def require_subset(expected, actual, where):
             require_subset(value, actual.get(key), where + '/' + key)
     elif expected != actual:
         raise ValueError('Readback mismatch: ' + where)
+
+
+def verify_subset_with_retry(expected, read_fn, where, attempts=5, delay_s=2.0, sleep=None):
+    """Verify a readback with bounded propagation-delay tolerance.
+
+    Calls read_fn() up to `attempts` times until require_subset passes.
+    Sleeps delay_s between attempts. Raises the last ValueError on exhaustion.
+    """
+    rest = time.sleep if sleep is None else sleep
+    last_error = None
+    for attempt in range(attempts):
+        try:
+            require_subset(expected, read_fn(), where)
+            return
+        except ValueError as error:
+            last_error = error
+            if attempt + 1 < attempts:
+                rest(delay_s)
+    raise last_error
 
 
 def activation_preflight(gh, repo):
@@ -82,7 +115,7 @@ def activation_preflight(gh, repo):
 def apply_settings(gh):
     for suffix, expected in SETTINGS.items():
         api(gh, BASE + suffix, 'PUT', expected)
-        require_subset(expected, api(gh, BASE + suffix), suffix)
+        verify_subset_with_retry(expected, lambda s=suffix: api(gh, BASE + s), suffix)
     api(gh, BASE + '/vulnerability-alerts', 'PUT')
     api(gh, BASE + '/vulnerability-alerts')
 
@@ -92,7 +125,7 @@ def activate(gh, repo, desired):
     apply_settings(gh)
     endpoint = BASE + '/actions/permissions/fork-pr-contributor-approval'
     api(gh, endpoint, 'PUT', FORK_APPROVAL)
-    require_subset(FORK_APPROVAL, api(gh, endpoint), 'fork approval')
+    verify_subset_with_retry(FORK_APPROVAL, lambda: api(gh, endpoint), 'fork approval')
     existing = api(gh, BASE + '/rulesets?per_page=100')
     for body in desired:
         matches = [r for r in existing if r['name'] == body['name']]
@@ -101,18 +134,22 @@ def activate(gh, repo, desired):
         suffix = '/rulesets' + ('/' + str(matches[0]['id']) if matches else '')
         saved = api(gh, BASE + suffix, 'PUT' if matches else 'POST', body)
         # GitHub adds metadata to rule entries; compare the requested fields.
-        actual = api(gh, BASE + '/rulesets/' + str(saved['id']))
+        # Readback may lag or omit documented false defaults; retry boundedly.
+        def read_ruleset(sid=saved['id']):
+            return api(gh, BASE + '/rulesets/' + str(sid))
         for key in ('name', 'target', 'enforcement', 'conditions', 'bypass_actors'):
-            require_subset(body[key], actual[key], key)
-        by_type = {rule['type']: rule for rule in actual['rules']}
+            verify_subset_with_retry(body[key], lambda k=key: read_ruleset()[k], key)
         for rule in body['rules']:
-            require_subset(rule, by_type.get(rule['type']), rule['type'])
+            verify_subset_with_retry(
+                rule,
+                lambda r=rule: {t: e for t, e in ((x['type'], x) for x in read_ruleset()['rules'])}.get(r['type']),
+                rule['type'])
     security = {'secret_scanning': {'status': 'enabled'},
                 'secret_scanning_push_protection': {'status': 'enabled'}}
     api(gh, BASE, 'PATCH', {'security_and_analysis': security})
-    require_subset(security, api(gh, BASE)['security_and_analysis'], 'security_and_analysis')
+    verify_subset_with_retry(security, lambda: api(gh, BASE)['security_and_analysis'], 'security_and_analysis')
     api(gh, BASE + '/private-vulnerability-reporting', 'PUT')
-    require_subset({'enabled': True}, api(gh, BASE + '/private-vulnerability-reporting'), 'private reporting')
+    verify_subset_with_retry({'enabled': True}, lambda: api(gh, BASE + '/private-vulnerability-reporting'), 'private reporting')
 
 
 def main():

@@ -4,7 +4,8 @@
 """Check built M4 channel packages against the channel policy before signing.
 
 Every file must be on its package's allowlist and off the protected list (the
-video, Widevine, audio, speaker and trackpad work installed outside pacman).
+video, Widevine, audio, speaker and trackpad work installed outside pacman),
+except the exact files listed with a reason under protected_exceptions.
 The kernel and devicetree must be the pinned, qualified ones, and the boot
 composer must accept exactly them. A package already published under the same
 file name must have identical contents, so a change cannot ship without a
@@ -13,6 +14,7 @@ version bump.
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import runpy
 import subprocess
@@ -23,6 +25,8 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 CHANNEL = ROOT / 'packaging/omarchy-m4/channel.json'
+REALTIME = 'usr/lib/systemd/system/speakersafetyd-j713.service.d/50-realtime.conf'
+SPEAKER_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/20-m4-speaker-module.conf'
 
 
 def require(condition, message):
@@ -104,7 +108,8 @@ def check_package(channel, package, info, files, root):
     require(files, 'Empty package ' + name)
     for path in files:
         require(allowed(path, channel['allowed_paths'][name]), f'{name} installs an unlisted path: {path}')
-        require(not allowed(path, channel['protected_paths']), f'{name} installs a protected path: {path}')
+        require(not allowed(path, channel['protected_paths']) or path in channel.get('protected_exceptions', {}),
+                f'{name} installs a protected path: {path}')
         require(files[path][0] & 0o7022 == 0, f'{name} installs a writable or setuid file: {path}')
     kernel = channel['kernel']
     if name == 'linux-m4-omarchy':
@@ -128,6 +133,27 @@ def check_package(channel, package, info, files, root):
         require(policy['KNOWN_KERNELS'].get(kernel['image_sha256']) == kernel['release'],
                 'Composer does not accept the pinned kernel release')
         require(channel['devicetree']['sha256'] in policy['KNOWN_DTBS'], 'Composer does not accept the pinned devicetree')
+        realtime = (ROOT / 'packaging/omarchy-m4/omarchy-m4-boot/speakersafetyd-j713-realtime.conf').read_bytes()
+        require(files.get(REALTIME) == (0o644, sha(realtime)), 'Boot package lacks the real-time speaker setting')
+        # No dependency on the sinks: a later gst-plugins-good must be able to replace them.
+        for path, source in (('usr/bin/omarchy-m4-update', 'tools/omarchy-m4-update'),
+                             ('usr/lib/omarchy-m4/m4-channel-setup.py', 'tools/m4-channel-setup.py')):
+            require(files.get(path, (0, ''))[1] == sha((ROOT / source).read_bytes()), 'Boot package differs: ' + path)
+        names = [re.split('[<>=]', d, maxsplit=1)[0] for d in info.get('depend', [])]
+        require('omarchy-m4-gst-audio' not in names, 'Boot package must not require the GStreamer sinks')
+    elif name == 'omarchy-m4-speaker':
+        for path, digest in channel['speaker_module'].items():
+            require(files.get(path, (0, ''))[1] == digest, 'Staged speaker module differs from the pin: ' + path)
+        tool = (ROOT / 'tools/m4-speaker-module.py').read_bytes()
+        require(files.get('usr/bin/m4-speaker-module') == (0o755, sha(tool)), 'Packaged speaker module tool differs')
+        drop_in = (ROOT / 'packaging/omarchy-m4/omarchy-m4-speaker/20-m4-speaker-module.conf').read_bytes()
+        require(files.get(SPEAKER_DROP_IN) == (0o644, sha(drop_in)), 'Speaker module drop-in differs')
+    elif name == 'omarchy-m4-gst-audio':
+        for path, digest in channel['gst_audio'].items():
+            require(files.get(path, (0, ''))[1] == digest, 'GStreamer sink differs from the pin: ' + path)
+        require(info.get('conflict') == ['gst-plugins-good'], 'GStreamer sink package must conflict with gst-plugins-good')
+        require(sorted(info.get('depend', [])) == ['gst-plugins-base-libs>=1.28.7', 'gstreamer>=1.28.7', 'libpulse'],
+                'GStreamer sink package dependencies changed')
     elif name == 'omarchy-m4-keyring':
         listing = subprocess.run(['gpg', '--show-keys', '--with-colons',
                                   str(root / 'usr/share/pacman/keyrings/omarchy-m4.gpg')],

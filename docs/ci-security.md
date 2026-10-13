@@ -75,7 +75,8 @@ python3 tools/ci/configure-public-security.py --gh /absolute/path/to/gh
 allowlist and dependency alerts. It
 never changes visibility. Once the owner makes the repo public, run
 `--activate-public` to require the CI checks, CODEOWNER review and CodeQL results,
-require approval for all external contributors, restrict `main` updates to KB2UKA,
+require approval for all external contributors, restrict `develop` and `main`
+updates to KB2UKA,
 enable push protection/private vulnerability
 reports, and verify the settings by reading them back. No other settings or
 rulesets are replaced. This helper must run from a reviewed checkout with the
@@ -91,4 +92,5 @@ The required status names are recorded in the setup helper. CodeQL merge rules
 block security alerts at medium or higher, and non-security errors. KB2UKA can
 bypass review rules **through a PR** for maintainer-authored changes; using that
 exception requires reviewing the actual results. Ordinary contributors cannot
-bypass. Main's separate update rule reserves release promotion to KB2UKA.
+bypass. The separate "Maintainer merges only" update rule reserves updates to
+`develop` and `main`, including release promotion, to KB2UKA.

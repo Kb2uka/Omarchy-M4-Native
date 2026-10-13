@@ -121,21 +121,24 @@ AFE startup remains an open qualification item.
 
 The alpha.1 installer still makes **Shut Down restart the Air**, and it does not
 yet receive M4 fixes. One step fixes both. First join Wi-Fi: open a terminal
-and run `nmtui`. Then paste this whole block, press Enter, and type your
+and run `nmtui`. Then paste this one line, press Enter, and type your
 password when asked:
 
 ```bash
-cd ~ && rm -rf m4-updates && mkdir m4-updates && cd m4-updates &&
-base=https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages &&
-curl -fL -O "$base/omarchy-m4-setup.py" -O "$base/SETUP-SHA256SUMS" &&
-sha256sum -c SETUP-SHA256SUMS &&
-sudo python3 omarchy-m4-setup.py --apply
+curl -fsSL --retry 5 --retry-all-errors https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages/m4-connect.sh | bash
 ```
 
 The last lines it prints include
-`"status": "connected; restart once to boot the updated boot.bin"`. Restart the
+`"status": "connected; restart once to apply the update"`. Restart the
 Air once. From then on, Shut Down turns it off, and M4 fixes arrive with the
 normal `omarchy update`. [Details, messages and rollback](updates.md).
+
+Installers built after October 13, 2026 do this step on their own. Once your
+account exists and the Air is online, a background service
+(`m4-channel-connect.timer`) runs the same setup within about 20 minutes and
+retries until it succeeds; restart once afterwards. Check it with
+`systemctl status m4-channel-connect.service`. Running the line above yourself
+is still fine and only speeds it up.
 
 Widevine acquisition needs internet access and a closed browser; finish that
 setup before expecting protected movies. Ordinary browser video and protected

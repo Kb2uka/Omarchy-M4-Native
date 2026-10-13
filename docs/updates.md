@@ -9,8 +9,35 @@ Nothing is reinstalled. How it works: [package-channel.md](package-channel.md).
 
 Every v0.1.0-alpha.1 Air needs this step once, including a fresh installation
 and an Air that already has update 1. Join Wi-Fi first (`nmtui`). Open a
-terminal, paste this whole block, press Enter, and type your password when
+terminal, paste this one line, press Enter, and type your password when
 asked:
+
+```bash
+curl -fsSL --retry 5 --retry-all-errors https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages/m4-connect.sh | bash
+```
+
+`m4-connect.sh` downloads the setup script, retrying if Wi-Fi drops a lookup,
+and refuses it unless its SHA256 matches the one written into `m4-connect.sh`
+when both were published. It then runs the setup script once and deletes its
+temporary files. It must print `omarchy-m4-setup.py: OK`. The last lines then
+show one of:
+
+- `"status": "connected; restart once to apply the update"`: restart
+  the Air once. This happens on an Air without update 1; it now gets the
+  shutdown fix.
+- `"status": "connected; future M4 fixes arrive with omarchy-m4-update"`: done,
+  nothing to restart. This is the normal result on an Air that has update 1.
+- `omarchy-m4-setup: refused: …`: the reason follows. If the download or
+  installation failed, `pacman.conf` is put back as it was. In every case your
+  Air keeps booting exactly as before. Fix the stated cause (for example free
+  space on the EFI partition) and run the block again, or report it in
+  [issue #49](https://github.com/Kb2uka/Omarchy-M4-Native/issues/49).
+
+### Step by step instead
+
+To download and look at each file before anything runs, use this block. It
+does the same as the line above. Run it in one terminal; line 2 sets `base` for
+the lines after it.
 
 ```bash
 cd ~ && rm -rf m4-updates && mkdir m4-updates && cd m4-updates &&
@@ -20,18 +47,9 @@ sha256sum -c SETUP-SHA256SUMS &&
 sudo python3 omarchy-m4-setup.py --apply
 ```
 
-The block must print `omarchy-m4-setup.py: OK`. The last lines then show one of:
-
-- `"status": "connected; restart once to boot the updated boot.bin"`: restart
-  the Air once. This happens on an Air without update 1; it now gets the
-  shutdown fix.
-- `"status": "connected; future M4 fixes arrive with omarchy update"`: done,
-  nothing to restart. This is the normal result on an Air that has update 1.
-- `omarchy-m4-setup: refused: …`: the reason follows. If the download or
-  installation failed, `pacman.conf` is put back as it was. In every case your
-  Air keeps booting exactly as before. Fix the stated cause (for example free
-  space on the EFI partition) and run the block again, or report it in
-  [issue #49](https://github.com/Kb2uka/Omarchy-M4-Native/issues/49).
+The first three lines only download; `sha256sum -c` must print
+`omarchy-m4-setup.py: OK`. Running `sudo python3 omarchy-m4-setup.py` without
+`--apply` shows what it would do and changes nothing.
 
 What it does:
 
@@ -55,7 +73,13 @@ The check starts right after the connect step (otherwise at your next login).
 This is separate from Omarchy's own update indicator, which only watches the
 `omarchy` package. Check by hand at any time with `omarchy-m4-update-check`.
 
-Run `omarchy update` as usual. When an M4 fix is included, pacman shows
+Run **`omarchy-m4-update`** and type your password. It refreshes only the M4
+repository and installs or upgrades only the M4 packages, including any new
+one, the same way the connect step does; nothing else on the system changes.
+(`omarchy-m4-boot` 1-5 adds the command. On an Air with an older boot package,
+run the connect line once instead.) `omarchy update` also installs M4 fixes,
+but it updates the whole system as well, which is not qualified on this
+hardware (below). When an M4 fix is included, pacman shows
 `Updating the M4 boot object (boot.bin)...` followed by
 `"status": "updated; takes effect at next boot"`. Restart once. If nothing in
 the boot object changed, it reports `"status": "current"`.
