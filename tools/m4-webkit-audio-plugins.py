@@ -63,8 +63,9 @@ def session_file(environment):
 
 
 def session_text(directory):
-    # environment.d expands $ and treats quotes and spaces specially; refuse those.
-    require(not set(str(directory)) & set('$\\"\' \t\n`'),
+    # environment.d expands $ and treats quotes and spaces specially, and
+    # GST_PLUGIN_PATH splits at colons; refuse those.
+    require(not set(str(directory)) & set('$\\"\' \t\n`:'),
             'Plugin directory has characters environment.d cannot hold: ' + str(directory))
     # systemd reads environment.d at login; ${...:+...} keeps any existing value.
     return ('# Written by m4-webkit-audio-plugins.py; removed by its --remove.\n'
@@ -93,8 +94,14 @@ def own_session(environment, directory):
 
 def write_session(environment, directory):
     if own_session(environment, directory) == 'missing':
-        session_file(environment).parent.mkdir(parents=True, exist_ok=True)
-        write(session_file(environment), session_text(directory).encode())
+        path = session_file(environment)
+        # The file lands by an atomic rename, so a leftover temporary file is
+        # only this tool's interrupted write and holds nothing worth keeping.
+        temp = path.with_name(SESSION + '.new')
+        if temp.is_symlink() or temp.is_file():
+            temp.unlink()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write(path, session_text(directory).encode())
 
 
 def package_version(run, name):
@@ -185,9 +192,6 @@ def install(environment, run=subprocess.run, download=fetch, apply=False):
     require(full, 'GStreamer is not installed')
     version = full.split(':')[-1].rsplit('-', 1)[0]
     report['gstreamer'] = full
-    temp = session_file(environment).with_name(SESSION + '.new')
-    require(not temp.exists() and not temp.is_symlink(),
-            'Stale temporary file from an interrupted run; run --remove first: ' + str(temp))
     if receipt and receipt.get('gstreamer') == full and installed(directory, receipt):
         validate(run, 'run --remove, then --apply again')
         if own_session(environment, directory) == 'present':
@@ -209,6 +213,7 @@ def install(environment, run=subprocess.run, download=fetch, apply=False):
         require(not temp.exists() and not temp.is_symlink(),
                 'Stale temporary file from an interrupted run; run --remove first: ' + str(temp))
     own_session(environment, directory)
+    session_text(directory)  # refuses a directory environment.d cannot hold, before any download
     report['status'] = 'build available'
     if not apply:
         return report

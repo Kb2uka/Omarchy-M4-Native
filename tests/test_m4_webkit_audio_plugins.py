@@ -281,14 +281,37 @@ class WebkitAudioPlugins(unittest.TestCase):
             MODULE.install(self.env, run=system, download=self.download, apply=True)
         self.assertFalse(self.session.exists())
 
+    def test_interrupted_session_write_is_finished_by_apply(self):
+        self.run_install({'gstreamer': '1.28.7-2'})
+        self.session.unlink()
+        temp = self.session.with_name(self.session.name + '.new')
+        temp.write_text('GST_PL')
+        report = self.run_install({'gstreamer': '1.28.7-2'}, apply=False)[1]
+        self.assertEqual(report['status'], 'plugins installed; session setting missing, run --apply')
+        self.assertTrue(temp.exists())
+        report = self.run_install({'gstreamer': '1.28.7-2'})[1]
+        self.assertEqual(report['status'], 'session setting added; ' + MODULE.RESTART)
+        self.assertEqual(list(self.session.parent.iterdir()), [self.session])
+        self.assertEqual(len(self.downloads), 1)
+
     def test_interrupted_session_write_is_cleared_by_remove(self):
         self.run_install({'gstreamer': '1.28.7-2'})
         self.session.unlink()
         self.session.with_name(self.session.name + '.new').write_text('GST_PL')
-        with self.assertRaisesRegex(RuntimeError, 'run --remove first'):
-            self.run_install({'gstreamer': '1.28.7-2'})
         MODULE.remove(self.env)
         self.assertEqual(list(self.session.parent.iterdir()), [])
+
+    def test_session_link_is_not_ours_even_with_our_text(self):
+        self.run_install({'gstreamer': '1.28.7-2'})
+        target = self.home / 'elsewhere.conf'
+        target.write_text(self.session.read_text())
+        self.session.unlink()
+        self.session.symlink_to(target)
+        with self.assertRaisesRegex(RuntimeError, 'session file this tool does not own'):
+            self.run_install({'gstreamer': '1.28.7-2'})
+        MODULE.remove(self.env)
+        self.assertTrue(self.session.is_symlink())
+        self.assertTrue(target.is_file())
 
     def test_system_package_after_session_only_install_asks_for_removal(self):
         self.run_install({'gstreamer': '1.28.7-2'})
@@ -304,10 +327,13 @@ class WebkitAudioPlugins(unittest.TestCase):
         self.assertFalse(self.session.exists())
 
     def test_plugin_dir_environment_d_cannot_hold_is_refused(self):
-        self.env['XDG_DATA_HOME'] = str(self.home / 'my data')
-        with self.assertRaisesRegex(RuntimeError, 'environment.d cannot hold'):
-            self.run_install({'gstreamer': '1.28.7-2'})
-        self.assertEqual(self.downloads, [])
+        for data in ('my data', 'a:b', 'cost$x'):
+            with self.subTest(data=data):
+                self.env['XDG_DATA_HOME'] = str(self.home / data)
+                with self.assertRaisesRegex(RuntimeError, 'environment.d cannot hold'):
+                    self.run_install({'gstreamer': '1.28.7-2'})
+                self.assertEqual(self.downloads, [])
+                self.assertFalse(self.session.exists())
 
     def test_image_manifest_ships_the_plugins(self):
         manifest = SOURCE.with_name('m4-desktop.packages').read_text().split()
