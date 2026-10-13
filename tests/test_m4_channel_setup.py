@@ -45,7 +45,7 @@ class FakeSystem:
         self.installed = installed
         self.commands, self.refresh_config = [], None
 
-    def __call__(self, command, check=False, capture_output=False, text=False, stdout=None):
+    def __call__(self, command, check=False, capture_output=False, text=False, stdout=None, stderr=None):
         self.commands.append(command)
         if 'm4-boot-compose' in ' '.join(map(str, command)):
             return types.SimpleNamespace(returncode=0, stdout=json.dumps({'status': self.status}), stderr='')
@@ -122,6 +122,19 @@ class SetupTests(unittest.TestCase):
         self.assertEqual((self.root / MODULE.CONF).read_text(), AIR_CONF)
         self.assertFalse((self.root / MODULE.SNIPPET).exists())
         self.assertEqual([c[-2:] for c in system.commands], [['-Q', 'linux-m4-omarchy'], ['-Q', 'gst-plugins-good']])
+
+    def test_package_probe_keeps_pacman_errors_off_screen(self):
+        system = FakeSystem(self.root)
+        calls = []
+        real = system.__call__
+
+        def recording(command, **options):
+            calls.append((command, options))
+            return real(command, **options)
+        with mock.patch.object(MODULE.subprocess, 'run', side_effect=recording):
+            MODULE.setup(self.root, apply=False, output=io.StringIO())
+        probe = next(options for command, options in calls if command[-2:] == ['-Q', 'gst-plugins-good'])
+        self.assertEqual((probe['stdout'], probe['stderr']), (subprocess.DEVNULL, subprocess.DEVNULL))
 
     def test_installed_gst_plugins_good_keeps_its_sinks(self):
         system = FakeSystem(self.root, installed=('linux-m4-omarchy', 'gst-plugins-good'))

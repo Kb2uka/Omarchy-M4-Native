@@ -98,6 +98,12 @@ class Machine:
         self.sandbox = root != Path('/')
 
     def pacman(self, *args, config=None):
+        command = self.pacman_command(*args, config=config)
+        if self.sandbox and args[0] == '-S':
+            command.append('--noscriptlet')
+        return self.run(command)
+
+    def pacman_command(self, *args, config=None):
         command = ['pacman']
         if self.sandbox:
             command += ['--root', str(self.root), '--dbpath', str(self.root / 'var/lib/pacman'),
@@ -105,10 +111,12 @@ class Machine:
                         '--cachedir', str(self.root / 'var/cache/pacman/pkg'),
                         '--logfile', str(self.root / 'var/log/pacman.log'),
                         '--hookdir', str(self.root / 'etc/pacman.d/hooks')]
-        command += ['--config', str(config or self.root / CONF), *args]
-        if self.sandbox and args[0] == '-S':
-            command.append('--noscriptlet')
-        return self.run(command)
+        return command + ['--config', str(config or self.root / CONF), *args]
+
+    def installed(self, name):
+        """Whether a package is installed, without pacman's 'not found' error on screen."""
+        command = self.pacman_command('-Q', name)
+        return subprocess.run(command, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
 
     def pacman_key(self, *args):
         command = ['pacman-key', '--config', str(self.root / CONF)]
@@ -166,7 +174,7 @@ def preflight(root, machine):
 def setup(root, apply=False, server=SERVER, key=PUBLIC_KEY, fingerprint=FINGERPRINT, output=sys.stderr):
     machine = Machine(root, output)
     preflight(root, machine)
-    packages = [p for p in PACKAGES if p != SINKS or machine.pacman('-Q', 'gst-plugins-good') != 0]
+    packages = [p for p in PACKAGES if p != SINKS or not machine.installed('gst-plugins-good')]
     conf = root / CONF
     text = conf.read_text()
     updated = with_include(text, include_line(root))
