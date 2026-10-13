@@ -17,8 +17,11 @@ main() {
   # Read nothing more from the pipe this script arrived on. Bash reads a piped
   # script a byte at a time, so after main it reaches end of input here, even
   # when a retried download handed it a prefix followed by the whole file; and
-  # nothing main starts can consume script bytes.
-  exec </dev/null
+  # nothing main starts can consume script bytes. A terminal is left alone, so
+  # text pasted into an interactive shell does not close it.
+  if [[ ! -t 0 ]]; then
+    exec </dev/null
+  fi
   local base="${M4_CONNECT_BASE:-https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages}"
   local expected='@SETUP_SHA256@'
   if [[ ! $expected =~ ^[0-9a-f]{64}$ ]]; then
@@ -44,4 +47,5 @@ main() {
   sudo python3 "$dir/omarchy-m4-setup.py" --apply
 }
 
-main "$@" </dev/null
+# No redirection here: bash would restore the pipe when main returns.
+main "$@"

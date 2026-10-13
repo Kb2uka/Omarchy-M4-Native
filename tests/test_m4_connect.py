@@ -104,6 +104,10 @@ class ConnectScript(unittest.TestCase):
                     self.assertEqual((self.home / 'setup-copy.py.ran').read_text(), '--apply')
                     self.assertEqual((self.home / 'sudo-stdin').read_text().strip(), '/dev/null')
 
+    def test_two_whole_copies_run_setup_once(self):
+        script = self.published()
+        self.assert_setup_applied_once(self.run_script(script + '\n' + script, piped=True))
+
     def test_inherited_environment_cannot_skip_setup(self):
         self.env['M4_CONNECT_STARTED'] = '1'
         self.assert_setup_applied_once(self.run_script(self.published(), piped=True))
