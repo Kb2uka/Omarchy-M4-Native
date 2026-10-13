@@ -87,7 +87,7 @@ It turns on M4 updates and, if your Air does not have it yet, the shutdown fix.
 curl -fsSL --retry 5 --retry-all-errors https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages/m4-connect.sh | bash
 ```
 
-3. If it ends with `"status": "connected; restart once to boot the updated boot.bin"`,
+3. If it ends with `"status": "connected; restart once to apply the update"`,
    **restart the Air.** If it ends with
    `"status": "connected; future M4 fixes arrive with omarchy-m4-update"`, you are done.
 

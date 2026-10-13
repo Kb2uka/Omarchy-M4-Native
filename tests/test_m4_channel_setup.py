@@ -150,6 +150,18 @@ class SetupTests(unittest.TestCase):
         self.assertTrue(result['restart_needed'])
         self.assertIn('restart once', result['status'])
 
+    def test_restart_reported_when_a_speaker_swap_is_pending(self):
+        self.put(MODULE.SPEAKER_MODULE, 'alpha.1 module')
+        self.put(MODULE.SPEAKER_STAGED, 'fixed module')
+        result = self.setup_with(FakeSystem(self.root))
+        self.assertEqual((result['restart_needed'], result['status']),
+                         (True, 'connected; restart once to apply the update'))
+        self.put(MODULE.SPEAKER_HOLD, '')
+        self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'held: nothing applies')
+        (self.root / MODULE.SPEAKER_HOLD).unlink()
+        self.put(MODULE.SPEAKER_MODULE, 'fixed module')
+        self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'already swapped')
+
     def test_boot_not_current_is_a_failure(self):
         with self.assertRaisesRegex(MODULE.Refused, 'boot.bin is not in step'):
             self.setup_with(FakeSystem(self.root, boot_status='refused'))

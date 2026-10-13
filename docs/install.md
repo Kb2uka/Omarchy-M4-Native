@@ -129,7 +129,7 @@ curl -fsSL --retry 5 --retry-all-errors https://github.com/Kb2uka/Omarchy-M4-Nat
 ```
 
 The last lines it prints include
-`"status": "connected; restart once to boot the updated boot.bin"`. Restart the
+`"status": "connected; restart once to apply the update"`. Restart the
 Air once. From then on, Shut Down turns it off, and M4 fixes arrive with the
 normal `omarchy update`. [Details, messages and rollback](updates.md).
 

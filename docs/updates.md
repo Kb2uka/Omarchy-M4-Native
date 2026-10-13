@@ -22,7 +22,7 @@ when both were published. It then runs the setup script once and deletes its
 temporary files. It must print `omarchy-m4-setup.py: OK`. The last lines then
 show one of:
 
-- `"status": "connected; restart once to boot the updated boot.bin"`: restart
+- `"status": "connected; restart once to apply the update"`: restart
   the Air once. This happens on an Air without update 1; it now gets the
   shutdown fix.
 - `"status": "connected; future M4 fixes arrive with omarchy-m4-update"`: done,
