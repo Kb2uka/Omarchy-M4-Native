@@ -173,16 +173,23 @@ class PolicyTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         root = Path(temp.name)
-        for name, kind in (('../etc/passwd', tarfile.REGTYPE), (tempfile.gettempdir() + '/m4-absolute-member', tarfile.REGTYPE),
-                           ('usr/bin/link', tarfile.SYMTYPE)):
+        outside = root / 'outside-target'
+        for name, kind, message in (('../escape', tarfile.REGTYPE, 'Unsafe member path'),
+                                    (str(outside), tarfile.REGTYPE, 'Unsafe member path'),
+                                    ('usr/bin/link', tarfile.SYMTYPE, 'Only regular files')):
             with self.subTest(name):
                 path = root / 'bad.tar'
                 with tarfile.open(path, 'w') as tar:
-                    info = tarfile.TarInfo(name)
-                    info.type = kind
-                    tar.addfile(info, io.BytesIO(b''))
-                with self.assertRaises(ValueError):
-                    CHECK.read_archive(path, root, 'bad')
+                    for member, data, member_kind in (('.PKGINFO', b'pkgname = x\n', tarfile.REGTYPE),
+                                                      (name, b'payload', kind)):
+                        info = tarfile.TarInfo(member)
+                        info.type, info.size = member_kind, len(data) if member_kind == tarfile.REGTYPE else 0
+                        tar.addfile(info, io.BytesIO(data))
+                out = root / 'out'
+                out.mkdir(exist_ok=True)
+                with self.assertRaisesRegex(ValueError, message):
+                    CHECK.read_archive(path, out, 'bad')
+                self.assertFalse(outside.exists())
 
     def test_other_module_release_is_rejected(self):
         files = {'usr/lib/modules/7.2.0-other/kernel/x.ko': (0o644, '1' * 64)}
