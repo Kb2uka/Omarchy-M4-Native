@@ -74,6 +74,25 @@ Every fixed boot loaded the new build ID, published `ready.json` and kept
 the register service active. The six boots before the cpufreq devicetree
 also started cleanly on the qualified module.
 
+## Existing installs
+
+Connected Airs get the fix from the M4 package channel: run
+`omarchy-m4-update`, then restart. The `omarchy-m4-speaker` package stages the
+module; at the next boot, before any audio module loads, `m4-speaker-module
+--boot` (run by a drop-in on `m4-j713-audio-register.service`) writes the
+module and then the manifest, changing only the six values that pin
+`snd-soc-j713-group.ko`. It never swaps a loaded module, because the audio
+readiness gate would fail for the rest of that session.
+
+```bash
+m4-speaker-module                  # state: stock, fixed or interrupted; changes nothing
+sudo m4-speaker-module --rollback  # restore the alpha.1 module at the next boot
+```
+
+The alpha.1 module and manifest are kept in `/var/lib/omarchy-m4/speaker-module/`.
+A rollback also sets a hold there, so the fix is not applied again until
+`/var/lib/omarchy-m4/speaker-module/hold` is removed.
+
 ## Limits
 
 - **Continuous control readers still starve protection.** With two loops
@@ -83,5 +102,9 @@ also started cleanly on the qualified module.
   Level reads go to the hardware
   under the same lock the daemon writes through. Serving reads from the stored
   values would remove that, and is a separate protection-stack change.
-- **The protection stack needs requalification for this module:** a speaker
-  test at the owner's listening level and the readiness checks on a fresh boot.
+- **Requalification (2026-10-13, owner's Air):** readiness reached `ready` on
+  two consecutive fresh boots with this module, and the owner played music at
+  100% volume for about 4.5 minutes: clean, protection active throughout
+  (`phase=3`), no faults and no gain limiting needed. A sustained run long
+  enough to make the thermal model limit gain has not been recorded. The
+  maintainer approved delivery through the package channel.

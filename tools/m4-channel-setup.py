@@ -34,7 +34,10 @@ ACjuCm7/wS3BkXKT/XBLOSU61X3JF2UI
 =FvsK
 -----END PGP PUBLIC KEY BLOCK-----
 '''
-PACKAGES = ('omarchy-m4-keyring', 'omarchy-m4-boot', 'linux-m4-omarchy', 'omarchy-m4-gst-audio')
+SPEAKER_STAGED = 'usr/lib/omarchy-m4/j713-audio/snd-soc-j713-group.ko'
+SPEAKER_MODULE = 'usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-j713-group.ko'
+SPEAKER_HOLD = 'var/lib/omarchy-m4/speaker-module/hold'
+PACKAGES = ('omarchy-m4-keyring', 'omarchy-m4-boot', 'linux-m4-omarchy', 'omarchy-m4-gst-audio', 'omarchy-m4-speaker')
 SINKS = 'omarchy-m4-gst-audio'  # gst-plugins-good already has both sinks and conflicts with it
 BOARD = b'apple,j713'
 CONF = 'etc/pacman.conf'
@@ -155,6 +158,14 @@ class Machine:
         return subprocess.run(command, check=False, stdout=sys.stderr).returncode
 
 
+def speaker_pending(root):
+    """Whether omarchy-m4-speaker staged a module that the next boot will swap in."""
+    staged, module = root / SPEAKER_STAGED, root / SPEAKER_MODULE
+    if not staged.is_file() or not module.is_file() or (root / SPEAKER_HOLD).exists():
+        return False
+    return hashlib.sha256(module.read_bytes()).digest() != hashlib.sha256(staged.read_bytes()).digest()
+
+
 def boot_digest(root):
     path = root / BOOT
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
@@ -222,10 +233,10 @@ def setup(root, apply=False, server=SERVER, key=PUBLIC_KEY, fingerprint=FINGERPR
             f'({boot}); boot.bin keeps booting what it booted before. See the message above, '
             'fix the cause, then run this again')
     machine.start_notifier()
-    restart = boot_digest(root) != before
+    restart = boot_digest(root) != before or speaker_pending(root)
     plan.update(applied=True, boot=boot, restart_needed=restart,
-                status=('connected; restart once to boot the updated boot.bin' if restart else
-                        'connected; future M4 fixes arrive with omarchy update'))
+                status=('connected; restart once to apply the update' if restart else
+                        'connected; future M4 fixes arrive with omarchy-m4-update'))
     return plan
 
 

@@ -37,7 +37,7 @@
 > [step-by-step version](docs/updates.md#step-by-step-instead).
 >
 > - It ends with **`restart once`**: restart the Air. That is all.
-> - It ends with **`future M4 fixes arrive with omarchy update`**: you are done.
+> - It ends with **`future M4 fixes arrive with omarchy-m4-update`**: you are done.
 >
 > From then on, M4 fixes arrive with the normal `omarchy update`, and a
 > **"M4 update available"** notification tells you when one is ready. Your
@@ -87,9 +87,9 @@ It turns on M4 updates and, if your Air does not have it yet, the shutdown fix.
 curl -fsSL --retry 5 --retry-all-errors https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages/m4-connect.sh | bash
 ```
 
-3. If it ends with `"status": "connected; restart once to boot the updated boot.bin"`,
+3. If it ends with `"status": "connected; restart once to apply the update"`,
    **restart the Air.** If it ends with
-   `"status": "connected; future M4 fixes arrive with omarchy update"`, you are done.
+   `"status": "connected; future M4 fixes arrive with omarchy-m4-update"`, you are done.
 
 If it prints `FAILED` or `omarchy-m4-setup: refused: …`, stop and
 [open an issue](https://github.com/Kb2uka/Omarchy-M4-Native/issues); your Air
@@ -126,6 +126,7 @@ once applies them:
 | Shut Down turns the Air off ([#48](https://github.com/Kb2uka/Omarchy-M4-Native/pull/48)) | `omarchy-m4-boot` 1-1 |
 | CPU frequency scaling on all ten cores ([#55](https://github.com/Kb2uka/Omarchy-M4-Native/pull/55)), with the real-time speaker protection it needs | `omarchy-m4-boot` 1-4 |
 | CPU die temperature in Linux ([#62](https://github.com/Kb2uka/Omarchy-M4-Native/pull/62)) | `omarchy-m4-boot` 1-4 |
+| Speaker protection starts reliably at boot ([#61](https://github.com/Kb2uka/Omarchy-M4-Native/pull/61)); applied at the next boot ([details](docs/j713-protection-startup.md#existing-installs)) | `omarchy-m4-speaker` 1-1 |
 | Sound in Zeus Link and other WebKitGTK and GStreamer apps ([#54](https://github.com/Kb2uka/Omarchy-M4-Native/pull/54), [#63](https://github.com/Kb2uka/Omarchy-M4-Native/pull/63)) | `omarchy-m4-gst-audio` 1.28.7-1 |
 
 A devicetree you applied by hand from the guides is kept; the update never
@@ -133,10 +134,9 @@ moves an Air back to an older one. An Air connected before
 `omarchy-m4-gst-audio` was published gets it by running the connect line once
 more.
 
-The speaker protection startup fix
-([#61](https://github.com/Kb2uka/Omarchy-M4-Native/pull/61)) has no install
-path for existing machines yet. The M4 packages deliberately exclude audio
-modules, and the fixed module still needs a speaker requalification.
+Get M4 fixes with **`omarchy-m4-update`**: it updates only the M4 packages.
+`omarchy update` updates the whole system too, which is not yet qualified on
+this hardware.
 
 ## Shutdown
 

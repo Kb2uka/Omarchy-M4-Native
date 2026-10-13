@@ -27,6 +27,10 @@ BUILD = load('tools/build-m4-packages.py')
 CHECK = load('tools/check-m4-packages.py')
 
 
+def file_sha(name):
+    return hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
+
+
 def recipe(name):
     return (PACKAGING / name / 'PKGBUILD').read_text()
 
@@ -196,6 +200,23 @@ class PolicyTests(unittest.TestCase):
                     CHECK.check_package(CHANNEL, *self.package('omarchy-m4-gst-audio', files, info=case_info,
                                                                version='1.28.7-1'))
 
+    def test_speaker_package_must_be_the_pin(self):
+        good = {path: (0o644, digest) for path, digest in CHANNEL['speaker_module'].items()}
+        good['usr/bin/m4-speaker-module'] = (0o755, file_sha('tools/m4-speaker-module.py'))
+        good[CHECK.SPEAKER_DROP_IN] = (0o644, file_sha('packaging/omarchy-m4/omarchy-m4-speaker/20-m4-speaker-module.conf'))
+        CHECK.check_package(CHANNEL, *self.package('omarchy-m4-speaker', good))
+        staged = next(iter(CHANNEL['speaker_module']))
+        for files, message in (({**good, staged: (0o644, '0' * 64)}, 'differs from the pin'),
+                               ({**good, 'usr/bin/m4-speaker-module': (0o755, '0' * 64)}, 'tool differs'),
+                               ({**good, CHECK.SPEAKER_DROP_IN: (0o644, '0' * 64)}, 'drop-in differs')):
+            with self.subTest(message):
+                with self.assertRaisesRegex(ValueError, message):
+                    CHECK.check_package(CHANNEL, *self.package('omarchy-m4-speaker', files))
+
+    def test_speaker_drop_in_cannot_block_registration(self):
+        text = (PACKAGING / 'omarchy-m4-speaker/20-m4-speaker-module.conf').read_text()
+        self.assertIn('ExecStartPre=-/usr/bin/m4-speaker-module --boot\n', text)
+
     def boot_package(self, files, info=None):
         return Path('omarchy-m4-boot-1-4-aarch64.pkg.tar.zst'), info or self.boot_info(), files, self.boot_root
 
@@ -214,7 +235,9 @@ class PolicyTests(unittest.TestCase):
         (self.boot_root / 'usr/bin/m4-boot-compose').write_bytes(composer)
         return {'usr/bin/m4-boot-compose': (0o755, hashlib.sha256(composer).hexdigest()),
                 'usr/share/libalpm/hooks/90-omarchy-m4-boot.hook': (0o644, hashlib.sha256(hook).hexdigest()),
-                'usr/lib/omarchy-m4/j713.dtb': (0o644, CHANNEL['devicetree']['sha256'])}
+                'usr/lib/omarchy-m4/j713.dtb': (0o644, CHANNEL['devicetree']['sha256']),
+                'usr/bin/omarchy-m4-update': (0o755, file_sha('tools/omarchy-m4-update')),
+                'usr/lib/omarchy-m4/m4-channel-setup.py': (0o644, file_sha('tools/m4-channel-setup.py'))}
 
     def test_protected_beats_an_allowlist_mistake(self):
         channel = json.loads(json.dumps(CHANNEL))
