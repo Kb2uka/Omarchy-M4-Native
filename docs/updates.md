@@ -23,49 +23,45 @@ No automatic M4 update command is promised by this first alpha.
 
 ## Shutdown fix for alpha.1
 
-**Update 1** (`v0.1.0-alpha.1-update.1`) fixes Shut Down restarting the Air
-([issue #24](https://github.com/Kb2uka/Omarchy-M4-Native/issues/24)). It
-changes only the devicetree inside the installed boot object, so alpha.1
-machines take it without reinstalling. It does not touch the kernel, root
-filesystem or packages. New installations from the alpha.1 installer need it
-too.
+**Who needs it:** every alpha.1 installation, new or old. **What it fixes:**
+Shut Down restarting the Air ([issue #24](https://github.com/Kb2uka/Omarchy-M4-Native/issues/24)).
+**Reinstall needed:** no.
 
-In a terminal on the Air:
+### Quick version
 
-```bash
-mkdir -p ~/m4-update-1 && cd ~/m4-update-1
-base=https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/v0.1.0-alpha.1-update.1
-curl -fLO "$base/j713-poweroff.dtb"
-curl -fLO "$base/m4-j713-update-boot-dtb.py"
-curl -fLO "$base/SHA256SUMS"
-sha256sum -c SHA256SUMS
-```
-
-Both files must report `OK`. The devicetree's SHA256 is
-`e54c77a760a5b696486f9d80c7c83ca4295d641113bb9e54d13e259863bf9b07`.
-
-Inspect first; nothing is written:
+Open a terminal on the Air, paste this whole block, press Enter, and type your
+password when asked:
 
 ```bash
-sudo python3 m4-j713-update-boot-dtb.py --dtb j713-poweroff.dtb
-```
-
-The updater refuses unless `/boot/efi/omarchy/boot.bin` holds exactly one
-alpha.1 poweroff devicetree followed by the initramfs payload, and unless the
-new file has the hash above. A machine that already has the update reports
-`already updated`.
-
-Apply, then restart once:
-
-```bash
+cd ~ && rm -rf m4-update-1 && mkdir m4-update-1 && cd m4-update-1 &&
+base=https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/v0.1.0-alpha.1-update.1 &&
+curl -fL -O "$base/j713-poweroff.dtb" -O "$base/m4-j713-update-boot-dtb.py" -O "$base/SHA256SUMS" &&
+sha256sum -c SHA256SUMS &&
 sudo python3 m4-j713-update-boot-dtb.py --dtb j713-poweroff.dtb --apply
 ```
 
-The previous file is kept as `boot.bin.pre-shutdown-flag` beside it, and the
-printed receipt includes the rollback command. After the restart,
-`journalctl -k -b | grep macsmc-reboot` should show only
+- `"status": "updated; takes effect at next boot"`: restart the Air. Done.
+- `"status": "already updated"`: you already have it.
+- `FAILED` or any error: stop. Nothing is written unless every check passes. Please
+  [open an issue](https://github.com/Kb2uka/Omarchy-M4-Native/issues).
+
+### What it does
+
+Update 1 (`v0.1.0-alpha.1-update.1`) changes only the devicetree inside
+`/boot/efi/omarchy/boot.bin`. It does not touch the kernel, root filesystem,
+packages or your files.
+
+`sha256sum -c` checks both downloads against the release checksums. The
+devicetree's SHA256 is
+`e54c77a760a5b696486f9d80c7c83ca4295d641113bb9e54d13e259863bf9b07`. The updater
+refuses unless `boot.bin` holds exactly one alpha.1 poweroff devicetree followed
+by the initramfs payload, and unless the new file has that hash. It keeps the
+previous file as `boot.bin.pre-shutdown-flag` and prints the rollback command.
+To look without changing anything, run the last line without `--apply`.
+
+After the restart, `journalctl -k -b | grep macsmc-reboot` should show only
 `Handling reboot and poweroff requests via SMC`, with no `Missing NVMEM cell`
-lines. Shut Down then leaves the Air off.
+lines.
 
 **Rollback** if the Air does not boot: hold the power button to reach startup
 options, start macOS, mount the `EFI - OMARC` partition, and copy

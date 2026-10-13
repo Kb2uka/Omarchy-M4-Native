@@ -115,11 +115,29 @@ installation or repeatedly force power off to diagnose a stalled handoff.
 Once setup completes and the desktop works, eject and remove the USB. Earlier
 private installations had working keyboard, trackpad, audio and video. The
 replacement's attended installation is still pending; intermittent trackpad
-AFE startup and physical shutdown remain open qualification items.
+AFE startup remains an open qualification item.
+
+## Last step: install update 1 (required)
+
+The alpha.1 installer still makes **Shut Down restart the Air**. Fix it once:
+open a terminal on the Air, paste this whole block, press Enter, and type your
+password when asked:
+
+```bash
+cd ~ && rm -rf m4-update-1 && mkdir m4-update-1 && cd m4-update-1 &&
+base=https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/v0.1.0-alpha.1-update.1 &&
+curl -fL -O "$base/j713-poweroff.dtb" -O "$base/m4-j713-update-boot-dtb.py" -O "$base/SHA256SUMS" &&
+sha256sum -c SHA256SUMS &&
+sudo python3 m4-j713-update-boot-dtb.py --dtb j713-poweroff.dtb --apply
+```
+
+When it prints `"status": "updated; takes effect at next boot"`, restart the
+Air. From then on, Shut Down turns it off.
+[Details and rollback](updates.md#shutdown-fix-for-alpha1).
 
 For Wi-Fi, open a terminal and run `nmtui`. Widevine acquisition needs internet
 access and a closed browser; finish that setup before expecting protected movies.
 Ordinary browser video and protected movies may use different decoders.
 
-Read `UPDATES.md` before accepting a system update. Read the shutdown workaround
-in `KNOWN-LIMITATIONS.md` before powering off.
+Read `UPDATES.md` before accepting a system update. Until update 1 is applied,
+read the shutdown note in `KNOWN-LIMITATIONS.md` before powering off.
