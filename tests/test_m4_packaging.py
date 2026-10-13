@@ -156,7 +156,11 @@ class PolicyTests(unittest.TestCase):
                     tar.addfile(info, io.BytesIO(data))
             out = root / (path.stem + '-root')
             out.mkdir()
-            return CHECK.read_archive(path, out, path.name)
+            result = CHECK.read_archive(path, out, path.name)
+            self.assertEqual((out / 'usr/bin/m4-boot-compose').read_bytes(), b'composer',
+                             'payload files are written out for the content checks')
+            self.assertFalse((out / '.INSTALL').exists() or (out / '.MTREE').exists())
+            return result
 
         info, files = archive(b'post_install() { :; }\n')
         self.assertEqual(info['depend'], ['python'])
@@ -169,7 +173,8 @@ class PolicyTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         root = Path(temp.name)
-        for name, kind in (('../etc/passwd', tarfile.REGTYPE), ('usr/bin/link', tarfile.SYMTYPE)):
+        for name, kind in (('../etc/passwd', tarfile.REGTYPE), ('/etc/passwd', tarfile.REGTYPE),
+                           ('usr/bin/link', tarfile.SYMTYPE)):
             with self.subTest(name):
                 path = root / 'bad.tar'
                 with tarfile.open(path, 'w') as tar:
