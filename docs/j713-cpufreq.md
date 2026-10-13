@@ -80,8 +80,10 @@ Two userspace changes ship with it:
   existing `LimitRTPRIO=50`. The daemon must renew its lease within 10.7 ms of
   each 21.3 ms capture period. As a normal task it misses that under full CPU
   load and fails closed, leaving the speakers silent until it is restarted.
-  The first boot with the new devicetree hit it at startup. See the table
-  below.
+  See the table below. Real-time scheduling does **not** fix the boot-time
+  failure: that is an I2C budget overrun in the protection driver, fixed
+  separately in [protection startup](j713-protection-startup.md) (#61). Ship
+  this devicetree only together with, or after, that fix.
 
 ## Results on the owner's Air
 
@@ -129,8 +131,12 @@ six or eight starts per row:
 Without load, three restarts on the cpufreq devicetree all reached nominal
 gain, on P cores at 912 MHz and on E cores. Six earlier boots on the older
 devicetrees started cleanly. The first cpufreq boot, without the real-time
-setting, failed with `J713 backlog before renewal`. The next cpufreq boot, with
-the setting, started cleanly. One boot is not a boot-time qualification.
+setting, failed with `J713 backlog before renewal`. With the real-time setting,
+two of three further cpufreq boots failed the same way, so on the qualified
+protection module the cpufreq devicetree started protection in 1 of 4 boots.
+Traces show the daemon alone on the I2C bus with its startup amp writes
+overrunning the renewal window; the CPU clock does not change the transfer time.
+With the fixed protection module (#61), 6 of 6 cpufreq boots started cleanly.
 
 ## Existing installs
 
