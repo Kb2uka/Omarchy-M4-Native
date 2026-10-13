@@ -247,6 +247,15 @@ and the byte offset plus bit for `shutdown_flag`. An explicit Abbey ADT
 property set or an in-tree Abbey layout with those definitions would satisfy
 that requirement; a Stowe or Chapel offset alone would not.
 
+Update (issue #24): alpha.1 shipped the reboot child without cells, and
+shutdown then restarted the Air. The poweroff devicetree now supplies the four
+cells at Abbey's legacy scratchpad (`0xf801`, `0xf802` nibbles, `0xf80f` bit 3).
+The evidence goes beyond a Chapel offset alone: Abbey's ADT
+`pm_setting`/`rtc_scrpad`/`leg_scrpad` triple is identical to T6030 Chapel's.
+`info-leg_scrpad` equals the DT cell base in both families with public ADTs.
+The live PMU bytes fit the layout. Physical verification is pending; see
+[J713 SMC poweroff handler](j713-poweroff.md).
+
 ## T8132 SPI slice
 
 The SPI slice adds disabled `spi2` and `spi4` controller nodes. Their terminal

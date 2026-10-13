@@ -63,28 +63,36 @@ and physical shutdown remain unqualified. See the [startup repair record](docs/j
 [known limitations](docs/release-limitations.md).
 
 **Read the [update policy](docs/updates.md) before accepting system updates.**
-There is no coordinated M4 update channel in this alpha. A push to `main` does
-not update installed machines.
+There is no coordinated M4 update channel in this alpha yet, and a push to
+`main` does not update installed machines. Fixes ship as small in-place updates
+with their own instructions; the first is the
+[shutdown fix](docs/updates.md#shutdown-fix-for-alpha1). M4 fixes are planned to
+become signed packages delivered by the normal system update
+([issue #49](https://github.com/Kb2uka/Omarchy-M4-Native/issues/49)).
 
 ## Known shutdown issue
 
-**Normal shutdown can hang without powering off the Air.** The owner reproduced
-this on the fresh **v0.1.0-alpha.1 private build 2** installation: Omarchy closes
-and shutdown messages appear, but the machine stays powered on. The same symptom
-was reported on the earlier installation. Follow
+**On v0.1.0-alpha.1, choosing Shut Down restarts the Air instead of turning it
+off.** Earlier builds hung after the shutdown messages instead. Follow
 [issue #24](https://github.com/Kb2uka/Omarchy-M4-Native/issues/24).
 
-**Owner-observed workaround on this Air:** save your work, choose **Shut Down**
-in Omarchy, wait until shutdown has stalled, then hold the power button to turn
-the machine off. Holding the power button while the Omarchy desktop is still
-running instead made the Air loop and start back up. The order matters for the
-reported workaround; it is a forced power-off, not a normal shutdown fix.
+Cause: alpha.1 enabled the SMC poweroff driver without the PMU shutdown-state
+cells. The driver then sends the SMC off command without first setting the
+PMU's stay-off flag, and the firmware starts the machine again. The boot log
+shows `macsmc-reboot: Missing NVMEM cell shutdown_flag`.
 
-The next candidate enables the existing SMC poweroff handler by adding its
-missing device-tree child. [Source and evidence](docs/j713-poweroff.md) explain
-the narrow change and its limits. Physical poweroff and staying off remain
-unverified; issue #24 stays open until the attended check. Working login,
-trackpad, audio and video do not establish working shutdown.
+The correction adds Abbey's four shutdown-state cells to the devicetree; no
+kernel change is involved. Installed alpha.1 machines can take it in place,
+without reinstalling: see [the in-place update](docs/updates.md#shutdown-fix-for-alpha1).
+[Source and evidence](docs/j713-poweroff.md) explain the change and its limits.
+
+The fix was verified on the owner's Air: after the update, the driver
+probed with all four cells, Shut Down left the Air off, and the next power-on
+booted normally.
+
+**Without the update,** only a forced power-off (holding the power button)
+keeps the Air off. Save your work first. A long press sometimes still ends in
+a restart depending on its timing; hold it again if that happens.
 
 ## What has been observed on the test Air
 

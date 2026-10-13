@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 KB2UKA
-"""Add the SMC poweroff child to the exact retained portable J713 DTB."""
+"""Add the SMC poweroff child and its PMU state cells to the exact retained portable J713 DTB."""
 import argparse
 import hashlib
 import json
@@ -13,6 +13,14 @@ import tempfile
 BASE_SHA256 = '3ba58a528c3c1f07bbde6704231689a8a9eba1b4a3cc9a73f62654544b11e5e3'
 SMC = '/soc/smc@38c600000'
 CHILD = SMC + '/reboot'
+LAYOUT = '/soc/spmi@388714000/pmic@e/nvmem-layout'
+# Driver cell name -> (node, reg, bits). Abbey legacy scratchpad 0xf800 (T6030 Chapel layout).
+CELLS = {
+    'shutdown_flag': ('shutdown-flag@f80f,3', (0xf80f, 1), (3, 1)),
+    'boot_stage': ('boot-stage@f801', (0xf801, 1), None),
+    'boot_error_count': ('boot-error-count@f802,0', (0xf802, 1), (0, 4)),
+    'panic_count': ('panic-count@f802,4', (0xf802, 1), (4, 4)),
+}
 
 
 def require(value, message):
@@ -94,15 +102,30 @@ def build(base, output, overlay, dtc='dtc', fdtoverlay='fdtoverlay'):
         subprocess.run([fdtoverlay, '-i', str(base), '-o', str(candidate), str(compiled)], check=True)
         data = candidate.read_bytes()
         new, new_reservations, new_cpu = tree(data)
+        require(new_reservations == reservations and new_cpu == cpu and
+                set(new) == set(old) | {CHILD} | {LAYOUT + '/' + c[0] for c in CELLS.values()},
+                'Candidate changed data beyond the SMC reboot child and its PMU cells')
+        used = {p['phandle'] for p in old.values() if 'phandle' in p}
         expected = dict(old)
-        expected[CHILD] = {'compatible': b'apple,smc-reboot\0'}
-        require(new == expected and new_reservations == reservations and new_cpu == cpu,
-                'Candidate changed data beyond the single SMC reboot child')
+        handles = []
+        for node, reg, bits in CELLS.values():
+            props = new[LAYOUT + '/' + node]
+            require(set(props) == {'reg', 'phandle'} | ({'bits'} if bits else set()) and
+                    len(props['phandle']) == 4 and props['phandle'] not in used,
+                    'Candidate changed data beyond the SMC reboot child and its PMU cells')
+            used.add(props['phandle'])
+            handles.append(props['phandle'])
+            expected[LAYOUT + '/' + node] = dict(props, reg=struct.pack('>2I', *reg),
+                                                 **({'bits': struct.pack('>2I', *bits)} if bits else {}))
+        expected[CHILD] = {'compatible': b'apple,smc-reboot\0', 'nvmem-cells': b''.join(handles),
+                           'nvmem-cell-names': b''.join(n.encode() + b'\0' for n in CELLS)}
+        require(new == expected, 'Candidate changed data beyond the SMC reboot child and its PMU cells')
         require(base.read_bytes() == original, 'Base changed during build')
         with output.open('xb') as stream:
             stream.write(data)
     return {'base_sha256': sha(original), 'output_sha256': sha(data), 'output_bytes': len(data),
             'overlay_sha256': sha(overlay.read_bytes()), 'added_node': CHILD,
+            'added_nvmem_cells': {name: LAYOUT + '/' + c[0] for name, c in CELLS.items()},
             'other_properties_reservations_and_boot_cpu_unchanged': True,
             'kernel_changed': False, 'hardware_poweroff_verified': False}
 
