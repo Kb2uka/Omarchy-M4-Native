@@ -1,8 +1,8 @@
 # Updates for the experimental M4 build
 
 M4 kernel, devicetree and boot fixes ship as **signed packages** from this
-project's `[omarchy-m4]` repository. Connect each Air once; after that they
-arrive with the normal `omarchy update`, and the boot object is updated for you.
+project's `[omarchy-m4]` repository. Connect each Air once; after that, run
+`omarchy-m4-update` to get them, and the boot object is updated for you.
 Nothing is reinstalled. How it works: [package-channel.md](package-channel.md).
 
 ## Connect once
