@@ -48,8 +48,31 @@ bash "$HOME/Downloads/download-j713.command"
 The downloader reassembles the installer and verifies the release checksums.
 Then follow the **[step-by-step installation guide](docs/install.md)**. This
 installer starts in macOS; it is not a bootable PC ISO. GitHub's automatic
-“Source code” ZIP is not the installer. Release downloads require repository
-access while this repository is private.
+“Source code” ZIP is not the installer.
+
+### Then install update 1 — everyone, once
+
+**Every alpha.1 install needs this, whether you installed today or earlier.**
+Without it, **Shut Down restarts the Air instead of turning it off.**
+
+1. On the Air, open a terminal in Omarchy.
+2. Copy this whole block, paste it, press Enter, and type your password when asked:
+
+```bash
+cd ~ && rm -rf m4-update-1 && mkdir m4-update-1 && cd m4-update-1 &&
+base=https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/v0.1.0-alpha.1-update.1 &&
+curl -fL -O "$base/j713-poweroff.dtb" -O "$base/m4-j713-update-boot-dtb.py" -O "$base/SHA256SUMS" &&
+sha256sum -c SHA256SUMS &&
+sudo python3 m4-j713-update-boot-dtb.py --dtb j713-poweroff.dtb --apply
+```
+
+3. When it prints `"status": "updated; takes effect at next boot"`, **restart the Air.** Done.
+
+If it prints `"status": "already updated"`, you already have it. If it prints
+`FAILED` or an error, stop and [open an issue](https://github.com/Kb2uka/Omarchy-M4-Native/issues);
+nothing is written unless every check passes. No reinstall, and your files are
+not touched.
+[Details and rollback](docs/updates.md#shutdown-fix-for-alpha1).
 
 Two attended private installations reached the desktop. A later October 12
 candidate completed account setup but failed graphics and audio startup, leaving
@@ -58,7 +81,7 @@ unrelated device waits as fatal prerequisites. The replacement corrects those
 startup dependencies, enables an authenticated recovery console, and keeps
 kernel messages from displacing the setup form. **The replacement still needs
 an attended installation before publication.** Intermittent trackpad AFE startup
-and physical shutdown remain unqualified. See the [startup repair record](docs/j713-first-boot-recovery.md),
+remains unqualified; shutdown needs [update 1](docs/updates.md#shutdown-fix-for-alpha1). See the [startup repair record](docs/j713-first-boot-recovery.md),
 [qualification record](docs/experimental-release.md) and
 [known limitations](docs/release-limitations.md).
 
@@ -70,7 +93,7 @@ with their own instructions; the first is the
 become signed packages delivered by the normal system update
 ([issue #49](https://github.com/Kb2uka/Omarchy-M4-Native/issues/49)).
 
-## Known shutdown issue
+## Shutdown fix (update 1)
 
 **On v0.1.0-alpha.1, choosing Shut Down restarts the Air instead of turning it
 off.** Earlier builds hung after the shutdown messages instead. Follow
@@ -126,7 +149,7 @@ Widevine binaries and preset personal consent. Speaker filters are prepared
 from the owner's installed macOS components and must match the expected hashes
 before partitioning begins. Unrecognized inputs are refused.
 
-Shutdown, the front USB port, camera, suspend/resume, broad hardware coverage
+The front USB port, camera, suspend/resume, broad hardware coverage
 and coordinated updates remain open work. This alpha is not a daily-driver,
 safe-update or all-M4 compatibility promise. See the
 [source package guide](docs/release-source.md) for source/build boundaries.
