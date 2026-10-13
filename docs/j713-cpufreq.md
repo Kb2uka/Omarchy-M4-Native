@@ -170,11 +170,11 @@ sudo python3 m4-j713-update-boot-dtb.py --dtb j713-cpufreq.dtb
 sudo python3 m4-j713-update-boot-dtb.py --dtb j713-cpufreq.dtb --apply
 ```
 
-From `omarchy-m4-boot` 1-2 on, the M4 package channel recognizes this
+From `omarchy-m4-boot` 1-3 on (1-2 was never published), the M4 package channel recognizes this
 devicetree and keeps it when a package update recomposes `boot.bin`; see
 [package channel](package-channel.md). The published 1-1 composer does not know
 it: it refuses and leaves `boot.bin` untouched. Join the channel on a cpufreq
-machine only after 1-2 is published.
+machine only after 1-3 is published.
 
 Then restart. If the post-boot hook was disabled (renamed to
 `50-m4-main-placement.sample`), rename it back to enable the clamp. An old copy
@@ -196,8 +196,9 @@ then restart. From macOS, copy the same file on the `EFI - OMARC` partition.
 ## Limits
 
 - No CPU state above the handoff clock is offered: E stays at 900 MHz and P
-  peaks at 1800 MHz, as before. Higher states need a CPU temperature source
-  and a thermal policy first.
+  peaks at 1800 MHz, as before. Higher states need a CPU thermal policy first.
+  [CPU die temperature](j713-cpu-temperature.md) now makes the temperature
+  visible and records bounded measurements above the handoff clocks (#60).
 - CPU idle states are still absent (`cpuidle: none`, `idle=nop`).
 - No energy model is provided, so energy-aware scheduling stays off.
   Placement uses capacity only.

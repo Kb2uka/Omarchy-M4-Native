@@ -1,0 +1,55 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
+// Copyright (c) 2026 KB2UKA
+/dts-v1/;
+/plugin/;
+
+/*
+ * Reporting-only CPU die temperature channels for macsmc-hwmon. Nothing reads
+ * these for control; they make the CPU temperature visible in Linux.
+ *
+ * Keys come from a read-only survey of the owner's J713 SMC (2,129 keys, 200
+ * temperature keys) at the handoff clocks:
+ * - TCMz followed the hottest of every Tp and Te key within 0.5 C (never
+ *   above it) in all 239 one-second samples, under idle, P-cluster and
+ *   E-cluster load. It is the SMC's own CPU-max reading.
+ * - Tp01/Tp05/Tp09/Tp0D rose 8.0 C on average with four P cores loaded at
+ *   2088 MHz against 3.6 C with six E cores loaded at 2172 MHz; the Te keys
+ *   rose 5.5 C and 6.5 C. The names match the six channels upstream reads
+ *   on T8140.
+ * The SMC refreshes these keys about once a second.
+ */
+/ {
+	fragment@0 {
+		target-path = "/soc/smc@38c600000/hwmon";
+		__overlay__ {
+			temperature-TCMz {
+				apple,key-id = "TCMz";
+				label = "CPU Die Max";
+			};
+			temperature-Tp01 {
+				apple,key-id = "Tp01";
+				label = "P-cluster Temperature 1";
+			};
+			temperature-Tp05 {
+				apple,key-id = "Tp05";
+				label = "P-cluster Temperature 2";
+			};
+			temperature-Tp09 {
+				apple,key-id = "Tp09";
+				label = "P-cluster Temperature 3";
+			};
+			temperature-Tp0D {
+				apple,key-id = "Tp0D";
+				label = "P-cluster Temperature 4";
+			};
+			temperature-Te05 {
+				apple,key-id = "Te05";
+				label = "E-cluster Temperature 1";
+			};
+			temperature-Te0S {
+				apple,key-id = "Te0S";
+				label = "E-cluster Temperature 2";
+			};
+		};
+	};
+};

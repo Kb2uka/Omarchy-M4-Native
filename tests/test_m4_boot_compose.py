@@ -321,7 +321,7 @@ class ComposeTests(unittest.TestCase):
         updater = load_tool('tools/m4-j713-update-boot-dtb.py')
         self.assertEqual(MODULE.KNOWN_KERNELS, {channel['kernel']['image_sha256']: channel['kernel']['release']})
         self.assertEqual(list(MODULE.KNOWN_DTBS),
-                         [updater.ALPHA1_DTB, updater.POWEROFF_DTB, updater.CPUFREQ_DTB])
+                         [updater.ALPHA1_DTB, updater.POWEROFF_DTB, updater.CPUFREQ_DTB, updater.CPUTEMP_DTB])
         self.assertEqual(channel['devicetree']['sha256'], updater.POWEROFF_DTB)
 
 
