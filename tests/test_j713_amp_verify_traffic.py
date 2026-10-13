@@ -44,6 +44,13 @@ class LevelWriteTraffic(unittest.TestCase):
         self.assertEqual(calls(self.level, 'amp_store', 'amp_write', 'amp_read', 'verify_limits'),
                          ['amp_store', 'verify_limits'])
 
+    def test_successful_store_is_always_verified(self):
+        lines = [l.strip() for l in self.level.splitlines()]
+        self.assertIn('if (write) ret = amp_store(a, index, reg, *value, gen);', lines)
+        self.assertIn('if (!ret && write) *stored = *value;', lines)
+        self.assertIn('if (!ret) ret = verify_limits(a, index, mode, gen);', lines)
+        self.assertIn('if (!ret) *value = *stored;', lines)
+
     def test_verification_reads_every_limit_register(self):
         verify = function(self.text, 'verify_limits')
         registers = re.findall(r'expect_byte\(a, i, (0x[0-9a-f]+|\d+),', verify)

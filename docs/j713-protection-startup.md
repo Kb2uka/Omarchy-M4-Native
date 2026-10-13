@@ -49,8 +49,12 @@ made a normal start fail 5 of 5 times. Each daemon write then waited about
 (`amp_store()`), then runs `verify_limits()`. That reads the page, gain, DVC
 and mode registers back against the stored values, so every register,
 including the new one, is still checked after every change. If verification
-fails, the stored value goes back to the old one and the group is revoked,
-as before. A level change now takes 5 transfers instead of 7, and a read
+fails, the group is revoked, as before. New in this change: the stored value
+also goes back to the old one; the previous code committed the new value
+before `verify_limits()` and kept it on failure. A mismatch on the written
+register now reports `-EPROTO` (from `verify_limits()`) instead of `-EIO`;
+either error revokes the group, and the daemon fails closed on any control
+write error. A level change now takes 5 transfers instead of 7, and a read
 takes 4 instead of 5. The worst-case period drops to 4 × 5 × 0.368 ≈ 7.4 ms of
 bus time.
 
