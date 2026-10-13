@@ -34,7 +34,8 @@ ACjuCm7/wS3BkXKT/XBLOSU61X3JF2UI
 =FvsK
 -----END PGP PUBLIC KEY BLOCK-----
 '''
-PACKAGES = ('omarchy-m4-keyring', 'omarchy-m4-boot', 'linux-m4-omarchy')
+PACKAGES = ('omarchy-m4-keyring', 'omarchy-m4-boot', 'linux-m4-omarchy', 'omarchy-m4-gst-audio')
+SINKS = 'omarchy-m4-gst-audio'  # gst-plugins-good already has both sinks and conflicts with it
 BOARD = b'apple,j713'
 CONF = 'etc/pacman.conf'
 SNIPPET = 'etc/pacman.d/omarchy-m4.conf'
@@ -97,6 +98,12 @@ class Machine:
         self.sandbox = root != Path('/')
 
     def pacman(self, *args, config=None):
+        command = self.pacman_command(*args, config=config)
+        if self.sandbox and args[0] == '-S':
+            command.append('--noscriptlet')
+        return self.run(command)
+
+    def pacman_command(self, *args, config=None):
         command = ['pacman']
         if self.sandbox:
             command += ['--root', str(self.root), '--dbpath', str(self.root / 'var/lib/pacman'),
@@ -104,10 +111,12 @@ class Machine:
                         '--cachedir', str(self.root / 'var/cache/pacman/pkg'),
                         '--logfile', str(self.root / 'var/log/pacman.log'),
                         '--hookdir', str(self.root / 'etc/pacman.d/hooks')]
-        command += ['--config', str(config or self.root / CONF), *args]
-        if self.sandbox and args[0] == '-S':
-            command.append('--noscriptlet')
-        return self.run(command)
+        return command + ['--config', str(config or self.root / CONF), *args]
+
+    def installed(self, name):
+        """Whether a package is installed, without pacman's 'not found' error on screen."""
+        command = self.pacman_command('-Q', name)
+        return subprocess.run(command, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
 
     def pacman_key(self, *args):
         command = ['pacman-key', '--config', str(self.root / CONF)]
@@ -165,13 +174,14 @@ def preflight(root, machine):
 def setup(root, apply=False, server=SERVER, key=PUBLIC_KEY, fingerprint=FINGERPRINT, output=sys.stderr):
     machine = Machine(root, output)
     preflight(root, machine)
+    packages = [p for p in PACKAGES if p != SINKS or not machine.installed('gst-plugins-good')]
     conf = root / CONF
     text = conf.read_text()
     updated = with_include(text, include_line(root))
     wanted = snippet(server)
     current = (root / SNIPPET).read_text() if (root / SNIPPET).is_file() else None
     plan = {'trust_key': fingerprint, 'snippet': str(root / SNIPPET), 'snippet_changes': current != wanted,
-            'pacman_conf_changes': updated is not None, 'install': list(PACKAGES), 'applied': False}
+            'pacman_conf_changes': updated is not None, 'install': packages, 'applied': False}
     if not apply:
         plan['status'] = 'ready; rerun with --apply'
         return plan
@@ -197,7 +207,7 @@ def setup(root, apply=False, server=SERVER, key=PUBLIC_KEY, fingerprint=FINGERPR
             only.write_text('[options]\nArchitecture = auto\nSigLevel = Required DatabaseRequired\n' +
                             include_line(root) + '\n')
             require(machine.pacman('-Sy', config=only) == 0, 'Could not download the M4 package database')
-            require(machine.pacman('-S', '--needed', '--noconfirm', *PACKAGES) == 0, 'Package installation failed')
+            require(machine.pacman('-S', '--needed', '--noconfirm', *packages) == 0, 'Package installation failed')
         except (Refused, OSError) as error:
             # A configured but unreachable repository would stop every later system update.
             write(conf, text, conf.stat().st_mode & 0o777)

@@ -12,8 +12,37 @@ reviewers.
 | Package | Installs | Version at launch |
 | --- | --- | --- |
 | `omarchy-m4-keyring` | The channel's public signing key for `pacman-key` | `20261012-1` |
-| `omarchy-m4-boot` | `m4-boot-compose`, its pacman hook, the J713 devicetree, and the daily update notifier | `1-1` |
+| `omarchy-m4-boot` | `m4-boot-compose`, its pacman hook, the J713 devicetree, the daily update notifier and, from 1-4, the real-time speaker protection drop-in | `1-1`; `1-4` adds CPU frequency scaling and CPU temperature |
 | `linux-m4-omarchy` | The J713 kernel image and its modules | `7.1.9.m4.20261008-2` |
+| `omarchy-m4-gst-audio` | GStreamer's `autodetect` and `pulse` sinks in `/usr/lib/gstreamer-1.0`, for WebKitGTK and GStreamer apps | `1.28.7-1` |
+
+### omarchy-m4-boot 1-4 and omarchy-m4-gst-audio 1.28.7-1
+
+- **Devicetree:** `08e8e719…` (`j713-cpu-temperature`): update 1 plus [CPU
+  frequency scaling](j713-cpufreq.md) and [CPU die
+  temperature](j713-cpu-temperature.md). It was rebuilt byte for byte with DTC
+  1.8.1 and is pinned in the `package-inputs` release. The composer moves an Air
+  on alpha.1 or update 1 to it, and keeps it on an Air that already has it.
+- **Real-time speaker protection:**
+  `/usr/lib/systemd/system/speakersafetyd-j713.service.d/50-realtime.conf`
+  (`SCHED_FIFO` 20). The CPU frequency devicetree needs it, or speaker
+  protection can fail at boot. It is the one file a channel package may install
+  under a protected prefix (`protected_exceptions` in `channel.json`).
+- **GStreamer sinks:** alpha.1 has GStreamer 1.28.7-2 but no matching
+  `gst-plugins-good` on the mirrors, so WebKitGTK apps had no `autoaudiosink`.
+  `omarchy-m4-gst-audio` installs only `libgstautodetect.so` and
+  `libgstpulseaudio.so`. They are the files `tools/m4-webkit-audio-plugins.py`
+  built on the owner's Air (hashes pinned in `channel.json`), and the upstream
+  source is mirrored in `package-inputs`. Installing them system-wide lets the
+  WebKitGTK sandbox see them without `GST_PLUGIN_PATH`. The package conflicts
+  with `gst-plugins-good`, so a later full install of that package replaces it.
+  Nothing depends on it, so that replacement is never blocked. The connect step
+  installs it; an Air connected before 1.28.7-1 was published gets it by running
+  the connect line once more.
+- **Not in the channel:** the core-placement helper (per user, under `~/.local`;
+  an old copy refuses to pin on this devicetree) and the speaker protection
+  startup module ([#61](https://github.com/Kb2uka/Omarchy-M4-Native/pull/61)),
+  which still needs requalification at sustained listening level.
 
 At launch the channel delivers exactly what a fully updated alpha.1 Air already
 runs:

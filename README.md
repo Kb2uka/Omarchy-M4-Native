@@ -118,19 +118,20 @@ Arch Linux ARM and Omarchy updates remain unqualified on this hardware; read the
 
 ### What `omarchy update` brings, and what is still manual
 
-After the connect step, `omarchy update` keeps the M4 kernel, the devicetree
-and the boot object (`boot.bin`) current, and restarting once applies them. It
-also keeps any later devicetree you applied by hand, such as the CPU frequency
-or CPU temperature one below; it never reverts those.
+After the connect step, `omarchy update` keeps these current, and restarting
+once applies them:
 
-These fixes are not in the M4 packages yet. Each is optional, and each guide
-has an inspect step, a rollback and the exact commands:
-
-| Fix | Apply it with |
+| Fix | Since |
 | --- | --- |
-| CPU frequency scaling, all ten cores ([#55](https://github.com/Kb2uka/Omarchy-M4-Native/pull/55)) | [CPU frequency scaling: existing installs](docs/j713-cpufreq.md#existing-installs) |
-| CPU die temperature ([#62](https://github.com/Kb2uka/Omarchy-M4-Native/pull/62)), applied after the CPU frequency one | [CPU temperature: existing installs](docs/j713-cpu-temperature.md#existing-installs) |
-| Sound in Zeus Link and other WebKitGTK apps ([#54](https://github.com/Kb2uka/Omarchy-M4-Native/pull/54), [#63](https://github.com/Kb2uka/Omarchy-M4-Native/pull/63)) | [WebKit audio: existing installs](docs/j713-webkit-audio.md#existing-installs), then log out and back in |
+| Shut Down turns the Air off ([#48](https://github.com/Kb2uka/Omarchy-M4-Native/pull/48)) | `omarchy-m4-boot` 1-1 |
+| CPU frequency scaling on all ten cores ([#55](https://github.com/Kb2uka/Omarchy-M4-Native/pull/55)), with the real-time speaker protection it needs | `omarchy-m4-boot` 1-4 |
+| CPU die temperature in Linux ([#62](https://github.com/Kb2uka/Omarchy-M4-Native/pull/62)) | `omarchy-m4-boot` 1-4 |
+| Sound in Zeus Link and other WebKitGTK and GStreamer apps ([#54](https://github.com/Kb2uka/Omarchy-M4-Native/pull/54), [#63](https://github.com/Kb2uka/Omarchy-M4-Native/pull/63)) | `omarchy-m4-gst-audio` 1.28.7-1 |
+
+A devicetree you applied by hand from the guides is kept; the update never
+moves an Air back to an older one. An Air connected before
+`omarchy-m4-gst-audio` was published gets it by running the connect line once
+more.
 
 The speaker protection startup fix
 ([#61](https://github.com/Kb2uka/Omarchy-M4-Native/pull/61)) has no install

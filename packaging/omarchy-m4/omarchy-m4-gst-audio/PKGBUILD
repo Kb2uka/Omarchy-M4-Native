@@ -1,0 +1,25 @@
+# Maintainer: KB2UKA
+# Built and signed by .github/workflows/packages.yml; see docs/package-channel.md.
+# The two plugins come from the pinned package-inputs release; SOURCE.md names their source.
+pkgname=omarchy-m4-gst-audio
+pkgver=1.28.7
+pkgrel=1
+pkgdesc='GStreamer autodetect and pulse audio sinks for J713 alpha.1, which lacks gst-plugins-good'
+arch=('aarch64')
+url='https://github.com/Kb2uka/Omarchy-M4-Native'
+license=('LGPL-2.1-or-later')
+depends=('gstreamer>=1.28.7' 'gst-plugins-base-libs>=1.28.7' 'libpulse')
+conflicts=('gst-plugins-good')
+options=('!strip' '!debug')
+_inputs="${url}/releases/download/package-inputs"
+source=("libgstautodetect.so::${_inputs}/gst-plugins-good-1.28.7-libgstautodetect-aarch64.so"
+        "libgstpulseaudio.so::${_inputs}/gst-plugins-good-1.28.7-libgstpulseaudio-aarch64.so"
+        'SOURCE.md')
+sha256sums=('ffb41a1812d1ea398b567692b730df0ea6bea5620511390d8731704eae7515b7'
+            '3a303612b701477a5588c1f0f1d55ae2fe7c96100e0a5c8545659eb598be953a'
+            'be1fb4be35cf7a5f7a771d0bbcb70748a96458af2bf803cc931b78cac4b3ff1d')
+
+package() {
+  install -Dm755 -t "$pkgdir/usr/lib/gstreamer-1.0" libgstautodetect.so libgstpulseaudio.so
+  install -Dm644 SOURCE.md "$pkgdir/usr/share/licenses/$pkgname/SOURCE.md"
+}

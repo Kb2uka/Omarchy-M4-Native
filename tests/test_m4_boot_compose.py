@@ -322,7 +322,9 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual(MODULE.KNOWN_KERNELS, {channel['kernel']['image_sha256']: channel['kernel']['release']})
         self.assertEqual(list(MODULE.KNOWN_DTBS),
                          [updater.ALPHA1_DTB, updater.POWEROFF_DTB, updater.CPUFREQ_DTB, updater.CPUTEMP_DTB])
-        self.assertEqual(channel['devicetree']['sha256'], updater.POWEROFF_DTB)
+        # The channel ships the newest devicetree in the lineage (CPU frequency and
+        # temperature), so connecting never moves an Air back.
+        self.assertEqual(channel['devicetree']['sha256'], updater.CPUTEMP_DTB)
 
 
 def load_tool(name):
