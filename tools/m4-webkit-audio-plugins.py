@@ -85,11 +85,10 @@ def fetch(url):
         return response.read()
 
 
-def validate(run):
+def validate(run, advice):
     for element in ELEMENTS:
         result = run(['gst-inspect-1.0', '--exists', element])
-        require(result.returncode == 0, 'GStreamer cannot load ' + element +
-                '; run --remove, then --apply again')
+        require(result.returncode == 0, 'GStreamer cannot load ' + element + '; ' + advice)
 
 
 def build(version, scratch, run, download):
@@ -117,7 +116,8 @@ def build(version, scratch, run, download):
 
 def write(path, data):
     temp = path.with_name(path.name + '.new')
-    require(not temp.exists() and not temp.is_symlink(), 'Stale temporary file: ' + str(temp))
+    require(not temp.exists() and not temp.is_symlink(),
+            'Stale temporary file from an interrupted run; run --remove first: ' + str(temp))
     fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, 'wb') as stream:
         stream.write(data)
@@ -140,7 +140,7 @@ def install(environment, run=subprocess.run, download=fetch, apply=False):
     version = full.split(':')[-1].rsplit('-', 1)[0]
     report['gstreamer'] = full
     if receipt and receipt.get('gstreamer') == full and installed(directory, receipt):
-        validate(run)
+        validate(run, 'run --remove, then --apply again')
         report['status'] = 'already installed'
         return report
     require(version in SOURCES, 'No pinned source for GStreamer ' + version +
@@ -162,7 +162,7 @@ def install(environment, run=subprocess.run, download=fetch, apply=False):
     try:
         for name, data in plugins.items():
             write(directory / name, data)
-        validate(run)
+        validate(run, 'the plugins were removed again')
     except BaseException:
         remove(environment)
         raise
@@ -173,6 +173,11 @@ def install(environment, run=subprocess.run, download=fetch, apply=False):
 def remove(environment):
     require(os.getuid() != 0, 'Run as the desktop user, without sudo')
     directory = plugin_dir(environment)
+    # Temporary files with these names are only ever this tool's interrupted writes.
+    for name in (*PLUGINS, RECEIPT):
+        temp = directory / (name + '.new')
+        if temp.is_file() and not temp.is_symlink():
+            temp.unlink()
     receipt = read_receipt(directory)
     if receipt is None:
         return {'plugin_dir': str(directory), 'status': 'nothing to remove'}
@@ -183,7 +188,6 @@ def remove(environment):
                 'Plugin changed since install; leaving it: ' + str(path))
     for name in (*receipt['plugins'], RECEIPT):
         (directory / name).unlink(missing_ok=True)
-        (directory / (name + '.new')).unlink(missing_ok=True)
     return {'plugin_dir': str(directory), 'status': 'removed'}
 
 

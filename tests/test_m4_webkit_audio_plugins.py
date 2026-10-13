@@ -133,7 +133,7 @@ class WebkitAudioPlugins(unittest.TestCase):
     def test_unloadable_plugin_rolls_the_install_back(self):
         system = FakeSystem({'gstreamer': '1.28.7-2'})
         system.missing_elements.add('pulsesink')
-        with self.assertRaisesRegex(RuntimeError, 'cannot load pulsesink'):
+        with self.assertRaisesRegex(RuntimeError, 'cannot load pulsesink; the plugins were removed again'):
             MODULE.install(self.env, run=system, download=self.download, apply=True)
         self.assertEqual(list(self.plugins.iterdir()), [])
 
@@ -152,6 +152,16 @@ class WebkitAudioPlugins(unittest.TestCase):
             self.run_install({'gstreamer': '1.28.7-2'})
         self.assertEqual(MODULE.remove(self.env)['status'], 'removed')
         self.assertEqual(list(self.plugins.iterdir()), [])
+
+    def test_interrupted_receipt_write_is_cleared_by_remove(self):
+        self.plugins.mkdir(parents=True)
+        (self.plugins / '.m4-webkit-audio.json.new').write_bytes(b'{"gstr')
+        with self.assertRaisesRegex(RuntimeError, 'run --remove first'):
+            self.run_install({'gstreamer': '1.28.7-2'})
+        self.assertEqual(MODULE.remove(self.env)['status'], 'nothing to remove')
+        self.assertEqual(list(self.plugins.iterdir()), [])
+        self.assertEqual(self.run_install({'gstreamer': '1.28.7-2'})[1]['status'],
+                         'installed; restart apps to get sound')
 
     def test_tampered_plugin_is_not_reported_installed(self):
         self.run_install({'gstreamer': '1.28.7-2'})
