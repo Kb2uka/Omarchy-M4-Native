@@ -2,15 +2,13 @@
 
 - **Experimental J713 only.** Mac16,12 / 13-inch M4 Air is the only supported
   installer profile. M4 Pro, Max, mini, iMac and other Air boards are not qualified.
-- **Shutdown can hang.** The desktop closes and shutdown messages appear, but the
-  Air may remain powered on. On the maintainer's Air, the workaround was: save
-  work, choose Shut Down, wait for the stall, then hold power. Holding power while
-  the desktop was still running instead caused a restart loop. This forced
-  power-off is not a fix or proof that writes are complete. See
-  https://github.com/Kb2uka/Omarchy-M4-Native/issues/24.
-  The final candidate adds the missing device-tree child for the existing SMC
-  poweroff handler. Its physical shutdown and stay-off behavior await the
-  maintainer's check; the issue remains open.
+- **Shut Down restarts the Air until update 1 is applied.** alpha.1 enables the
+  SMC poweroff driver without the PMU shutdown-state cells, so the firmware
+  starts the Air again. Update 1 fixes this in place, with no reinstall, and was
+  verified on the maintainer's Air:
+  https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1-update.1
+  (issue #24). Without it, only holding the power button keeps the Air off, and
+  a long press can still end in a restart depending on its timing.
 - **Replacement first boot still needs qualification.** The October 12 candidate
   finished account setup but failed graphics and audio on global device waits;
   the recovery console alias was also missing. The replacement corrects those

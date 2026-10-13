@@ -48,8 +48,31 @@ bash "$HOME/Downloads/download-j713.command"
 The downloader reassembles the installer and verifies the release checksums.
 Then follow the **[step-by-step installation guide](docs/install.md)**. This
 installer starts in macOS; it is not a bootable PC ISO. GitHub's automatic
-“Source code” ZIP is not the installer. Release downloads require repository
-access while this repository is private.
+“Source code” ZIP is not the installer.
+
+### Then install update 1 — everyone, once
+
+**Every alpha.1 install needs this, whether you installed today or earlier.**
+Without it, **Shut Down restarts the Air instead of turning it off.**
+
+1. On the Air, open a terminal in Omarchy.
+2. Copy this whole block, paste it, press Enter, and type your password when asked:
+
+```bash
+cd ~ && rm -rf m4-update-1 && mkdir m4-update-1 && cd m4-update-1 &&
+base=https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/v0.1.0-alpha.1-update.1 &&
+curl -fL -O "$base/j713-poweroff.dtb" -O "$base/m4-j713-update-boot-dtb.py" -O "$base/SHA256SUMS" &&
+sha256sum -c SHA256SUMS &&
+sudo python3 m4-j713-update-boot-dtb.py --dtb j713-poweroff.dtb --apply
+```
+
+3. When it prints `"status": "updated; takes effect at next boot"`, **restart the Air.** Done.
+
+If it prints `"status": "already updated"`, you already have it. If it prints
+`FAILED` or an error, stop and [open an issue](https://github.com/Kb2uka/Omarchy-M4-Native/issues);
+nothing is written unless every check passes. No reinstall, and your files are
+not touched.
+[Details and rollback](docs/updates.md#shutdown-fix-for-alpha1).
 
 Two attended private installations reached the desktop. A later October 12
 candidate completed account setup but failed graphics and audio startup, leaving
@@ -58,7 +81,7 @@ unrelated device waits as fatal prerequisites. The replacement corrects those
 startup dependencies, enables an authenticated recovery console, and keeps
 kernel messages from displacing the setup form. **The replacement still needs
 an attended installation before publication.** Intermittent trackpad AFE startup
-and physical shutdown remain unqualified. See the [startup repair record](docs/j713-first-boot-recovery.md),
+remains unqualified; shutdown needs [update 1](docs/updates.md#shutdown-fix-for-alpha1). See the [startup repair record](docs/j713-first-boot-recovery.md),
 [qualification record](docs/experimental-release.md) and
 [known limitations](docs/release-limitations.md).
 
@@ -70,29 +93,14 @@ with their own instructions; the first is the
 become signed packages delivered by the normal system update
 ([issue #49](https://github.com/Kb2uka/Omarchy-M4-Native/issues/49)).
 
-## Known shutdown issue
+## Shutdown
 
-**On v0.1.0-alpha.1, choosing Shut Down restarts the Air instead of turning it
-off.** Earlier builds hung after the shutdown messages instead. Follow
-[issue #24](https://github.com/Kb2uka/Omarchy-M4-Native/issues/24).
-
-Cause: alpha.1 enabled the SMC poweroff driver without the PMU shutdown-state
-cells. The driver then sends the SMC off command without first setting the
-PMU's stay-off flag, and the firmware starts the machine again. The boot log
-shows `macsmc-reboot: Missing NVMEM cell shutdown_flag`.
-
-The correction adds Abbey's four shutdown-state cells to the devicetree; no
-kernel change is involved. Installed alpha.1 machines can take it in place,
-without reinstalling: see [the in-place update](docs/updates.md#shutdown-fix-for-alpha1).
-[Source and evidence](docs/j713-poweroff.md) explain the change and its limits.
-
-The fix was verified on the owner's Air: after the update, the driver
-probed with all four cells, Shut Down left the Air off, and the next power-on
-booted normally.
-
-**Without the update,** only a forced power-off (holding the power button)
-keeps the Air off. Save your work first. A long press sometimes still ends in
-a restart depending on its timing; hold it again if that happens.
+**Shut Down works once update 1 is installed:** the Air turns off and stays
+off. Verified on the test Air on October 12, 2026. alpha.1 without update 1
+restarted instead, so install it if you haven't
+([step above](#then-install-update-1--everyone-once)).
+[What was wrong and how it was fixed](docs/j713-poweroff.md) ·
+[issue #24](https://github.com/Kb2uka/Omarchy-M4-Native/issues/24) (closed).
 
 ## What has been observed on the test Air
 
@@ -103,6 +111,7 @@ As of October 11, 2026, with the pinned experimental runtime:
 | Installed desktop | Two private installer trials reached the desktop; the second required a restart after setup stalled. The final owner-input packaging and general updates remain unqualified. |
 | Keyboard, trackpad, Wi-Fi | Used in the native desktop. These observations do not qualify every peripheral or power state. |
 | Bluetooth | A paired mouse reconnected after an observed reboot. General Bluetooth audio and every device are not qualified. |
+| Shut Down | With update 1, Shut Down turns the Air off and it stays off; the next power-on boots normally (October 12). |
 | Graphics | Experimental Apple M4 GPU rendering is active. Scanout still uses simpledrm; this is not complete display-controller support or proof of physical panel timing. |
 | Speakers | Protected internal-speaker playback and automatic startup have worked on the test Air. Broad acoustic calibration, all failure conditions and suspend/resume remain unqualified. |
 | Browser video | H264 8-bit and VP9 Profile 0 hardware decoding have been observed with the qualified decoder/graphics stack. Ordinary 1080p30 playback works in the tested cases. This is not hardware support for every codec or protected video. |
@@ -126,7 +135,7 @@ Widevine binaries and preset personal consent. Speaker filters are prepared
 from the owner's installed macOS components and must match the expected hashes
 before partitioning begins. Unrecognized inputs are refused.
 
-Shutdown, the front USB port, camera, suspend/resume, broad hardware coverage
+The front USB port, camera, suspend/resume, broad hardware coverage
 and coordinated updates remain open work. This alpha is not a daily-driver,
 safe-update or all-M4 compatibility promise. See the
 [source package guide](docs/release-source.md) for source/build boundaries.
