@@ -4,6 +4,8 @@ sudo
 base-devel
 autoconf-archive
 gst-plugin-pipewire
+# autoaudiosink and pulsesink: WebKitGTK and other GStreamer apps are silent without them.
+gst-plugins-good
 pipewire-alsa
 pipewire-jack
 pipewire-pulse
