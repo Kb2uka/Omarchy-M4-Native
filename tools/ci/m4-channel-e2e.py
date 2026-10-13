@@ -30,7 +30,7 @@ STUB = '''pkgname=e2e-system
 pkgver=1
 pkgrel=1
 arch=(any)
-provides=(python coreutils kmod)
+provides=(python coreutils kmod pacman)
 package() { mkdir -p "$pkgdir/usr/share/e2e-system"; }
 '''
 OLD_KERNEL = '''pkgname=linux-m4-omarchy
