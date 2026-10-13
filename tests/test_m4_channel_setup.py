@@ -40,8 +40,9 @@ Include = /etc/pacman.d/mirrorlist
 class FakeSystem:
     """Records commands; answers like a machine with alpha.1 installed."""
 
-    def __init__(self, root, fail=(), boot_status='current', change_boot=False):
+    def __init__(self, root, fail=(), boot_status='current', change_boot=False, installed=('linux-m4-omarchy',)):
         self.root, self.fail, self.status, self.change_boot = root, fail, boot_status, change_boot
+        self.installed = installed
         self.commands, self.refresh_config = [], None
 
     def __call__(self, command, check=False, capture_output=False, text=False, stdout=None):
@@ -53,6 +54,8 @@ class FakeSystem:
         if '-S' in command and self.change_boot:
             (self.root / MODULE.BOOT).write_bytes(b'composed')
         failed = any(word in command for word in self.fail)
+        if '-Q' in command and command[-1] not in self.installed:
+            failed = True
         return types.SimpleNamespace(returncode=1 if failed else 0, stdout='', stderr='')
 
 
@@ -86,9 +89,10 @@ class SetupTests(unittest.TestCase):
                          ('connected; future M4 fixes arrive with omarchy update', False))
         pacman = [c for c in system.commands if c[0] == 'pacman']
         self.assertEqual(pacman[0][-2:], ['-Q', 'linux-m4-omarchy'])
-        self.assertEqual(pacman[1][-1], '-Sy')
+        self.assertEqual(pacman[1][-2:], ['-Q', 'gst-plugins-good'])
+        self.assertEqual(pacman[2][-1], '-Sy')
         expected = ['-S', '--needed', '--noconfirm', *CHANNEL['packages'], '--noscriptlet']
-        self.assertEqual(pacman[2][-len(expected):], expected)
+        self.assertEqual(pacman[3][-len(expected):], expected)
         for command in pacman:
             self.assertFalse(any(arg.startswith('-') and not arg.startswith('--') and 'u' in arg for arg in command),
                              'setup must never run a system upgrade: ' + ' '.join(command))
@@ -117,7 +121,16 @@ class SetupTests(unittest.TestCase):
         self.assertEqual((result['applied'], result['pacman_conf_changes']), (False, True))
         self.assertEqual((self.root / MODULE.CONF).read_text(), AIR_CONF)
         self.assertFalse((self.root / MODULE.SNIPPET).exists())
-        self.assertEqual([c[-2:] for c in system.commands], [['-Q', 'linux-m4-omarchy']])
+        self.assertEqual([c[-2:] for c in system.commands], [['-Q', 'linux-m4-omarchy'], ['-Q', 'gst-plugins-good']])
+
+    def test_installed_gst_plugins_good_keeps_its_sinks(self):
+        system = FakeSystem(self.root, installed=('linux-m4-omarchy', 'gst-plugins-good'))
+        result = self.setup_with(system)
+        self.assertTrue(result['status'].startswith('connected'))
+        self.assertNotIn(MODULE.SINKS, result['install'])
+        install = next(c for c in system.commands if '-S' in c)
+        self.assertNotIn(MODULE.SINKS, install)
+        self.assertIn('omarchy-m4-boot', install)
 
     def test_restart_reported_when_boot_changes(self):
         result = self.setup_with(FakeSystem(self.root, change_boot=True))

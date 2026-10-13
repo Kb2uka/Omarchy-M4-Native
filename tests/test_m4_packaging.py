@@ -36,7 +36,17 @@ def field(text, key):
     return match.group(1).strip("'\"") if match else None
 
 
+def covers_protected(path, protected):
+    """An allowlisted directory that contains a protected path would let a package reach it."""
+    return path.endswith('/') and any(p.startswith(path) for p in protected)
+
+
 class RecipeTests(unittest.TestCase):
+    def test_a_directory_over_a_protected_path_is_caught(self):
+        self.assertTrue(covers_protected('usr/lib/', CHANNEL['protected_paths']))
+        self.assertFalse(covers_protected('usr/lib/gstreamer-1.0/', CHANNEL['protected_paths']))
+        self.assertFalse(covers_protected('usr/lib/omarchy-m4/j713.dtb', CHANNEL['protected_paths']))
+
     def test_local_sources_match_their_hashes(self):
         for name in CHANNEL['packages']:
             text = recipe(name)
@@ -107,7 +117,7 @@ class RecipeTests(unittest.TestCase):
                 if path in exceptions:
                     continue
                 self.assertFalse(CHECK.allowed(path, CHANNEL['protected_paths']), f'{name}: {path}')
-                self.assertFalse(any(p.startswith(path) for p in CHANNEL['protected_paths'] if path.endswith('/')))
+                self.assertFalse(covers_protected(path, CHANNEL['protected_paths']), f'{name}: {path}')
         for path, reason in exceptions.items():
             # An exception is one exact file, inside a protected prefix, owned by one package, with a reason.
             self.assertFalse(path.endswith('/'), path)
@@ -162,6 +172,9 @@ class PolicyTests(unittest.TestCase):
                   self.boot_info(), 'real-time speaker setting'),
                  ({**self.boot_files(), CHECK.REALTIME: (0o644, hashlib.sha256(realtime).hexdigest())},
                   {**self.boot_info(), 'depend': ['python', 'pacman', 'omarchy-m4-gst-audio']},
+                  'must not require the GStreamer sinks'),
+                 ({**self.boot_files(), CHECK.REALTIME: (0o644, hashlib.sha256(realtime).hexdigest())},
+                  {**self.boot_info(), 'depend': ['python', 'pacman', 'omarchy-m4-gst-audio>=1.28.7']},
                   'must not require the GStreamer sinks'))
         for files, info, message in cases:
             with self.subTest(message):

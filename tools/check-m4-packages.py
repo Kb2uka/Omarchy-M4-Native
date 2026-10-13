@@ -14,6 +14,7 @@ version bump.
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import runpy
 import subprocess
@@ -134,7 +135,8 @@ def check_package(channel, package, info, files, root):
         realtime = (ROOT / 'packaging/omarchy-m4/omarchy-m4-boot/speakersafetyd-j713-realtime.conf').read_bytes()
         require(files.get(REALTIME) == (0o644, sha(realtime)), 'Boot package lacks the real-time speaker setting')
         # No dependency on the sinks: a later gst-plugins-good must be able to replace them.
-        require('omarchy-m4-gst-audio' not in info.get('depend', []), 'Boot package must not require the GStreamer sinks')
+        names = [re.split('[<>=]', d, maxsplit=1)[0] for d in info.get('depend', [])]
+        require('omarchy-m4-gst-audio' not in names, 'Boot package must not require the GStreamer sinks')
     elif name == 'omarchy-m4-gst-audio':
         for path, digest in channel['gst_audio'].items():
             require(files.get(path, (0, ''))[1] == digest, 'GStreamer sink differs from the pin: ' + path)

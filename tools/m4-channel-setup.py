@@ -35,6 +35,7 @@ ACjuCm7/wS3BkXKT/XBLOSU61X3JF2UI
 -----END PGP PUBLIC KEY BLOCK-----
 '''
 PACKAGES = ('omarchy-m4-keyring', 'omarchy-m4-boot', 'linux-m4-omarchy', 'omarchy-m4-gst-audio')
+SINKS = 'omarchy-m4-gst-audio'  # gst-plugins-good already has both sinks and conflicts with it
 BOARD = b'apple,j713'
 CONF = 'etc/pacman.conf'
 SNIPPET = 'etc/pacman.d/omarchy-m4.conf'
@@ -165,13 +166,14 @@ def preflight(root, machine):
 def setup(root, apply=False, server=SERVER, key=PUBLIC_KEY, fingerprint=FINGERPRINT, output=sys.stderr):
     machine = Machine(root, output)
     preflight(root, machine)
+    packages = [p for p in PACKAGES if p != SINKS or machine.pacman('-Q', 'gst-plugins-good') != 0]
     conf = root / CONF
     text = conf.read_text()
     updated = with_include(text, include_line(root))
     wanted = snippet(server)
     current = (root / SNIPPET).read_text() if (root / SNIPPET).is_file() else None
     plan = {'trust_key': fingerprint, 'snippet': str(root / SNIPPET), 'snippet_changes': current != wanted,
-            'pacman_conf_changes': updated is not None, 'install': list(PACKAGES), 'applied': False}
+            'pacman_conf_changes': updated is not None, 'install': packages, 'applied': False}
     if not apply:
         plan['status'] = 'ready; rerun with --apply'
         return plan
@@ -197,7 +199,7 @@ def setup(root, apply=False, server=SERVER, key=PUBLIC_KEY, fingerprint=FINGERPR
             only.write_text('[options]\nArchitecture = auto\nSigLevel = Required DatabaseRequired\n' +
                             include_line(root) + '\n')
             require(machine.pacman('-Sy', config=only) == 0, 'Could not download the M4 package database')
-            require(machine.pacman('-S', '--needed', '--noconfirm', *PACKAGES) == 0, 'Package installation failed')
+            require(machine.pacman('-S', '--needed', '--noconfirm', *packages) == 0, 'Package installation failed')
         except (Refused, OSError) as error:
             # A configured but unreachable repository would stop every later system update.
             write(conf, text, conf.stat().st_mode & 0o777)
