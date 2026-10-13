@@ -19,6 +19,8 @@ def fdt(body):
 
 OLD = fdt(b'old poweroff tree')
 NEW = fdt(b'new poweroff tree with cells')
+CPUFREQ = fdt(b'poweroff tree with cpufreq clusters')
+CPUTEMP = fdt(b'cpufreq tree with CPU temperature channels')
 INITRAMFS = b'm1n1_initramfs' + struct.pack('<I', 6) + b'070701'
 
 
@@ -34,10 +36,12 @@ class UpdateBootDtb(unittest.TestCase):
         self.boot = self.root / 'boot.bin'
         self.dtb = self.root / 'new.dtb'
         self.dtb.write_bytes(NEW)
-        for name, data in (('OLD_DTB', OLD), ('NEW_DTB', NEW)):
-            patcher = patch.object(MODULE, name, hashlib.sha256(data).hexdigest())
-            patcher.start()
-            self.addCleanup(patcher.stop)
+        old, new, cpufreq, cputemp = (hashlib.sha256(d).hexdigest() for d in (OLD, NEW, CPUFREQ, CPUTEMP))
+        patcher = patch.dict(MODULE.UPDATES, {new: ((old,), '.pre-shutdown-flag'),
+                                              cpufreq: ((old, new), '.pre-cpufreq'),
+                                              cputemp: ((cpufreq,), '.pre-cputemp')}, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def run_update(self, boot, apply=True):
         self.boot.write_bytes(boot)
@@ -83,10 +87,74 @@ class UpdateBootDtb(unittest.TestCase):
         self.assertEqual(self.boot.read_bytes(), image(OLD))
 
     def test_conflicting_backup_refused(self):
-        (self.root / ('boot.bin' + MODULE.BACKUP_SUFFIX)).write_bytes(b'other machine')
+        (self.root / 'boot.bin.pre-shutdown-flag').write_bytes(b'other machine')
         with self.assertRaisesRegex(RuntimeError, 'different backup'):
             self.run_update(image(OLD))
         self.assertEqual(self.boot.read_bytes(), image(OLD))
+
+
+    def test_cpufreq_update_follows_update_1_with_its_own_backup(self):
+        self.run_update(image(OLD))
+        self.dtb.write_bytes(CPUFREQ)
+        receipt = MODULE.update(self.boot, self.dtb, True)
+        self.assertEqual(receipt['status'], 'updated; takes effect at next boot')
+        self.assertEqual(self.boot.read_bytes(), image(CPUFREQ))
+        self.assertEqual((self.root / 'boot.bin.pre-cpufreq').read_bytes(), image(NEW))
+        self.assertEqual((self.root / 'boot.bin.pre-shutdown-flag').read_bytes(), image(OLD))
+        self.assertIn('boot.bin.pre-cpufreq', receipt['rollback'])
+
+    def test_cpufreq_update_applies_directly_to_alpha_1(self):
+        self.dtb.write_bytes(CPUFREQ)
+        receipt = self.run_update(image(OLD))
+        self.assertTrue(receipt['applied'])
+        self.assertEqual(self.boot.read_bytes(), image(CPUFREQ))
+        self.assertEqual((self.root / 'boot.bin.pre-cpufreq').read_bytes(), image(OLD))
+
+    def test_cpufreq_update_is_idempotent(self):
+        self.dtb.write_bytes(CPUFREQ)
+        self.run_update(image(NEW))
+        self.assertEqual(MODULE.update(self.boot, self.dtb, True)['status'], 'already updated')
+
+    def test_update_1_does_not_downgrade_cpufreq(self):
+        with self.assertRaisesRegex(RuntimeError, 'exactly one'):
+            self.run_update(image(CPUFREQ))
+        self.assertEqual(self.boot.read_bytes(), image(CPUFREQ))
+        self.assertFalse((self.root / 'boot.bin.pre-shutdown-flag').exists())
+
+    def test_cputemp_update_follows_cpufreq_with_its_own_backup(self):
+        self.dtb.write_bytes(CPUTEMP)
+        receipt = self.run_update(image(CPUFREQ))
+        self.assertTrue(receipt['applied'])
+        self.assertEqual(self.boot.read_bytes(), image(CPUTEMP))
+        self.assertEqual((self.root / 'boot.bin.pre-cputemp').read_bytes(), image(CPUFREQ))
+        self.assertIn('boot.bin.pre-cputemp', receipt['rollback'])
+
+    def test_cputemp_update_refused_without_cpufreq(self):
+        # It carries the cpufreq tables, so it must not reach machines that never applied them.
+        self.dtb.write_bytes(CPUTEMP)
+        for tree in (OLD, NEW):
+            with self.subTest(tree=tree):
+                with self.assertRaisesRegex(RuntimeError, 'exactly one'):
+                    self.run_update(image(tree))
+                self.assertEqual(self.boot.read_bytes(), image(tree))
+                self.assertFalse((self.root / 'boot.bin.pre-cputemp').exists())
+
+    def test_cputemp_update_is_idempotent(self):
+        self.dtb.write_bytes(CPUTEMP)
+        self.run_update(image(CPUFREQ))
+        self.assertEqual(MODULE.update(self.boot, self.dtb, True)['status'], 'already updated')
+
+    def test_cpufreq_update_does_not_downgrade_cputemp(self):
+        self.dtb.write_bytes(CPUFREQ)
+        with self.assertRaisesRegex(RuntimeError, 'exactly one'):
+            self.run_update(image(CPUTEMP))
+        self.assertEqual(self.boot.read_bytes(), image(CPUTEMP))
+
+    def test_shipped_updates_chain_from_alpha_1(self):
+        updates = SOURCE.read_text()
+        self.assertIn("CPUTEMP_DTB: ((CPUFREQ_DTB,), '.pre-cputemp')", updates)
+        self.assertIn("CPUFREQ_DTB: ((ALPHA1_DTB, POWEROFF_DTB), '.pre-cpufreq')", updates)
+        self.assertIn("POWEROFF_DTB: ((ALPHA1_DTB,), '.pre-shutdown-flag')", updates)
 
 
 if __name__ == '__main__':

@@ -89,8 +89,8 @@
       "license": "GPL-2.0-only",
       "mode": 420,
       "origin": "kernel-build",
-      "sha256": "465a88aa9f70ceac8682499ad6bd9ecd34a33b35a3b5c556b42f7bd1524272d0",
-      "size": 52088
+      "sha256": "aaad802eb136ff6cb915feaa123001b3eb848bc2f038d0a5b71c8e2ff35d2581",
+      "size": 52000
     },
     "usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-macaudio.ko": {
       "license": "GPL-2.0-only",
@@ -246,10 +246,10 @@
     },
     "snd_soc_j713_group": {
       "module": "snd_soc_j713_group",
-      "note": "040000001400000003000000474e5500f2078435f633f3e320dc95119734cfd263d6edd9",
+      "note": "040000001400000003000000474e55009e792aa072fe3a8c75354bcc631fae233c7c014b",
       "path": "/usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-j713-group.ko",
-      "sha256": "465a88aa9f70ceac8682499ad6bd9ecd34a33b35a3b5c556b42f7bd1524272d0",
-      "size": 52088
+      "sha256": "aaad802eb136ff6cb915feaa123001b3eb848bc2f038d0a5b71c8e2ff35d2581",
+      "size": 52000
     },
     "snd_soc_macaudio": {
       "module": "snd_soc_macaudio",
@@ -268,8 +268,8 @@
   },
   "readiness_inputs": {
     "packaging/j713-audio/speakersafetyd-j713.service": {
-      "sha256": "ff3da34751fba7d6cf54e8899ef43c24801550a1c773ae99c6e3a400f8c34137",
-      "size": 808
+      "sha256": "6854823cdba7c61715bce39b540b30b17d73d287a82a2d6a228eddb8d7595f54",
+      "size": 1006
     },
     "packaging/j713-audio/wireplumber.service.d/80-j713-audio-ready.conf": {
       "sha256": "a847df53f52ffc3677d0ed3d1493565fda97443206f820d05887247137fd9b15",

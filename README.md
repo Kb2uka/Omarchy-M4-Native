@@ -120,6 +120,27 @@ installed machines; only packages published to the channel do. General
 Arch Linux ARM and Omarchy updates remain unqualified on this hardware; read the
 [update guide](docs/updates.md) before accepting them.
 
+### What `omarchy update` brings, and what is still manual
+
+After the connect step, `omarchy update` keeps the M4 kernel, the devicetree
+and the boot object (`boot.bin`) current, and restarting once applies them. It
+also keeps any later devicetree you applied by hand, such as the CPU frequency
+or CPU temperature one below; it never reverts those.
+
+These fixes are not in the M4 packages yet. Each is optional, and each guide
+has an inspect step, a rollback and the exact commands:
+
+| Fix | Apply it with |
+| --- | --- |
+| CPU frequency scaling, all ten cores ([#55](https://github.com/Kb2uka/Omarchy-M4-Native/pull/55)) | [CPU frequency scaling: existing installs](docs/j713-cpufreq.md#existing-installs) |
+| CPU die temperature ([#62](https://github.com/Kb2uka/Omarchy-M4-Native/pull/62)), applied after the CPU frequency one | [CPU temperature: existing installs](docs/j713-cpu-temperature.md#existing-installs) |
+| Sound in Zeus Link and other WebKitGTK apps ([#54](https://github.com/Kb2uka/Omarchy-M4-Native/pull/54), [#63](https://github.com/Kb2uka/Omarchy-M4-Native/pull/63)) | [WebKit audio: existing installs](docs/j713-webkit-audio.md#existing-installs), then log out and back in |
+
+The speaker protection startup fix
+([#61](https://github.com/Kb2uka/Omarchy-M4-Native/pull/61)) has no install
+path for existing machines yet. The M4 packages deliberately exclude audio
+modules, and the fixed module still needs a speaker requalification.
+
 ## Shutdown
 
 **Shut Down works once the Air is connected to M4 updates (or has update 1):**
