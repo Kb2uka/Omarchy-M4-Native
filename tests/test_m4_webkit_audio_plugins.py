@@ -130,11 +130,46 @@ class WebkitAudioPlugins(unittest.TestCase):
             self.run_install({'gstreamer': '1.28.7-2'})
         self.assertEqual((self.plugins / 'libgstpulseaudio.so').read_bytes(), b'someone else')
 
-    def test_unloadable_plugin_fails_the_install(self):
+    def test_unloadable_plugin_rolls_the_install_back(self):
         system = FakeSystem({'gstreamer': '1.28.7-2'})
         system.missing_elements.add('pulsesink')
         with self.assertRaisesRegex(RuntimeError, 'cannot load pulsesink'):
             MODULE.install(self.env, run=system, download=self.download, apply=True)
+        self.assertEqual(list(self.plugins.iterdir()), [])
+
+    def test_installed_plugins_are_revalidated(self):
+        self.run_install({'gstreamer': '1.28.7-2'})
+        system = FakeSystem({'gstreamer': '1.28.7-2'})
+        system.missing_elements.add('autoaudiosink')
+        with self.assertRaisesRegex(RuntimeError, 'cannot load autoaudiosink'):
+            MODULE.install(self.env, run=system, download=self.download, apply=True)
+
+    def test_interrupted_install_can_be_removed(self):
+        self.run_install({'gstreamer': '1.28.7-2'})
+        (self.plugins / 'libgstpulseaudio.so').unlink()
+        (self.plugins / 'libgstpulseaudio.so.new').write_bytes(b'partial')
+        with self.assertRaisesRegex(RuntimeError, 'run --remove first'):
+            self.run_install({'gstreamer': '1.28.7-2'})
+        self.assertEqual(MODULE.remove(self.env)['status'], 'removed')
+        self.assertEqual(list(self.plugins.iterdir()), [])
+
+    def test_tampered_plugin_is_not_reported_installed(self):
+        self.run_install({'gstreamer': '1.28.7-2'})
+        (self.plugins / 'libgstautodetect.so').write_bytes(b'edited')
+        with self.assertRaisesRegex(RuntimeError, 'run --remove first'):
+            self.run_install({'gstreamer': '1.28.7-2'})
+        self.assertEqual((self.plugins / 'libgstautodetect.so').read_bytes(), b'edited')
+
+    def test_receipt_is_written_before_any_plugin(self):
+        order = []
+        real = MODULE.write
+        with patch.object(MODULE, 'write', side_effect=lambda path, data: (order.append(path.name), real(path, data))):
+            self.run_install({'gstreamer': '1.28.7-2'})
+        self.assertEqual(order[0], '.m4-webkit-audio.json')
+
+    def test_missing_home_is_a_clean_error(self):
+        with patch.dict(MODULE.os.environ, {}, clear=True), patch('sys.stderr'):
+            self.assertEqual(MODULE.main([]), 1)
 
     def test_remove_deletes_only_unchanged_plugins(self):
         self.run_install({'gstreamer': '1.28.7-2'})

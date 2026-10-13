@@ -15,7 +15,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 import tarfile
@@ -86,6 +85,13 @@ def fetch(url):
         return response.read()
 
 
+def validate(run):
+    for element in ELEMENTS:
+        result = run(['gst-inspect-1.0', '--exists', element])
+        require(result.returncode == 0, 'GStreamer cannot load ' + element +
+                '; run --remove, then --apply again')
+
+
 def build(version, scratch, run, download):
     source = download(SOURCE_URL.format(version))
     require(sha(source) == SOURCES[version], 'Source checksum mismatch; nothing was installed')
@@ -134,6 +140,7 @@ def install(environment, run=subprocess.run, download=fetch, apply=False):
     version = full.split(':')[-1].rsplit('-', 1)[0]
     report['gstreamer'] = full
     if receipt and receipt.get('gstreamer') == full and installed(directory, receipt):
+        validate(run)
         report['status'] = 'already installed'
         return report
     require(version in SOURCES, 'No pinned source for GStreamer ' + version +
@@ -148,14 +155,17 @@ def install(environment, run=subprocess.run, download=fetch, apply=False):
     with tempfile.TemporaryDirectory(prefix='m4-webkit-audio-') as scratch:
         plugins = build(version, Path(scratch), run, download)
     directory.mkdir(parents=True, exist_ok=True)
-    for name, data in plugins.items():
-        write(directory / name, data)
     digests = {name: sha(data) for name, data in plugins.items()}
+    # The receipt goes first, so --remove can clean up after any interruption.
     write(directory / RECEIPT, (json.dumps({'gstreamer': full, 'plugins': digests},
                                            indent=2, sort_keys=True) + '\n').encode())
-    for element in ELEMENTS:
-        result = run(['gst-inspect-1.0', '--exists', element])
-        require(result.returncode == 0, 'GStreamer cannot load ' + element + ' after install')
+    try:
+        for name, data in plugins.items():
+            write(directory / name, data)
+        validate(run)
+    except BaseException:
+        remove(environment)
+        raise
     report.update(applied=True, status='installed; restart apps to get sound', plugins=digests)
     return report
 
@@ -171,9 +181,9 @@ def remove(environment):
         require(not path.exists() or (path.is_file() and not path.is_symlink() and
                                       sha(path.read_bytes()) == digest),
                 'Plugin changed since install; leaving it: ' + str(path))
-    for name in receipt['plugins']:
+    for name in (*receipt['plugins'], RECEIPT):
         (directory / name).unlink(missing_ok=True)
-    (directory / RECEIPT).unlink()
+        (directory / (name + '.new')).unlink(missing_ok=True)
     return {'plugin_dir': str(directory), 'status': 'removed'}
 
 
@@ -186,7 +196,7 @@ def main(arguments=None):
     args = parser.parse_args(arguments)
     try:
         report = remove(os.environ) if args.remove else install(os.environ, apply=args.apply)
-    except (OSError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
+    except (KeyError, OSError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
         print('error: ' + str(error), file=sys.stderr)
         return 1
     print(json.dumps(report, indent=2, sort_keys=True))
