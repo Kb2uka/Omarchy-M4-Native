@@ -92,8 +92,9 @@ protection stayed active, and `TCMz` was back at 71 C.
 
 What this shows:
 
-- **The requested states are real.** Each state up to P15 and E7 ran as asked,
-  confirmed by throughput, so the ADT voltage tables iBoot leaves are usable.
+- **The requested states are real.** P5, P8, P12, E3 and E5 ran as asked by
+  `DVFS_STATUS`; throughput confirmed it for P5, P8, E3 and E5 and matched E7
+  when E8 was asked. The ADT voltage tables iBoot leaves are usable.
 - **Something caps the top states.** P16 and P20 were accepted as the target
   (`DVFS_STATUS` bits 4:0) but the cluster ran P15. E8 ran E7. These runs
   cannot tell a fixed limit from a power limit or a fast hardware thermal
@@ -110,8 +111,8 @@ What this shows:
 - **The E cluster is mild.** Six E cores at 2172 MHz settled near 73 C within
   20 s. That is cooler than the P die at the handoff clock.
 
-These were bursts of at most 20 s on one machine, with the lid open on a desk.
-They do not qualify any clock for sustained use.
+These were bursts of at most 20 s on one machine. They do not qualify any
+clock for sustained use.
 
 ## Building
 
