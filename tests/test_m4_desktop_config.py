@@ -62,7 +62,7 @@ class DesktopImageTests(unittest.TestCase):
         self.write("usr/share/omarchy/shell/plugins/agents/Main.qml", "Item {}\n")
         self.write("usr/share/omarchy/shell/plugins/agents/assets/mark.svg", "<svg/>\n")
         self.packages = ("omarchy", "omarchy-settings", "hyprland", "sudo", "base-devel",
-                         "autoconf-archive", "gst-plugin-pipewire", "pipewire-alsa",
+                         "autoconf-archive", "gst-plugin-pipewire", "gst-plugins-good", "pipewire-alsa",
                          "pipewire-jack", "pipewire-pulse", "zram-generator", "htop")
         for name in self.packages:
             self.write(f"var/lib/pacman/local/{name}-1-1/desc", f"%NAME%\n{name}\n\n%VERSION%\n1-1\n")
