@@ -46,7 +46,9 @@ class LevelWriteTraffic(unittest.TestCase):
 
     def test_successful_store_is_always_verified(self):
         lines = [l.strip() for l in self.level.splitlines()]
-        sequence = ['old = *stored;',
+        # Unchanged puts must leave before any bus traffic.
+        sequence = ['if (write && *value == *stored) goto out;',
+                    'old = *stored;',
                     'if (write) ret = amp_store(a, index, reg, *value, gen);',
                     'if (!ret && write) *stored = *value;',
                     'if (!ret) ret = verify_limits(a, index, mode, gen);',
