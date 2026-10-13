@@ -131,11 +131,47 @@ class PublishTests(unittest.TestCase):
         self.assertEqual(self.release.uploads[-1], f'{REPO}.db.sig', 'the client-facing database goes last')
         self.assertIn(MODULE.SETUP, names)
 
-    def test_rerun_changes_nothing_but_the_setup_script(self):
+    def test_connect_script_carries_the_published_setup_hash(self):
+        self.publish()
+        digest = hashlib.sha256(self.release.assets[MODULE.SETUP]).hexdigest()
+        connect = self.release.assets[MODULE.CONNECT].decode()
+        self.assertIn(f"expected='{digest}'", connect)
+        self.assertNotIn(MODULE.CONNECT_HASH, connect)
+        self.assertGreater(self.release.uploads.index(MODULE.CONNECT), self.release.uploads.index(MODULE.SETUP),
+                           'the connect script goes up after the script it checks')
+
+    def test_rerun_changes_nothing_but_the_setup_scripts(self):
         self.publish()
         self.release.uploads.clear()
         self.publish()
-        self.assertEqual(sorted(self.release.uploads), sorted([MODULE.SETUP, 'SETUP-SHA256SUMS']))
+        self.assertEqual(sorted(self.release.uploads), sorted([MODULE.SETUP, 'SETUP-SHA256SUMS', MODULE.CONNECT]))
+
+    def test_stale_served_database_is_retried(self):
+        self.publish()
+        (self.built / 'omarchy-m4-boot-1-1-aarch64.pkg.tar.zst').unlink()
+        (self.built / 'omarchy-m4-boot-2-1-aarch64.pkg.tar.zst').write_bytes(b'boot 2')
+        stale, real_fetch, served = self.release.assets[f'{REPO}.db'], self.release.fetch, []
+
+        def lagging_fetch(name, attempts=4):
+            uploaded = self.release.assets[f'{REPO}.db'] != stale
+            if name == f'{REPO}.db' and uploaded and len(served) < 2:  # the CDN lags twice after upload
+                served.append(name)
+                return stale
+            return real_fetch(name)
+        self.release.fetch = lagging_fetch
+        with mock.patch.object(MODULE.time, 'sleep') as sleep:
+            self.publish()
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_database_that_never_matches_fails(self):
+        self.publish()
+        stale = self.release.assets[f'{REPO}.db']
+        (self.built / 'omarchy-m4-boot-1-1-aarch64.pkg.tar.zst').unlink()
+        (self.built / 'omarchy-m4-boot-2-1-aarch64.pkg.tar.zst').write_bytes(b'boot 2')
+        real_fetch = self.release.fetch
+        self.release.fetch = lambda name, attempts=4: stale if name == f'{REPO}.db' else real_fetch(name)
+        with mock.patch.object(MODULE.time, 'sleep'), self.assertRaises(SystemExit):
+            self.publish()
 
     def test_missing_package_signature_is_repaired(self):
         self.publish()
