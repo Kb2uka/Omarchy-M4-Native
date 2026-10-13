@@ -62,10 +62,14 @@ def session_file(environment):
     return Path(config) / 'environment.d' / SESSION
 
 
-def session_text(directory):
+def expressible(directory):
     # environment.d expands $ and treats quotes and spaces specially, and
-    # GST_PLUGIN_PATH splits at colons; refuse those.
-    require(not set(str(directory)) & set('$\\"\' \t\n`:'),
+    # GST_PLUGIN_PATH splits at colons.
+    return not set(str(directory)) & set('$\\"\' \t\n`:')
+
+
+def session_text(directory):
+    require(expressible(directory),
             'Plugin directory has characters environment.d cannot hold: ' + str(directory))
     # systemd reads environment.d at login; ${...:+...} keeps any existing value.
     return ('# Written by m4-webkit-audio-plugins.py; removed by its --remove.\n'
@@ -79,7 +83,9 @@ def session_state(environment, directory):
     path = session_file(environment)
     if not path.exists() and not path.is_symlink():
         return 'missing'
-    if path.is_file() and not path.is_symlink() and path.read_text() == session_text(directory):
+    # This tool never writes a file for a directory it cannot express.
+    if (expressible(directory) and path.is_file() and not path.is_symlink() and
+            path.read_text() == session_text(directory)):
         return 'present'
     return 'foreign'
 

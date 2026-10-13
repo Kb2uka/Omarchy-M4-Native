@@ -301,6 +301,22 @@ class WebkitAudioPlugins(unittest.TestCase):
         MODULE.remove(self.env)
         self.assertEqual(list(self.session.parent.iterdir()), [])
 
+    def test_dangling_session_temp_link_is_cleared_by_apply(self):
+        self.run_install({'gstreamer': '1.28.7-2'})
+        self.session.unlink()
+        temp = self.session.with_name(self.session.name + '.new')
+        temp.symlink_to(self.home / 'missing')
+        self.assertEqual(self.run_install({'gstreamer': '1.28.7-2'})[1]['status'],
+                         'session setting added; ' + MODULE.RESTART)
+        self.assertFalse(temp.is_symlink())
+        self.assertFalse((self.home / 'missing').exists())
+
+    def test_remove_works_after_the_data_dir_moves_somewhere_unusable(self):
+        self.run_install({'gstreamer': '1.28.7-2'})
+        self.env['XDG_DATA_HOME'] = str(self.home / 'a:b')
+        self.assertEqual(MODULE.remove(self.env)['status'], 'nothing to remove')
+        self.assertTrue(self.session.is_file())  # names the old directory, so not ours here
+
     def test_session_link_is_not_ours_even_with_our_text(self):
         self.run_install({'gstreamer': '1.28.7-2'})
         target = self.home / 'elsewhere.conf'
