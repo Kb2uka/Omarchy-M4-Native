@@ -50,6 +50,17 @@ def candidate_nodes(changes=None):
 dtb = POWEROFF_TESTS.dtb
 
 
+def with_boot_cpu(data, cpu):
+    return data[:28] + U32(cpu) + data[32:]
+
+
+def with_reservation(data, address, size):
+    """Insert one memory reservation before the terminator; later sections move 16 bytes."""
+    total, start, strings = struct.unpack_from('>3I', data, 4)
+    header = data[:4] + U32(total + 16, start + 16, strings + 16) + data[16:40]
+    return header + struct.pack('>QQ', address, size) + data[40:]
+
+
 class BuildGuards(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
@@ -98,6 +109,24 @@ class BuildGuards(unittest.TestCase):
 
     def test_other_property_change_refused(self):
         self.refused(candidate_nodes({('soc',): {'status': b'disabled\0'}}))
+
+    def test_boot_cpu_change_refused(self):
+        with self.assertRaisesRegex(ValueError, 'beyond the CPU temperature channels'):
+            self.build(with_boot_cpu(dtb(candidate_nodes()), 1))
+        self.assertFalse(self.output.exists())
+
+    def test_reservation_change_refused(self):
+        with self.assertRaisesRegex(ValueError, 'beyond the CPU temperature channels'):
+            self.build(with_reservation(dtb(candidate_nodes()), 0x10000000000, 0x4000))
+        self.assertFalse(self.output.exists())
+
+    def test_fixture_variants_parse(self):
+        # Guards against the two tests above passing only because the fixture is malformed.
+        nodes, reservations, cpu = MODULE.tree(with_reservation(with_boot_cpu(dtb(candidate_nodes()), 1),
+                                                                0x10000000000, 0x4000))
+        self.assertEqual(cpu, 1)
+        self.assertEqual(reservations, [(0x10000000000, 0x4000), (0, 0)])
+        self.assertIn('/soc/smc@38c600000/hwmon/temperature-TCMz', nodes)
 
     def test_existing_channel_base_refused(self):
         self.base.write_bytes(dtb(candidate_nodes()))
