@@ -187,7 +187,7 @@ class OwnerFilterReleaseTests(unittest.TestCase):
             service = (root / 'usr/lib/systemd/system/m4-channel-connect.service').read_text()
             self.assertIn('ExecStart=/usr/bin/python3 /usr/lib/omarchy/m4-channel-connect.py --apply\n', service)
             self.assertIn('TimeoutStartSec=infinity\n', service)
-            self.assertIn('ExecStartPost=/usr/bin/systemctl disable --no-block m4-channel-connect.timer\n', service)
+            self.assertIn('ExecStartPost=/usr/bin/systemctl disable --now --no-block m4-channel-connect.timer\n', service)
             self.assertIn('OnCalendar=', (root / 'usr/lib/systemd/system/m4-channel-connect.timer').read_text())
             self.assertIn('ConditionPathExists=!/var/lib/omarchy/provisioning/pending\n', service)
             self.assertIn('ConditionPathExists=!/var/lib/omarchy-m4/connected\n', service)

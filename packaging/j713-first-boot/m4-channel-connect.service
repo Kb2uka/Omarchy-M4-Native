@@ -12,7 +12,7 @@ ConditionPathExists=!/var/lib/omarchy-m4/connected
 Type=oneshot
 ExecStart=/usr/bin/python3 /usr/lib/omarchy/m4-channel-connect.py --apply
 ExecStartPost=/usr/bin/install -D -m 0644 /dev/null /var/lib/omarchy-m4/connected
-ExecStartPost=/usr/bin/systemctl disable --no-block m4-channel-connect.timer
+ExecStartPost=/usr/bin/systemctl disable --now --no-block m4-channel-connect.timer
 # No external timeout: killing the setup script mid-install would skip its own
 # rollback of pacman.conf; pacman's download timeouts bound a stalled network.
 TimeoutStartSec=infinity
