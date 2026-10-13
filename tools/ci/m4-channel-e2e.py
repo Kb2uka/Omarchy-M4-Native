@@ -226,7 +226,8 @@ def main():
             require(refused.returncode != 0, 'pacman accepted a database signed by an untrusted key')
             print('m4-channel-e2e: passed')
         finally:
-            subprocess.run(['sudo', 'rm', '-rf', str(scratch / 'root')], check=False)
+            # pacman ran as root in these two trees; remove them before the temporary directory goes.
+            subprocess.run(['sudo', 'rm', '-rf', str(scratch / 'root'), str(scratch / 'forged-db')], check=False)
 
 
 if __name__ == '__main__':
