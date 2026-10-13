@@ -11,6 +11,12 @@ produced small floating-point differences. A complete native run on the J713
 Air (macOS 26.5.1 / 25F80) and Mac Studio (26.5.2 / 25F84) produced the same
 four native hashes. CPython was the installer's bundled 3.13.9 in both cases.
 
+macOS 26.6.2 (25G83) ships a different AudioDSP binary (17,311,312 bytes,
+`b8711ac5c284751b343a9b2ea23799107225f5aadb7dcbfb68be1134508f64a6`). On a second
+13-inch M4 Air running that build, the unchanged pipeline with only the input
+pin replaced produced the same four native hashes. The manifest therefore lists
+it as a second qualified AudioDSP build; the outputs remain single-pinned.
+
 | Lane | Taps | Different samples | Maximum absolute difference | Sum of absolute differences |
 | --- | ---: | ---: | ---: | ---: |
 | 0 | 4096 | 27 | 1.111e-16 | 3.972e-16 |
