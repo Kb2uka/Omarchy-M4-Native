@@ -162,6 +162,18 @@ class WebkitAudioPlugins(unittest.TestCase):
         self.assertEqual(list(self.plugins.iterdir()), [])
         self.assertEqual(self.run_install({'gstreamer': '1.28.7-2'})[1]['status'],
                          'installed; restart apps to get sound')
+        self.assertEqual(len(self.downloads), 1)
+
+    def test_stale_temporary_link_is_cleared_without_touching_its_target(self):
+        target = self.home / 'keep.txt'
+        target.write_text('keep')
+        self.plugins.mkdir(parents=True)
+        (self.plugins / 'libgstpulseaudio.so.new').symlink_to(target)
+        with self.assertRaisesRegex(RuntimeError, 'run --remove first'):
+            self.run_install({'gstreamer': '1.28.7-2'})
+        self.assertEqual(self.downloads, [])
+        MODULE.remove(self.env)
+        self.assertEqual((list(self.plugins.iterdir()), target.read_text()), ([], 'keep'))
 
     def test_tampered_plugin_is_not_reported_installed(self):
         self.run_install({'gstreamer': '1.28.7-2'})

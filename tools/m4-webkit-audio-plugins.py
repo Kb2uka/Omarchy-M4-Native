@@ -149,6 +149,10 @@ def install(environment, run=subprocess.run, download=fetch, apply=False):
     for name in PLUGINS:
         require(not (directory / name).exists() and not (directory / name).is_symlink(),
                 'A plugin file this tool does not own already exists: ' + str(directory / name))
+    for name in (*PLUGINS, RECEIPT):
+        temp = directory / (name + '.new')
+        require(not temp.exists() and not temp.is_symlink(),
+                'Stale temporary file from an interrupted run; run --remove first: ' + str(temp))
     report['status'] = 'build available'
     if not apply:
         return report
@@ -176,8 +180,8 @@ def remove(environment):
     # Temporary files with these names are only ever this tool's interrupted writes.
     for name in (*PLUGINS, RECEIPT):
         temp = directory / (name + '.new')
-        if temp.is_file() and not temp.is_symlink():
-            temp.unlink()
+        if temp.is_symlink() or temp.is_file():
+            temp.unlink()  # removes a link itself, never its target
     receipt = read_receipt(directory)
     if receipt is None:
         return {'plugin_dir': str(directory), 'status': 'nothing to remove'}
