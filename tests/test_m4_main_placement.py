@@ -298,7 +298,7 @@ class BoostPlacementTests(MainPlacementTests):
         self.assertEqual(self.set_calls, [])
 
     def test_unexpected_capacities_refused_before_clamp(self):
-        cases = (("cpu1", "1024\n", "cpu0", "512\n"),   # a P core below full capacity
+        cases = (("cpu1", "900\n", "cpu0", "331\n"),    # a P core below full capacity
                  ("cpu0", "331\n", "cpu2", "400\n"),    # E cores that disagree
                  ("cpu1", "1024\n", "cpu0", "1100\n"))  # E cores above P
         for p_cpu, p_value, e_cpu, e_value in cases:

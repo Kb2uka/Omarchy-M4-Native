@@ -134,15 +134,20 @@ the setting, started cleanly. One boot is not a boot-time qualification.
 
 ## Existing installs
 
-Build `j713-cpufreq.dtb` from the update 1 devicetree (the
-`j713-poweroff.dtb` asset of `v0.1.0-alpha.1-update.1`) on a Linux host with
-`dtc` and `fdtoverlay`, and check its SHA256 (`033025bb…` above):
+No release asset carries `j713-cpufreq.dtb` yet; publishing one is pending.
+Until then, build it in a checkout of this repository on a Linux host with
+DTC 1.8.1 (`dtc` and `fdtoverlay`). Use the `j713-poweroff.dtb` asset of
+`v0.1.0-alpha.1-update.1` as the base:
 
 ```bash
 python3 tools/build-j713-cpufreq-dtb.py --base j713-poweroff.dtb --output j713-cpufreq.dtb
+sha256sum j713-cpufreq.dtb   # must be 033025bbdda3ce72b5eefe39d1d6d68209256fd43e4fd587c96ae1cf38978555
 ```
 
-A published update will replace this step. All three parts are needed together. Apply the devicetree update without the
+The builder checks the tree's structure, not its bytes. Another DTC version
+can assign phandles or order nodes differently. The result then has a
+different hash, and the updater refuses it as `Unknown replacement devicetree`.
+Do not use such a file. All three parts are needed together. Apply the devicetree update without the
 real-time protection setting and speaker protection can fail at boot.
 
 ```bash
@@ -156,6 +161,9 @@ install -m 0644 m4-session-placement.py ~/.local/lib/omarchy/m4-session-placemen
 sudo python3 m4-j713-update-boot-dtb.py --dtb j713-cpufreq.dtb
 sudo python3 m4-j713-update-boot-dtb.py --dtb j713-cpufreq.dtb --apply
 ```
+
+The M4 package channel recognizes this devicetree and keeps it when a
+package update recomposes `boot.bin`; see [package channel](package-channel.md).
 
 Then restart. If the post-boot hook was disabled (renamed to
 `50-m4-main-placement.sample`), rename it back to enable the clamp. An old copy

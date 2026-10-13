@@ -4,7 +4,7 @@
 # and LICENSES/ by tools/build-m4-packages.py.
 pkgname=omarchy-m4-boot
 pkgver=1
-pkgrel=1
+pkgrel=2
 pkgdesc='Keeps the J713 boot.bin in step with the packaged M4 kernel and devicetree'
 arch=('aarch64')
 url='https://github.com/Kb2uka/Omarchy-M4-Native'
@@ -16,7 +16,7 @@ _dtb_release=v0.1.0-alpha.1-update.1
 source=('m4-boot-compose.py' '90-omarchy-m4-boot.hook' 'm4-update-check.py'
         'omarchy-m4-update-check.service' 'omarchy-m4-update-check.timer' 'MIT.txt' 'GPL-2.0-or-later.txt'
         "j713-poweroff-${_dtb_release}.dtb::${url}/releases/download/${_dtb_release}/j713-poweroff.dtb")
-sha256sums=('5a3bce6b03b6d89225de9ffa5cd856f655e1fc7423183934d9d6d0ec989b5af4'
+sha256sums=('7c6188241ac4fa80acc9af5dbe2eb7ff2b3b04f8d6da22aca778049ae864672f'
             '22514358734721ffcb4478f9c3c2c91f55b858bbd40aba6278c395e7a35de810'
             '97b8f5fff0feac4f0cb76ef188c90aa448a5764e520cc42f67b7f75e54f5e08d'
             '8ecdbfc8303276d8db5922f6a06aa945f58ebca27b83520f76e9155561b9c5b0'

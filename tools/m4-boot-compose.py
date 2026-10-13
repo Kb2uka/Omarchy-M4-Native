@@ -24,9 +24,12 @@ import zlib
 KNOWN_KERNELS = {
     'c3704cfd2afb7760e73f0b9939a68864a30bd916fcd478bd960e538373123dc9': '7.1.9-m4-gpu-backport-20261008',
 }
+# Devicetrees in lineage order. A machine whose boot.bin carries a later one than
+# the package keeps it: an owner-applied devicetree update is never reverted.
 KNOWN_DTBS = {
     '67dc61458b03c0fad1156994ad85a85f9f8612cac2996eb684609b0455ebf547': 'v0.1.0-alpha.1',
     'e54c77a760a5b696486f9d80c7c83ca4295d641113bb9e54d13e259863bf9b07': 'v0.1.0-alpha.1-update.1',
+    '033025bbdda3ce72b5eefe39d1d6d68209256fd43e4fd587c96ae1cf38978555': 'j713-cpufreq',
 }
 BOARD = b'apple,j713'
 BOOT = 'boot/efi/omarchy/boot.bin'
@@ -164,6 +167,9 @@ def plan(root):
     new = {'kernel': sha(kernel), 'dtb': sha(dtb)}
     require(new['kernel'] in KNOWN_KERNELS, 'Packaged kernel is not a known J713 kernel ' + new['kernel'])
     require(new['dtb'] in KNOWN_DTBS, 'Packaged devicetree is not a known J713 devicetree ' + new['dtb'])
+    lineage = list(KNOWN_DTBS)
+    if lineage.index(now['dtb']) > lineage.index(new['dtb']):
+        dtb, new['dtb'] = layout['dtb'], now['dtb']
     require(gzip_end(kernel, 0) == len(kernel), 'Packaged kernel is not one complete gzip stream')
     require(fdt_size(dtb, 0) == len(dtb), 'Packaged devicetree has an invalid header')
     check_protected(root, new['kernel'])
