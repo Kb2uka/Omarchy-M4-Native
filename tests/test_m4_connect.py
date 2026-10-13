@@ -4,6 +4,7 @@
 import hashlib
 import importlib.util
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import tempfile
@@ -32,11 +33,20 @@ class ConnectScript(unittest.TestCase):
         bin_dir = self.home / 'bin'
         bin_dir.mkdir()
         self.sudo_log = self.home / 'sudo.log'
-        # A sudo that records its arguments, copies the setup script out of the
-        # temporary directory (which the script removes) and then runs it.
+        self.curl_log = self.home / 'curl.log'
+        # A curl that records its arguments and then runs the real one.
+        (bin_dir / 'curl').write_text(
+            '#!/usr/bin/env bash\n'
+            f'echo "$*" >> {self.curl_log}\n'
+            f'exec {shutil.which("curl")} "$@"\n')
+        (bin_dir / 'curl').chmod(0o755)
+        # A sudo that records its arguments and what its stdin is, copies the
+        # setup script out of the temporary directory (which the script
+        # removes) and then runs it.
         (bin_dir / 'sudo').write_text(
             '#!/usr/bin/env bash\n'
             f'echo "$*" >> {self.sudo_log}\n'
+            f'readlink /proc/self/fd/0 > {self.home}/sudo-stdin\n'
             f'cp "$2" {self.home}/setup-copy.py\n'
             f'exec "$1" {self.home}/setup-copy.py "${{@:3}}"\n')
         (bin_dir / 'sudo').chmod(0o755)
@@ -65,6 +75,21 @@ class ConnectScript(unittest.TestCase):
 
     def test_works_piped_into_bash(self):
         self.assert_setup_applied_once(self.run_script(self.published(), piped=True))
+        # Nothing the script starts can read the rest of a piped script.
+        self.assertEqual((self.home / 'sudo-stdin').read_text().strip(), '/dev/null')
+
+    def test_download_retries_every_error(self):
+        self.run_script(self.published())
+        arguments = self.curl_log.read_text().split()
+        self.assertIn('--retry-all-errors', arguments)
+        self.assertEqual(arguments[arguments.index('--retry') + 1], '5')
+
+    def test_documented_line_retries_too(self):
+        line = ('curl -fsSL --retry 5 --retry-all-errors '
+                'https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages/m4-connect.sh | bash')
+        for doc in ('README.md', 'docs/install.md', 'docs/updates.md', 'tools/m4-connect.sh'):
+            with self.subTest(doc):
+                self.assertIn(line, (ROOT / doc).read_text())
 
     def test_mismatched_setup_script_runs_nothing(self):
         (self.server / 'omarchy-m4-setup.py').write_bytes(SETUP + b'# tampered\n')

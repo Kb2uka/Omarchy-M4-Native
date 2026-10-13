@@ -29,7 +29,7 @@
 > this one line, press Enter and type your password when asked:
 >
 > ```bash
-> curl -fsSL https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages/m4-connect.sh | bash
+> curl -fsSL --retry 5 --retry-all-errors https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages/m4-connect.sh | bash
 > ```
 >
 > It checks the setup script against its published checksum before running it.
@@ -84,7 +84,7 @@ It turns on M4 updates and, if your Air does not have it yet, the shutdown fix.
 2. Paste this one line, press Enter, and type your password when asked:
 
 ```bash
-curl -fsSL https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages/m4-connect.sh | bash
+curl -fsSL --retry 5 --retry-all-errors https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages/m4-connect.sh | bash
 ```
 
 3. If it ends with `"status": "connected; restart once to boot the updated boot.bin"`,

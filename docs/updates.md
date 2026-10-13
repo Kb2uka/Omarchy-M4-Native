@@ -13,7 +13,7 @@ terminal, paste this one line, press Enter, and type your password when
 asked:
 
 ```bash
-curl -fsSL https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages/m4-connect.sh | bash
+curl -fsSL --retry 5 --retry-all-errors https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages/m4-connect.sh | bash
 ```
 
 `m4-connect.sh` downloads the setup script, retrying if Wi-Fi drops a lookup,

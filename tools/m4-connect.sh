@@ -4,7 +4,7 @@
 #
 # Connect this M4 Air to the signed [omarchy-m4] update channel in one paste:
 #
-#   curl -fsSL https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages/m4-connect.sh | bash
+#   curl -fsSL --retry 5 --retry-all-errors https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages/m4-connect.sh | bash
 #
 # The publish step writes the SHA256 of the setup script it publishes into this
 # file. Any other setup script is refused before anything runs. Everything is

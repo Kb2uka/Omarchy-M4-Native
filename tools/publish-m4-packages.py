@@ -32,7 +32,7 @@ CONNECT = 'm4-connect.sh'
 CONNECT_HASH = '@SETUP_SHA256@'
 NOTES = ('Signed pacman repository for the experimental M4 build ([issue #49]'
          '(https://github.com/Kb2uka/Omarchy-M4-Native/issues/49)). Owners connect once with '
-         '`omarchy-m4-setup.py`; see docs/updates.md. Not an installer.')
+         '`m4-connect.sh` (it checks and runs `omarchy-m4-setup.py`); see docs/updates.md. Not an installer.')
 
 
 def require(condition, message):
@@ -110,19 +110,27 @@ def connect_script(setup_sha256):
     return template.replace(CONNECT_HASH, setup_sha256)
 
 
-def published_database(desired, attempts=6):
-    """Download the served database until it lists the desired packages.
+def served(name, accept, message, attempts=6):
+    """Download a release asset until accept(data) holds, and return it.
 
-    The release CDN can serve the previous database for a few seconds after an
-    upload, so a mismatch is retried before it counts as a failure.
+    The release CDN can serve an object's previous bytes for a few seconds after
+    an upload, so a mismatch is retried before it counts as a failure.
     """
     for attempt in range(attempts):
-        data = fetch(f'{REPO}.db')
-        if database_entries(data) == desired:
+        data = fetch(name)
+        if accept(data):
             return data
         if attempt + 1 < attempts:
             time.sleep(10)
-    require(False, 'The published database does not match')
+    require(False, message)
+
+
+def signs(signature_path, data_path):
+    """An accept() for served(): the bytes are a good signature of data_path."""
+    def accept(data):
+        signature_path.write_bytes(data)
+        return signed(signature_path, data_path)
+    return accept
 
 
 def sign(package):
@@ -197,18 +205,18 @@ def publish(directory):
             print('database already published and verified')
         check = scratch / 'check'
         check.mkdir()
-        (check / f'{REPO}.db').write_bytes(published_database(desired))
-        (check / f'{REPO}.db.sig').write_bytes(fetch(f'{REPO}.db.sig'))
-        verify(check / f'{REPO}.db.sig', check / f'{REPO}.db')
+        database = check / f'{REPO}.db'
+        database.write_bytes(served(database.name, lambda d: database_entries(d) == desired,
+                                    'The published database does not match'))
+        served(database.name + '.sig', signs(check / (database.name + '.sig'), database),
+               'Bad or foreign signature on ' + database.name)
         for name, digest in sorted(desired):
-            data = fetch(name)
-            require(hashlib.sha256(data).hexdigest() == digest, 'Published package differs: ' + name)
-            (check / name).write_bytes(data)
-            (check / (name + '.sig')).write_bytes(fetch(name + '.sig'))
-            verify(check / (name + '.sig'), check / name)
+            (check / name).write_bytes(served(name, lambda d, digest=digest: hashlib.sha256(d).hexdigest() == digest,
+                                              'Published package differs: ' + name))
+            served(name + '.sig', signs(check / (name + '.sig'), check / name), 'Bad or foreign signature on ' + name)
             print('verified ' + name)
-        require(fetch(SETUP) == setup.read_bytes(), 'Published setup script differs')
-        require(fetch(CONNECT) == connect.read_bytes(), 'Published connect script differs')
+        served(SETUP, lambda d: d == setup.read_bytes(), 'Published setup script differs')
+        served(CONNECT, lambda d: d == connect.read_bytes(), 'Published connect script differs')
 
 
 def main():

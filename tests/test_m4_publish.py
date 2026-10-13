@@ -163,6 +163,15 @@ class PublishTests(unittest.TestCase):
             self.publish()
         self.assertEqual(sleep.call_count, 2)
 
+    def test_stale_served_connect_script_fails(self):
+        self.publish()
+        real_fetch = self.release.fetch
+        self.release.fetch = (lambda name, attempts=4:
+                              b'old connect script' if name == MODULE.CONNECT else real_fetch(name))
+        with mock.patch.object(MODULE.time, 'sleep'), self.assertRaises(SystemExit) as raised:
+            self.publish()
+        self.assertIn('connect script differs', str(raised.exception))
+
     def test_database_that_never_matches_fails(self):
         self.publish()
         stale = self.release.assets[f'{REPO}.db']
