@@ -130,10 +130,11 @@ curl -fsSL --retry 5 --retry-all-errors https://github.com/Kb2uka/Omarchy-M4-Nat
 
 The last lines it prints include
 `"status": "connected; restart once to apply the update"`. Restart the
-Air once. From then on, Shut Down turns it off, and M4 fixes arrive with the
-normal `omarchy update`. [Details, messages and rollback](updates.md).
+Air once. From then on, Shut Down turns it off, and `omarchy-m4-update` brings
+new M4 fixes. [Details, messages and rollback](updates.md).
 
-Installers built after October 13, 2026 do this step on their own. Once your
+A later installer will do this step on its own (the published v0.1.0-alpha.1
+installer does not). Once your
 account exists and the Air is online, a background service
 (`m4-channel-connect.timer`) runs the same setup within about 20 minutes and
 retries until it succeeds; restart once afterwards. Check it with
