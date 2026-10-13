@@ -80,14 +80,19 @@ file.
 ## Connecting new installs
 
 The release root builder (`tools/prepare-j713-release.py`) adds
-`/usr/lib/omarchy-m4/m4-channel-setup.py` (a copy of `tools/m4-channel-setup.py`)
-and enables `m4-channel-connect.timer`. Its service runs the setup script with
+`/usr/lib/omarchy/m4-channel-connect.py` (a copy of `tools/m4-channel-setup.py`;
+`/usr/lib/omarchy-m4/` belongs to the channel packages) and enables
+`m4-channel-connect.timer`. Its service runs the setup script with
 `--apply` once the owner's account exists
 (`ConditionPathExists=!/var/lib/omarchy/provisioning/pending`). The timer
-retries every 20 minutes until the script succeeds, because Wi-Fi usually
-arrives after first login. Success writes `/var/lib/omarchy-m4/connected`, after
-which the service is skipped. The script refuses rather than half-connects, so a
-failed attempt leaves `pacman.conf` and `boot.bin` as they were.
+fires every 20 minutes of wall-clock time until the script succeeds, because
+Wi-Fi usually arrives after first login. Success writes
+`/var/lib/omarchy-m4/connected` and disables the timer. The service has no
+timeout of its own, so it is never killed in the middle of its rollback. A
+failed attempt leaves `pacman.conf` and `boot.bin` as they were; the channel's
+signing key, imported before the network step, stays trusted. Setup takes an
+exclusive lock, so this service and a manual connect or `omarchy-m4-update` run
+one after the other.
 
 ## The boot object and its composer
 

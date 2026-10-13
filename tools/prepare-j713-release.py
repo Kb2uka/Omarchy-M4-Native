@@ -372,7 +372,7 @@ def prepare_root(source, image, root, tree, identity, kernel=None):
             'usr/lib/systemd/system/omarchy-provision-owner.service.d/10-owner-assets.conf':
                 'packaging/j713-owner-assets-audio.conf',
             # Connect to the signed M4 update channel once the owner is online.
-            'usr/lib/omarchy-m4/m4-channel-setup.py': 'tools/m4-channel-setup.py',
+            'usr/lib/omarchy/m4-channel-connect.py': 'tools/m4-channel-setup.py',  # not the package's copy path
             'usr/lib/systemd/system/m4-channel-connect.service': 'packaging/j713-first-boot/m4-channel-connect.service',
             'usr/lib/systemd/system/m4-channel-connect.timer': 'packaging/j713-first-boot/m4-channel-connect.timer',
         }

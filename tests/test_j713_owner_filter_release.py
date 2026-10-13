@@ -178,10 +178,17 @@ class OwnerFilterReleaseTests(unittest.TestCase):
             self.assertTrue((root / 'etc/systemd/system/multi-user.target.wants/j713-owner-assets.service').is_symlink())
             timer = root / 'etc/systemd/system/timers.target.wants/m4-channel-connect.timer'
             self.assertEqual(str(timer.readlink()), '/usr/lib/systemd/system/m4-channel-connect.timer')
-            self.assertEqual((root / 'usr/lib/omarchy-m4/m4-channel-setup.py').read_bytes(),
+            self.assertEqual((root / 'usr/lib/omarchy/m4-channel-connect.py').read_bytes(),
                              (ROOT / 'tools/m4-channel-setup.py').read_bytes())
+            self.assertFalse((root / 'usr/lib/omarchy-m4').exists(), 'that path belongs to the channel packages')
+            for unit in ('m4-channel-connect.service', 'm4-channel-connect.timer'):
+                self.assertEqual((root / 'usr/lib/systemd/system' / unit).read_bytes(),
+                                 (ROOT / 'packaging/j713-first-boot' / unit).read_bytes())
             service = (root / 'usr/lib/systemd/system/m4-channel-connect.service').read_text()
-            self.assertIn('ExecStart=/usr/bin/python3 /usr/lib/omarchy-m4/m4-channel-setup.py --apply\n', service)
+            self.assertIn('ExecStart=/usr/bin/python3 /usr/lib/omarchy/m4-channel-connect.py --apply\n', service)
+            self.assertIn('TimeoutStartSec=infinity\n', service)
+            self.assertIn('ExecStartPost=/usr/bin/systemctl disable --no-block m4-channel-connect.timer\n', service)
+            self.assertIn('OnCalendar=', (root / 'usr/lib/systemd/system/m4-channel-connect.timer').read_text())
             self.assertIn('ConditionPathExists=!/var/lib/omarchy/provisioning/pending\n', service)
             self.assertIn('ConditionPathExists=!/var/lib/omarchy-m4/connected\n', service)
             for name in release.FIRS:
