@@ -74,9 +74,25 @@ class KernelReleaseTests(unittest.TestCase):
         for name in ('tools/m4-j713-owner-assets.py', 'tools/m4-j713-fir-owner.py',
                      'packaging/Install.command', 'docs/install.md', 'docs/release-limitations.md',
                      'docs/updates.md', 'docs/j713-poweroff.md', 'docs/release-source.md',
-                     'docs/j713-afe-native-action.md', 'audio/j713/owner-fir/README.md'):
+                     'docs/j713-afe-native-action.md', 'audio/j713/owner-fir/README.md',
+                     'audio/j713/owner-fir/.gitattributes', 'audio/j713/owner-fir/licenses/LICENSE.txt'):
             self.write(self.tree, name, ('fixture ' + name).encode())
-        self.write(self.tree, 'audio/j713/owner-fir/manifest.json', b'{"outputs": {}}')
+        self.sources = {name: ('current ' + name).encode()
+                        for name in ('run-transfer.py', 'run-memory.py', 'measure-memory.c')}
+        for name, data in self.sources.items():
+            self.write(self.tree, 'audio/j713/owner-fir/src/' + name, data)
+        self.helpers = {'measure-memory': b'native memory', 'measure-transfer': b'native transfer'}
+        self.wheel = ('numpy-fixture.whl', b'pinned wheel')
+        self.profile = {
+            'outputs': {},
+            'sources': {name: {'size': len(data), 'sha256': digest(data)}
+                        for name, data in self.sources.items()},
+            'helpers': {name: {'size': len(data), 'sha256': digest(data)}
+                        for name, data in self.helpers.items()},
+            'numpy': {'filename': self.wheel[0], 'size': len(self.wheel[1]),
+                      'sha256': digest(self.wheel[1])},
+        }
+        self.save_profile()
         self.boot = {'bootargs': 'console=tty0 dockchannel_hid.m4_power_v2=1'}
         self.parts = {'kernel': self.original_kernel, 'dtb': b'old DTB',
                       'loader': b'preserved loader', 'initramfs': b'preserved initramfs'}
@@ -95,10 +111,14 @@ class KernelReleaseTests(unittest.TestCase):
             for name, data in self.parts.items():
                 archive.writestr(self.boot[name]['file'], data)
         self.owner = self.base / 'owner.tar'
-        with tarfile.open(self.owner, 'w') as archive:
-            info = tarfile.TarInfo('owner-fir/.gitattributes')
-            info.size = 1
-            archive.addfile(info, io.BytesIO(b'\n'))
+        # The pinned helper archive also carries the released, now stale scripts.
+        self.owner_members = {'.gitattributes': b'\n', 'README.md': b'released README',
+                              'manifest.json': b'{"outputs": {}}',
+                              'dependencies/' + self.wheel[0]: self.wheel[1],
+                              **{'bin/' + name: data for name, data in self.helpers.items()},
+                              **{'src/' + name: b'released ' + name.encode()
+                                 for name in self.sources}}
+        self.save_owner()
         self.fixed_inputs = {}
         for name, pin in {
             'numpy_source': 'df2d5874ff183595a4ba404edd04f6bd9b5505c1d7708573f6a6c17489a67563',
@@ -129,6 +149,17 @@ class KernelReleaseTests(unittest.TestCase):
 
     def save_receipt(self):
         self.receipt_path.write_text(json.dumps(self.receipt))
+
+    def save_profile(self):
+        self.write(self.tree, 'audio/j713/owner-fir/manifest.json', json.dumps(self.profile).encode())
+
+    def save_owner(self):
+        self.owner.unlink(missing_ok=True)
+        with tarfile.open(self.owner, 'w') as archive:
+            for name, data in self.owner_members.items():
+                info = tarfile.TarInfo('owner-fir/' + name)
+                info.size = len(data)
+                archive.addfile(info, io.BytesIO(data))
 
     def git_output(self, command, **kwargs):
         if 'ls-files' in command:
@@ -195,6 +226,46 @@ class KernelReleaseTests(unittest.TestCase):
                 self.assertEqual(archive.extractfile(name).read(), (self.tree / name).read_bytes())
         kit = json.loads((delivery / 'KIT.json').read_bytes())
         self.assertEqual(kit['files']['IMAGE.json']['sha256'], digest((delivery / 'IMAGE.json').read_bytes()))
+
+    def test_owner_runtime_bundle_takes_only_native_files_from_helper_archive(self):
+        bundle = self.assemble() / 'owner-audio/bundle'
+        owner_fir = self.tree / 'audio/j713/owner-fir'
+        for name, data in self.sources.items():
+            self.assertEqual((bundle / 'src' / name).read_bytes(), data)
+        for name in ('manifest.json', 'README.md', 'licenses/LICENSE.txt'):
+            self.assertEqual((bundle / name).read_bytes(), (owner_fir / name).read_bytes())
+        for name, data in self.helpers.items():
+            self.assertEqual((bundle / 'bin' / name).read_bytes(), data)
+        self.assertEqual((bundle / 'dependencies' / self.wheel[0]).read_bytes(), self.wheel[1])
+        self.assertFalse((bundle / '.gitattributes').exists())
+        self.assertFalse((self.args.output / 'owner-helpers').exists())
+
+    def test_owner_runtime_bundle_disagreeing_with_manifest_refuses(self):
+        changes = (
+            ('sources', 'run-memory.py', lambda: self.write(
+                self.tree, 'audio/j713/owner-fir/src/run-memory.py', b'edited run-memory.py')),
+            ('helpers', 'measure-transfer', lambda: self.owner_members.update(
+                {'bin/measure-transfer': b'rebuilt transfer'})),
+            ('numpy', self.wheel[0], lambda: self.owner_members.update(
+                {'dependencies/' + self.wheel[0]: b'other wheel'})),
+        )
+        for section, name, change in changes:
+            with self.subTest(section=section):
+                self.setUp()
+                change()
+                self.save_owner()
+                with self.assertRaisesRegex(RuntimeError, 'disagrees with its manifest: ' + name):
+                    self.assemble()
+
+    def test_owner_helper_archive_without_native_files_refuses(self):
+        for directory in ('bin/', 'dependencies/'):
+            with self.subTest(directory=directory):
+                self.setUp()
+                self.owner_members = {name: data for name, data in self.owner_members.items()
+                                      if not name.startswith(directory)}
+                self.save_owner()
+                with self.assertRaisesRegex(RuntimeError, 'Owner helper bundle lacks'):
+                    self.assemble()
 
     def test_absent_pair_preserves_retained_kernel_and_bootargs(self):
         self.args.kernel = self.args.kernel_receipt = None
