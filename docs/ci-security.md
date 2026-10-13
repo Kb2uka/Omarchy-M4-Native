@@ -22,6 +22,7 @@ See [GitHub runner pricing](https://docs.github.com/en/actions/how-tos/write-wor
 | Tests (Linux) | Offline Python regressions and the Lua policy fixture. No image installation, speaker pulse or hardware reboot. |
 | Speaker daemon (Rust) | Verifies every hash in `audio/j713/imported-source.sha256`, then builds and unit-tests `speakersafetyd` with its locked dependencies. No audio device or speaker is touched. |
 | Installer transport (macOS) | Downloader and packaging regressions on macOS, including its shell and archive tools. |
+| Package channel | Builds the M4 pacman packages with makepkg, checks every file against the channel allowlist and protected paths, and refuses changed contents under an already-published file name. It then installs them with real pacman into a sandboxed alpha.1-style root, signed by a throwaway key, and runs the setup script twice. Protected stand-ins and `boot.bin` must not change, and pacman must refuse a database signed by an untrusted key. See [package-channel.md](package-channel.md). |
 | Secrets | Gitleaks default rules across fetched history and current files; supported encoded/archive content is also scanned. Findings are redacted. |
 | Malware | Updated ClamAV definitions; every tracked regular file, including archives. Detections, scanner errors, encrypted archives and scan-limit exhaustion fail. Git export exclusions cannot hide files. Symlinks, submodules, oversized files and unresolved LFS pointers require review. |
 | Workflow lint | Actionlint plus security-policy assertions and negative tests for unsafe workflow changes. |
@@ -43,8 +44,15 @@ external release assets.
 Fork PRs use `pull_request`, never privileged `pull_request_target`. The token is
 read-only, checkout credentials are not persisted, actions are pinned by full
 commit SHA, and scanner binaries have fixed SHA-256 checksums. Only the CodeQL
-job requests the permission needed to upload security results. No workflow
-publishes, deploys or has access to release signing credentials.
+job requests the permission needed to upload security results.
+
+The single exception is the `publish` job in `packages.yml`. It runs only for
+pushes and manual runs on `main`, after the package checks pass, inside the
+`package-publish` environment (deployments restricted to `main`). It alone
+receives write access and the package signing key (`PACKAGE_SIGNING_KEY`). It
+signs packages and the repository database and publishes them to the `packages`
+release. The workflow policy and its negative tests reject a secret, write
+access or that environment anywhere else. No workflow publishes an installer.
 
 External contributors require maintainer approval to run workflows. Review the
 workflow, build scripts and dependencies **before** approving a run. CODEOWNERS

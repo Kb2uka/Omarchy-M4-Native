@@ -1,0 +1,13 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Path
+Target = usr/bin/m4-boot-compose
+Target = usr/lib/omarchy-m4/Image.gz
+Target = usr/lib/omarchy-m4/j713.dtb
+
+[Action]
+Description = Updating the M4 boot object (boot.bin)...
+When = PostTransaction
+Exec = /usr/bin/m4-boot-compose --apply
+Depends = python

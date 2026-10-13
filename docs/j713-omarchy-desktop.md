@@ -180,6 +180,7 @@ not a maintainable package update strategy.
 A proposed maintenance model is to reuse upstream Omarchy packages, package
 M4-specific changes separately, and test a coherent package set before
 promoting an M4 stable channel. Users could then use the normal
-`omarchy update` flow. That channel and its upgrade/recovery tests are not
-implemented. No claim is made that arbitrary upstream updates are safe for
-this experimental image.
+`omarchy update` flow. The M4 kernel and boot object now ship that way through
+the signed `[omarchy-m4]` channel ([package-channel.md](package-channel.md)).
+Graphics, decoder and audio payloads are not packaged yet. No claim is made
+that arbitrary upstream updates are safe for this experimental image.

@@ -19,6 +19,31 @@
 > The applicable [licenses](LICENSE.md) and
 > [third-party notices](THIRD_PARTY_NOTICES.md) remain in effect.
 
+# 📣 Installed before October 13, 2026? Run one command.
+
+> [!IMPORTANT]
+> ## If you installed v0.1.0-alpha.1 before [PR #53](https://github.com/Kb2uka/Omarchy-M4-Native/pull/53) (October 13, 2026), connect your Air to M4 updates once.
+>
+> Until you do, your Air **cannot receive M4 fixes**. If you never ran update 1,
+> **Shut Down still restarts it**. Join Wi-Fi, open a terminal on the Air, paste
+> this whole block, press Enter and type your password:
+>
+> ```bash
+> cd ~ && rm -rf m4-updates && mkdir m4-updates && cd m4-updates &&
+> base=https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages &&
+> curl -fL -O "$base/omarchy-m4-setup.py" -O "$base/SETUP-SHA256SUMS" &&
+> sha256sum -c SETUP-SHA256SUMS &&
+> sudo python3 omarchy-m4-setup.py --apply
+> ```
+>
+> - It ends with **`restart once`**: restart the Air. That is all.
+> - It ends with **`future M4 fixes arrive with omarchy update`**: you are done.
+>
+> From then on, M4 fixes arrive with the normal `omarchy update`, and a
+> **"M4 update available"** notification tells you when one is ready. Your
+> browser, video, Widevine, speaker and trackpad setup are not touched.
+> [What it does, messages and rollback](docs/updates.md).
+
 ![Experimental Omarchy M4 Air concept artwork](docs/images/omarchy-m4-native.png)
 
 # Omarchy on Apple M4 — experimental
@@ -50,29 +75,32 @@ Then follow the **[step-by-step installation guide](docs/install.md)**. This
 installer starts in macOS; it is not a bootable PC ISO. GitHub's automatic
 “Source code” ZIP is not the installer.
 
-### Then install update 1 — everyone, once
+### Then connect to M4 updates — everyone, once
 
-**Every alpha.1 install needs this, whether you installed today or earlier.**
-Without it, **Shut Down restarts the Air instead of turning it off.**
+**Every alpha.1 install needs this once, whether you installed today or earlier.**
+It turns on M4 updates and, if your Air does not have it yet, the shutdown fix.
 
-1. On the Air, open a terminal in Omarchy.
+1. On the Air, join Wi-Fi (`nmtui`) and open a terminal in Omarchy.
 2. Copy this whole block, paste it, press Enter, and type your password when asked:
 
 ```bash
-cd ~ && rm -rf m4-update-1 && mkdir m4-update-1 && cd m4-update-1 &&
-base=https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/v0.1.0-alpha.1-update.1 &&
-curl -fL -O "$base/j713-poweroff.dtb" -O "$base/m4-j713-update-boot-dtb.py" -O "$base/SHA256SUMS" &&
-sha256sum -c SHA256SUMS &&
-sudo python3 m4-j713-update-boot-dtb.py --dtb j713-poweroff.dtb --apply
+cd ~ && rm -rf m4-updates && mkdir m4-updates && cd m4-updates &&
+base=https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages &&
+curl -fL -O "$base/omarchy-m4-setup.py" -O "$base/SETUP-SHA256SUMS" &&
+sha256sum -c SETUP-SHA256SUMS &&
+sudo python3 omarchy-m4-setup.py --apply
 ```
 
-3. When it prints `"status": "updated; takes effect at next boot"`, **restart the Air.** Done.
+3. If it ends with `"status": "connected; restart once to boot the updated boot.bin"`,
+   **restart the Air.** If it ends with
+   `"status": "connected; future M4 fixes arrive with omarchy update"`, you are done.
 
-If it prints `"status": "already updated"`, you already have it. If it prints
-`FAILED` or an error, stop and [open an issue](https://github.com/Kb2uka/Omarchy-M4-Native/issues);
-nothing is written unless every check passes. No reinstall, and your files are
-not touched.
-[Details and rollback](docs/updates.md#shutdown-fix-for-alpha1).
+If it prints `FAILED` or `omarchy-m4-setup: refused: …`, stop and
+[open an issue](https://github.com/Kb2uka/Omarchy-M4-Native/issues); your Air
+keeps booting as before. No reinstall, and your files are not touched.
+After this, M4 fixes arrive with the normal `omarchy update`, and a
+"M4 update available" notification tells you when one is ready.
+[Details, messages and rollback](docs/updates.md).
 
 Two attended private installations reached the desktop. A later October 12
 candidate completed account setup but failed graphics and audio startup, leaving
@@ -81,24 +109,23 @@ unrelated device waits as fatal prerequisites. The replacement corrects those
 startup dependencies, enables an authenticated recovery console, and keeps
 kernel messages from displacing the setup form. **The replacement still needs
 an attended installation before publication.** Intermittent trackpad AFE startup
-remains unqualified; shutdown needs [update 1](docs/updates.md#shutdown-fix-for-alpha1). See the [startup repair record](docs/j713-first-boot-recovery.md),
+remains unqualified; shutdown needs the [connect step](#then-connect-to-m4-updates--everyone-once). See the [startup repair record](docs/j713-first-boot-recovery.md),
 [qualification record](docs/experimental-release.md) and
 [known limitations](docs/release-limitations.md).
 
-**Read the [update policy](docs/updates.md) before accepting system updates.**
-There is no coordinated M4 update channel in this alpha yet, and a push to
-`main` does not update installed machines. Fixes ship as small in-place updates
-with their own instructions; the first is the
-[shutdown fix](docs/updates.md#shutdown-fix-for-alpha1). M4 fixes are planned to
-become signed packages delivered by the normal system update
-([issue #49](https://github.com/Kb2uka/Omarchy-M4-Native/issues/49)).
+**M4 updates are signed packages** from this project's `[omarchy-m4]`
+repository ([how it works](docs/package-channel.md)), delivered by the normal
+`omarchy update` after the connect step. A push to `main` does not update
+installed machines; only packages published to the channel do. General
+Arch Linux ARM and Omarchy updates remain unqualified on this hardware; read the
+[update guide](docs/updates.md) before accepting them.
 
 ## Shutdown
 
-**Shut Down works once update 1 is installed:** the Air turns off and stays
-off. Verified on the test Air on October 12, 2026. alpha.1 without update 1
-restarted instead, so install it if you haven't
-([step above](#then-install-update-1--everyone-once)).
+**Shut Down works once the Air is connected to M4 updates (or has update 1):**
+the Air turns off and stays off. Verified on the test Air on October 12, 2026.
+alpha.1 without the fix restarted instead, so run the
+[connect step](#then-connect-to-m4-updates--everyone-once) if you haven't.
 [What was wrong and how it was fixed](docs/j713-poweroff.md) ·
 [issue #24](https://github.com/Kb2uka/Omarchy-M4-Native/issues/24) (closed).
 

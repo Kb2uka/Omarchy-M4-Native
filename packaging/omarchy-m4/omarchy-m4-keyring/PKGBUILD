@@ -1,0 +1,18 @@
+# Maintainer: KB2UKA
+# Built and signed by .github/workflows/packages.yml; see docs/package-channel.md.
+pkgname=omarchy-m4-keyring
+pkgver=20261012
+pkgrel=1
+pkgdesc='Signing key for the Omarchy M4 Native package repository'
+arch=('any')
+url='https://github.com/Kb2uka/Omarchy-M4-Native'
+license=('MIT')
+install=omarchy-m4-keyring.install
+source=('omarchy-m4.gpg' 'omarchy-m4-trusted' 'omarchy-m4-revoked')
+sha256sums=('89bf287018fe0a1f24c4895bff37d0a60391e4ffeccc196a35d84dc2d1f4459c'
+            '1fb04eb1eac51527c2f54b433ab609766b9450dd5a86a6ddecaef7ee41e4d536'
+            'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')
+
+package() {
+  install -Dm644 -t "$pkgdir/usr/share/pacman/keyrings" omarchy-m4.gpg omarchy-m4-trusted omarchy-m4-revoked
+}

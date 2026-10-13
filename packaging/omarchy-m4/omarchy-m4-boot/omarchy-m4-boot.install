@@ -1,0 +1,11 @@
+post_install() {
+  systemctl --global enable omarchy-m4-update-check.timer >/dev/null 2>&1 || true
+}
+
+post_upgrade() {
+  post_install
+}
+
+pre_remove() {
+  systemctl --global disable omarchy-m4-update-check.timer >/dev/null 2>&1 || true
+}

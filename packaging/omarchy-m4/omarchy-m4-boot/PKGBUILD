@@ -1,0 +1,35 @@
+# Maintainer: KB2UKA
+# Built and signed by .github/workflows/packages.yml; see docs/package-channel.md.
+# m4-boot-compose.py, m4-update-check.py, MIT.txt and GPL-2.0-or-later.txt are staged from tools/
+# and LICENSES/ by tools/build-m4-packages.py.
+pkgname=omarchy-m4-boot
+pkgver=1
+pkgrel=1
+pkgdesc='Keeps the J713 boot.bin in step with the packaged M4 kernel and devicetree'
+arch=('aarch64')
+url='https://github.com/Kb2uka/Omarchy-M4-Native'
+license=('MIT' 'GPL-2.0-or-later OR MIT')
+depends=('python' 'pacman')
+install=omarchy-m4-boot.install
+options=('!strip' '!debug')
+_dtb_release=v0.1.0-alpha.1-update.1
+source=('m4-boot-compose.py' '90-omarchy-m4-boot.hook' 'm4-update-check.py'
+        'omarchy-m4-update-check.service' 'omarchy-m4-update-check.timer' 'MIT.txt' 'GPL-2.0-or-later.txt'
+        "j713-poweroff-${_dtb_release}.dtb::${url}/releases/download/${_dtb_release}/j713-poweroff.dtb")
+sha256sums=('5a3bce6b03b6d89225de9ffa5cd856f655e1fc7423183934d9d6d0ec989b5af4'
+            '22514358734721ffcb4478f9c3c2c91f55b858bbd40aba6278c395e7a35de810'
+            '97b8f5fff0feac4f0cb76ef188c90aa448a5764e520cc42f67b7f75e54f5e08d'
+            '8ecdbfc8303276d8db5922f6a06aa945f58ebca27b83520f76e9155561b9c5b0'
+            '2e920a979cdf4d8d2075f9f3ab513c5e614eaa126f74b2c01ea5ccf0ab8a9544'
+            'b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5'
+            'aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3'
+            'e54c77a760a5b696486f9d80c7c83ca4295d641113bb9e54d13e259863bf9b07')
+
+package() {
+  install -Dm755 m4-boot-compose.py "$pkgdir/usr/bin/m4-boot-compose"
+  install -Dm644 90-omarchy-m4-boot.hook "$pkgdir/usr/share/libalpm/hooks/90-omarchy-m4-boot.hook"
+  install -Dm755 m4-update-check.py "$pkgdir/usr/bin/omarchy-m4-update-check"
+  install -Dm644 -t "$pkgdir/usr/lib/systemd/user" omarchy-m4-update-check.service omarchy-m4-update-check.timer
+  install -Dm644 "j713-poweroff-${_dtb_release}.dtb" "$pkgdir/usr/lib/omarchy-m4/j713.dtb"
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" MIT.txt GPL-2.0-or-later.txt
+}
