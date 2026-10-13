@@ -133,11 +133,14 @@ def check_package(channel, package, info, files, root):
         require(channel['devicetree']['sha256'] in policy['KNOWN_DTBS'], 'Composer does not accept the pinned devicetree')
         realtime = (ROOT / 'packaging/omarchy-m4/omarchy-m4-boot/speakersafetyd-j713-realtime.conf').read_bytes()
         require(files.get(REALTIME) == (0o644, sha(realtime)), 'Boot package lacks the real-time speaker setting')
-        require('omarchy-m4-gst-audio' in info.get('depend', []), 'Boot package does not pull in the GStreamer sinks')
+        # No dependency on the sinks: a later gst-plugins-good must be able to replace them.
+        require('omarchy-m4-gst-audio' not in info.get('depend', []), 'Boot package must not require the GStreamer sinks')
     elif name == 'omarchy-m4-gst-audio':
         for path, digest in channel['gst_audio'].items():
             require(files.get(path, (0, ''))[1] == digest, 'GStreamer sink differs from the pin: ' + path)
         require(info.get('conflict') == ['gst-plugins-good'], 'GStreamer sink package must conflict with gst-plugins-good')
+        require(sorted(info.get('depend', [])) == ['gst-plugins-base-libs>=1.28.7', 'gstreamer>=1.28.7', 'libpulse'],
+                'GStreamer sink package dependencies changed')
     elif name == 'omarchy-m4-keyring':
         listing = subprocess.run(['gpg', '--show-keys', '--with-colons',
                                   str(root / 'usr/share/pacman/keyrings/omarchy-m4.gpg')],

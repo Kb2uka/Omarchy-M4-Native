@@ -38,8 +38,9 @@ Images built after this change ship it.
 
 ## Existing installs
 
-**Connected to M4 updates? You get this automatically.** `omarchy update`
-installs `omarchy-m4-gst-audio`, which puts the same two plugins in the system
+**Connected to M4 updates? You get this automatically.** The connect step
+installs `omarchy-m4-gst-audio` (an Air connected before it existed gets it by
+running the connect line once more), which puts the same two plugins in the system
 plugin directory that every app and the WebKitGTK sandbox can see; restart the
 app. If you ran the helper below earlier, it now reports `not needed`; run it
 once with `--remove` to delete its own copies and session file. The helper

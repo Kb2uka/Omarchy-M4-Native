@@ -9,7 +9,7 @@ pkgdesc='Keeps the J713 boot.bin in step with the packaged M4 kernel and devicet
 arch=('aarch64')
 url='https://github.com/Kb2uka/Omarchy-M4-Native'
 license=('MIT' 'GPL-2.0-or-later OR MIT')
-depends=('python' 'pacman' 'omarchy-m4-gst-audio')
+depends=('python' 'pacman')
 install=omarchy-m4-boot.install
 options=('!strip' '!debug')
 # The CPU frequency and CPU temperature devicetree (docs/j713-cpu-temperature.md), and the

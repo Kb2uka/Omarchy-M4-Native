@@ -74,7 +74,7 @@ class RecipeTests(unittest.TestCase):
         self.assertIn(CHANNEL['devicetree']['sha256'], text)
         self.assertEqual(load('tools/m4-boot-compose.py').KNOWN_DTBS[CHANNEL['devicetree']['sha256']],
                          'j713-cpu-temperature')
-        self.assertIn("depends=('python' 'pacman' 'omarchy-m4-gst-audio')", text)
+        self.assertIn("depends=('python' 'pacman')\n", text, 'gst-plugins-good must be able to replace the sinks')
 
     def test_realtime_setting_matches_the_image_unit(self):
         drop_in = (PACKAGING / 'omarchy-m4-boot/speakersafetyd-j713-realtime.conf').read_text()
@@ -107,13 +107,13 @@ class RecipeTests(unittest.TestCase):
                 if path in exceptions:
                     continue
                 self.assertFalse(CHECK.allowed(path, CHANNEL['protected_paths']), f'{name}: {path}')
+                self.assertFalse(any(p.startswith(path) for p in CHANNEL['protected_paths'] if path.endswith('/')))
         for path, reason in exceptions.items():
             # An exception is one exact file, inside a protected prefix, owned by one package, with a reason.
             self.assertFalse(path.endswith('/'), path)
             self.assertTrue(CHECK.allowed(path, CHANNEL['protected_paths']), path)
             self.assertEqual(sum(path in paths for paths in CHANNEL['allowed_paths'].values()), 1, path)
             self.assertTrue(reason.strip(), path)
-                self.assertFalse(any(p.startswith(path) for p in CHANNEL['protected_paths'] if path.endswith('/')))
         for protected in ('opt/m4-video/20261011/vaapi/v4l2_request_drv_video.so', 'usr/local/bin/brave',
                           'etc/omarchy/j713-video-manifest.json', 'usr/share/asahi-audio/j713/graph.json',
                           'usr/lib/omarchy/j713-audio/x/modules/snd-soc-tas2764.ko',
@@ -155,13 +155,14 @@ class PolicyTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'protected path'):
                     CHECK.check_package(channel, *self.boot_package({**boot, path: (0o644, 'x')}))
 
-    def test_boot_package_needs_the_realtime_setting_and_the_sinks(self):
+    def test_boot_package_needs_the_realtime_setting_not_the_sinks(self):
         realtime = (PACKAGING / 'omarchy-m4-boot/speakersafetyd-j713-realtime.conf').read_bytes()
         cases = (({**self.boot_files()}, self.boot_info(), 'real-time speaker setting'),
                  ({**self.boot_files(), CHECK.REALTIME: (0o644, hashlib.sha256(b'other').hexdigest())},
                   self.boot_info(), 'real-time speaker setting'),
                  ({**self.boot_files(), CHECK.REALTIME: (0o644, hashlib.sha256(realtime).hexdigest())},
-                  {**self.boot_info(), 'depend': ['python', 'pacman']}, 'GStreamer sinks'))
+                  {**self.boot_info(), 'depend': ['python', 'pacman', 'omarchy-m4-gst-audio']},
+                  'must not require the GStreamer sinks'))
         for files, info, message in cases:
             with self.subTest(message):
                 with self.assertRaisesRegex(ValueError, message):
@@ -170,11 +171,13 @@ class PolicyTests(unittest.TestCase):
     def test_gst_audio_package_must_be_the_pin(self):
         good = {path: (0o755, digest) for path, digest in CHANNEL['gst_audio'].items()}
         info = {'pkgname': ['omarchy-m4-gst-audio'], 'pkgver': ['1.28.7-1'], 'arch': ['aarch64'],
-                'conflict': ['gst-plugins-good']}
+                'conflict': ['gst-plugins-good'],
+                'depend': ['gstreamer>=1.28.7', 'gst-plugins-base-libs>=1.28.7', 'libpulse']}
         CHECK.check_package(CHANNEL, *self.package('omarchy-m4-gst-audio', good, info=info, version='1.28.7-1'))
         path = next(iter(good))
         for files, case_info, message in (({**good, path: (0o755, '0' * 64)}, info, 'differs from the pin'),
-                                          (good, {**info, 'conflict': []}, 'conflict with gst-plugins-good')):
+                                          (good, {**info, 'conflict': []}, 'conflict with gst-plugins-good'),
+                                          (good, {**info, 'depend': ['gstreamer>=1.28.7']}, 'dependencies changed')):
             with self.subTest(message):
                 with self.assertRaisesRegex(ValueError, message):
                     CHECK.check_package(CHANNEL, *self.package('omarchy-m4-gst-audio', files, info=case_info,
@@ -185,7 +188,7 @@ class PolicyTests(unittest.TestCase):
 
     def boot_info(self):
         return {'pkgname': ['omarchy-m4-boot'], 'pkgver': ['1-4'], 'arch': ['aarch64'],
-                'depend': ['python', 'pacman', 'omarchy-m4-gst-audio']}
+                'depend': ['python', 'pacman']}
 
     def boot_files(self):
         """A boot package that passes every check except the ones under test, unpacked on disk."""

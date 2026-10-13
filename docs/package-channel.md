@@ -14,7 +14,7 @@ reviewers.
 | `omarchy-m4-keyring` | The channel's public signing key for `pacman-key` | `20261012-1` |
 | `omarchy-m4-boot` | `m4-boot-compose`, its pacman hook, the J713 devicetree, the daily update notifier and, from 1-4, the real-time speaker protection drop-in | `1-1`; `1-4` adds CPU frequency scaling and CPU temperature |
 | `linux-m4-omarchy` | The J713 kernel image and its modules | `7.1.9.m4.20261008-2` |
-| `omarchy-m4-gst-audio` | GStreamer's `autodetect` and `pulse` sinks in `/usr/lib/gstreamer-1.0`, for WebKitGTK and GStreamer apps; `omarchy-m4-boot` 1-4 depends on it | `1.28.7-1` |
+| `omarchy-m4-gst-audio` | GStreamer's `autodetect` and `pulse` sinks in `/usr/lib/gstreamer-1.0`, for WebKitGTK and GStreamer apps | `1.28.7-1` |
 
 ### omarchy-m4-boot 1-4 and omarchy-m4-gst-audio 1.28.7-1
 
@@ -36,6 +36,9 @@ reviewers.
   source is mirrored in `package-inputs`. Installing them system-wide lets the
   WebKitGTK sandbox see them without `GST_PLUGIN_PATH`. The package conflicts
   with `gst-plugins-good`, so a later full install of that package replaces it.
+  Nothing depends on it, so that replacement is never blocked. The connect step
+  installs it; an Air connected before 1.28.7-1 was published gets it by running
+  the connect line once more.
 - **Not in the channel:** the core-placement helper (per user, under `~/.local`;
   an old copy refuses to pin on this devicetree) and the speaker protection
   startup module ([#61](https://github.com/Kb2uka/Omarchy-M4-Native/pull/61)),

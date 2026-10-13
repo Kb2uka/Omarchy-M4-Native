@@ -133,7 +133,9 @@ once applies them:
 | Sound in Zeus Link and other WebKitGTK and GStreamer apps ([#54](https://github.com/Kb2uka/Omarchy-M4-Native/pull/54), [#63](https://github.com/Kb2uka/Omarchy-M4-Native/pull/63)) | `omarchy-m4-gst-audio` 1.28.7-1 |
 
 A devicetree you applied by hand from the guides is kept; the update never
-moves an Air back to an older one.
+moves an Air back to an older one. An Air connected before
+`omarchy-m4-gst-audio` was published gets it by running the connect line once
+more.
 
 The speaker protection startup fix
 ([#61](https://github.com/Kb2uka/Omarchy-M4-Native/pull/61)) has no install
