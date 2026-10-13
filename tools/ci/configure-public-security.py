@@ -10,7 +10,7 @@ import subprocess
 REPO = 'Kb2uka/Omarchy-M4-Native'
 BASE = 'repos/' + REPO
 ROOT = Path(__file__).resolve().parents[2]
-CHECKS = ['PR policy', 'Tests (Linux)', 'Speaker daemon (Rust)', 'Installer transport (macOS)',
+CHECKS = ['PR policy', 'Tests (Linux)', 'Speaker daemon (Rust)', 'Installer transport (macOS)', 'Package channel',
           'Secrets', 'Malware', 'Workflow lint', 'Dependency review',
           'CodeQL (python)', 'CodeQL (c-cpp)', 'CodeQL (rust)', 'CodeQL (actions)']
 SETTINGS = {

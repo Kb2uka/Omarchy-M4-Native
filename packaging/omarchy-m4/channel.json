@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "repository": "omarchy-m4",
+  "release_tag": "packages",
+  "server": "https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages",
+  "signing_fingerprint": "578DF78177CF6DF29B888B8C9404F3CC90797A50",
+  "packages": ["omarchy-m4-keyring", "omarchy-m4-boot", "linux-m4-omarchy"],
+  "kernel": {
+    "release": "7.1.9-m4-gpu-backport-20261008",
+    "image_sha256": "c3704cfd2afb7760e73f0b9939a68864a30bd916fcd478bd960e538373123dc9",
+    "image_bytes": 18901266
+  },
+  "devicetree": {
+    "sha256": "e54c77a760a5b696486f9d80c7c83ca4295d641113bb9e54d13e259863bf9b07"
+  },
+  "allowed_paths": {
+    "omarchy-m4-keyring": ["usr/share/pacman/keyrings/omarchy-m4.gpg", "usr/share/pacman/keyrings/omarchy-m4-trusted",
+                           "usr/share/pacman/keyrings/omarchy-m4-revoked"],
+    "omarchy-m4-boot": ["usr/bin/m4-boot-compose", "usr/share/libalpm/hooks/90-omarchy-m4-boot.hook",
+                        "usr/lib/omarchy-m4/j713.dtb", "usr/share/licenses/omarchy-m4-boot/"],
+    "linux-m4-omarchy": ["usr/lib/modules/7.1.9-m4-gpu-backport-20261008/", "usr/lib/omarchy-m4/Image.gz",
+                         "usr/lib/omarchy-m4/kernel.config", "usr/share/licenses/linux-m4-omarchy/"]
+  },
+  "protected_paths": [
+    "boot/", "etc/", "home/", "opt/", "root/", "usr/local/", "var/",
+    "usr/lib/firmware/", "usr/lib/omarchy/", "usr/lib/speakersafetyd-j713", "usr/lib/systemd/",
+    "usr/share/alsa/", "usr/share/applications/", "usr/share/asahi-audio/", "usr/share/speakersafetyd/",
+    "usr/share/wireplumber/"
+  ]
+}

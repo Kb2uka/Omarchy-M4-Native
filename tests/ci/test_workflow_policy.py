@@ -39,6 +39,23 @@ class WorkflowPolicyTests(unittest.TestCase):
             lambda f: f['ci.yml']['jobs']['tests']['steps'].append({'run': 'scanner', 'env': {'TOKEN': '${{ secrets.TOKEN }}'}}),
             lambda f: f['ci.yml']['jobs']['tests']['steps'].append({'run': 'scanner', 'continue-on-error': 'true'}),
             lambda f: f['ci.yml']['jobs']['tests']['steps'].append({'run': 'scanner', 'if': 'false'}),
+            lambda f: f['packages.yml']['jobs']['publish'].pop('environment'),
+            lambda f: f['packages.yml']['jobs']['publish'].pop('if'),
+            lambda f: f['packages.yml']['jobs']['publish'].update({'if': "github.ref == 'refs/heads/main'"}),
+            lambda f: f['packages.yml']['jobs']['publish'].pop('needs'),
+            lambda f: f['packages.yml']['jobs']['publish'].update({'permissions': 'write-all'}),
+            lambda f: f['packages.yml']['jobs']['build'].update({'permissions': {'contents': 'write'}}),
+            lambda f: f['packages.yml']['jobs']['build'].update({'environment': 'package-publish'}),
+            lambda f: f['packages.yml']['jobs']['build']['steps'].append(
+                {'run': 'sign', 'env': {'PACKAGE_SIGNING_KEY': '${{ secrets.PACKAGE_SIGNING_KEY }}'}}),
+            lambda f: f['packages.yml']['jobs']['publish']['steps'][-1]['env'].update(
+                {'OTHER': '${{ secrets.OTHER }}'}),
+            lambda f: f['packages.yml']['jobs']['publish']['steps'][-1]['env'].update(
+                {'ALL': '${{ toJSON(secrets) }}'}),
+            lambda f: f['packages.yml']['jobs']['publish']['steps'][-1].update({'env': 'PACKAGE_SIGNING_KEY'}),
+            lambda f: f['packages.yml']['jobs']['publish']['steps'].append({'run': 'echo ${{ toJSON(secrets) }}'}),
+            lambda f: f['ci.yml']['jobs']['tests']['steps'].append(
+                {'run': 'scanner', 'env': {'ALL': '${{ toJSON(secrets) }}'}}),
         ]
         for index, mutate in enumerate(mutations):
             with self.subTest(index=index):

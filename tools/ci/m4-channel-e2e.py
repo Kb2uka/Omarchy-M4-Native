@@ -1,0 +1,231 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 KB2UKA
+"""Install the built channel packages into a sandboxed alpha.1 root with real pacman.
+
+Runs on a hosted runner as an ordinary user with sudo. A throwaway key signs a
+local copy of the repository. The sandbox carries an alpha.1-style
+linux-m4-omarchy -1, a synthetic boot.bin around the real packaged kernel and
+devicetree, and stand-ins for the protected video, Widevine, audio and speaker
+files. The setup script must connect it twice without changing those files or
+boot.bin, and pacman must refuse a database signed by an untrusted key.
+"""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import struct
+import subprocess
+import sys
+import tarfile
+import tempfile
+
+ROOT = Path(__file__).resolve().parents[2]
+CHANNEL = json.loads((ROOT / 'packaging/omarchy-m4/channel.json').read_text())
+RELEASE = CHANNEL['kernel']['release']
+STUB = '''pkgname=e2e-system
+pkgver=1
+pkgrel=1
+arch=(any)
+provides=(python coreutils kmod)
+package() { mkdir -p "$pkgdir/usr/share/e2e-system"; }
+'''
+OLD_KERNEL = '''pkgname=linux-m4-omarchy
+pkgver=7.1.9.m4.20261008
+pkgrel=1
+arch=(aarch64)
+depends=(coreutils kmod)
+provides=(linux=7.1.9 linux-aarch64=7.1.9)
+conflicts=(linux-aarch64)
+package() {
+  install -Dm644 /dev/null "$pkgdir/usr/lib/modules/%s/modules.order"
+  printf 'alpha.1 package kernel' | install -Dm644 /dev/stdin "$pkgdir/usr/lib/omarchy-m4/Image.gz"
+}
+''' % RELEASE
+PROTECTED = {
+    'opt/m4-video/20261011/mesa/lib/libgallium-26.3.0-devel.so': b'decoder mesa',
+    'opt/m4-gpu/asahi_m4.ko': b'gpu module',
+    'opt/m4-mesa/lib/libEGL.so.1.0.0': b'gpu mesa',
+    'usr/local/bin/brave': b'#!/bin/sh\n# Widevine-aware browser wrapper\n',
+    'etc/skel/.config/omarchy/pending/widevine-Brave-Browser.json': b'{}\n',
+    f'usr/lib/omarchy/j713-audio/{RELEASE}/modules/snd-soc-tas2764.ko': b'speaker amp',
+    'usr/share/asahi-audio/j713/graph.json': b'{}\n',
+    'usr/share/speakersafetyd/apple/j713.conf': b'[speakers]\n',
+}
+
+
+def require(condition, message):
+    if not condition:
+        raise SystemExit('m4-channel-e2e: ' + message)
+
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def run(*command, check=True, **options):
+    print('+ ' + ' '.join(map(str, command)), flush=True)
+    return subprocess.run([str(part) for part in command], check=check, **options)
+
+
+def sudo(*command, **options):
+    return run('sudo', '--preserve-env=GNUPGHOME', *command, **options)
+
+
+def member(package, name):
+    data = subprocess.run(['bsdtar', '-xOf', str(package), name], check=True, capture_output=True).stdout
+    require(data, f'{name} is missing from {package.name}')
+    return data
+
+
+def makepkg(directory, recipe, output):
+    directory.mkdir()
+    (directory / 'PKGBUILD').write_text(recipe)
+    config = directory / 'makepkg.conf'
+    config.write_text('CARCH="aarch64"\nPKGEXT=".pkg.tar.zst"\nBUILDENV=(!check !sign)\n'
+                      'OPTIONS=(!strip !debug)\nINTEGRITY_CHECK=(sha256)\n')
+    run('makepkg', '--config', config, '--nodeps', '--noconfirm', cwd=directory,
+        env=dict(os.environ, PKGDEST=str(output)))
+
+
+def new_key(home, name):
+    home.mkdir(mode=0o700)
+    env = dict(os.environ, GNUPGHOME=str(home))
+    run('gpg', '--batch', '--pinentry-mode', 'loopback', '--passphrase', '', '--quick-generate-key',
+        name, 'ed25519', 'sign', 'never', env=env)
+    listing = run('gpg', '--with-colons', '--list-secret-keys', env=env, capture_output=True, text=True).stdout
+    fingerprint = next(line.split(':')[9] for line in listing.splitlines() if line.startswith('fpr:'))
+    armored = run('gpg', '--armor', '--export', fingerprint, env=env, capture_output=True, text=True).stdout
+    return env, fingerprint, armored
+
+
+def signed_repository(directory, packages, env, fingerprint):
+    directory.mkdir()
+    for package in packages:
+        shutil.copyfile(package, directory / package.name)
+        run('gpg', '--batch', '--yes', '--local-user', fingerprint, '--detach-sign', '--no-armor',
+            directory / package.name, env=env)
+    run('repo-add', '--sign', '--key', fingerprint, directory / 'omarchy-m4.db.tar.gz',
+        *sorted(directory.glob('*.pkg.tar.zst')), env=env)
+
+
+def boot_bin(kernel, dtb):
+    loader = b'm1n1 sandbox loader\0' + bytes(44) + b'STACKBOT'
+    args = b'chosen.bootargs=dockchannel_hid.m4_power_v2=1 dockchannel_hid.m4_afe_action=1\n'
+    initramfs = b'\x1f\x8bsandbox base cpio' + b'070701 sandbox owner firmware'
+    return loader + args + kernel + dtb + b'm1n1_initramfs' + struct.pack('<I', len(initramfs)) + initramfs
+
+
+def sandbox(root, old, stub):
+    for name in ('var/lib/pacman', 'var/cache/pacman/pkg', 'var/log', 'etc/pacman.d/hooks',
+                 'srv/core', 'boot/efi/omarchy', 'sys/firmware/devicetree/base'):
+        (root / name).mkdir(parents=True, exist_ok=True)
+    with tarfile.open(root / 'srv/core/core.db', 'w:gz'):
+        pass
+    (root / 'etc/pacman.d/mirrorlist').write_text(f'Server = file://{root}/srv/$repo\n')
+    (root / 'etc/pacman.conf').write_text(
+        '[options]\nHoldPkg = pacman glibc\nArchitecture = aarch64\n'
+        'SigLevel = Required DatabaseOptional\nLocalFileSigLevel = Optional\n\n'
+        f'[core]\nInclude = {root}/etc/pacman.d/mirrorlist\n')
+    (root / 'sys/firmware/devicetree/base/compatible').write_bytes(b'apple,j713\0apple,t8132\0apple,arm-platform\0')
+    for name, data in PROTECTED.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_bytes(data)
+    kernel_sha = CHANNEL['kernel']['image_sha256']
+    for name, data in (('etc/omarchy/j713-video-manifest.json',
+                        {'boot_kernel_sha256': kernel_sha, 'kernel_release': RELEASE}),
+                       ('etc/omarchy/j713-audio-manifest.json', {'kernel_release': RELEASE})):
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text(json.dumps(data) + '\n')
+    sudo('chown', '-R', 'root:root', root)
+    pacman = ['pacman', '--root', root, '--dbpath', root / 'var/lib/pacman', '--config', root / 'etc/pacman.conf',
+              '--cachedir', root / 'var/cache/pacman/pkg', '--gpgdir', root / 'etc/pacman.d/gnupg',
+              '--hookdir', root / 'etc/pacman.d/hooks', '--logfile', root / 'var/log/pacman.log']
+    sudo(*pacman, '-Sy')
+    sudo(*pacman, '-U', '--noconfirm', '--noscriptlet', stub, old)
+    sudo('pacman-key', '--gpgdir', root / 'etc/pacman.d/gnupg', '--init')
+    return pacman
+
+
+def snapshot(root):
+    names = [*PROTECTED, 'boot/efi/omarchy/boot.bin', 'etc/omarchy/j713-video-manifest.json',
+             'etc/omarchy/j713-audio-manifest.json']
+    return {name: sha(Path(root / name).read_bytes()) for name in names}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('packages', type=Path, help='built channel packages')
+    built = parser.parse_args().packages.resolve()
+    packages = sorted(built.glob('*.pkg.tar.zst'))
+    by_name = {p.name.rsplit('-', 3)[0]: p for p in packages}
+    require(set(by_name) == set(CHANNEL['packages']), 'Unexpected package set')
+    with tempfile.TemporaryDirectory(prefix='m4-e2e-') as scratch:
+        scratch = Path(scratch)
+        try:
+            run('chmod', '755', scratch)
+            local = scratch / 'local'
+            local.mkdir()
+            makepkg(scratch / 'stub', STUB, local)
+            makepkg(scratch / 'old-kernel', OLD_KERNEL, local)
+            env, fingerprint, armored = new_key(scratch / 'gnupg', 'M4 channel e2e <e2e@invalid>')
+            signed_repository(scratch / 'repo', packages, env, fingerprint)
+            root = scratch / 'root'
+            root.mkdir()
+            kernel = member(by_name['linux-m4-omarchy'], 'usr/lib/omarchy-m4/Image.gz')
+            dtb = member(by_name['omarchy-m4-boot'], 'usr/lib/omarchy-m4/j713.dtb')
+            (root / 'boot/efi/omarchy').mkdir(parents=True)
+            (root / 'boot/efi/omarchy/boot.bin').write_bytes(boot_bin(kernel, dtb))
+            old, = local.glob('linux-m4-omarchy-*.pkg.tar.zst')
+            stub, = local.glob('e2e-system-*.pkg.tar.zst')
+            pacman = sandbox(root, old, stub)
+            before = snapshot(root)
+            key = scratch / 'key.asc'
+            key.write_text(armored)
+            setup = ['python3', ROOT / 'tools/m4-channel-setup.py', '--root', root,
+                     '--server', f'file://{scratch}/repo', '--key-file', key, '--fingerprint', fingerprint]
+            plan = json.loads(sudo(*setup, capture_output=True, text=True).stdout)
+            require(plan['applied'] is False and plan['pacman_conf_changes'], 'Inspection did not plan the change')
+            require(snapshot(root) == before, 'Inspection changed files')
+            results = []
+            for attempt in range(2):
+                result = sudo(*setup, '--apply', capture_output=True, text=True, check=False)
+                print(result.stdout + result.stderr)
+                require(result.returncode == 0, f'Setup attempt {attempt + 1} failed')
+                results.append(json.loads(result.stdout[result.stdout.index('{\n'):]))
+                conf = (root / 'etc/pacman.conf').read_text()
+                require(conf.count('Include = ' + str(root / 'etc/pacman.d/omarchy-m4.conf')) == 1,
+                        'The channel include is missing or duplicated')
+            require(all(r['status'].startswith('connected') and r['boot'] == 'current' and
+                        r['restart_needed'] is False for r in results), 'Setup did not report a current boot.bin')
+            repos = run('pacman-conf', '--config', root / 'etc/pacman.conf', '--repo-list',
+                        capture_output=True, text=True).stdout.split()
+            require(repos == ['omarchy-m4', 'core'], 'The channel is not searched first: ' + ' '.join(repos))
+            installed = run(*pacman, '-Q', capture_output=True, text=True).stdout
+            for package in packages:
+                name, version, rel, _ = package.name.removesuffix('.pkg.tar.zst').rsplit('-', 3)
+                require(f'{name} {version}-{rel}' in installed, f'{name} {version}-{rel} is not installed')
+            require(sha((root / 'usr/lib/omarchy-m4/Image.gz').read_bytes()) == CHANNEL['kernel']['image_sha256'],
+                    'The installed kernel image is not the pinned kernel')
+            require(len(list((root / 'usr/lib/modules' / RELEASE).rglob('*.ko'))) > 1000, 'Modules are missing')
+            require(snapshot(root) == before, 'A protected file or boot.bin changed')
+            require((root / 'etc/pacman.conf.pre-omarchy-m4').is_file(), 'No pacman.conf backup')
+            # A database signed by a key the machine does not trust must be refused.
+            env2, other, _ = new_key(scratch / 'gnupg-untrusted', 'Untrusted <untrusted@invalid>')
+            signed_repository(scratch / 'forged', packages, env2, other)
+            forged = scratch / 'forged.conf'
+            forged.write_text('[options]\nArchitecture = aarch64\nSigLevel = Required DatabaseRequired\n'
+                              f'[omarchy-m4]\nServer = file://{scratch}/forged\n')
+            (scratch / 'forged-db').mkdir()
+            refused = sudo('pacman', '--root', root, '--dbpath', scratch / 'forged-db', '--noconfirm',
+                           '--gpgdir', root / 'etc/pacman.d/gnupg', '--config', forged, '-Sy', check=False)
+            require(refused.returncode != 0, 'pacman accepted a database signed by an untrusted key')
+            print('m4-channel-e2e: passed')
+        finally:
+            subprocess.run(['sudo', 'rm', '-rf', str(scratch / 'root')], check=False)
+
+
+if __name__ == '__main__':
+    sys.exit(main())

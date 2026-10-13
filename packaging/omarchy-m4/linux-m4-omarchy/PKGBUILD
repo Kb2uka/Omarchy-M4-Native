@@ -1,0 +1,24 @@
+# Maintainer: KB2UKA
+# Built and signed by .github/workflows/packages.yml; see docs/package-channel.md.
+# The payload holds the alpha.1 package's modules, licenses and configuration,
+# plus the kernel alpha.1 boots (build 18). Corresponding source: the
+# v0.1.0-alpha.1 release source archives and patches-kernel/j713-input/.
+pkgname=linux-m4-omarchy
+pkgver=7.1.9.m4.20261008
+pkgrel=2
+pkgdesc='Experimental J713 M4 kernel and modules'
+arch=('aarch64')
+url='https://github.com/Kb2uka/Omarchy-M4-Native'
+license=('GPL-2.0-only')
+depends=('coreutils' 'kmod' 'omarchy-m4-boot')
+provides=('linux=7.1.9' 'linux-aarch64=7.1.9')
+conflicts=('linux-aarch64')
+options=('!strip' '!debug')
+_payload="${pkgname}-${pkgver}-payload.tar.zst"
+source=("${url}/releases/download/package-inputs/${_payload}")
+noextract=("${_payload}")
+sha256sums=('b160686fa06c437343f85aab10be41a669f2a23106b7e4e83e0911c921e6388f')
+
+package() {
+  bsdtar -xf "${srcdir}/${_payload}" -C "${pkgdir}"
+}

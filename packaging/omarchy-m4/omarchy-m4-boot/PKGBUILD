@@ -1,0 +1,28 @@
+# Maintainer: KB2UKA
+# Built and signed by .github/workflows/packages.yml; see docs/package-channel.md.
+# m4-boot-compose.py, MIT.txt and GPL-2.0-or-later.txt are staged from tools/
+# and LICENSES/ by tools/build-m4-packages.py.
+pkgname=omarchy-m4-boot
+pkgver=1
+pkgrel=1
+pkgdesc='Keeps the J713 boot.bin in step with the packaged M4 kernel and devicetree'
+arch=('aarch64')
+url='https://github.com/Kb2uka/Omarchy-M4-Native'
+license=('MIT' 'GPL-2.0-or-later OR MIT')
+depends=('python')
+options=('!strip' '!debug')
+_dtb_release=v0.1.0-alpha.1-update.1
+source=('m4-boot-compose.py' '90-omarchy-m4-boot.hook' 'MIT.txt' 'GPL-2.0-or-later.txt'
+        "j713-poweroff-${_dtb_release}.dtb::${url}/releases/download/${_dtb_release}/j713-poweroff.dtb")
+sha256sums=('bc03a2aaa19b27f384aefb781753557291d932948c93f48c9195cf9a0d15b34a'
+            '22514358734721ffcb4478f9c3c2c91f55b858bbd40aba6278c395e7a35de810'
+            'b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5'
+            'aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3'
+            'e54c77a760a5b696486f9d80c7c83ca4295d641113bb9e54d13e259863bf9b07')
+
+package() {
+  install -Dm755 m4-boot-compose.py "$pkgdir/usr/bin/m4-boot-compose"
+  install -Dm644 90-omarchy-m4-boot.hook "$pkgdir/usr/share/libalpm/hooks/90-omarchy-m4-boot.hook"
+  install -Dm644 "j713-poweroff-${_dtb_release}.dtb" "$pkgdir/usr/lib/omarchy-m4/j713.dtb"
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" MIT.txt GPL-2.0-or-later.txt
+}
