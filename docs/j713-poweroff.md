@@ -95,5 +95,14 @@ m1n1 and the gravity loader advance past a devicetree by its own `totalsize`
 3. Power on and confirm a normal boot.
 4. Choose Restart and confirm it returns.
 
-Physical poweroff with these cells has not been observed on any Abbey machine.
-Issue #24 stays open until steps 2–4 pass on the Air.
+Owner result, 2026-10-12, on the owner's Air after the in-place update:
+
+- **Step 1 passed.** The boot logged only `Handling reboot and poweroff
+  requests via SMC`, and the four cells appeared in sysfs.
+- **Driver probe cleared the error counter.** The two recorded boot errors
+  were cleared (`0xf802` went from `0x02` to `0x00`).
+- **Steps 2 and 3 passed.** The journal shows
+  `poweroff requested … System is powering down`. The owner confirmed the Air
+  stayed off, and the next power-on booted normally.
+- **Restart with the cells active** (step 4) and the power-button long press
+  were not separately recorded in that session.

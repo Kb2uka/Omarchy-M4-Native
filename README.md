@@ -63,8 +63,12 @@ and physical shutdown remain unqualified. See the [startup repair record](docs/j
 [known limitations](docs/release-limitations.md).
 
 **Read the [update policy](docs/updates.md) before accepting system updates.**
-There is no coordinated M4 update channel in this alpha. A push to `main` does
-not update installed machines.
+There is no coordinated M4 update channel in this alpha yet, and a push to
+`main` does not update installed machines. Fixes ship as small in-place updates
+with their own instructions; the first is the
+[shutdown fix](docs/updates.md#shutdown-fix-for-alpha1). M4 fixes are planned to
+become signed packages delivered by the normal system update
+([issue #49](https://github.com/Kb2uka/Omarchy-M4-Native/issues/49)).
 
 ## Known shutdown issue
 
@@ -81,12 +85,14 @@ The correction adds Abbey's four shutdown-state cells to the devicetree; no
 kernel change is involved. Installed alpha.1 machines can take it in place,
 without reinstalling: see [the in-place update](docs/updates.md#shutdown-fix-for-alpha1).
 [Source and evidence](docs/j713-poweroff.md) explain the change and its limits.
-Issue #24 stays open until a normal shutdown is verified to stay off on the Air.
 
-**Until the correction is installed,** only a forced power-off (holding the
-power button) keeps the Air off. Save your work first. The owner reports that
-a long press sometimes still ends in a restart depending on its timing; hold
-it again if that happens. A forced power-off is not a normal shutdown.
+The fix was verified on the owner's Air: after the update, the driver
+probed with all four cells, Shut Down left the Air off, and the next power-on
+booted normally.
+
+**Without the update,** only a forced power-off (holding the power button)
+keeps the Air off. Save your work first. A long press sometimes still ends in
+a restart depending on its timing; hold it again if that happens.
 
 ## What has been observed on the test Air
 
