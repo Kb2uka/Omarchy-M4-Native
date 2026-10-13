@@ -13,6 +13,11 @@ import unittest
 SOURCE = Path(__file__).resolve().parents[1] / 'audio/j713/kernel/j713-audio.c'
 
 
+def code(text):
+    """Drop C comments so prose naming a function is not counted as a call."""
+    return re.sub(r'/\*.*?\*/|//[^\n]*', '', text, flags=re.S)
+
+
 def function(text, name):
     start = re.search(r'^(?:static )?int ' + re.escape(name) + r'\(', text, re.M)
     if not start:
@@ -32,7 +37,7 @@ def calls(body, *names):
 
 class LevelWriteTraffic(unittest.TestCase):
     def setUp(self):
-        self.text = SOURCE.read_text()
+        self.text = code(SOURCE.read_text())
         self.level = function(self.text, 'j713_audio_level')
 
     def test_level_write_is_one_store_then_full_verification(self):
