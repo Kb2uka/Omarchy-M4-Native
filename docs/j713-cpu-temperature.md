@@ -94,11 +94,14 @@ What this shows:
 
 - **The requested states are real.** Each state up to P15 and E7 ran as asked,
   confirmed by throughput, so the ADT voltage tables iBoot leaves are usable.
-- **The hardware caps the top states.** P16 and P20 were accepted as the
-  target (`DVFS_STATUS` bits 4:0) but the cluster ran P15. E8 ran E7. Whether
-  the cap moves with temperature, core count or something else is unknown.
-- **The firmware did not slow anything down for heat.** Even at 114.8 C the
-  current state stayed where it was asked until Linux restored it.
+- **Something caps the top states.** P16 and P20 were accepted as the target
+  (`DVFS_STATUS` bits 4:0) but the cluster ran P15. E8 ran E7. These runs
+  cannot tell a fixed limit from a power limit or a fast hardware thermal
+  limiter; they lasted under half a second for P16 and P20.
+- **Nothing stepped the clock down further as the die heated.** Up to P15 the
+  current state never fell below what the cap allowed, even at 114.8 C, until
+  Linux restored the handoff state. A Linux policy cannot count on the
+  firmware to bring the temperature back down.
 - **The P die heats faster than the sensor reports.** From P8 up, the first
   refresh after the change was already 13-40 C hotter. With a refresh about
   once a second, a Linux policy only learns of the heat after it has happened;
@@ -150,9 +153,9 @@ then restart.
 
 - Reporting only. No thermal zone, trip point or frequency cap uses these
   channels, and the clocks are unchanged.
-- Full clocks (#60) still need a Linux CPU thermal policy. The measurements
-  above say it cannot rely on the firmware and must expect the die to move tens
-  of degrees between readings at P8 and above.
+- Full clocks (#60) still need a Linux CPU thermal policy. In these runs the
+  firmware did not bring the temperature down by itself, and the die moved
+  tens of degrees between readings at P8 and above.
 - `TCMz` is the SMC's maximum; the four `Tp` and two `Te` channels are samples
   of their clusters, not every sensor.
 - Key names follow the SMC key groups and the upstream T8140 choice. Apple
