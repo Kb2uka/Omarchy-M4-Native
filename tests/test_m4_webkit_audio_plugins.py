@@ -109,6 +109,17 @@ class WebkitAudioPlugins(unittest.TestCase):
         self.assertEqual(self.downloads, [])
         self.assertNotIn('note', report)
 
+    def test_channel_package_makes_the_build_unnecessary(self):
+        system, report = self.run_install({'gstreamer': '1.28.7-2', 'omarchy-m4-gst-audio': '1.28.7-1'})
+        self.assertEqual(report['status'], 'not needed: omarchy-m4-gst-audio 1.28.7-1 is installed')
+        self.assertEqual(self.downloads, [])
+        self.assertFalse(self.plugins.exists())
+
+    def test_channel_package_after_local_install_asks_for_removal(self):
+        self.run_install({'gstreamer': '1.28.7-2'})
+        report = self.run_install({'gstreamer': '1.28.7-2', 'omarchy-m4-gst-audio': '1.28.7-1'})[1]
+        self.assertIn('--remove', report['note'])
+
     def test_system_package_after_local_install_asks_for_removal(self):
         self.run_install({'gstreamer': '1.28.7-2'})
         system, report = self.run_install({'gstreamer': '1.28.8-1', 'gst-plugins-good': '1.28.8-1'})

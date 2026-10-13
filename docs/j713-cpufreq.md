@@ -140,6 +140,11 @@ With the fixed protection module (#61), 6 of 6 cpufreq boots started cleanly.
 
 ## Existing installs
 
+**Connected to M4 updates? You get this automatically.** `omarchy update`
+installs `omarchy-m4-boot` 1-4, which brings this devicetree (with CPU
+temperature) and the real-time speaker protection setting; restart once. See
+[updates](updates.md). The steps below are for an Air that is not connected.
+
 No release asset carries `j713-cpufreq.dtb` yet; publishing one is pending.
 Until then, build it in a checkout of this repository on a Linux host with
 DTC 1.8.1 (`dtc` and `fdtoverlay`). Use the `j713-poweroff.dtb` asset of

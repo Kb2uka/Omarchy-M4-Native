@@ -40,6 +40,8 @@ PLUGINS = {'libgstautodetect.so': 'gst/autodetect', 'libgstpulseaudio.so': 'ext/
 ELEMENTS = ('autoaudiosink', 'pulsesink')
 RESTART = 'log out and back in, then restart apps to get sound'
 RECEIPT = '.m4-webkit-audio.json'
+# gst-plugins-good itself, or the M4 channel's package of just its two sinks.
+SYSTEM_PACKAGES = ('gst-plugins-good', 'omarchy-m4-gst-audio')
 SESSION = '60-m4-webkit-audio.conf'
 
 
@@ -187,10 +189,17 @@ def install(environment, run=subprocess.run, download=fetch, apply=False):
     directory = plugin_dir(environment)
     report = {'plugin_dir': str(directory), 'session_file': str(session_file(environment)),
               'applied': False}
-    system = package_version(run, 'gst-plugins-good')
+    # Either package puts both sinks in the system plugin directory, which every
+    # app and WebKitGTK's sandbox can see.
+    provider = None
+    for name in SYSTEM_PACKAGES:
+        version = package_version(run, name)
+        if version:
+            provider = (name, version)
+            break
     receipt = read_receipt(directory)
-    if system:
-        report.update(status='not needed: gst-plugins-good ' + system + ' is installed')
+    if provider:
+        report.update(status='not needed: ' + ' '.join(provider) + ' is installed')
         if receipt or session_state(environment, directory) == 'present':
             report['note'] = 'remove the local plugins with --remove'
         return report

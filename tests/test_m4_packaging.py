@@ -57,7 +57,10 @@ class RecipeTests(unittest.TestCase):
         self.assertEqual(CHANNEL['kernel'], {'release': identity['build']['kernel_release'],
                                              'image_sha256': identity['kernel']['sha256'],
                                              'image_bytes': identity['kernel']['bytes']})
-        self.assertEqual(CHANNEL['devicetree']['sha256'], release.POWEROFF_DTB)
+        # The channel ships a devicetree later in the composer's lineage than the
+        # installer's update-1 one, so connecting moves an Air forward, never back.
+        lineage = list(load('tools/m4-boot-compose.py').KNOWN_DTBS)
+        self.assertGreater(lineage.index(CHANNEL['devicetree']['sha256']), lineage.index(release.POWEROFF_DTB))
         text = recipe('linux-m4-omarchy')
         self.assertEqual(field(text, 'pkgver'), '7.1.9.m4.20261008')
         self.assertGreaterEqual(int(field(text, 'pkgrel')), 2, 'must upgrade the installed alpha.1 -1 package')
@@ -65,10 +68,26 @@ class RecipeTests(unittest.TestCase):
         self.assertIn("conflicts=('linux-aarch64')", text)
         self.assertIn("provides=('linux=7.1.9' 'linux-aarch64=7.1.9')", text)
 
-    def test_boot_package_carries_the_update1_devicetree(self):
+    def test_boot_package_carries_the_cpu_temperature_devicetree(self):
         text = recipe('omarchy-m4-boot')
-        self.assertIn('_dtb_release=v0.1.0-alpha.1-update.1', text)
+        self.assertIn('releases/download/package-inputs/j713-cputemp.dtb', text)
         self.assertIn(CHANNEL['devicetree']['sha256'], text)
+        self.assertEqual(load('tools/m4-boot-compose.py').KNOWN_DTBS[CHANNEL['devicetree']['sha256']],
+                         'j713-cpu-temperature')
+        self.assertIn("depends=('python' 'pacman' 'omarchy-m4-gst-audio')", text)
+
+    def test_realtime_setting_matches_the_image_unit(self):
+        drop_in = (PACKAGING / 'omarchy-m4-boot/speakersafetyd-j713-realtime.conf').read_text()
+        unit = (ROOT / 'packaging/j713-audio/speakersafetyd-j713.service').read_text()
+        for line in ('CPUSchedulingPolicy=fifo', 'CPUSchedulingPriority=20'):
+            self.assertIn(line + '\n', drop_in)
+            self.assertIn(line + '\n', unit)
+
+    def test_gst_audio_recipe_pins_the_channel_sinks(self):
+        text = recipe('omarchy-m4-gst-audio')
+        for digest in CHANNEL['gst_audio'].values():
+            self.assertIn(digest, text)
+        self.assertIn("conflicts=('gst-plugins-good')", text)
 
     def test_hook_covers_every_boot_input(self):
         hook = (PACKAGING / 'omarchy-m4-boot/90-omarchy-m4-boot.hook').read_text()
@@ -113,6 +132,64 @@ class PolicyTests(unittest.TestCase):
             with self.subTest(message):
                 with self.assertRaisesRegex(ValueError, message):
                     CHECK.check_package(CHANNEL, *self.package('omarchy-m4-boot', files))
+
+    def test_only_the_listed_protected_exception_passes(self):
+        realtime = (PACKAGING / 'omarchy-m4-boot/speakersafetyd-j713-realtime.conf').read_bytes()
+        boot = self.boot_files()
+        boot[CHECK.REALTIME] = (0o644, hashlib.sha256(realtime).hexdigest())
+        CHECK.check_package(CHANNEL, *self.boot_package(boot))
+        for path in ('usr/lib/systemd/system/speakersafetyd-j713.service.d/60-other.conf',
+                     'usr/lib/systemd/system/speakersafetyd-j713.service'):
+            with self.subTest(path):
+                channel = json.loads(json.dumps(CHANNEL))
+                channel['allowed_paths']['omarchy-m4-boot'].append(path)
+                with self.assertRaisesRegex(ValueError, 'protected path'):
+                    CHECK.check_package(channel, *self.boot_package({**boot, path: (0o644, 'x')}))
+
+    def test_boot_package_needs_the_realtime_setting_and_the_sinks(self):
+        realtime = (PACKAGING / 'omarchy-m4-boot/speakersafetyd-j713-realtime.conf').read_bytes()
+        cases = (({**self.boot_files()}, self.boot_info(), 'real-time speaker setting'),
+                 ({**self.boot_files(), CHECK.REALTIME: (0o644, hashlib.sha256(b'other').hexdigest())},
+                  self.boot_info(), 'real-time speaker setting'),
+                 ({**self.boot_files(), CHECK.REALTIME: (0o644, hashlib.sha256(realtime).hexdigest())},
+                  {**self.boot_info(), 'depend': ['python', 'pacman']}, 'GStreamer sinks'))
+        for files, info, message in cases:
+            with self.subTest(message):
+                with self.assertRaisesRegex(ValueError, message):
+                    CHECK.check_package(CHANNEL, *self.boot_package(files, info))
+
+    def test_gst_audio_package_must_be_the_pin(self):
+        good = {path: (0o755, digest) for path, digest in CHANNEL['gst_audio'].items()}
+        info = {'pkgname': ['omarchy-m4-gst-audio'], 'pkgver': ['1.28.7-1'], 'arch': ['aarch64'],
+                'conflict': ['gst-plugins-good']}
+        CHECK.check_package(CHANNEL, *self.package('omarchy-m4-gst-audio', good, info=info, version='1.28.7-1'))
+        path = next(iter(good))
+        for files, case_info, message in (({**good, path: (0o755, '0' * 64)}, info, 'differs from the pin'),
+                                          (good, {**info, 'conflict': []}, 'conflict with gst-plugins-good')):
+            with self.subTest(message):
+                with self.assertRaisesRegex(ValueError, message):
+                    CHECK.check_package(CHANNEL, *self.package('omarchy-m4-gst-audio', files, info=case_info,
+                                                               version='1.28.7-1'))
+
+    def boot_package(self, files, info=None):
+        return Path('omarchy-m4-boot-1-4-aarch64.pkg.tar.zst'), info or self.boot_info(), files, self.boot_root
+
+    def boot_info(self):
+        return {'pkgname': ['omarchy-m4-boot'], 'pkgver': ['1-4'], 'arch': ['aarch64'],
+                'depend': ['python', 'pacman', 'omarchy-m4-gst-audio']}
+
+    def boot_files(self):
+        """A boot package that passes every check except the ones under test, unpacked on disk."""
+        composer = (ROOT / 'tools/m4-boot-compose.py').read_bytes()
+        hook = (PACKAGING / 'omarchy-m4-boot/90-omarchy-m4-boot.hook').read_bytes()
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.boot_root = Path(temp.name)
+        (self.boot_root / 'usr/bin').mkdir(parents=True)
+        (self.boot_root / 'usr/bin/m4-boot-compose').write_bytes(composer)
+        return {'usr/bin/m4-boot-compose': (0o755, hashlib.sha256(composer).hexdigest()),
+                'usr/share/libalpm/hooks/90-omarchy-m4-boot.hook': (0o644, hashlib.sha256(hook).hexdigest()),
+                'usr/lib/omarchy-m4/j713.dtb': (0o644, CHANNEL['devicetree']['sha256'])}
 
     def test_protected_beats_an_allowlist_mistake(self):
         channel = json.loads(json.dumps(CHANNEL))

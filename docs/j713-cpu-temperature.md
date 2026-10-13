@@ -132,6 +132,10 @@ the file as `Unknown replacement devicetree`.
 
 ## Existing installs
 
+**Connected to M4 updates? You get this automatically** with `omarchy-m4-boot`
+1-4 through `omarchy update`; restart once. The steps below are for an Air that
+is not connected.
+
 Only on a machine already running the cpufreq devicetree (see
 [CPU frequency scaling](j713-cpufreq.md)); on any other devicetree the updater
 refuses:

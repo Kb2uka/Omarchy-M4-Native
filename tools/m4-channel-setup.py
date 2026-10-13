@@ -34,7 +34,7 @@ ACjuCm7/wS3BkXKT/XBLOSU61X3JF2UI
 =FvsK
 -----END PGP PUBLIC KEY BLOCK-----
 '''
-PACKAGES = ('omarchy-m4-keyring', 'omarchy-m4-boot', 'linux-m4-omarchy')
+PACKAGES = ('omarchy-m4-keyring', 'omarchy-m4-boot', 'linux-m4-omarchy', 'omarchy-m4-gst-audio')
 BOARD = b'apple,j713'
 CONF = 'etc/pacman.conf'
 SNIPPET = 'etc/pacman.d/omarchy-m4.conf'

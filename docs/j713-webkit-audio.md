@@ -38,6 +38,13 @@ Images built after this change ship it.
 
 ## Existing installs
 
+**Connected to M4 updates? You get this automatically.** `omarchy update`
+installs `omarchy-m4-gst-audio`, which puts the same two plugins in the system
+plugin directory that every app and the WebKitGTK sandbox can see; restart the
+app. If you ran the helper below earlier, it now reports `not needed`; run it
+once with `--remove` to delete its own copies and session file. The helper
+remains for an Air that is not connected.
+
 Installing the package on alpha.1 does not work as-is. alpha.1 carries
 GStreamer 1.28.7-2, and the Arch Linux ARM mirrors only carry the matching
 `gst-plugins-good` until the next GStreamer release lands. After that,
