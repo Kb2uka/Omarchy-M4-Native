@@ -80,16 +80,37 @@ class ConnectScript(unittest.TestCase):
 
     def test_download_retries_every_error(self):
         self.run_script(self.published())
-        arguments = self.curl_log.read_text().split()
-        self.assertIn('--retry-all-errors', arguments)
-        self.assertEqual(arguments[arguments.index('--retry') + 1], '5')
+        calls = self.curl_log.read_text().splitlines()
+        self.assertTrue(calls)
+        for call in calls:
+            arguments = call.split()
+            self.assertIn('--retry-all-errors', arguments)
+            self.assertEqual(arguments[arguments.index('--retry') + 1], '5')
+
+    def test_retried_partial_download_never_runs_setup_twice_or_partially(self):
+        # curl --retry writes a fresh copy after a dropped transfer, so bash can
+        # read a prefix of the script followed by the whole script again.
+        script = self.published()
+        cuts = sorted({i for i, c in enumerate(script) if c == '\n'} | set(range(1, len(script), 13)))
+        for cut in cuts:
+            with self.subTest(cut=cut):
+                if self.sudo_log.exists():
+                    self.sudo_log.unlink()
+                result = self.run_script(script[:cut] + script, piped=True)
+                runs = len(self.sudo_log.read_text().splitlines()) if self.sudo_log.exists() else 0
+                self.assertLessEqual(runs, 1)
+                if runs:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual((self.home / 'setup-copy.py.ran').read_text(), '--apply')
 
     def test_documented_line_retries_too(self):
         line = ('curl -fsSL --retry 5 --retry-all-errors '
                 'https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages/m4-connect.sh | bash')
         for doc in ('README.md', 'docs/install.md', 'docs/updates.md', 'tools/m4-connect.sh'):
             with self.subTest(doc):
-                self.assertIn(line, (ROOT / doc).read_text())
+                text = (ROOT / doc).read_text()
+                self.assertGreater(text.count(line), 0)
+                self.assertEqual(text.count(line), text.count('m4-connect.sh | bash'), 'every copy retries')
 
     def test_mismatched_setup_script_runs_nothing(self):
         (self.server / 'omarchy-m4-setup.py').write_bytes(SETUP + b'# tampered\n')

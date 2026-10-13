@@ -118,7 +118,11 @@ def served(name, accept, message, attempts=6):
     """
     for attempt in range(attempts):
         data = fetch(name)
-        if accept(data):
+        try:
+            ok = accept(data)
+        except (tarfile.TarError, OSError, EOFError):  # truncated or corrupt bytes: not served yet
+            ok = False
+        if ok:
             return data
         if attempt + 1 < attempts:
             time.sleep(10)

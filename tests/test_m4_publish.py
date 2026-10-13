@@ -172,6 +172,22 @@ class PublishTests(unittest.TestCase):
             self.publish()
         self.assertIn('connect script differs', str(raised.exception))
 
+    def test_corrupt_served_database_is_retried(self):
+        self.publish()
+        (self.built / 'omarchy-m4-boot-1-1-aarch64.pkg.tar.zst').unlink()
+        (self.built / 'omarchy-m4-boot-2-1-aarch64.pkg.tar.zst').write_bytes(b'boot 2')
+        stale, real_fetch, served = self.release.assets[f'{REPO}.db'], self.release.fetch, []
+
+        def corrupt_once(name, attempts=4):
+            if name == f'{REPO}.db' and self.release.assets[name] != stale and not served:
+                served.append(name)
+                return b'truncated'
+            return real_fetch(name)
+        self.release.fetch = corrupt_once
+        with mock.patch.object(MODULE.time, 'sleep') as sleep:
+            self.publish()
+        self.assertEqual(sleep.call_count, 1)
+
     def test_database_that_never_matches_fails(self):
         self.publish()
         stale = self.release.assets[f'{REPO}.db']
