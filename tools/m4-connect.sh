@@ -8,11 +8,18 @@
 #
 # The publish step writes the SHA256 of the setup script it publishes into this
 # file. Any other setup script is refused before anything runs. Everything is
-# inside main(), which runs only once the whole file has arrived, so a cut-off
-# download runs nothing.
+# inside main(), which bash runs only once the definition is complete, and
+# main() runs at most once per shell, so a cut-off or retried download cannot
+# run a partial script or run setup twice.
 set -euo pipefail
 
 main() {
+  # A retried download can hand bash a prefix of this file followed by all of
+  # it, which can invoke main twice; the second call in the same shell returns.
+  if [[ -n ${M4_CONNECT_STARTED:-} ]]; then
+    return 0
+  fi
+  M4_CONNECT_STARTED=1
   local base="${M4_CONNECT_BASE:-https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages}"
   local expected='@SETUP_SHA256@'
   if [[ ! $expected =~ ^[0-9a-f]{64}$ ]]; then

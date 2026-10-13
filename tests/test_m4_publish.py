@@ -173,6 +173,27 @@ class PublishTests(unittest.TestCase):
         self.assertIn('connect script differs', str(raised.exception))
 
     def test_corrupt_served_database_is_retried(self):
+        import gzip
+        good = gzip.compress(b'x' * 4096)
+        for label, corrupt in (('not an archive', b'truncated'),
+                               ('corrupt deflate body', good[:10] + bytes(len(good) - 10)),
+                               ('truncated gzip', good[:len(good) // 2])):
+            with self.subTest(label):
+                self.setUp()
+                self.corrupt_database_once(corrupt)
+
+    def test_local_errors_are_not_retried(self):
+        self.publish()
+        def failing_signs(signature_path, data_path):
+            def accept(data):
+                raise OSError('scratch disk full')
+            return accept
+        with mock.patch.object(MODULE, 'signs', failing_signs), \
+             mock.patch.object(MODULE.time, 'sleep') as sleep, self.assertRaises(OSError):
+            self.publish()
+        self.assertEqual(sleep.call_count, 0)
+
+    def corrupt_database_once(self, corrupt):
         self.publish()
         (self.built / 'omarchy-m4-boot-1-1-aarch64.pkg.tar.zst').unlink()
         (self.built / 'omarchy-m4-boot-2-1-aarch64.pkg.tar.zst').write_bytes(b'boot 2')
@@ -181,7 +202,7 @@ class PublishTests(unittest.TestCase):
         def corrupt_once(name, attempts=4):
             if name == f'{REPO}.db' and self.release.assets[name] != stale and not served:
                 served.append(name)
-                return b'truncated'
+                return corrupt
             return real_fetch(name)
         self.release.fetch = corrupt_once
         with mock.patch.object(MODULE.time, 'sleep') as sleep:

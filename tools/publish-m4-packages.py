@@ -23,6 +23,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 CHANNEL = json.loads((ROOT / 'packaging/omarchy-m4/channel.json').read_text())
@@ -118,15 +119,24 @@ def served(name, accept, message, attempts=6):
     """
     for attempt in range(attempts):
         data = fetch(name)
-        try:
-            ok = accept(data)
-        except (tarfile.TarError, OSError, EOFError):  # truncated or corrupt bytes: not served yet
-            ok = False
-        if ok:
+        if accept(data):
             return data
         if attempt + 1 < attempts:
             time.sleep(10)
     require(False, message)
+
+
+def lists(desired):
+    """An accept() for served(): a database listing exactly these packages.
+
+    Truncated or corrupt bytes count as not served yet, so they are retried.
+    """
+    def accept(data):
+        try:  # parses in memory only, so an OSError here means bad bytes (BadGzipFile)
+            return database_entries(data) == desired
+        except (tarfile.TarError, zlib.error, EOFError, OSError):
+            return False
+    return accept
 
 
 def signs(signature_path, data_path):
@@ -210,8 +220,7 @@ def publish(directory):
         check = scratch / 'check'
         check.mkdir()
         database = check / f'{REPO}.db'
-        database.write_bytes(served(database.name, lambda d: database_entries(d) == desired,
-                                    'The published database does not match'))
+        database.write_bytes(served(database.name, lists(desired), 'The published database does not match'))
         served(database.name + '.sig', signs(check / (database.name + '.sig'), database),
                'Bad or foreign signature on ' + database.name)
         for name, digest in sorted(desired):
