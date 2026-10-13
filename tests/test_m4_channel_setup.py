@@ -87,7 +87,8 @@ class SetupTests(unittest.TestCase):
         pacman = [c for c in system.commands if c[0] == 'pacman']
         self.assertEqual(pacman[0][-2:], ['-Q', 'linux-m4-omarchy'])
         self.assertEqual(pacman[1][-1], '-Sy')
-        self.assertEqual(pacman[2][-7:], ['-S', '--needed', '--noconfirm', *CHANNEL['packages'], '--noscriptlet'])
+        expected = ['-S', '--needed', '--noconfirm', *CHANNEL['packages'], '--noscriptlet']
+        self.assertEqual(pacman[2][-len(expected):], expected)
         for command in pacman:
             self.assertFalse(any(arg.startswith('-') and not arg.startswith('--') and 'u' in arg for arg in command),
                              'setup must never run a system upgrade: ' + ' '.join(command))

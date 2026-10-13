@@ -101,9 +101,18 @@ class RecipeTests(unittest.TestCase):
             self.assertEqual(len(owners), 1, target)
 
     def test_allowlists_never_reach_protected_paths(self):
+        exceptions = CHANNEL['protected_exceptions']
         for name, paths in CHANNEL['allowed_paths'].items():
             for path in paths:
+                if path in exceptions:
+                    continue
                 self.assertFalse(CHECK.allowed(path, CHANNEL['protected_paths']), f'{name}: {path}')
+        for path, reason in exceptions.items():
+            # An exception is one exact file, inside a protected prefix, owned by one package, with a reason.
+            self.assertFalse(path.endswith('/'), path)
+            self.assertTrue(CHECK.allowed(path, CHANNEL['protected_paths']), path)
+            self.assertEqual(sum(path in paths for paths in CHANNEL['allowed_paths'].values()), 1, path)
+            self.assertTrue(reason.strip(), path)
                 self.assertFalse(any(p.startswith(path) for p in CHANNEL['protected_paths'] if path.endswith('/')))
         for protected in ('opt/m4-video/20261011/vaapi/v4l2_request_drv_video.so', 'usr/local/bin/brave',
                           'etc/omarchy/j713-video-manifest.json', 'usr/share/asahi-audio/j713/graph.json',
