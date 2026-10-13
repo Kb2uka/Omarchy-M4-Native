@@ -5,7 +5,9 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import io
 import re
+import tarfile
 import tempfile
 import unittest
 
@@ -137,6 +139,45 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(CHECK.release_identity(info, files), CHECK.release_identity(same, files))
         for change in ({'.INSTALL': ['b' * 64]}, {'depend': ['python', 'pacman']}):
             self.assertNotEqual(CHECK.release_identity(info, files), CHECK.release_identity(dict(info, **change), files))
+
+    def test_archive_reading_records_scripts_metadata_and_modes(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+
+        def archive(script):
+            path = root / ('package-%d.tar' % len(list(root.glob('*.tar'))))
+            with tarfile.open(path, 'w') as tar:
+                for name, data, mode in (('.PKGINFO', b'pkgname = omarchy-m4-boot\ndepend = python\n', 0o644),
+                                         ('.INSTALL', script, 0o644), ('.MTREE', b'ignored', 0o644),
+                                         ('usr/bin/m4-boot-compose', b'composer', 0o755)):
+                    info = tarfile.TarInfo(name)
+                    info.size, info.mode = len(data), mode
+                    tar.addfile(info, io.BytesIO(data))
+            out = root / (path.stem + '-root')
+            out.mkdir()
+            return CHECK.read_archive(path, out, path.name)
+
+        info, files = archive(b'post_install() { :; }\n')
+        self.assertEqual(info['depend'], ['python'])
+        self.assertEqual(info['.INSTALL'], [hashlib.sha256(b'post_install() { :; }\n').hexdigest()])
+        self.assertEqual(files, {'usr/bin/m4-boot-compose': (0o755, hashlib.sha256(b'composer').hexdigest())})
+        self.assertNotEqual(CHECK.release_identity(info, files),
+                            CHECK.release_identity(*archive(b'post_install() { exit 1; }\n')))
+
+    def test_unsafe_archive_members_are_rejected(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        for name, kind in (('../etc/passwd', tarfile.REGTYPE), ('usr/bin/link', tarfile.SYMTYPE)):
+            with self.subTest(name):
+                path = root / 'bad.tar'
+                with tarfile.open(path, 'w') as tar:
+                    info = tarfile.TarInfo(name)
+                    info.type = kind
+                    tar.addfile(info, io.BytesIO(b''))
+                with self.assertRaises(ValueError):
+                    CHECK.read_archive(path, root, 'bad')
 
     def test_other_module_release_is_rejected(self):
         files = {'usr/lib/modules/7.2.0-other/kernel/x.ko': (0o644, '1' * 64)}

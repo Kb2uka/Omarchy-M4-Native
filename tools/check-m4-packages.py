@@ -51,6 +51,14 @@ def extract(package, destination):
     archive = destination.with_name(destination.name + '.tar')
     with archive.open('xb') as stream:
         subprocess.run(['zstd', '-dcq', str(package)], stdout=stream, check=True)
+    try:
+        return read_archive(archive, destination, package.name)
+    finally:
+        archive.unlink()
+
+
+def read_archive(archive, destination, label):
+    """Read an uncompressed package tar; see extract()."""
     info, files, scripts = None, {}, None
     with tarfile.open(archive) as tar:
         for member in tar:
@@ -74,8 +82,7 @@ def extract(package, destination):
             target = destination / name
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
-    archive.unlink()
-    require(info is not None, 'Package has no .PKGINFO: ' + package.name)
+    require(info is not None, 'Package has no .PKGINFO: ' + label)
     info['.INSTALL'] = [scripts]
     return info, files
 

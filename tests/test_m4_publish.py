@@ -92,7 +92,11 @@ class Release:
 
 
 def signed(sig, data):
-    return sig.read_bytes() == signature(data.read_bytes())
+    return signed_bytes(sig.read_bytes(), data.read_bytes())
+
+
+def signed_bytes(sig, data):
+    return sig == signature(data)
 
 
 class PublishTests(unittest.TestCase):
@@ -146,6 +150,18 @@ class PublishTests(unittest.TestCase):
         self.publish()
         self.assertIn(f'{REPO}.db.sig', self.release.assets)
         self.assertIn(f'{REPO}.db', self.release.uploads)
+
+    def test_corrupt_database_signatures_are_repaired(self):
+        for kind in ('db', 'files'):
+            with self.subTest(kind):
+                self.setUp()
+                self.publish()
+                self.release.assets[f'{REPO}.{kind}.sig'] = b'corrupt'
+                self.release.uploads.clear()
+                self.publish()
+                self.assertIn(f'{REPO}.{kind}.sig', self.release.uploads)
+                self.assertTrue(signed_bytes(self.release.assets[f'{REPO}.{kind}.sig'],
+                                             self.release.assets[f'{REPO}.{kind}']))
 
     def test_published_package_is_never_replaced(self):
         self.publish()
