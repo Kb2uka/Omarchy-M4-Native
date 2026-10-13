@@ -3,14 +3,23 @@
 # Copyright (c) 2026 KB2UKA
 """Reversible, owner-only placement for the experimental J713 desktop."""
 import argparse
+import ctypes
 import fcntl
 import json
 import os
 from pathlib import Path
+import struct
 import subprocess
 
 
 DROPIN_NAME = "systemd/user/omarchy-browser-.service.d/70-m4-placement.conf"
+AFFINITY_POLICY = "hyprland-main-only-v1"
+BOOST_POLICY = "hyprland-main-uclamp-v1"
+BOOST = 1024
+# struct sched_attr; (sched_setattr, sched_getattr) syscall numbers.
+SCHED_ATTR = struct.Struct("<IIQiIQQQII")
+SCHED_SYSCALLS = {"aarch64": (274, 275), "x86_64": (314, 315)}
+SCHED_FLAG_RESET_ON_FORK, SCHED_FLAG_UTIL_CLAMP_MIN = 0x01, 0x20
 
 
 def command(*args):
@@ -30,7 +39,7 @@ def cpu_list(value):
     return result
 
 
-def performance_cpus(root):
+def cpu_layout(root):
     compatible = (root / "sys/firmware/devicetree/base/compatible").read_bytes().split(b"\0")
     if b"apple,j713" not in compatible or b"apple,t8132" not in compatible:
         raise ValueError("This workaround is qualified only for J713/T8132")
@@ -38,7 +47,7 @@ def performance_cpus(root):
     online = cpu_list((directory / "online").read_text())
     roles = {b"apple,donan-p": set(), b"apple,donan-e": set()}
     registers = set()
-    capacities = set()
+    capacities = {}
     for cpu in online:
         path = directory / f"cpu{cpu}"
         tags = (path / "of_node/compatible").read_bytes().rstrip(b"\0")
@@ -49,12 +58,56 @@ def performance_cpus(root):
         if len(reg) != 8 or reg in registers:
             raise ValueError("Invalid or duplicate CPU identity")
         registers.add(reg)
-        capacities.add(int((path / "cpu_capacity").read_text()))
+        capacities[cpu] = int((path / "cpu_capacity").read_text())
     if len(roles[b"apple,donan-p"]) != 4 or len(roles[b"apple,donan-e"]) != 6:
         raise ValueError("Expected all four performance and six efficiency CPUs online")
-    if capacities != {1024}:
+    return online, roles[b"apple,donan-p"], capacities
+
+
+def performance_cpus(root):
+    online, performance, capacities = cpu_layout(root)
+    if set(capacities.values()) != {1024}:
         raise ValueError("Scheduler capacity changed; review this workaround")
-    return online, roles[b"apple,donan-p"]
+    return online, performance
+
+
+def measured_capacities(root):
+    """True when the devicetree gives P cores more capacity than E cores, False when all are equal."""
+    online, performance, capacities = cpu_layout(root)
+    values = set(capacities.values())
+    if values == {1024}:
+        return False
+    efficiency = {capacities[cpu] for cpu in online - performance}
+    if {capacities[cpu] for cpu in performance} != {1024} or len(efficiency) != 1 or not 0 < min(efficiency) < 1024:
+        raise ValueError("Unexpected scheduler capacities; review this placement")
+    return True
+
+
+def sched_call(index, *args):
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.syscall(SCHED_SYSCALLS[os.uname().machine][index], *args):
+        raise OSError(ctypes.get_errno(), "sched_setattr/sched_getattr failed")
+
+
+def sched_attr(pid):
+    buffer = ctypes.create_string_buffer(SCHED_ATTR.size)
+    sched_call(1, ctypes.c_int(pid), buffer, ctypes.c_uint(SCHED_ATTR.size), ctypes.c_uint(0))
+    attr = SCHED_ATTR.unpack(buffer.raw)
+    if attr[1] != 0:
+        raise ValueError("Compositor is not a normal-priority task; leaving it unchanged")
+    return attr
+
+
+def util_min(pid):
+    return sched_attr(pid)[8]
+
+
+def set_util_min(pid, value):
+    """Set the compositor's minimum utilization clamp; children reset it on fork."""
+    nice = sched_attr(pid)[3]
+    attr = SCHED_ATTR.pack(SCHED_ATTR.size, 0, SCHED_FLAG_RESET_ON_FORK | SCHED_FLAG_UTIL_CLAMP_MIN,
+                           nice, 0, 0, 0, 0, value, 1024)
+    sched_call(0, ctypes.c_int(pid), ctypes.create_string_buffer(attr, SCHED_ATTR.size), ctypes.c_uint(0))
 
 
 def identity(root, pid, expected=None):
@@ -203,7 +256,7 @@ def apply(root, environment, state, dropin):
 
 def main_state(state):
     saved = json.loads(state.read_text())
-    if saved.get("policy") != "hyprland-main-only-v1":
+    if saved.get("policy") not in (AFFINITY_POLICY, BOOST_POLICY):
         raise ValueError("Unrecognized main-only state; leaving it unchanged")
     return saved
 
@@ -213,7 +266,16 @@ def restore_main(root, state):
         return {"status": "inactive"}
     saved = main_state(state)
     current = saved_process(root, saved["identity"])
-    if current == saved["identity"]:
+    if current == saved["identity"] and saved["policy"] == BOOST_POLICY:
+        pid = current["pid"]
+        clamp = util_min(pid)
+        if clamp == saved["boost"]:
+            set_util_min(pid, saved["original"])
+            if util_min(pid) != saved["original"]:
+                raise ValueError("Main-thread restore did not round-trip")
+        elif clamp != saved["original"]:
+            raise ValueError("Compositor clamp was changed elsewhere; leaving it unchanged")
+    elif current == saved["identity"]:
         pid = current["pid"]
         mask = os.sched_getaffinity(pid)
         if mask == set(saved["performance"]):
@@ -226,13 +288,46 @@ def restore_main(root, state):
     return {"status": "restored", "identity_still_current": current == saved["identity"]}
 
 
+def apply_boost(root, target, state):
+    if state.exists():
+        saved = main_state(state)
+        if saved["identity"] == target:
+            if (saved["policy"] != BOOST_POLICY or saved["original"] != 0 or
+                    saved["boost"] != BOOST or util_min(target["pid"]) != BOOST):
+                raise ValueError("Saved main-only placement was changed; leaving it unchanged")
+            return {"status": "active", "pid": target["pid"], "boost": BOOST}
+        if saved_process(root, saved["identity"]) == saved["identity"]:
+            raise ValueError("Another live compositor owns main-only placement")
+        restore_main(root, state)
+    if util_min(target["pid"]) != 0:
+        raise ValueError("Existing compositor clamp is customized; leaving it unchanged")
+    saved = {"policy": BOOST_POLICY, "identity": target, "original": 0, "boost": BOOST}
+    fd = os.open(state, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as stream:
+        json.dump(saved, stream)
+    try:
+        if identity(root, target["pid"]) != target:
+            raise ValueError("Compositor changed during configuration")
+        set_util_min(target["pid"], BOOST)
+        if util_min(target["pid"]) != BOOST:
+            raise ValueError("Main-thread boost did not round-trip")
+    except Exception:
+        restore_main(root, state)
+        raise
+    return {"status": "active", "pid": target["pid"], "boost": BOOST}
+
+
 def apply_main(root, environment, state):
+    # With measured capacities the scheduler can steer a clamped main thread to
+    # P cores without an affinity mask that every launched app would inherit.
+    if measured_capacities(root):
+        return apply_boost(root, session(root, environment), state)
     online, performance = performance_cpus(root)
     target = session(root, environment)
     if state.exists():
         saved = main_state(state)
         if saved["identity"] == target:
-            if (saved["performance"] != sorted(performance) or
+            if (saved.get("policy") != AFFINITY_POLICY or saved["performance"] != sorted(performance) or
                     saved["original"] != sorted(online) or
                     os.sched_getaffinity(target["pid"]) != performance):
                 raise ValueError("Saved main-only placement was changed; leaving it unchanged")
@@ -243,7 +338,7 @@ def apply_main(root, environment, state):
     original = os.sched_getaffinity(target["pid"])
     if original != online:
         raise ValueError("Existing compositor affinity is customized; leaving it unchanged")
-    saved = {"policy": "hyprland-main-only-v1", "identity": target,
+    saved = {"policy": AFFINITY_POLICY, "identity": target,
              "original": sorted(original), "performance": sorted(performance)}
     fd = os.open(state, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "w") as stream:

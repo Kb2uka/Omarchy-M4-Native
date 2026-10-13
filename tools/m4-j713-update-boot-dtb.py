@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 KB2UKA
-"""Replace the alpha.1 poweroff DTB inside an installed J713 boot.bin, in place.
+"""Replace the devicetree inside an installed J713 boot.bin, in place.
 
 The installer bakes per-machine boot arguments into boot.bin, so the file
 differs per machine. Only the embedded devicetree payload is swapped; m1n1
@@ -15,12 +15,17 @@ import os
 from pathlib import Path
 import struct
 
-OLD_DTB = '67dc61458b03c0fad1156994ad85a85f9f8612cac2996eb684609b0455ebf547'
-NEW_DTB = 'e54c77a760a5b696486f9d80c7c83ca4295d641113bb9e54d13e259863bf9b07'
+ALPHA1_DTB = '67dc61458b03c0fad1156994ad85a85f9f8612cac2996eb684609b0455ebf547'
+POWEROFF_DTB = 'e54c77a760a5b696486f9d80c7c83ca4295d641113bb9e54d13e259863bf9b07'
+CPUFREQ_DTB = '033025bbdda3ce72b5eefe39d1d6d68209256fd43e4fd587c96ae1cf38978555'
+# Replacement devicetree -> (devicetrees it may replace, backup suffix).
+UPDATES = {
+    POWEROFF_DTB: ((ALPHA1_DTB,), '.pre-shutdown-flag'),
+    CPUFREQ_DTB: ((ALPHA1_DTB, POWEROFF_DTB), '.pre-cpufreq'),
+}
 FDT_MAGIC = b'\xd0\x0d\xfe\xed'
 NEXT_PAYLOAD = b'm1n1_initramfs'
 DEFAULT_BOOT = Path('/boot/efi/omarchy/boot.bin')
-BACKUP_SUFFIX = '.pre-shutdown-flag'
 
 
 def require(condition, message):
@@ -46,19 +51,21 @@ def devicetrees(data):
 
 def plan(boot, dtb):
     """Return the replacement boot.bin bytes, or None when already updated."""
-    require(sha(dtb) == NEW_DTB, 'Unknown replacement devicetree')
+    target = sha(dtb)
+    require(target in UPDATES, 'Unknown replacement devicetree')
+    replaces = UPDATES[target][0]
     trees = devicetrees(boot)
-    old = [t for t in trees if t[2] == OLD_DTB]
-    new = [t for t in trees if t[2] == NEW_DTB]
+    old = [t for t in trees if t[2] in replaces]
+    new = [t for t in trees if t[2] == target]
     if not old and len(new) == 1:
         return None
-    require(len(old) == 1 and not new, 'boot.bin does not hold exactly one alpha.1 poweroff devicetree')
+    require(len(old) == 1 and not new, 'boot.bin does not hold exactly one devicetree this update replaces')
     offset, size, _ = old[0]
     require(boot[offset + size:offset + size + len(NEXT_PAYLOAD)] == NEXT_PAYLOAD,
             'Unexpected payload after the devicetree')
     result = boot[:offset] + dtb + boot[offset + size:]
     check = devicetrees(result)
-    require([t[2] for t in check if t[2] in (OLD_DTB, NEW_DTB)] == [NEW_DTB] and
+    require([t[2] for t in check if t[2] in (*replaces, target)] == [target] and
             result[:offset] == boot[:offset] and
             result[offset + len(dtb):] == boot[offset + size:], 'Replacement verification failed')
     return result
@@ -83,9 +90,10 @@ def update(boot_path, dtb_path, apply=False):
     require(boot_path.is_file() and not boot_path.is_symlink(), 'boot.bin must be a regular file')
     require(dtb_path.is_file() and not dtb_path.is_symlink(), 'Devicetree must be a regular file')
     boot = boot_path.read_bytes()
-    result = plan(boot, dtb_path.read_bytes())
-    backup = boot_path.with_name(boot_path.name + BACKUP_SUFFIX)
-    receipt = {'boot': str(boot_path), 'boot_sha256': sha(boot), 'devicetree_sha256': NEW_DTB,
+    dtb = dtb_path.read_bytes()
+    result = plan(boot, dtb)
+    backup = boot_path.with_name(boot_path.name + UPDATES[sha(dtb)][1])
+    receipt = {'boot': str(boot_path), 'boot_sha256': sha(boot), 'devicetree_sha256': sha(dtb),
                'backup': str(backup), 'applied': False}
     if result is None:
         receipt['status'] = 'already updated'

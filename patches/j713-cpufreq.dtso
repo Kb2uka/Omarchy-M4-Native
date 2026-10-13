@@ -1,0 +1,168 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
+// Copyright (c) 2026 KB2UKA
+/dts-v1/;
+/plugin/;
+
+/*
+ * Cluster performance controllers at the ADT pmgr reg[5] and reg[16] bases.
+ * DVFS_STATUS reads back in the T8112 layout (current state in bits 9:5,
+ * target in 4:0), as T8122 does upstream. Frequencies are the ADT
+ * voltage-states1/5 SRAM tables with one-based state numbers.
+ *
+ * Both tables stop at the state iBoot leaves each cluster in (E1 900 MHz,
+ * P4 1800 MHz), so no core runs faster or hotter than before this change.
+ * Higher states need a CPU thermal policy first; Linux sees no CPU die
+ * temperature on J713 yet.
+ *
+ * capacity-dmips-mhz is measured, not copied: at 900 and 1800 MHz an E core
+ * did 0.324x the work of a P core (python, zlib, xz, sort; geometric mean),
+ * so E = 0.324 * 1800 / 900 * 1024 = 663.
+ */
+/ {
+	fragment@0 {
+		target-path = "/soc";
+		__overlay__ {
+			#address-cells = <2>;
+			#size-cells = <2>;
+
+			cpufreq_e: cpufreq@210e20000 {
+				compatible = "apple,t8132-cluster-cpufreq", "apple,t8112-cluster-cpufreq";
+				reg = <0x2 0x10e20000 0 0x1000>;
+				#performance-domain-cells = <0>;
+			};
+
+			cpufreq_p: cpufreq@211e20000 {
+				compatible = "apple,t8132-cluster-cpufreq", "apple,t8112-cluster-cpufreq";
+				reg = <0x2 0x11e20000 0 0x1000>;
+				#performance-domain-cells = <0>;
+			};
+		};
+	};
+
+	fragment@1 {
+		target-path = "/";
+		__overlay__ {
+			ecluster_opp: opp-table-0 {
+				compatible = "operating-points-v2";
+				opp-shared;
+
+				opp01 {
+					opp-hz = /bits/ 64 <900000000>;
+					opp-level = <1>;
+				};
+			};
+
+			pcluster_opp: opp-table-1 {
+				compatible = "operating-points-v2";
+				opp-shared;
+
+				opp01 {
+					opp-hz = /bits/ 64 <912000000>;
+					opp-level = <1>;
+				};
+				opp02 {
+					opp-hz = /bits/ 64 <1260000000>;
+					opp-level = <2>;
+				};
+				opp03 {
+					opp-hz = /bits/ 64 <1512000000>;
+					opp-level = <3>;
+				};
+				opp04 {
+					opp-hz = /bits/ 64 <1800000000>;
+					opp-level = <4>;
+				};
+			};
+		};
+	};
+
+	fragment@2 {
+		target-path = "/cpus/cpu@0";
+		__overlay__ {
+			operating-points-v2 = <&ecluster_opp>;
+			performance-domains = <&cpufreq_e>;
+			capacity-dmips-mhz = <663>;
+		};
+	};
+
+	fragment@3 {
+		target-path = "/cpus/cpu@1";
+		__overlay__ {
+			operating-points-v2 = <&ecluster_opp>;
+			performance-domains = <&cpufreq_e>;
+			capacity-dmips-mhz = <663>;
+		};
+	};
+
+	fragment@4 {
+		target-path = "/cpus/cpu@2";
+		__overlay__ {
+			operating-points-v2 = <&ecluster_opp>;
+			performance-domains = <&cpufreq_e>;
+			capacity-dmips-mhz = <663>;
+		};
+	};
+
+	fragment@5 {
+		target-path = "/cpus/cpu@3";
+		__overlay__ {
+			operating-points-v2 = <&ecluster_opp>;
+			performance-domains = <&cpufreq_e>;
+			capacity-dmips-mhz = <663>;
+		};
+	};
+
+	fragment@6 {
+		target-path = "/cpus/cpu@4";
+		__overlay__ {
+			operating-points-v2 = <&ecluster_opp>;
+			performance-domains = <&cpufreq_e>;
+			capacity-dmips-mhz = <663>;
+		};
+	};
+
+	fragment@7 {
+		target-path = "/cpus/cpu@5";
+		__overlay__ {
+			operating-points-v2 = <&ecluster_opp>;
+			performance-domains = <&cpufreq_e>;
+			capacity-dmips-mhz = <663>;
+		};
+	};
+
+	fragment@8 {
+		target-path = "/cpus/cpu@10100";
+		__overlay__ {
+			operating-points-v2 = <&pcluster_opp>;
+			performance-domains = <&cpufreq_p>;
+			capacity-dmips-mhz = <1024>;
+		};
+	};
+
+	fragment@9 {
+		target-path = "/cpus/cpu@10101";
+		__overlay__ {
+			operating-points-v2 = <&pcluster_opp>;
+			performance-domains = <&cpufreq_p>;
+			capacity-dmips-mhz = <1024>;
+		};
+	};
+
+	fragment@10 {
+		target-path = "/cpus/cpu@10102";
+		__overlay__ {
+			operating-points-v2 = <&pcluster_opp>;
+			performance-domains = <&cpufreq_p>;
+			capacity-dmips-mhz = <1024>;
+		};
+	};
+
+	fragment@11 {
+		target-path = "/cpus/cpu@10103";
+		__overlay__ {
+			operating-points-v2 = <&pcluster_opp>;
+			performance-domains = <&cpufreq_p>;
+			capacity-dmips-mhz = <1024>;
+		};
+	};
+};

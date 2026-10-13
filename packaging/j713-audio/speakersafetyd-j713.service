@@ -14,6 +14,10 @@ RuntimeDirectoryMode=0755
 TimeoutStartSec=65
 Restart=no
 LimitRTPRIO=50
+# The lease must renew within 10.7 ms of each 21.3 ms period; as a normal
+# task it misses that under full CPU load and fails closed (no speakers).
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=20
 LimitMEMLOCK=64M
 NoNewPrivileges=yes
 ProtectSystem=strict
