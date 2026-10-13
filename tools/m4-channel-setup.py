@@ -91,7 +91,7 @@ def write(path, text, mode):
 class Machine:
     """Runs pacman for the real system, or for a test root with its own database."""
 
-    def __init__(self, root, output=sys.stdout):
+    def __init__(self, root, output=sys.stderr):
         self.root = root
         self.output = output
         self.sandbox = root != Path('/')
@@ -129,8 +129,9 @@ class Machine:
             return 'unknown'
 
     def run(self, command):
+        # Progress goes to stderr; stdout carries only the JSON result.
         print('+ ' + ' '.join(command), file=self.output, flush=True)
-        return subprocess.run(command, check=False).returncode
+        return subprocess.run(command, check=False, stdout=sys.stderr).returncode
 
 
 def boot_digest(root):
@@ -149,7 +150,7 @@ def preflight(root, machine):
             'The alpha.1 kernel package linux-m4-omarchy is not installed')
 
 
-def setup(root, apply=False, server=SERVER, key=PUBLIC_KEY, fingerprint=FINGERPRINT, output=sys.stdout):
+def setup(root, apply=False, server=SERVER, key=PUBLIC_KEY, fingerprint=FINGERPRINT, output=sys.stderr):
     machine = Machine(root, output)
     preflight(root, machine)
     conf = root / CONF

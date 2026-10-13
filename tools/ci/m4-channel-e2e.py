@@ -194,7 +194,7 @@ def main():
                 result = sudo(*setup, '--apply', capture_output=True, text=True, check=False)
                 print(result.stdout + result.stderr)
                 require(result.returncode == 0, f'Setup attempt {attempt + 1} failed')
-                results.append(json.loads(result.stdout[result.stdout.index('{\n'):]))
+                results.append(json.loads(result.stdout))
                 conf = (root / 'etc/pacman.conf').read_text()
                 require(conf.count('Include = ' + str(root / 'etc/pacman.d/omarchy-m4.conf')) == 1,
                         'The channel include is missing or duplicated')

@@ -44,7 +44,7 @@ class FakeSystem:
         self.root, self.fail, self.status, self.change_boot = root, fail, boot_status, change_boot
         self.commands, self.refresh_config = [], None
 
-    def __call__(self, command, check=False, capture_output=False, text=False):
+    def __call__(self, command, check=False, capture_output=False, text=False, stdout=None):
         self.commands.append(command)
         if 'm4-boot-compose' in ' '.join(map(str, command)):
             return types.SimpleNamespace(returncode=0, stdout=json.dumps({'status': self.status}), stderr='')
