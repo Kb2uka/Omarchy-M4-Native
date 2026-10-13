@@ -436,6 +436,8 @@ class ReadinessTests(unittest.TestCase):
         self.assertIn('omarchy/j713-audio-readiness',protection['Service']['RuntimeDirectory'].split())
         self.assertEqual(protection['Service']['RuntimeDirectoryMode'],'0755')
         self.assertEqual(protection['Install']['WantedBy'],'multi-user.target')
+        self.assertEqual(protection['Service']['CPUSchedulingPolicy'],'fifo')
+        self.assertTrue(1<=int(protection['Service']['CPUSchedulingPriority'])<=int(protection['Service']['LimitRTPRIO']))
         self.assertNotIn('Before',protection['Unit']);self.assertFalse(user.has_section('Unit'))
         self.assertLessEqual(int(user['Service']['TimeoutStartSec']),65)
         self.write('/etc/omarchy/j713-audio-manifest.json',json.dumps(self.manifest))

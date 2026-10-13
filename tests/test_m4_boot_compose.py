@@ -48,6 +48,7 @@ def fdt(body):
 
 K1, K2 = kernel(1), kernel(2)
 D1, D2, D3 = fdt(b'alpha.1 tree'), fdt(b'update 1 tree with cells'), fdt(b'unknown tree')
+D4 = fdt(b'update 1 tree with cpufreq clusters')
 RELEASE = '7.1.9-test'
 # A loader that, like m1n1, contains the boot-argument tag text itself.
 LOADER = b'm1n1 stage2 chosen.bootargs= string table\0' + bytes(32) + b'STACKBOT'
@@ -212,7 +213,20 @@ def scenario_foreign_rollback(test, module):
     test.assertEqual(machine.boot, boot())
 
 
-SCENARIOS = (scenario_devicetree_update, scenario_unqualified_kernel, scenario_audio_release,
+def scenario_newer_devicetree_kept(test, module):
+    machine = Machine(test, module, boot_bytes=boot(dtb=D4), package_kernel=K2)
+    patcher = mock.patch.dict(module.KNOWN_DTBS, {sha(D4): 'cpufreq'})
+    patcher.start()
+    test.addCleanup(patcher.stop)
+    machine.manifests(sha(K2))
+    code, out, err = machine.run('--apply')
+    test.assertEqual((code, err), (0, ''))
+    receipt = json.loads(out)
+    test.assertEqual((receipt['changes'], receipt['devicetree_sha256']), (['kernel'], sha(D4)))
+    test.assertEqual(machine.boot, boot(kernel_bytes=K2, dtb=D4))
+
+
+SCENARIOS = (scenario_devicetree_update, scenario_newer_devicetree_kept, scenario_unqualified_kernel, scenario_audio_release,
              scenario_unknown_current, scenario_unknown_package, scenario_preserves_machine_parts,
              scenario_free_space, scenario_modules, scenario_board, scenario_rollback,
              scenario_foreign_rollback)
@@ -306,8 +320,9 @@ class ComposeTests(unittest.TestCase):
         channel = json.loads((ROOT / 'packaging/omarchy-m4/channel.json').read_text())
         updater = load_tool('tools/m4-j713-update-boot-dtb.py')
         self.assertEqual(MODULE.KNOWN_KERNELS, {channel['kernel']['image_sha256']: channel['kernel']['release']})
-        self.assertEqual(set(MODULE.KNOWN_DTBS), {updater.OLD_DTB, updater.NEW_DTB})
-        self.assertEqual(channel['devicetree']['sha256'], updater.NEW_DTB)
+        self.assertEqual(list(MODULE.KNOWN_DTBS),
+                         [updater.ALPHA1_DTB, updater.POWEROFF_DTB, updater.CPUFREQ_DTB])
+        self.assertEqual(channel['devicetree']['sha256'], updater.POWEROFF_DTB)
 
 
 def load_tool(name):
@@ -331,6 +346,7 @@ MUTANTS = (
      "    boot_path = root / BOOT\n    current = read_regular(boot_path, 'boot.bin (is the EFI partition mounted at /boot/efi?)')\n    kernel"),
     ('backup', '        write(previous, current)\n', '        pass\n'),
     ('splice-dtb', "'dtb': dtb})", "'dtb': layout['dtb']})"),
+    ('revert-newer-dtb', "if lineage.index(now['dtb']) > lineage.index(new['dtb']):", 'if False:'),
     ('rollback-owner', "require(all(now[name] == then[name] for name in ('loader', 'bootargs', 'initramfs')),",
      'require(True,'),
 )

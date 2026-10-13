@@ -220,7 +220,19 @@ startup configuration loads. Its sole command is:
 exec /usr/bin/python3 "$HOME/.local/lib/omarchy/m4-session-placement.py" --main-only apply
 ```
 
-This mode derives logical CPU IDs from each online CPU's device-tree node,
+The mode first reads each CPU's scheduler capacity. On a devicetree with the
+measured core capacities from [CPU frequency scaling](j713-cpufreq.md) (P cores
+1024, E cores equal and lower), it does not touch affinity at all: it sets the
+Hyprland main thread's minimum utilization clamp (`uclamp_min`) to 1024 with
+`SCHED_FLAG_RESET_ON_FORK`. The scheduler then keeps that thread on P cores and
+the P cluster at full clock while it runs, and every process it launches starts
+with the default clamp and all ten CPUs. Saved state uses the policy
+`hyprland-main-uclamp-v1`; restore puts the original clamp back. Other
+capacity layouts are refused. The rest of this section describes the affinity
+policy used while every core reports capacity 1024 (the alpha.1 and update 1
+devicetrees).
+
+That policy derives logical CPU IDs from each online CPU's device-tree node,
 requires J713/T8132 with four `apple,donan-p` and six `apple,donan-e` CPUs and
 capacity 1024, and matches both the current Hyprland instance signature and
 Wayland socket. The PID must be that owner's Hyprland main thread. The helper

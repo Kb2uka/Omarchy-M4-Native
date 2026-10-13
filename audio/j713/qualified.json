@@ -268,8 +268,8 @@
   },
   "readiness_inputs": {
     "packaging/j713-audio/speakersafetyd-j713.service": {
-      "sha256": "ff3da34751fba7d6cf54e8899ef43c24801550a1c773ae99c6e3a400f8c34137",
-      "size": 808
+      "sha256": "6854823cdba7c61715bce39b540b30b17d73d287a82a2d6a228eddb8d7595f54",
+      "size": 1006
     },
     "packaging/j713-audio/wireplumber.service.d/80-j713-audio-ready.conf": {
       "sha256": "a847df53f52ffc3677d0ed3d1493565fda97443206f820d05887247137fd9b15",
