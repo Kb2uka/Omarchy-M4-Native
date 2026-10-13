@@ -210,3 +210,136 @@ class MainPlacementTests(unittest.TestCase):
         for action in ("apply", "restore", "status"):
             with self.assertRaisesRegex(ValueError, "Unrecognized"): self.cli(action)
         self.assertEqual(self.set_calls, [])
+
+
+class BoostPlacementTests(MainPlacementTests):
+    """Measured capacities (cpufreq DTB): a leak-free clamp replaces the affinity mask."""
+
+    def setUp(self):
+        fixture.PlacementTests.setUp(self)
+        for cpu in set(range(10)) - self.performance:
+            self.write(f"sys/devices/system/cpu/cpu{cpu}/cpu_capacity", "331\n")
+        self.clamps = {789: 0}
+        self.clamp_calls = []
+        patch.object(placement, "util_min", side_effect=lambda pid: self.clamps[pid]).start()
+        patch.object(placement, "set_util_min", side_effect=self.set_clamp).start()
+
+    def set_clamp(self, pid, value):
+        self.clamp_calls.append((pid, value))
+        self.clamps[pid] = value
+
+    def test_apply_repeat_restore_clamps_only_main_and_keeps_every_cpu(self):
+        self.write(self.dropin.relative_to(self.root), "# Existing owner policy\nCPUAffinity=2 4\n")
+        before_dropin = self.dropin.read_bytes()
+        self.assertEqual(self.cli(), {"status": "active", "pid": 789, "boost": 1024})
+        saved = self.main_state.read_bytes()
+        self.assertEqual(json.loads(saved)["policy"], "hyprland-main-uclamp-v1")
+        self.assertEqual(self.cli()["status"], "active")
+        self.assertEqual(self.main_state.read_bytes(), saved)
+        self.assertEqual(self.clamp_calls, [(789, 1024)])
+        self.assertEqual(self.set_calls, [])
+        self.assertEqual(self.masks[789], set(range(10)))
+        self.assertEqual(self.main_state.stat().st_mode & 0o777, 0o600)
+        self.assertTrue(all(command[0] == "hyprctl" for command in self.commands))
+        self.assertEqual(self.cli("restore")["status"], "restored")
+        self.assertEqual(self.clamp_calls[-1], (789, 0))
+        self.assertFalse(self.main_state.exists())
+        self.assertEqual(self.dropin.read_bytes(), before_dropin)
+
+    def test_customized_clamp_refused_without_state(self):
+        self.clamps[789] = 512
+        with self.assertRaisesRegex(ValueError, "clamp is customized"):
+            self.cli()
+        self.assertEqual(self.clamp_calls, [])
+        self.assertFalse(self.main_state.exists())
+
+    def test_clamp_changed_elsewhere_is_left_alone(self):
+        self.cli(); saved = self.main_state.read_bytes()
+        self.clamps[789] = 300
+        for action in ("apply", "restore"):
+            with self.assertRaisesRegex(ValueError, "changed"):
+                self.cli(action)
+            self.assertEqual(self.main_state.read_bytes(), saved)
+        self.assertEqual(self.clamps[789], 300)
+        self.assertEqual(self.clamp_calls, [(789, 1024)])
+
+    def test_reused_pid_restore_never_changes_new_process(self):
+        self.cli(); self.process(789, 9999); self.clamps[789] = 1024
+        self.assertFalse(self.cli("restore")["identity_still_current"])
+        self.assertEqual(self.clamp_calls, [(789, 1024)])
+        self.assertFalse(self.main_state.exists())
+
+    def test_failed_clamp_rolls_back_state(self):
+        with patch.object(placement, "set_util_min", side_effect=OSError("refused")):
+            with self.assertRaisesRegex(OSError, "refused"): self.cli()
+        self.assertFalse(self.main_state.exists())
+        self.assertEqual(self.clamps[789], 0)
+
+    def test_clamp_without_readback_never_reports_active(self):
+        with patch.object(placement, "set_util_min", side_effect=lambda pid, value: self.clamps.__setitem__(pid, 512)):
+            with self.assertRaisesRegex(ValueError, "changed elsewhere"): self.cli()
+        self.assertTrue(self.main_state.exists())
+
+    def test_live_nested_session_refused(self):
+        self.cli(); saved = self.main_state.read_bytes()
+        self.process(888, 9000); self.clamps[888] = 0; self.instances[0]["pid"] = 888
+        with self.assertRaisesRegex(ValueError, "Another live compositor"):
+            self.cli()
+        self.assertEqual(self.main_state.read_bytes(), saved)
+        self.assertEqual(self.clamp_calls, [(789, 1024)])
+
+    def test_stale_affinity_state_replaced_by_clamp(self):
+        stale = {"policy": "hyprland-main-only-v1", "identity": {"pid": 700, "start": 1, "uid": 1000,
+                 "boot": "old-boot", "executable": "/usr/bin/Hyprland"},
+                 "original": list(range(10)), "performance": sorted(self.performance)}
+        self.main_state.write_text(json.dumps(stale))
+        self.assertEqual(self.cli()["boost"], 1024)
+        self.assertEqual(json.loads(self.main_state.read_text())["policy"], "hyprland-main-uclamp-v1")
+        self.assertEqual(self.set_calls, [])
+
+    def test_unexpected_capacities_refused_before_clamp(self):
+        cases = (("cpu1", "1024\n", "cpu0", "512\n"),   # a P core below full capacity
+                 ("cpu0", "331\n", "cpu2", "400\n"))    # E cores that disagree
+        for p_cpu, p_value, e_cpu, e_value in cases:
+            with self.subTest(p=p_value, e=e_value):
+                old = {c: (self.root / f"sys/devices/system/cpu/{c}/cpu_capacity").read_text() for c in (p_cpu, e_cpu)}
+                self.write(f"sys/devices/system/cpu/{p_cpu}/cpu_capacity", p_value)
+                self.write(f"sys/devices/system/cpu/{e_cpu}/cpu_capacity", e_value)
+                with self.assertRaisesRegex(ValueError, "Unexpected scheduler capacities"):
+                    self.cli()
+                for c, value in old.items():
+                    self.write(f"sys/devices/system/cpu/{c}/cpu_capacity", value)
+        self.assertEqual(self.clamp_calls, [])
+
+    # Affinity-only behaviors from the parent class do not apply to the clamp.
+    test_cli_apply_repeat_restore_changes_only_main_and_no_browser_files = None
+    test_custom_main_and_modified_repeat_preserved = None
+    test_cli_main_lock_held_during_affinity = None
+    test_failed_set_rolls_back_state_without_browser_operation = None
+    test_successful_set_with_restricted_readback_never_reports_active = None
+    test_stale_main_state_replaced_without_touching_reused_pid = None
+    test_modified_saved_masks_refused_without_affinity_write = None
+    test_restore_successful_set_with_restricted_readback_keeps_state = None
+
+
+class SchedAttrEncoding(unittest.TestCase):
+    def test_clamp_request_resets_on_fork_and_keeps_nice(self):
+        current = placement.SCHED_ATTR.pack(56, 0, 0, -3, 0, 0, 0, 0, 0, 1024)
+        requests = []
+        def call(index, pid, buffer, *rest):
+            if index == 1:
+                buffer.raw = current
+            else:
+                requests.append(placement.SCHED_ATTR.unpack(buffer.raw))
+        with patch.object(placement, "sched_call", side_effect=call):
+            placement.set_util_min(789, 1024)
+        size, policy, flags, nice, priority, *_, low, high = requests[0]
+        self.assertEqual((size, policy, nice, low), (56, 0, -3, 1024))
+        self.assertEqual(flags, placement.SCHED_FLAG_RESET_ON_FORK | placement.SCHED_FLAG_UTIL_CLAMP_MIN)
+
+    def test_realtime_compositor_refused(self):
+        def call(index, pid, buffer, *rest):
+            buffer.raw = placement.SCHED_ATTR.pack(56, 1, 0, 0, 10, 0, 0, 0, 0, 1024)
+        with patch.object(placement, "sched_call", side_effect=call):
+            with self.assertRaisesRegex(ValueError, "normal-priority"):
+                placement.util_min(789)
