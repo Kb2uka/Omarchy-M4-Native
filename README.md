@@ -26,15 +26,15 @@
 >
 > Until you do, your Air **cannot receive M4 fixes**. If you never ran update 1,
 > **Shut Down still restarts it**. Join Wi-Fi, open a terminal on the Air, paste
-> this whole block, press Enter and type your password:
+> this one line, press Enter and type your password when asked:
 >
 > ```bash
-> cd ~ && rm -rf m4-updates && mkdir m4-updates && cd m4-updates &&
-> base=https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages &&
-> curl -fL -O "$base/omarchy-m4-setup.py" -O "$base/SETUP-SHA256SUMS" &&
-> sha256sum -c SETUP-SHA256SUMS &&
-> sudo python3 omarchy-m4-setup.py --apply
+> curl -fsSL https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages/m4-connect.sh | bash
 > ```
+>
+> It checks the setup script against its published checksum before running it.
+> If you prefer to download and inspect each file first, use the
+> [step-by-step version](docs/updates.md#step-by-step-instead).
 >
 > - It ends with **`restart once`**: restart the Air. That is all.
 > - It ends with **`future M4 fixes arrive with omarchy update`**: you are done.
@@ -81,14 +81,10 @@ installer starts in macOS; it is not a bootable PC ISO. GitHub's automatic
 It turns on M4 updates and, if your Air does not have it yet, the shutdown fix.
 
 1. On the Air, join Wi-Fi (`nmtui`) and open a terminal in Omarchy.
-2. Copy this whole block, paste it, press Enter, and type your password when asked:
+2. Paste this one line, press Enter, and type your password when asked:
 
 ```bash
-cd ~ && rm -rf m4-updates && mkdir m4-updates && cd m4-updates &&
-base=https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages &&
-curl -fL -O "$base/omarchy-m4-setup.py" -O "$base/SETUP-SHA256SUMS" &&
-sha256sum -c SETUP-SHA256SUMS &&
-sudo python3 omarchy-m4-setup.py --apply
+curl -fsSL https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages/m4-connect.sh | bash
 ```
 
 3. If it ends with `"status": "connected; restart once to boot the updated boot.bin"`,

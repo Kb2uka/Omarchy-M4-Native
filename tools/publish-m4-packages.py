@@ -28,6 +28,8 @@ ROOT = Path(__file__).resolve().parents[1]
 CHANNEL = json.loads((ROOT / 'packaging/omarchy-m4/channel.json').read_text())
 TAG, REPO, FPR = CHANNEL['release_tag'], CHANNEL['repository'], CHANNEL['signing_fingerprint']
 SETUP = 'omarchy-m4-setup.py'
+CONNECT = 'm4-connect.sh'
+CONNECT_HASH = '@SETUP_SHA256@'
 NOTES = ('Signed pacman repository for the experimental M4 build ([issue #49]'
          '(https://github.com/Kb2uka/Omarchy-M4-Native/issues/49)). Owners connect once with '
          '`omarchy-m4-setup.py`; see docs/updates.md. Not an installer.')
@@ -101,6 +103,28 @@ def fetch(name, attempts=4):
             time.sleep(10 * (attempt + 1))
 
 
+def connect_script(setup_sha256):
+    """The one-paste connect script, carrying the published setup script's SHA256."""
+    template = (ROOT / 'tools' / CONNECT).read_text()
+    require(template.count(CONNECT_HASH) == 1, 'Connect script template needs exactly one hash slot')
+    return template.replace(CONNECT_HASH, setup_sha256)
+
+
+def published_database(desired, attempts=6):
+    """Download the served database until it lists the desired packages.
+
+    The release CDN can serve the previous database for a few seconds after an
+    upload, so a mismatch is retried before it counts as a failure.
+    """
+    for attempt in range(attempts):
+        data = fetch(f'{REPO}.db')
+        if database_entries(data) == desired:
+            return data
+        if attempt + 1 < attempts:
+            time.sleep(10)
+    require(False, 'The published database does not match')
+
+
 def sign(package):
     run('gpg', '--batch', '--yes', '--local-user', FPR, '--detach-sign', '--no-armor', package)
     verify(package.with_name(package.name + '.sig'), package)
@@ -151,8 +175,12 @@ def publish(directory):
         setup = scratch / SETUP
         shutil.copyfile(ROOT / 'tools/m4-channel-setup.py', setup)
         sums = scratch / 'SETUP-SHA256SUMS'
-        sums.write_text(hashlib.sha256(setup.read_bytes()).hexdigest() + '  ' + SETUP + '\n')
+        digest = hashlib.sha256(setup.read_bytes()).hexdigest()
+        sums.write_text(digest + '  ' + SETUP + '\n')
         run('gh', 'release', 'upload', TAG, '--clobber', setup, sums)
+        connect = scratch / CONNECT
+        connect.write_text(connect_script(digest))
+        run('gh', 'release', 'upload', TAG, '--clobber', connect)  # after the script it checks
         current = scratch / 'current'
         current.mkdir()
         if not database_published(assets, desired, current):
@@ -169,11 +197,9 @@ def publish(directory):
             print('database already published and verified')
         check = scratch / 'check'
         check.mkdir()
-        for name in (f'{REPO}.db', f'{REPO}.db.sig'):
-            (check / name).write_bytes(fetch(name))
+        (check / f'{REPO}.db').write_bytes(published_database(desired))
+        (check / f'{REPO}.db.sig').write_bytes(fetch(f'{REPO}.db.sig'))
         verify(check / f'{REPO}.db.sig', check / f'{REPO}.db')
-        require(database_entries((check / f'{REPO}.db').read_bytes()) == desired,
-                'The published database does not match')
         for name, digest in sorted(desired):
             data = fetch(name)
             require(hashlib.sha256(data).hexdigest() == digest, 'Published package differs: ' + name)
@@ -182,6 +208,7 @@ def publish(directory):
             verify(check / (name + '.sig'), check / name)
             print('verified ' + name)
         require(fetch(SETUP) == setup.read_bytes(), 'Published setup script differs')
+        require(fetch(CONNECT) == connect.read_bytes(), 'Published connect script differs')
 
 
 def main():

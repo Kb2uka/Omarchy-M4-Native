@@ -9,18 +9,18 @@ Nothing is reinstalled. How it works: [package-channel.md](package-channel.md).
 
 Every v0.1.0-alpha.1 Air needs this step once, including a fresh installation
 and an Air that already has update 1. Join Wi-Fi first (`nmtui`). Open a
-terminal, paste this whole block, press Enter, and type your password when
+terminal, paste this one line, press Enter, and type your password when
 asked:
 
 ```bash
-cd ~ && rm -rf m4-updates && mkdir m4-updates && cd m4-updates &&
-base=https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages &&
-curl -fL -O "$base/omarchy-m4-setup.py" -O "$base/SETUP-SHA256SUMS" &&
-sha256sum -c SETUP-SHA256SUMS &&
-sudo python3 omarchy-m4-setup.py --apply
+curl -fsSL https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages/m4-connect.sh | bash
 ```
 
-The block must print `omarchy-m4-setup.py: OK`. The last lines then show one of:
+`m4-connect.sh` downloads the setup script, retrying if Wi-Fi drops a lookup,
+and refuses it unless its SHA256 matches the one written into `m4-connect.sh`
+when both were published. It then runs the setup script once and deletes its
+temporary files. It must print `omarchy-m4-setup.py: OK`. The last lines then
+show one of:
 
 - `"status": "connected; restart once to boot the updated boot.bin"`: restart
   the Air once. This happens on an Air without update 1; it now gets the
@@ -32,6 +32,24 @@ The block must print `omarchy-m4-setup.py: OK`. The last lines then show one of:
   Air keeps booting exactly as before. Fix the stated cause (for example free
   space on the EFI partition) and run the block again, or report it in
   [issue #49](https://github.com/Kb2uka/Omarchy-M4-Native/issues/49).
+
+### Step by step instead
+
+To download and look at each file before anything runs, use this block. It
+does the same as the line above. Run it in one terminal; line 2 sets `base` for
+the lines after it.
+
+```bash
+cd ~ && rm -rf m4-updates && mkdir m4-updates && cd m4-updates &&
+base=https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages &&
+curl -fL -O "$base/omarchy-m4-setup.py" -O "$base/SETUP-SHA256SUMS" &&
+sha256sum -c SETUP-SHA256SUMS &&
+sudo python3 omarchy-m4-setup.py --apply
+```
+
+The first three lines only download; `sha256sum -c` must print
+`omarchy-m4-setup.py: OK`. Running `sudo python3 omarchy-m4-setup.py` without
+`--apply` shows what it would do and changes nothing.
 
 What it does:
 
