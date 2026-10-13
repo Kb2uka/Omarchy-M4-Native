@@ -112,9 +112,9 @@ def build(version, scratch, run, download):
 def write(path, data):
     temp = path.with_name(path.name + '.new')
     require(not temp.exists() and not temp.is_symlink(), 'Stale temporary file: ' + str(temp))
-    with temp.open('xb') as stream:
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'wb') as stream:
         stream.write(data)
-    os.chmod(temp, 0o644)
     os.replace(temp, path)
 
 

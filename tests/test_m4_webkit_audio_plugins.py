@@ -93,7 +93,7 @@ class WebkitAudioPlugins(unittest.TestCase):
         self.assertIn(['gst-inspect-1.0', '--exists', 'pulsesink'], system.commands)
         receipt = json.loads((self.plugins / '.m4-webkit-audio.json').read_text())
         self.assertEqual(receipt['gstreamer'], '1.28.7-2')
-        self.assertTrue(all(p.stat().st_mode & 0o777 == 0o644 for p in self.plugins.glob('*.so')))
+        self.assertTrue(all(p.stat().st_mode & 0o777 == 0o600 for p in self.plugins.iterdir()))
 
     def test_second_run_is_a_no_op(self):
         self.run_install({'gstreamer': '1.28.7-2'})
