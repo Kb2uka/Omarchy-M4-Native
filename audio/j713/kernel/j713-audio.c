@@ -133,11 +133,12 @@ static int amp_read(struct j713_audio *a, unsigned int index, u8 reg, u8 *value,
 	return j713_group_check(&a->gate, generation);
 }
 
-static int amp_write(struct j713_audio *a, unsigned int index, u8 reg, u8 value,
+/* Unverified store; callers must read the register back before relying on it. */
+static int amp_store(struct j713_audio *a, unsigned int index, u8 reg, u8 value,
 		     u64 generation)
 {
 	struct i2c_client *client = a->codec[index];
-	u8 bytes[] = { reg, value }, got;
+	u8 bytes[] = { reg, value };
 	struct i2c_msg msg;
 	int ret = j713_group_check(&a->gate, generation);
 	if (ret)
@@ -146,9 +147,16 @@ static int amp_write(struct j713_audio *a, unsigned int index, u8 reg, u8 value,
 		return -ENODEV;
 	msg = (struct i2c_msg){ .addr = client->addr, .len = sizeof(bytes), .buf = bytes };
 	ret = i2c_transfer(client->adapter, &msg, 1);
-	if (ret != 1)
-		return ret < 0 ? ret : -EIO;
-	ret = amp_read(a, index, reg, &got, generation);
+	return ret == 1 ? 0 : ret < 0 ? ret : -EIO;
+}
+
+static int amp_write(struct j713_audio *a, unsigned int index, u8 reg, u8 value,
+		     u64 generation)
+{
+	u8 got;
+	int ret = amp_store(a, index, reg, value, generation);
+	if (!ret)
+		ret = amp_read(a, index, reg, &got, generation);
 	return ret ?: got == value ? 0 : -EIO;
 }
 
@@ -580,7 +588,7 @@ EXPORT_SYMBOL_GPL(j713_audio_quiesced);
 int j713_audio_level(struct j713_audio *a, unsigned int index,
 		     unsigned int reg, unsigned int *value, bool write)
 {
-	u8 *stored, got, mode;
+	u8 *stored, old, mode;
 	u64 gen;
 	int ret = 0;
 	if (index >= 4 || (reg != 3 && reg != 0x1a)) return -EINVAL;
@@ -601,11 +609,17 @@ int j713_audio_level(struct j713_audio *a, unsigned int index,
 	mutex_lock(&a->gate.gpio_lock);
 	mode = a->gate.phase == J713_GROUP_ACTIVE ? 0x80 : a->sensing ? 0x81 : 0x82;
 	mutex_unlock(&a->gate.gpio_lock);
-	if (write) ret = amp_write(a, index, reg, *value, gen);
-	if (!ret) ret = amp_read(a, index, reg, &got, gen);
-	if (!ret && got != (write ? *value : *stored)) ret = -EIO;
+	/*
+	 * verify_limits() reads page, gain, DVC and mode back against the stored
+	 * values, the new one included. A separate read-back of the written
+	 * register would repeat that check and costs a bus transfer per amp in the
+	 * protection daemon's renewal window.
+	 */
+	old = *stored;
+	if (write) ret = amp_store(a, index, reg, *value, gen);
 	if (!ret && write) *stored = *value;
 	if (!ret) ret = verify_limits(a, index, mode, gen);
+	if (ret && write) *stored = old;
 	if (!ret) *value = *stored;
 out:
 	mutex_unlock(&a->members);
