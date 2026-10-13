@@ -3,12 +3,49 @@
 /dts-v1/;
 /plugin/;
 
+/*
+ * Abbey keeps its boot/shutdown state in the legacy scratchpad at ADT
+ * info-leg_scrpad = 0xf800, laid out like T6030 Chapel (same pm_setting,
+ * rtc and leg_scrpad bases). Without shutdown_flag the SMC off1 command
+ * restarts the machine instead of leaving it off.
+ */
 / {
 	fragment@0 {
+		target-path = "/soc/spmi@388714000/pmic@e/nvmem-layout";
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			boot_stage: boot-stage@f801 {
+				reg = <0xf801 0x1>;
+			};
+
+			boot_error_count: boot-error-count@f802,0 {
+				reg = <0xf802 0x1>;
+				bits = <0 4>;
+			};
+
+			panic_count: panic-count@f802,4 {
+				reg = <0xf802 0x1>;
+				bits = <4 4>;
+			};
+
+			shutdown_flag: shutdown-flag@f80f,3 {
+				reg = <0xf80f 0x1>;
+				bits = <3 1>;
+			};
+		};
+	};
+
+	fragment@1 {
 		target-path = "/soc/smc@38c600000";
 		__overlay__ {
 			reboot {
 				compatible = "apple,smc-reboot";
+				nvmem-cells = <&shutdown_flag>, <&boot_stage>,
+					      <&boot_error_count>, <&panic_count>;
+				nvmem-cell-names = "shutdown_flag", "boot_stage",
+						   "boot_error_count", "panic_count";
 			};
 		};
 	};

@@ -56,7 +56,7 @@ KERNEL_PATCHES = {
 NATIVE_KERNEL_CHECKS = {'boot', 'touch_mt_ready', 'keyboard_registered', 'trackpad_registered',
                         'gpu_service_integrity', 'video_service_integrity',
                         'audio_service_integrity', 'repeat_boot'}
-POWEROFF_DTB = '67dc61458b03c0fad1156994ad85a85f9f8612cac2996eb684609b0455ebf547'
+POWEROFF_DTB = 'e54c77a760a5b696486f9d80c7c83ca4295d641113bb9e54d13e259863bf9b07'
 FIRS = ('j713-static-minimal-lane0-48000.wav', 'j713-static-minimal-lane1-48000.wav',
         'j713-static-minimal-lane2-48000.wav', 'j713-static-minimal-lane3-48000.wav')
 PROFILES = ('Brave-Browser', 'Brave-Browser-M4', 'Chromium')
@@ -537,7 +537,7 @@ def assemble(args):
         'qualification': 'The preceding owner-input candidate failed fresh startup. This image includes startup and recovery corrections; a successful owner installation is still required before publication.',
         'owner_inputs': 'Speaker filters generated from installed macOS and hash checked before partitioning; Widevine requires each owner choice.',
         'baseline_root_sha256': BASE_ROOT,
-        'poweroff': {'change': 'Enable existing SMC handler through its missing device-tree child',
+        'poweroff': {'change': 'Enable existing SMC handler with its Abbey shutdown-state PMU cells',
                     'hardware_verified': False, 'issue': 24},
     }
     if kernel is not None:
