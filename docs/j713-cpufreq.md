@@ -140,6 +140,8 @@ DTC 1.8.1 (`dtc` and `fdtoverlay`). Use the `j713-poweroff.dtb` asset of
 `v0.1.0-alpha.1-update.1` as the base:
 
 ```bash
+curl -fL -O https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/v0.1.0-alpha.1-update.1/j713-poweroff.dtb
+sha256sum j713-poweroff.dtb  # must be e54c77a760a5b696486f9d80c7c83ca4295d641113bb9e54d13e259863bf9b07
 python3 tools/build-j713-cpufreq-dtb.py --base j713-poweroff.dtb --output j713-cpufreq.dtb
 sha256sum j713-cpufreq.dtb   # must be 033025bbdda3ce72b5eefe39d1d6d68209256fd43e4fd587c96ae1cf38978555
 ```
@@ -162,8 +164,11 @@ sudo python3 m4-j713-update-boot-dtb.py --dtb j713-cpufreq.dtb
 sudo python3 m4-j713-update-boot-dtb.py --dtb j713-cpufreq.dtb --apply
 ```
 
-The M4 package channel recognizes this devicetree and keeps it when a
-package update recomposes `boot.bin`; see [package channel](package-channel.md).
+From `omarchy-m4-boot` 1-2 on, the M4 package channel recognizes this
+devicetree and keeps it when a package update recomposes `boot.bin`; see
+[package channel](package-channel.md). The published 1-1 composer does not know
+it: it refuses and leaves `boot.bin` untouched. Join the channel on a cpufreq
+machine only after 1-2 is published.
 
 Then restart. If the post-boot hook was disabled (renamed to
 `50-m4-main-placement.sample`), rename it back to enable the clamp. An old copy

@@ -167,11 +167,11 @@ def plan(root):
     new = {'kernel': sha(kernel), 'dtb': sha(dtb)}
     require(new['kernel'] in KNOWN_KERNELS, 'Packaged kernel is not a known J713 kernel ' + new['kernel'])
     require(new['dtb'] in KNOWN_DTBS, 'Packaged devicetree is not a known J713 devicetree ' + new['dtb'])
+    require(gzip_end(kernel, 0) == len(kernel), 'Packaged kernel is not one complete gzip stream')
+    require(fdt_size(dtb, 0) == len(dtb), 'Packaged devicetree has an invalid header')
     lineage = list(KNOWN_DTBS)
     if lineage.index(now['dtb']) > lineage.index(new['dtb']):
         dtb, new['dtb'] = layout['dtb'], now['dtb']
-    require(gzip_end(kernel, 0) == len(kernel), 'Packaged kernel is not one complete gzip stream')
-    require(fdt_size(dtb, 0) == len(dtb), 'Packaged devicetree has an invalid header')
     check_protected(root, new['kernel'])
     desired = join({**layout, 'kernel': kernel, 'dtb': dtb})
     result = parse(desired)
