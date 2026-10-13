@@ -102,6 +102,11 @@ class ConnectScript(unittest.TestCase):
                 if runs:
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual((self.home / 'setup-copy.py.ran').read_text(), '--apply')
+                    self.assertEqual((self.home / 'sudo-stdin').read_text().strip(), '/dev/null')
+
+    def test_inherited_environment_cannot_skip_setup(self):
+        self.env['M4_CONNECT_STARTED'] = '1'
+        self.assert_setup_applied_once(self.run_script(self.published(), piped=True))
 
     def test_documented_line_retries_too(self):
         line = ('curl -fsSL --retry 5 --retry-all-errors '
