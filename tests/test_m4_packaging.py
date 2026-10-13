@@ -173,7 +173,7 @@ class PolicyTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         root = Path(temp.name)
-        for name, kind in (('../etc/passwd', tarfile.REGTYPE), ('/etc/passwd', tarfile.REGTYPE),
+        for name, kind in (('../etc/passwd', tarfile.REGTYPE), (tempfile.gettempdir() + '/m4-absolute-member', tarfile.REGTYPE),
                            ('usr/bin/link', tarfile.SYMTYPE)):
             with self.subTest(name):
                 path = root / 'bad.tar'
