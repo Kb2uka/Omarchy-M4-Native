@@ -25,7 +25,31 @@ hl.config({
 hl.on("hyprland.start", function()
   hl.exec_cmd("uwsm finalize HYPRLAND_INSTANCE_SIGNATURE OMARCHY_PATH && systemctl --user start pipewire.service wireplumber.service wayland-wm-app-daemon.service")
 end)
+-- J713 lid (issue #84): lock on close, light the lock screen on open.
+-- The Air's lid is "Apple SMC power/lid events", not the "Lid Switch" Omarchy
+-- 4.0.4 binds, and its lid check reads ACPI, which arm64 lacks. Lock on close
+-- and light the lock screen on open. Omarchy's clamshell check is skipped:
+-- omarchy-hw-external-monitors counts the simpledrm panel (Unknown-1) as
+-- external, so it would never lock. logind still ignores the lid: J713
+-- suspend is unqualified.
+o.bind("switch:on:Apple SMC power/lid events", nil, "omarchy-system-lock", { locked = true })
+o.bind("switch:off:Apple SMC power/lid events", nil, "omarchy-brightness-display on", { locked = true })
 '''
+
+
+APPLY_LOCK = "usr/bin/omarchy-apply-lock"
+LOCK_PAM = "etc/pam.d/omarchy-lock-password"
+
+
+def lock_pam(root):
+    """Omarchy's installer runs omarchy-apply-lock to write the lock screen's PAM
+    stack. An offline image never runs it, and without the file the lock screen
+    refuses to lock ("missing-pam"). Take the stack from the packaged helper."""
+    text = image_path(root, APPLY_LOCK).read_text(encoding="utf-8")
+    stacks = re.findall(r"\btee /etc/pam\.d/omarchy-lock-password >/dev/null <<'EOF'\n(.*?\n)EOF\n", text, re.S)
+    if len(stacks) != 1 or not stacks[0].startswith("#%PAM-1.0\n"):
+        raise ValueError("Unexpected packaged lock screen PAM helper; review omarchy-apply-lock")
+    return stacks[0]
 
 
 def image_path(root, relative):
@@ -208,6 +232,7 @@ def planned_files(root):
         "etc/xdg/uwsm/env.d/90-m4-shader-cache": "export MESA_SHADER_CACHE_DISABLE=false\n",
         "etc/skel/.local/lib/omarchy/m4-session-placement.py": Path(__file__).with_name("m4-session-placement.py").read_bytes(),
         "etc/systemd/zram-generator.conf.d/90-omarchy.conf": zram,
+        LOCK_PAM: lock_pam(root),
     }
     files.update(session_logging_files(root))
     files.update(agent_widget_files(root))
@@ -230,7 +255,8 @@ def configure(root, apply=False):
             raise ValueError("Image path is not a publicly readable directory: " +
                              parent.relative_to(root).as_posix())
     owned_modes = {cache: 0o644, image_path(root, MAIN_PLACEMENT_HOOK): 0o755,
-                   image_path(root, "etc/skel/.local/lib/omarchy/m4-session-placement.py"): 0o644}
+                   image_path(root, "etc/skel/.local/lib/omarchy/m4-session-placement.py"): 0o644,
+                   image_path(root, LOCK_PAM): 0o644}
     different = [path.relative_to(root).as_posix() for path, content in files.items()
                  if not path.is_file() or path.read_bytes() != content or
                  (path in owned_modes and os.name != "nt" and
