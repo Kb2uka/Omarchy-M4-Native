@@ -345,6 +345,7 @@
    ]
   }
  },
+ "dtc": "Version: DTC 1.7.0",
  "patches": [
   "0001-arm64-dts-apple-t8132-add-storage-smc.patch",
   "0002-arm64-dts-apple-t8132-add-spi.patch",
