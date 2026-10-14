@@ -30,7 +30,8 @@ CASES = ("undrained", "slow_drain", "recover")
 
 # Each mutant undoes one part of the fix; the named case must catch it.
 MUTANTS = {
-    "no_timeout": ("            if (timeout_expired(timeout)) {", "            if (false) {", "undrained"),
+    "no_timeout": ("            if (timeout_expired(timeout)) {", "            if (timeout_expired(timeout) && false) {",
+                   "undrained"),
     "no_latch_check": ("        if (tx_stalled)\n            return;\n", "", "undrained"),
     "latch_never_set": ("                tx_stalled = true;\n", "", "undrained"),
     "latch_never_cleared": ("    tx_stalled = false;\n    write32", "    write32", "recover"),
@@ -61,7 +62,8 @@ class M1n1DockchannelTxTests(unittest.TestCase):
         cls.temp.cleanup()
 
     def build(self, name, src):
-        exe = self.work / name
+        exe = self.work / "bin" / name
+        exe.parent.mkdir(exist_ok=True)
         subprocess.run(["cc", "-std=gnu11", "-O2", "-Wall", "-Werror", "-iquote", str(src), "-iquote",
                         str(self.work / "stubs"), str(FIXTURE), "-o", str(exe)], check=True)
         return exe
