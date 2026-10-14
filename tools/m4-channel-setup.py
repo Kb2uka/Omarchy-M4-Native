@@ -45,8 +45,10 @@ GPU_HOLD = 'var/lib/omarchy-m4/gpu-module/hold'
 GPU_STOCK = '80cf3669575edd09aed226a93e47aaaf132e70f1070154629c413c0b40d34578'
 HEADPHONES_STAGED = 'usr/lib/omarchy-m4/j713-headphones/snd-soc-j713-headphones.ko'
 HEADPHONES_STATE = 'var/lib/omarchy-m4/headphones'
+CPU_IDLE_STAGED = 'usr/lib/omarchy-m4/cpu/j713_cpuidle.ko'
+CPU_IDLE_STATE = 'var/lib/omarchy-m4/cpu-idle'
 PACKAGES = ('omarchy-m4-keyring', 'omarchy-m4-boot', 'linux-m4-omarchy', 'omarchy-m4-gst-audio', 'omarchy-m4-speaker',
-            'omarchy-m4-gpu', 'omarchy-m4-headphones')
+            'omarchy-m4-gpu', 'omarchy-m4-headphones', 'omarchy-m4-cpu')
 SINKS = 'omarchy-m4-gst-audio'  # gst-plugins-good already has both sinks and conflicts with it
 BOARD = b'apple,j713'
 CONF = 'etc/pacman.conf'
@@ -219,6 +221,18 @@ def headphones_pending(root):
             not (state / 'hold').exists() and not (state / 'attempt').exists())
 
 
+def cpu_idle_pending(root):
+    """Whether omarchy-m4-cpu staged an idle driver that the next boot will load.
+
+    Only on a running system (sys/module present), never while switched off
+    (hold) or after a boot that died while loading (attempt).
+    """
+    state = root / CPU_IDLE_STATE
+    return ((root / CPU_IDLE_STAGED).is_file() and (root / 'sys/module').is_dir() and
+            not (root / 'sys/module/j713_cpuidle').exists() and
+            not (state / 'hold').exists() and not (state / 'attempt').exists())
+
+
 def boot_digest(root):
     path = root / BOOT
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
@@ -301,7 +315,7 @@ def connect(root, apply, server, key, fingerprint, output):
             'fix the cause, then run this again')
     machine.start_notifier()
     restart = (boot_digest(root) != before or speaker_pending(root) or gpu_pending(root) or
-               headphones_pending(root))
+               headphones_pending(root) or cpu_idle_pending(root))
     plan.update(applied=True, boot=boot, restart_needed=restart,
                 status=('connected; restart once to apply the update' if restart else
                         'connected; future M4 fixes arrive with omarchy-m4-update'))

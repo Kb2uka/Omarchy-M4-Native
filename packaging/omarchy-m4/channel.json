@@ -11,7 +11,8 @@
     "omarchy-m4-gst-audio",
     "omarchy-m4-speaker",
     "omarchy-m4-gpu",
-    "omarchy-m4-headphones"
+    "omarchy-m4-headphones",
+    "omarchy-m4-cpu"
   ],
   "kernel": {
     "release": "7.1.9-m4-gpu-backport-20261008",
@@ -19,7 +20,7 @@
     "image_bytes": 18901266
   },
   "devicetree": {
-    "sha256": "08e8e719381f88a1e50d821c145dad5b2d97fd772609e13d7778e19795e9cad1"
+    "sha256": "fdedc09f2fe8ed681a61208589024e01fb5efa77beebbd0eb4ad267c08e77f7c"
   },
   "allowed_paths": {
     "omarchy-m4-keyring": [
@@ -71,6 +72,12 @@
       "usr/share/wireplumber/wireplumber.conf.d/83-j713-headphones.conf",
       "usr/share/wireplumber/scripts/default-nodes/j713-headphones.lua",
       "usr/share/licenses/omarchy-m4-headphones/"
+    ],
+    "omarchy-m4-cpu": [
+      "usr/bin/m4-cpu-idle",
+      "usr/lib/omarchy-m4/cpu/j713_cpuidle.ko",
+      "usr/lib/systemd/system/m4-cpu-idle.service",
+      "usr/share/licenses/omarchy-m4-cpu/"
     ]
   },
   "protected_paths": [
@@ -106,7 +113,8 @@
     "usr/share/alsa/ucm2/conf.d/J713Headphones/J713Headphones.conf": "UCM for the new J713Headphones card only; no speaker or other card file",
     "usr/share/alsa/ucm2/conf.d/J713Headphones/HiFi.conf": "UCM for the new J713Headphones card only; no speaker or other card file",
     "usr/share/wireplumber/wireplumber.conf.d/83-j713-headphones.conf": "names the headphone sink and adds its default-output hook as an optional component",
-    "usr/share/wireplumber/scripts/default-nodes/j713-headphones.lua": "the headphone default-output hook; it only selects the headphone sink while it is available"
+    "usr/share/wireplumber/scripts/default-nodes/j713-headphones.lua": "the headphone default-output hook; it only selects the headphone sink while it is available",
+    "usr/lib/systemd/system/m4-cpu-idle.service": "loads the J713 CPU idle driver (#65) at boot, with a one-strike guard"
   },
   "speaker_module": {
     "usr/lib/omarchy-m4/j713-audio/snd-soc-j713-group.ko": "aaad802eb136ff6cb915feaa123001b3eb848bc2f038d0a5b71c8e2ff35d2581"
@@ -117,5 +125,8 @@
   "headphone_modules": {
     "usr/lib/omarchy-m4/j713-headphones/j713_hp_dt.ko": "9ba22f0eb586052606eb6e9d98fa9d05663c12e3197c1b41c4bdc833afe41f07",
     "usr/lib/omarchy-m4/j713-headphones/snd-soc-j713-headphones.ko": "a73ef5655d453c1ebd424922b0b6141a77159c01cbe718d4c972be61ec5be87d"
+  },
+  "cpu_idle_module": {
+    "usr/lib/omarchy-m4/cpu/j713_cpuidle.ko": "a2a7947a1d2260abcfc6eb10d7d63643ad2e191e73e93fedddf605116cdfd5a9"
   }
 }

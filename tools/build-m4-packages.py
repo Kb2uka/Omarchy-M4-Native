@@ -40,6 +40,9 @@ STAGED = {
                               'j713-headphones.lua': HEADPHONES + 'wireplumber/scripts/default-nodes/j713-headphones.lua',
                               'MIT.txt': 'LICENSES/MIT.txt',
                               'GPL-2.0-only.txt': 'LICENSES/GPL-2.0-only.txt'},
+    'omarchy-m4-cpu': {'m4-cpu-idle.py': 'tools/m4-cpu-idle.py',
+                       'MIT.txt': 'LICENSES/MIT.txt',
+                       'GPL-2.0-only.txt': 'LICENSES/GPL-2.0-only.txt'},
 }
 MAKEPKG_CONF = '''\
 CARCH="aarch64"
