@@ -70,6 +70,8 @@ def read_boot():
 
 def replace_stage2(boot, stage2):
     result = stage2 + boot[STAGE2:]
+    # Narrow the window against another tool rewriting boot.bin meanwhile.
+    require(BOOT.read_bytes() == boot, 'boot.bin changed while working; nothing changed, run it again')
     write(BOOT, result)
     require(BOOT.read_bytes() == result, 'Written boot.bin does not match')
     return result
@@ -107,6 +109,9 @@ def rollback():
     saved = BACKUP.read_bytes()
     require(len(saved) == STAGE2 and sha(saved) in KNOWN, 'backup is not a known stage 2; nothing changed')
     boot = read_boot()
+    head = sha(boot[:STAGE2])
+    require(boot[:STAGE2] == saved or head not in KNOWN,
+            f'stage 2 in boot.bin is {KNOWN.get(head)}, not a test build; nothing changed')
     if boot[:STAGE2] != saved:
         replace_stage2(boot, saved)
     BACKUP.unlink()

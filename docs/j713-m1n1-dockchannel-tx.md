@@ -34,8 +34,8 @@ Upstream m1n1 still has the same loop.
 `src/dockchannel_uart.c`. Every wait for TX space now has a limit:
 
 - Until anything has been seen draining the FIFO, the writer waits at most
-  100 ms (`TX_TIMEOUT_US`). It tracks how much space its own writes leave.
-  More space than that means a consumer drained the FIFO.
+  100 ms (`TX_TIMEOUT_US`). A consumer is seen when space comes back during a
+  wait, or when there is more space than the writer's own writes left.
 - Once a consumer has been seen, the limit is 2 s (`TX_CONSUMER_TIMEOUT_US`),
   so a debug host using m1n1's proxy over the dockchannel can pause briefly
   without losing reply bytes.
@@ -64,9 +64,10 @@ FIFO and clock:
 - `undrained` (the #82 state: 37 bytes free, never drained, 200 lines): the
   shipped source hangs with nothing on screen. The patched source puts every
   line on the screen, keeps the 37 bytes that fit, and waits 100 ms in total.
-- `slow_drain` (a host drains one byte per 200 µs) and `fast_host_pause` (a
-  host keeps up, then pauses 150 ms): every byte arrives in order, unpatched
-  and patched.
+- `slow_drain` (a host drains one byte per 200 µs), `fast_host_pause` (a
+  host keeps up, then pauses 150 ms) and `slow_host_pause` (a host slower than
+  the writes, then pauses 150 ms): every byte arrives in order, unpatched and
+  patched.
 - `recover` (stall, then a host starts draining): everything written after
   the host attaches arrives whole.
 - `consumer_vanishes` (a host drains, then stops for good): one 2 s wait, and
@@ -74,7 +75,7 @@ FIFO and clock:
 - `secondary` (a secondary CPU prints before the MMU is up, after a stall): no
   wait.
 
-Eleven mutants must each fail a case. They cover the timeout, the stall latch,
+Twelve mutants must each fail a case. They cover the timeout, the stall latch,
 consumer detection and both limits.
 
 The host test does not emulate the hardware FIFO or iBoot's handoff state.

@@ -20,7 +20,7 @@
  
  int dockchannel_uart_init(void)
  {
-@@ -37,9 +49,25 @@
+@@ -37,9 +49,26 @@
      if (!uart_base)
          return;
  
@@ -41,6 +41,7 @@
 +                return;
 +            }
 +        }
++        tx_consumer = true;
 +    }
  
 +    tx_stalled = false;

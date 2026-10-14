@@ -89,6 +89,31 @@ class M1n1TestStage2Tests(unittest.TestCase):
         self.assertIn('roll back first', err)
         self.assertEqual(self.backup.read_bytes(), STOCK)
 
+    def test_rollback_refusals_change_nothing(self):
+        self.boot.write_bytes(STOCK + PAYLOAD)
+        self.assertEqual(self.install()[0], 0)
+        self.backup.write_bytes(b'X' * STAGE2)
+        code, _, err = self.run_helper('rollback')
+        self.assertEqual(code, 1)
+        self.assertIn('backup is not a known stage 2', err)
+        self.assertEqual(self.boot.read_bytes(), TEST + PAYLOAD)
+        # A reinstall put a different known loader in place: keep it.
+        self.backup.write_bytes(STOCK)
+        self.boot.write_bytes(REPORTER + PAYLOAD)
+        code, _, err = self.run_helper('rollback')
+        self.assertEqual(code, 1)
+        self.assertIn('not a test build', err)
+        self.assertEqual(self.boot.read_bytes(), REPORTER + PAYLOAD)
+        self.assertTrue(self.backup.exists())
+
+    def test_missing_boot_bin_is_a_clean_refusal(self):
+        for args in (('status',), ('install', str(self.download), sha(TEST))):
+            with self.subTest(args[0]):
+                code, out, err = self.run_helper(*args)
+                self.assertEqual(code, 1)
+                self.assertIn('boot.bin must be a regular file', err)
+                self.assertEqual(out, '')
+
     def test_status_names_the_loader(self):
         self.boot.write_bytes(STOCK + PAYLOAD)
         code, out, _ = self.run_helper('status')

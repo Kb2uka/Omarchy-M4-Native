@@ -26,7 +26,7 @@ PUBLISHED = {
     "iodev.c": "6f6c633a7cf842444ae17fc72d3b8ae679f3998ffdc6a96942454c446e39a702",
     "iodev.h": "46edd5802ea95b66c0a54cd8b9ef5ae892dd11b6fd0fbfca6484aff076c0c180",
 }
-CASES = ("undrained", "slow_drain", "recover", "fast_host_pause", "consumer_vanishes", "secondary")
+CASES = ("undrained", "slow_drain", "recover", "fast_host_pause", "slow_host_pause", "consumer_vanishes", "secondary")
 
 # Each mutant undoes one part of the fix; the named case must catch it.
 MUTANTS = {
@@ -41,6 +41,7 @@ MUTANTS = {
     "expectation_never_updated": ("    tx_free = space - 1;\n", "", "fast_host_pause"),
     "short_consumer_timeout": ("#define TX_CONSUMER_TIMEOUT_US 2000000", "#define TX_CONSUMER_TIMEOUT_US 100000",
                                "fast_host_pause"),
+    "wait_drain_not_seen": ("        }\n        tx_consumer = true;\n    }\n", "        }\n    }\n", "slow_host_pause"),
     "unbounded_consumer_wait": ("#define TX_CONSUMER_TIMEOUT_US 2000000", "#define TX_CONSUMER_TIMEOUT_US 0xffffffff",
                                 "consumer_vanishes"),
     "secondary_waits": ("        if (tx_stalled)\n            return;\n", "        if (tx_stalled && is_boot_cpu())\n            return;\n",
@@ -110,7 +111,7 @@ class M1n1DockchannelTxTests(unittest.TestCase):
 
     def test_shipped_source_already_passes_the_drained_cases(self):
         exe = self.build("before_drained", BASE)
-        for case in ("slow_drain", "fast_host_pause"):
+        for case in ("slow_drain", "fast_host_pause", "slow_host_pause"):
             with self.subTest(case=case):
                 code, output = self.run_case(exe, case)
                 self.assertEqual(code, 0, output)
