@@ -28,6 +28,15 @@ PATCHES = sorted((ROOT / 'patches').glob('[0-9][0-9][0-9][0-9]-*.patch'))
 # Phandle-list properties checked on enabled nodes, with the cells property of their target.
 REFERENCES = (('iommus', '#iommu-cells'), ('phys', '#phy-cells'),
               ('power-domains', '#power-domain-cells'), ('mboxes', '#mbox-cells'))
+# Phandle-bearing properties: each entry is a phandle followed by the number of cells
+# named by the target's cells property, or a fixed count. Values are compared by
+# target path, so dtc renumbering phandles after a patch adds nodes is not a change.
+PHANDLE_LISTS = {'iommus': '#iommu-cells', 'phys': '#phy-cells', 'power-domains': '#power-domain-cells',
+                 'mboxes': '#mbox-cells', 'clocks': '#clock-cells', 'resets': '#reset-cells',
+                 'dmas': '#dma-cells', 'interrupts-extended': '#interrupt-cells', 'pwms': '#pwm-cells',
+                 'nvmem-cells': '#nvmem-cell-cells', 'io-channels': '#io-channel-cells',
+                 'thermal-sensors': '#thermal-sensor-cells', 'sound-dai': '#sound-dai-cells',
+                 'interrupt-parent': 0, 'memory-region': 0, 'remote-endpoint': 0, 'gpio-ranges': 3}
 LOCATION = re.compile(r'^.*?: (?=(?:Warning|ERROR) \()')
 
 spec = importlib.util.spec_from_file_location('adt_audit', ROOT / 'tools/adt-audit.py')
@@ -105,6 +114,32 @@ def dangling(root, enabled):
     return sorted(set(found))
 
 
+def phandle_rule(name):
+    if name in PHANDLE_LISTS:
+        return PHANDLE_LISTS[name]
+    if name == 'gpios' or name.endswith('-gpios'):
+        return '#gpio-cells'
+    if re.fullmatch(r'pinctrl-\d+', name):
+        return 0
+    return None
+
+
+def comparable(name, value, phandles):
+    """A property value with every phandle replaced by its target's path; other values as hex."""
+    rule = phandle_rule(name)
+    if rule is None or len(value) % 4:
+        return value.hex()
+    cells, index, entries = audit.be32s(value), 0, []
+    while index < len(cells):
+        target = phandles.get(cells[index])
+        if target is None:
+            return value.hex()
+        count = rule if isinstance(rule, int) else audit.one_be32(target.props.get(rule), 0)
+        entries.append(' '.join(['&' + target.path] + [f'{cell:#x}' for cell in cells[index + 1:index + 1 + count]]))
+        index += 1 + count
+    return ', '.join(entries)
+
+
 def changed(before, after):
     """Properties a patch added, removed or changed on nodes that exist both before and after."""
     found = []
@@ -119,8 +154,11 @@ def changed(before, after):
 def describe(dtb, warnings):
     root = audit.parse_dtb(dtb)
     enabled = enabled_nodes(root)
-    props = {node.path: node.props for node in audit.fdt_walk(root)}
+    phandles = audit.fdt_phandles(root)
+    props = {node.path: {name: comparable(name, value, phandles) for name, value in node.props.items()}
+             for node in audit.fdt_walk(root)}
     return {'compatible': audit.node_compatibles(root), 'warnings': warnings, 'props': props,
+            'props_raw': {node.path: node.props for node in audit.fdt_walk(root)},
             'model': audit.cstrings(root.props.get('model', b''))[0] if 'model' in root.props else '',
             'enabled': enabled, 'dangling': dangling(root, enabled)}
 

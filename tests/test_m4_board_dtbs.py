@@ -108,6 +108,7 @@ class BoardDevicetreeTool(unittest.TestCase):
             raise unittest.SkipTest('dtc not installed')
         dtb = subprocess.run(['dtc', '-I', 'dts', '-O', 'dtb'], input=SYNTHETIC.encode(),
                              capture_output=True, check=True).stdout
+        cls.root_dtb = dtb
         cls.root = MODULE.audit.parse_dtb(dtb)
         cls.enabled = MODULE.enabled_nodes(cls.root)
 
@@ -120,6 +121,20 @@ class BoardDevicetreeTool(unittest.TestCase):
             '/orphan@6 power-domains -> missing phandle 0x7777',
             '/stale@5 iommus -> disabled /iommu@1',
         ])
+
+    def test_changed_ignores_phandle_renumbering_but_not_real_edits(self):
+        renumbered = SYNTHETIC.replace(
+            '    off: iommu@1',
+            '    first@0 { compatible = "test,first"; reg = <0>; power-domains = <&extra>; };\n'
+            '    extra: power@a { compatible = "test,power"; reg = <0xa>; #power-domain-cells = <0>; };\n'
+            '    off: iommu@1').replace('iommus = <&on 7>, <&on 8>', 'iommus = <&on 7>, <&on 9>')
+        before = MODULE.describe(self.root_dtb, [])
+        after = MODULE.describe(subprocess.run(['dtc', '-I', 'dts', '-O', 'dtb'], input=renumbered.encode(),
+                                               capture_output=True, check=True).stdout, [])
+        self.assertNotEqual(MODULE.audit.be32s(before['props_raw']['/good@4']['power-domains']),
+                            MODULE.audit.be32s(after['props_raw']['/good@4']['power-domains']),
+                            'the fixture must actually renumber phandles')
+        self.assertEqual(MODULE.changed(before['props'], after['props']), ['/good@4 iommus'])
 
     def test_warning_location_is_stripped(self):
         line = '<stdin>:12.3-40.5: Warning (simple_bus_reg): /soc/x@1: message'
