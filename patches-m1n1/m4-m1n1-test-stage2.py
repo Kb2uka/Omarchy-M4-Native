@@ -30,6 +30,7 @@ if 'M4_M1N1_TEST_BOOT' in os.environ and 'M4_M1N1_TEST_KNOWN' in os.environ:
     # Tests cannot carry real loaders, so a test boot.bin may name its own.
     KNOWN = dict.fromkeys(os.environ['M4_M1N1_TEST_KNOWN'].split(','), 'test fixture')
 BACKUP = BOOT.with_name('stage2.pre-issue82.bin')
+INSTALLED = BOOT.with_name('stage2.issue82-installed.sha256')
 CHOSEN = Path('/proc/device-tree/chosen')
 
 
@@ -80,7 +81,8 @@ def replace_stage2(boot, stage2):
 def status():
     head = sha(read_boot()[:STAGE2])
     receipt = {'boot': str(BOOT), 'stage2_sha256': head, 'stage2': KNOWN.get(head, 'test build or unknown'),
-               'backup': str(BACKUP) if BACKUP.exists() else None}
+               'backup': str(BACKUP) if BACKUP.exists() else None,
+               'installed_test': INSTALLED.read_text().strip() if INSTALLED.exists() else None}
     for stage in ('stage1', 'stage2'):
         tag = CHOSEN / f'asahi,m1n1-{stage}-version'
         if tag.exists():
@@ -93,28 +95,32 @@ def install(file, want):
     require(len(loader) == STAGE2, f'{file} is {len(loader)} bytes, not a stage 2 loader')
     require(sha(loader) == want, f'{file} does not match {want}; download it again')
     require(want not in KNOWN, 'that is not a test build; use rollback')
-    require(not BACKUP.exists(), f'{BACKUP} already exists; roll back first')
+    require(not BACKUP.exists() and not INSTALLED.exists(), f'{BACKUP} already exists; roll back first')
     boot = read_boot()
     head = sha(boot[:STAGE2])
     require(head in KNOWN, f'stage 2 in boot.bin is not a known loader ({head}); nothing changed')
     write(BACKUP, boot[:STAGE2])
     require(BACKUP.read_bytes() == boot[:STAGE2], 'Backup does not match')
+    write(INSTALLED, (want + '\n').encode())
     result = replace_stage2(boot, loader)
     return {'status': 'installed; takes effect at next boot', 'replaced': KNOWN[head], 'backup': str(BACKUP),
             'boot_sha256': sha(result), 'rollback': 'sudo python3 m4-m1n1-test-stage2.py rollback'}
 
 
 def rollback():
-    require(BACKUP.is_file(), f'no backup at {BACKUP}')
+    require(BACKUP.is_file() and INSTALLED.is_file(), f'no backup at {BACKUP}')
     saved = BACKUP.read_bytes()
     require(len(saved) == STAGE2 and sha(saved) in KNOWN, 'backup is not a known stage 2; nothing changed')
+    installed = INSTALLED.read_text().strip()
     boot = read_boot()
     head = sha(boot[:STAGE2])
-    require(boot[:STAGE2] == saved or head not in KNOWN,
-            f'stage 2 in boot.bin is {KNOWN.get(head)}, not a test build; nothing changed')
+    # Only undo the test build this helper installed, never a loader that replaced it since.
+    require(boot[:STAGE2] == saved or head == installed,
+            f'stage 2 in boot.bin ({head}) is not the installed test build {installed}; nothing changed')
     if boot[:STAGE2] != saved:
         replace_stage2(boot, saved)
     BACKUP.unlink()
+    INSTALLED.unlink()
     return {'status': 'restored; takes effect at next boot', 'restored': KNOWN[sha(saved)]}
 
 

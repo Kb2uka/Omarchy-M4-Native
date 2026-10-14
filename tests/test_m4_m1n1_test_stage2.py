@@ -29,6 +29,7 @@ class M1n1TestStage2Tests(unittest.TestCase):
         self.dir = Path(temporary.name)
         self.boot = self.dir / 'boot.bin'
         self.backup = self.dir / 'stage2.pre-issue82.bin'
+        self.installed = self.dir / 'stage2.issue82-installed.sha256'
         self.download = self.dir / 'm1n1-stage2-issue82-test1.bin'
         self.download.write_bytes(TEST)
 
@@ -45,6 +46,7 @@ class M1n1TestStage2Tests(unittest.TestCase):
             with self.subTest(start=start[:1]):
                 self.boot.write_bytes(start + PAYLOAD)
                 self.backup.unlink(missing_ok=True)
+                self.installed.unlink(missing_ok=True)
                 code, out, err = self.install()
                 self.assertEqual(code, 0, err)
                 self.assertEqual(self.boot.read_bytes(), TEST + PAYLOAD)
@@ -59,6 +61,7 @@ class M1n1TestStage2Tests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(self.boot.read_bytes(), STOCK + PAYLOAD + b' updated devicetree')
         self.assertFalse(self.backup.exists())
+        self.assertFalse(self.installed.exists())
         self.assertEqual(self.run_helper('rollback')[0], 1)
 
     def test_refusals_change_nothing(self):
@@ -97,13 +100,20 @@ class M1n1TestStage2Tests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn('backup is not a known stage 2', err)
         self.assertEqual(self.boot.read_bytes(), TEST + PAYLOAD)
-        # A reinstall put a different known loader in place: keep it.
+        # Another loader, known or not, replaced the test build since: keep it.
         self.backup.write_bytes(STOCK)
-        self.boot.write_bytes(REPORTER + PAYLOAD)
+        for other in (REPORTER, b'N' * STAGE2):
+            with self.subTest(other=other[:1]):
+                self.boot.write_bytes(other + PAYLOAD)
+                code, _, err = self.run_helper('rollback')
+                self.assertEqual(code, 1)
+                self.assertIn('not the installed test build', err)
+                self.assertEqual(self.boot.read_bytes(), other + PAYLOAD)
+                self.assertTrue(self.backup.exists())
+        self.boot.unlink()
         code, _, err = self.run_helper('rollback')
         self.assertEqual(code, 1)
-        self.assertIn('not a test build', err)
-        self.assertEqual(self.boot.read_bytes(), REPORTER + PAYLOAD)
+        self.assertIn('boot.bin must be a regular file', err)
         self.assertTrue(self.backup.exists())
 
     def test_missing_boot_bin_is_a_clean_refusal(self):
