@@ -67,6 +67,12 @@ as a reference (the research notes record `53f8ee9b`). The boot sessions
 used a separately obtained m1n1 checkout. No m1n1 tree or binary is bundled;
 `tools/adt.py` is a standalone parser, not a copied m1n1 module.
 
+`patches-m1n1/base/src/` holds three unmodified MIT-licensed m1n1 files
+(`dockchannel_uart.c`, `iodev.c`, `iodev.h`) from the alpha.1 bootloader
+source, with that tree's `LICENSE` beside them in `patches-m1n1/base/`.
+The tests compile them against host shims. See
+[docs/j713-m1n1-dockchannel-tx.md](docs/j713-m1n1-dockchannel-tx.md).
+
 The upstream [MIT license](https://github.com/AsahiLinux/m1n1/blob/main/LICENSE)
 is reproduced below to preserve its notice for any adapted reference material:
 

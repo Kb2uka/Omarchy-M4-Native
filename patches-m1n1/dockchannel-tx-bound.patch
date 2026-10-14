@@ -1,0 +1,41 @@
+--- a/src/dockchannel_uart.c
++++ b/src/dockchannel_uart.c
+@@ -13,7 +13,15 @@
+ #define DATA_RX8      0x401c
+ #define DATA_RX_COUNT 0x402c
+ 
++/*
++ * On some machines nothing drains the TX FIFO, so once it fills it stays
++ * full. Wait at most this long for space, then drop output until space
++ * appears again, instead of hanging the boot with nothing on screen.
++ */
++#define TX_TIMEOUT_US 100000
++
+ static u64 uart_base = 0;
++static bool tx_stalled = false;
+ 
+ int dockchannel_uart_init(void)
+ {
+@@ -37,9 +45,20 @@
+     if (!uart_base)
+         return;
+ 
+-    while (read32(uart_base + DATA_TX_FREE) == 0)
+-        ;
++    if (read32(uart_base + DATA_TX_FREE) == 0) {
++        if (tx_stalled)
++            return;
++
++        u64 timeout = timeout_calculate(TX_TIMEOUT_US);
++        while (read32(uart_base + DATA_TX_FREE) == 0) {
++            if (timeout_expired(timeout)) {
++                tx_stalled = true;
++                return;
++            }
++        }
++    }
+ 
++    tx_stalled = false;
+     write32(uart_base + DATA_TX8, c);
+ }
+ 
