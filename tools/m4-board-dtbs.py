@@ -7,7 +7,8 @@ Usage: m4-board-dtbs.py <asahi-tree>
 The tree comes from tools/ci/fetch-asahi-dts.sh. Prints a JSON report: for each
 board, the dtc warnings, the nodes this repository's patches/00*.patch enable or
 disable or change compared with upstream, a digest of every enabled node's
-properties (phandles compared by target), and the enabled nodes whose iommus, phys,
+properties (phandles compared by target; an explicit status "okay" counts as no
+status), and the enabled nodes whose iommus, phys,
 power-domains or mboxes point at a node that is missing or disabled. Only the
 J713 board is qualified; the others show what the shared patches change on
 Macs nobody here has booted.
@@ -78,15 +79,15 @@ def compile_board(apple, include, board):
     return result.stdout, warnings
 
 
-def status(node):
-    return audit.cstrings(node.props['status'])[0] if 'status' in node.props else 'okay'
+def enabled_status(value):
+    return (audit.cstrings(value) or [''])[0] in ('okay', 'ok')
 
 
 def enabled_nodes(root):
     """Map every enabled node path (its own status and all its parents okay) to its first compatible."""
     enabled = {}
     def walk(node):
-        if status(node) not in ('okay', 'ok'):
+        if 'status' in node.props and not enabled_status(node.props['status']):
             return
         enabled[node.path] = (audit.node_compatibles(node) or [''])[0]
         for child in node.children:
@@ -159,7 +160,7 @@ def describe(dtb, warnings):
     enabled = enabled_nodes(root)
     phandles = audit.fdt_phandles(root)
     props = {node.path: {name: comparable(name, value, phandles) for name, value in node.props.items()
-                         if name not in ('phandle', 'linux,phandle')}
+                         if name not in ('phandle', 'linux,phandle') and not (name == 'status' and enabled_status(value))}
              for node in audit.fdt_walk(root)}
     return {'compatible': audit.node_compatibles(root), 'warnings': warnings, 'props': props,
             'props_raw': {node.path: node.props for node in audit.fdt_walk(root)},

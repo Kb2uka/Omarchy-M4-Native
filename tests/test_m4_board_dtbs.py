@@ -159,10 +159,13 @@ class BoardDevicetreeTool(unittest.TestCase):
             '    extra: power@a { compatible = "test,power"; reg = <0xa>; #power-domain-cells = <0>; status = "disabled"; };\n'
             '    off: iommu@1')
         edited = quiet.replace('iommus = <&on 7>, <&on 8>', 'iommus = <&on 7>, <&on 9>')
+        explicit = SYNTHETIC.replace('compatible = "test,good"; reg = <4>;',
+                                     'compatible = "test,good"; reg = <4>; status = "okay";')
         digest = lambda source: MODULE.describe(subprocess.run(
             ['dtc', '-I', 'dts', '-O', 'dtb'], input=source.encode(), capture_output=True, check=True).stdout,
             [])['enabled_digest']
         self.assertEqual(digest(quiet), digest(SYNTHETIC))
+        self.assertEqual(digest(explicit), digest(SYNTHETIC), 'status "okay" means the same as no status')
         self.assertNotEqual(digest(edited), digest(SYNTHETIC))
 
     def test_tool_loads_without_tools_on_the_path(self):
