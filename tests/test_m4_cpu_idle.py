@@ -112,13 +112,13 @@ class CpuIdleLoad(unittest.TestCase):
             path = self.root / 'sys/module' / name
             if path.exists():
                 path.rmdir()
-        self.put(MODULE.CURRENT_DRIVER, b'none\n')
         if (self.root / GATE_TRIP).exists():
             self.put(GATE_TRIP, b'20000\n')
         import shutil
         shutil.rmtree(self.root / MODULE.CPUS)
         for cpu in range(CPUS):
             (self.root / MODULE.CPUS / f'cpu{cpu}').mkdir(parents=True)
+        self.put(MODULE.CURRENT_DRIVER, b'none\n')
 
     def guard_insmod(self):
         return ['insmod', str(self.root / MODULE.GUARD_STAGED)]

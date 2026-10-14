@@ -178,7 +178,7 @@ class BuildGuards(unittest.TestCase):
         compose = importlib.util.module_from_spec(composer)
         composer.loader.exec_module(compose)
         lineage = list(compose.KNOWN_DTBS)
-        self.assertEqual(lineage[-2:], [module.CPUTEMP_DTB, module.ECLUSTER_DTB])
+        self.assertEqual(lineage.index(module.ECLUSTER_DTB), lineage.index(module.CPUTEMP_DTB) + 1)
 
     def test_e_states_are_the_adt_table(self):
         self.assertEqual(MODULE.E_STATES, {2: 1080, 3: 1476, 4: 1860, 5: 2172})

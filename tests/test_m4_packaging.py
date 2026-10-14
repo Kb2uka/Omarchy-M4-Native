@@ -283,7 +283,8 @@ class PolicyTests(unittest.TestCase):
                     CHECK.check_package(CHANNEL, *self.package('omarchy-m4-headphones', files))
 
     def test_cpu_idle_package_must_be_the_pin(self):
-        good = {path: (0o644, digest) for path, digest in CHANNEL['cpu_idle_module'].items()}
+        good = {path: (0o644, digest)
+                for path, digest in {**CHANNEL['cpu_idle_module'], **CHANNEL['cpu_guard_module']}.items()}
         good['usr/bin/m4-cpu-idle'] = (0o755, file_sha('tools/m4-cpu-idle.py'))
         good[CHECK.CPU_IDLE_UNIT] = (0o644, file_sha('packaging/omarchy-m4/omarchy-m4-cpu/m4-cpu-idle.service'))
         package, info, files, root = self.package('omarchy-m4-cpu', good)
@@ -291,8 +292,10 @@ class PolicyTests(unittest.TestCase):
         (root / 'usr/bin/m4-cpu-idle').write_bytes((ROOT / 'tools/m4-cpu-idle.py').read_bytes())
         CHECK.check_package(CHANNEL, package, info, files, root)
         staged = next(iter(CHANNEL['cpu_idle_module']))
+        guard = next(iter(CHANNEL['cpu_guard_module']))
         other_unit = 'usr/lib/systemd/system/m4-gpu.service'
         for changed, message in (({**good, staged: (0o644, '0' * 64)}, 'differs from the pin'),
+                                 ({**good, guard: (0o644, '0' * 64)}, 'boost guard differs from the pin'),
                                  ({**good, 'usr/bin/m4-cpu-idle': (0o755, '0' * 64)}, 'tool differs'),
                                  ({**good, CHECK.CPU_IDLE_UNIT: (0o644, '0' * 64)}, 'unit differs'),
                                  ({**good, other_unit: (0o644, 'x')}, 'unlisted path')):
@@ -301,10 +304,16 @@ class PolicyTests(unittest.TestCase):
                     CHECK.check_package(CHANNEL, package, info, changed, root)
 
     def test_cpu_idle_tool_pin_must_match_the_channel(self):
-        good = {path: (0o644, digest) for path, digest in CHANNEL['cpu_idle_module'].items()}
+        for key in ('cpu_idle_module', 'cpu_guard_module'):
+            with self.subTest(key):
+                self.tool_pin_refused(next(iter(CHANNEL[key].values())))
+
+    def tool_pin_refused(self, pinned):
+        good = {path: (0o644, digest)
+                for path, digest in {**CHANNEL['cpu_idle_module'], **CHANNEL['cpu_guard_module']}.items()}
         tool = (ROOT / 'tools/m4-cpu-idle.py').read_text()
-        pinned = next(iter(CHANNEL['cpu_idle_module'].values()))
         other = tool.replace(pinned, '1' * 64)
+        self.assertNotEqual(other, tool)
         good['usr/bin/m4-cpu-idle'] = (0o755, hashlib.sha256(other.encode()).hexdigest())
         good[CHECK.CPU_IDLE_UNIT] = (0o644, file_sha('packaging/omarchy-m4/omarchy-m4-cpu/m4-cpu-idle.service'))
         package, info, files, root = self.package('omarchy-m4-cpu', good)
