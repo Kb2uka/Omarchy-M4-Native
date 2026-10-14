@@ -219,6 +219,10 @@ def main():
                 require(sha((root / path).read_bytes()) == digest, 'Staged speaker module missing or wrong: ' + path)
             require((root / 'usr/lib/systemd/system/m4-j713-audio-register.service.d/20-m4-speaker-module.conf').is_file()
                     and os.access(root / 'usr/bin/m4-speaker-module', os.X_OK), 'The speaker module step is missing')
+            for path, digest in CHANNEL['gpu_module'].items():
+                require(sha((root / path).read_bytes()) == digest, 'Staged GPU module missing or wrong: ' + path)
+            require((root / 'usr/lib/systemd/system/m4-gpu.service.d/20-m4-gpu-module.conf').is_file()
+                    and os.access(root / 'usr/bin/m4-gpu-module', os.X_OK), 'The GPU module step is missing')
             require(os.access(root / 'usr/bin/omarchy-m4-update', os.X_OK) and
                     (root / 'usr/lib/omarchy-m4/m4-channel-setup.py').is_file(), 'omarchy-m4-update is missing')
             require((root / 'usr/lib/systemd/user/omarchy-m4-update-check.timer').is_file() and

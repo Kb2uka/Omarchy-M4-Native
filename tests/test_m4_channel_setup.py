@@ -179,6 +179,23 @@ class SetupTests(unittest.TestCase):
         self.put(MODULE.SPEAKER_MODULE, 'fixed module')
         self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'already swapped')
 
+    def test_restart_reported_when_a_gpu_swap_is_pending(self):
+        alpha1 = b'alpha.1 gpu module'
+        with mock.patch.object(MODULE, 'GPU_STOCK', MODULE.hashlib.sha256(alpha1).hexdigest()):
+            (self.root / MODULE.GPU_MODULE).parent.mkdir(parents=True)
+            (self.root / MODULE.GPU_MODULE).write_bytes(alpha1)
+            self.put(MODULE.GPU_STAGED, 'fixed module')
+            result = self.setup_with(FakeSystem(self.root))
+            self.assertEqual((result['restart_needed'], result['status']),
+                             (True, 'connected; restart once to apply the update'))
+            self.put(MODULE.GPU_HOLD, '')
+            self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'held: nothing applies')
+            (self.root / MODULE.GPU_HOLD).unlink()
+            self.put(MODULE.GPU_MODULE, 'fixed module')
+            self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'already swapped')
+            self.put(MODULE.GPU_MODULE, 'hand-patched module')
+            self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'unknown: never applied')
+
     def test_boot_not_current_is_a_failure(self):
         with self.assertRaisesRegex(MODULE.Refused, 'boot.bin is not in step'):
             self.setup_with(FakeSystem(self.root, boot_status='refused'))

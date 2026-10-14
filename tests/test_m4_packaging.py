@@ -88,7 +88,23 @@ class RecipeTests(unittest.TestCase):
         self.assertIn(CHANNEL['devicetree']['sha256'], text)
         self.assertEqual(load('tools/m4-boot-compose.py').KNOWN_DTBS[CHANNEL['devicetree']['sha256']],
                          'j713-cpu-temperature')
-        self.assertIn("depends=('python' 'pacman')\n", text, 'gst-plugins-good must be able to replace the sinks')
+        self.assertIn("depends=('python' 'pacman' 'omarchy-m4-gpu')\n", text,
+                      'gst-plugins-good must be able to replace the sinks; the GPU fix must come with this version')
+
+    def test_gpu_recipe_pins_the_channel_module(self):
+        text = recipe('omarchy-m4-gpu')
+        for digest in CHANNEL['gpu_module'].values():
+            self.assertIn(digest, text)
+            self.assertIn(f'package-inputs/asahi_m4-{digest[:8]}.ko', text)
+        tool = load('tools/m4-gpu-module.py')
+        self.assertEqual(set(CHANNEL['gpu_module']), {tool.STAGED})
+        self.assertEqual(set(CHANNEL['gpu_module'].values()), {tool.FIXED['sha256']})
+        setup = load('tools/m4-channel-setup.py')
+        self.assertEqual((setup.GPU_STAGED, setup.GPU_MODULE, setup.GPU_STOCK),
+                         (tool.STAGED, tool.MODULE, tool.STOCK['sha256']))
+        self.assertEqual(setup.GPU_HOLD, tool.STATE + '/hold')
+        helper = (ROOT / 'gpu/j713/m4-gpu-test-module').read_text()
+        self.assertIn('stock=' + tool.STOCK['sha256'], helper)
 
     def test_realtime_setting_matches_the_image_unit(self):
         drop_in = (PACKAGING / 'omarchy-m4-boot/speakersafetyd-j713-realtime.conf').read_text()
@@ -129,6 +145,7 @@ class RecipeTests(unittest.TestCase):
             self.assertEqual(sum(path in paths for paths in CHANNEL['allowed_paths'].values()), 1, path)
             self.assertTrue(reason.strip(), path)
         for protected in ('opt/m4-video/20261011/vaapi/v4l2_request_drv_video.so', 'usr/local/bin/brave',
+                          'opt/m4-gpu/asahi_m4.ko', 'opt/m4-gpu/runtime.sha256',
                           'etc/omarchy/j713-video-manifest.json', 'usr/share/asahi-audio/j713/graph.json',
                           'usr/lib/omarchy/j713-audio/x/modules/snd-soc-tas2764.ko',
                           'usr/share/speakersafetyd/apple/j713.conf', 'boot/efi/omarchy/boot.bin',
@@ -213,6 +230,31 @@ class PolicyTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     CHECK.check_package(CHANNEL, *self.package('omarchy-m4-speaker', files))
 
+    def test_boot_package_must_bring_the_gpu_package(self):
+        realtime = (PACKAGING / 'omarchy-m4-boot/speakersafetyd-j713-realtime.conf').read_bytes()
+        files = {**self.boot_files(), CHECK.REALTIME: (0o644, hashlib.sha256(realtime).hexdigest())}
+        CHECK.check_package(CHANNEL, *self.boot_package(files))
+        with self.assertRaisesRegex(ValueError, 'must require the GPU module package'):
+            CHECK.check_package(CHANNEL, *self.boot_package(files, {**self.boot_info(), 'depend': ['python', 'pacman']}))
+
+    def test_gpu_package_must_be_the_pin(self):
+        good = {path: (0o644, digest) for path, digest in CHANNEL['gpu_module'].items()}
+        good['usr/bin/m4-gpu-module'] = (0o755, file_sha('tools/m4-gpu-module.py'))
+        good[CHECK.GPU_DROP_IN] = (0o644, file_sha('packaging/omarchy-m4/omarchy-m4-gpu/20-m4-gpu-module.conf'))
+        CHECK.check_package(CHANNEL, *self.package('omarchy-m4-gpu', good))
+        staged = next(iter(CHANNEL['gpu_module']))
+        for files, message in (({**good, staged: (0o644, '0' * 64)}, 'differs from the pin'),
+                               ({**good, 'usr/bin/m4-gpu-module': (0o755, '0' * 64)}, 'tool differs'),
+                               ({**good, CHECK.GPU_DROP_IN: (0o644, '0' * 64)}, 'drop-in differs'),
+                               ({**good, 'opt/m4-gpu/asahi_m4.ko': (0o644, '0' * 64)}, 'unlisted path')):
+            with self.subTest(message):
+                with self.assertRaisesRegex(ValueError, message):
+                    CHECK.check_package(CHANNEL, *self.package('omarchy-m4-gpu', files))
+
+    def test_gpu_drop_in_cannot_block_graphics_startup(self):
+        text = (PACKAGING / 'omarchy-m4-gpu/20-m4-gpu-module.conf').read_text()
+        self.assertIn('ExecStartPre=-/usr/bin/m4-gpu-module --boot\n', text)
+
     def test_speaker_drop_in_cannot_block_registration(self):
         text = (PACKAGING / 'omarchy-m4-speaker/20-m4-speaker-module.conf').read_text()
         self.assertIn('ExecStartPre=-/usr/bin/m4-speaker-module --boot\n', text)
@@ -222,7 +264,7 @@ class PolicyTests(unittest.TestCase):
 
     def boot_info(self):
         return {'pkgname': ['omarchy-m4-boot'], 'pkgver': ['1-4'], 'arch': ['aarch64'],
-                'depend': ['python', 'pacman']}
+                'depend': ['python', 'pacman', 'omarchy-m4-gpu']}
 
     def boot_files(self):
         """A boot package that passes every check except the ones under test, unpacked on disk."""
