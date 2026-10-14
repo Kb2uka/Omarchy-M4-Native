@@ -148,32 +148,30 @@ Upstream Omarchy added its own Apple SMC lid binds after 4.0.4 (commit
 external-monitor check, so they would not lock on J713 either. Keep these binds
 until the panel has a display-controller connector.
 
-An existing install can apply both parts itself. First write the lock screen's
-PAM file with Omarchy's own helper:
+An installed Air gets both parts from `omarchy-m4-update`. From
+`omarchy-m4-boot` 1-9, the package's install script runs
+`/usr/lib/omarchy-m4/m4-lid-lock.py` on every update:
 
-```bash
-sudo omarchy-apply-lock
-```
+- It writes `/etc/pam.d/omarchy-lock-password`, mode 0644, only when the file
+  is missing, from the stack in the installed `omarchy-apply-lock`. It refuses
+  a helper it does not recognise.
+- It appends the binds once to each user's own `~/.config/hypr/hyprland.lua`,
+  running as that user, never as root. Only an Omarchy Lua configuration that
+  lacks the `-- J713 lid (issue #84)` line gets them, so a configuration made
+  from an image with this change, or one that already has the binds, is left
+  alone. Symlinks are never followed. The appended lines are:
 
-Then add the binds. This appends them once, only to an existing Omarchy
-configuration. It skips a configuration that already starts the block with the
-`-- J713 lid (issue #84)` line, as one made from an image with this change does:
-
-```bash
-f=~/.config/hypr/hyprland.lua
-if [ -f "$f" ] && ! grep -qF -- '-- J713 lid (issue #84)' "$f"; then
-  cat >>"$f" <<'EOF'
+```lua
 -- J713 lid (issue #84): lock on close, light the lock screen on open.
 o.bind("switch:on:Apple SMC power/lid events", nil, "omarchy-system-lock", { locked = true })
 o.bind("switch:off:Apple SMC power/lid events", nil, "omarchy-brightness-display on", { locked = true })
-EOF
-fi
 ```
 
-Save your work, then log out and back in. On October 14, 2026 these binds were
-checked in a fresh session on the test Air. A live `hyprctl reload` there left
-Hyprland ignoring input devices that were added later, so do not rely on a
-reload.
+When it changes anything, the update prints a line asking you to log out and
+back in once. Nothing is reloaded: on October 14, 2026 a live `hyprctl reload`
+on the test Air left Hyprland ignoring input devices that were added later.
+`python3 /usr/lib/omarchy-m4/m4-lid-lock.py` shows what it would do and
+changes nothing.
 
 The configuration tool performs no package installation, network operation,
 locale compilation or power action. `--check` is read-only; `--apply` is for

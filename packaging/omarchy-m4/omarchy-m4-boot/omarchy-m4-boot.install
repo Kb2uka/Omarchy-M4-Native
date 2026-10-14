@@ -1,5 +1,9 @@
 post_install() {
   systemctl --global enable omarchy-m4-update-check.timer >/dev/null 2>&1 || true
+  # Lid close locks the J713 (issue #84); a refusal never fails the update.
+  if [ -x usr/bin/python3 ]; then
+    usr/bin/python3 usr/lib/omarchy-m4/m4-lid-lock.py --hook || true
+  fi
 }
 
 post_upgrade() {
