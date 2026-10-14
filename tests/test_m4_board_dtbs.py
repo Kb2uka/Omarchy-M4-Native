@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -91,7 +92,9 @@ SYNTHETIC = """/dts-v1/;
     off: iommu@1 { compatible = "test,iommu"; reg = <1>; #iommu-cells = <1>; status = "disabled"; };
     on: iommu@2 { compatible = "test,iommu"; reg = <2>; #iommu-cells = <1>; };
     domain: power@3 { compatible = "test,power"; reg = <3>; #power-domain-cells = <0>; };
-    good@4 { compatible = "test,good"; reg = <4>; iommus = <&on 7>, <&on 8>; power-domains = <&domain>; };
+    clk: clock@c { compatible = "test,clock"; reg = <0xc>; #clock-cells = <1>; };
+    good@4 { compatible = "test,good"; reg = <4>; iommus = <&on 7>, <&on 8>; power-domains = <&domain>;
+             clocks = <&clk 1>; assigned-clocks = <&clk 2>; };
     stale@5 { compatible = "test,stale"; reg = <5>; iommus = <&on 1>, <&off 2>;
               phys = <&offphy>; mboxes = <&offmbox>; };
     offphy: phy@9 { compatible = "test,phy"; reg = <9>; #phy-cells = <0>; status = "disabled"; };
@@ -123,7 +126,8 @@ class BoardDevicetreeTool(unittest.TestCase):
         cls.enabled = MODULE.enabled_nodes(cls.root)
 
     def test_enabled_nodes_follow_status_and_parents(self):
-        self.assertEqual(sorted(self.enabled), ['/', '/good@4', '/iommu@2', '/orphan@6', '/power@3', '/stale@5'])
+        self.assertEqual(sorted(self.enabled), ['/', '/clock@c', '/good@4', '/iommu@2', '/orphan@6', '/power@3',
+                                                '/stale@5'])
         self.assertEqual(self.enabled['/good@4'], 'test,good')
 
     def test_dangling_finds_disabled_and_missing_targets_only(self):
@@ -160,6 +164,14 @@ class BoardDevicetreeTool(unittest.TestCase):
             [])['enabled_digest']
         self.assertEqual(digest(quiet), digest(SYNTHETIC))
         self.assertNotEqual(digest(edited), digest(SYNTHETIC))
+
+    def test_tool_loads_without_tools_on_the_path(self):
+        """The tool must import its parser itself, as when this file runs alone."""
+        code = ('import importlib.util; '
+                'spec = importlib.util.spec_from_file_location("tool", "tools/m4-board-dtbs.py"); '
+                'spec.loader.exec_module(importlib.util.module_from_spec(spec))')
+        result = subprocess.run([sys.executable, '-I', '-c', code], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_warning_location_is_stripped(self):
         line = '<stdin>:12.3-40.5: Warning (simple_bus_reg): /soc/x@1: message'

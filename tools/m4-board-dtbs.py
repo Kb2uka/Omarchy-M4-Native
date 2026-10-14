@@ -41,6 +41,7 @@ PHANDLE_LISTS = {'iommus': '#iommu-cells', 'phys': '#phy-cells', 'power-domains'
                  'assigned-clocks': '#clock-cells', 'interrupt-parent': 0, 'memory-region': 0, 'remote-endpoint': 0, 'gpio-ranges': 3}
 LOCATION = re.compile(r'^.*?: (?=(?:Warning|ERROR) \()')
 
+sys.path.insert(0, str(ROOT / 'tools'))  # adt-audit.py imports its sibling tools/adt.py
 spec = importlib.util.spec_from_file_location('adt_audit', ROOT / 'tools/adt-audit.py')
 audit = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = audit
