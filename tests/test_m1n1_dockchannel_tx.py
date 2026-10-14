@@ -87,6 +87,7 @@ class M1n1DockchannelTxTests(unittest.TestCase):
         code, output = self.run_case(self.build("before", BASE), "undrained")
         self.assertEqual(code, 3, output)
         self.assertTrue(output.startswith("HANG"), output)
+        print(f"\nshipped undrained: {output}", flush=True)
 
     def test_patched_source_never_hangs_and_loses_nothing_when_drained(self):
         exe = self.build("after", self.after)
@@ -95,6 +96,7 @@ class M1n1DockchannelTxTests(unittest.TestCase):
                 code, output = self.run_case(exe, case)
                 self.assertEqual(code, 0, output)
                 self.assertTrue(output.startswith("OK " + case), output)
+                print(f"\npatched {output}", flush=True)
 
     def test_shipped_source_already_passes_the_drained_cases(self):
         exe = self.build("before_drained", BASE)
@@ -111,6 +113,7 @@ class M1n1DockchannelTxTests(unittest.TestCase):
                 (src / "dockchannel_uart.c").write_text(source.replace(old, new))
                 code, output = self.run_case(self.build("bin_" + name, src), case)
                 self.assertNotEqual(code, 0, f"{name} survived {case}: {output}")
+                print(f"\nmutant {name} caught by {case}: {output}", flush=True)
 
 
 if __name__ == "__main__":
