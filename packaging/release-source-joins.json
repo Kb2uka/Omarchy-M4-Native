@@ -1,0 +1,346 @@
+{
+  "schema": 1,
+  "release": "0.1.0-alpha.1",
+  "note": "Every ELF object or kernel module in the release root that no pacman package owns, the source that built it, and how that was established. rebuilt-identical means a rebuild from the named sources reproduced the exact bytes; unverified names the likeliest published source by file name only. tools/prepare-j713-release.py refuses to assemble a release with an unlisted binary or an unverified entry.",
+  "binaries": {
+    "opt/m4-gpu/asahi_m4.ko": {
+      "sha256": "80cf3669575edd09aed226a93e47aaaf132e70f1070154629c413c0b40d34578",
+      "license": "GPL-2.0-only",
+      "correspondence": "rebuilt-identical",
+      "sources": [
+        {
+          "archive": "source/kernel-controller.tar.gz",
+          "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/omarchy-j713-v0.1.0-alpha.1-gpu-air-source.tar.gz",
+          "sha256": "c19a7c97184b3f954795c50dfeff857e8baf685f901524845710da839cbd2562"
+        }
+      ],
+      "evidence": "Issue 77: the published kernel-controller tree with the four-file Air GPU packet rebuilt this module byte for byte (clang 21.1.8, rustc 1.93.1, bindgen 0.72.1), 2026-10-13."
+    },
+    "opt/m4-mesa/lib/gbm/dri_gbm.so": {
+      "sha256": "5408ea008e52c98f5c111d637236e5ba52f07c20020fe188bb496c11ba430956",
+      "license": "MIT",
+      "correspondence": "unverified",
+      "sources": [
+        {
+          "archive": "source/mesa.tar.gz",
+          "sha256": "75c66a3669971936df27a135f26cefb012afe6d592fffe4250f21142510506d9"
+        }
+      ]
+    },
+    "opt/m4-mesa/lib/libEGL.so.1.0.0": {
+      "sha256": "f9f3247a5b0b425c15f29cf0773092e95c691e347594cd0b32278f303dc2ab05",
+      "license": "MIT",
+      "correspondence": "unverified",
+      "sources": [
+        {
+          "archive": "source/mesa.tar.gz",
+          "sha256": "75c66a3669971936df27a135f26cefb012afe6d592fffe4250f21142510506d9"
+        }
+      ]
+    },
+    "opt/m4-mesa/lib/libGLESv1_CM.so.1.1.0": {
+      "sha256": "7edfe3b254d802ae26aeebd3572875262dcb32888515fc7e53efb290d3e6d789",
+      "license": "MIT",
+      "correspondence": "unverified",
+      "sources": [
+        {
+          "archive": "source/mesa.tar.gz",
+          "sha256": "75c66a3669971936df27a135f26cefb012afe6d592fffe4250f21142510506d9"
+        }
+      ]
+    },
+    "opt/m4-mesa/lib/libGLESv2.so.2.0.0": {
+      "sha256": "b5fed2f5b970db1ee93145afca9159eab484680e6f230d59c1340f066c59095a",
+      "license": "MIT",
+      "correspondence": "unverified",
+      "sources": [
+        {
+          "archive": "source/mesa.tar.gz",
+          "sha256": "75c66a3669971936df27a135f26cefb012afe6d592fffe4250f21142510506d9"
+        }
+      ]
+    },
+    "opt/m4-mesa/lib/libgallium-26.3.0-devel.so": {
+      "sha256": "21cd0ce471406590ef931db75ba17d90f4c1c895ecf4bca4cec20ae6a834b88c",
+      "license": "MIT",
+      "correspondence": "unverified",
+      "sources": [
+        {
+          "archive": "source/mesa.tar.gz",
+          "sha256": "75c66a3669971936df27a135f26cefb012afe6d592fffe4250f21142510506d9"
+        }
+      ]
+    },
+    "opt/m4-mesa/lib/libgbm.so.1.0.0": {
+      "sha256": "e83c251960678b8707d9afbe8b4ca9747fc146166291bdcf651d77555859a46a",
+      "license": "MIT",
+      "correspondence": "unverified",
+      "sources": [
+        {
+          "archive": "source/mesa.tar.gz",
+          "sha256": "75c66a3669971936df27a135f26cefb012afe6d592fffe4250f21142510506d9"
+        }
+      ]
+    },
+    "opt/m4-video/20261011/kernel/apple-avd.ko": {
+      "sha256": "89ff8a98cd971392e1ec9d8b6c2b74ff09669e0c681ef35eee4d447aabad9fba",
+      "license": "GPL-2.0-only",
+      "correspondence": "rebuilt-identical",
+      "sources": [
+        {
+          "archive": "source/kernel-decoder.tar.gz",
+          "sha256": "13b89bb0d66b84be2d576873e2b7f84952921c223846f32b804775fc14cbb506"
+        },
+        {
+          "archive": "source/build-inputs-final.tar.gz",
+          "sha256": "6a800de13f6c4ab7318d66a91fe0c68bf1a0c8a49a969228fb709772c1576945"
+        }
+      ]
+    },
+    "opt/m4-video/20261011/kernel/avd-controller.ko": {
+      "sha256": "ade00c8882ccc32aa8480eba13e9232f3765ba3a461942d2967c22beb7d5ab2d",
+      "license": "GPL-2.0-only",
+      "correspondence": "rebuilt-identical",
+      "sources": [
+        {
+          "archive": "source/kernel-controller.tar.gz",
+          "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/build-inputs-final.tar.gz",
+          "sha256": "6a800de13f6c4ab7318d66a91fe0c68bf1a0c8a49a969228fb709772c1576945"
+        }
+      ]
+    },
+    "opt/m4-video/20261011/mesa/lib/gbm/dri_gbm.so": {
+      "sha256": "5408ea008e52c98f5c111d637236e5ba52f07c20020fe188bb496c11ba430956",
+      "license": "MIT",
+      "correspondence": "unverified",
+      "sources": [
+        {
+          "archive": "source/mesa.tar.gz",
+          "sha256": "75c66a3669971936df27a135f26cefb012afe6d592fffe4250f21142510506d9"
+        }
+      ]
+    },
+    "opt/m4-video/20261011/mesa/lib/libEGL.so.1.0.0": {
+      "sha256": "f9f3247a5b0b425c15f29cf0773092e95c691e347594cd0b32278f303dc2ab05",
+      "license": "MIT",
+      "correspondence": "unverified",
+      "sources": [
+        {
+          "archive": "source/mesa.tar.gz",
+          "sha256": "75c66a3669971936df27a135f26cefb012afe6d592fffe4250f21142510506d9"
+        }
+      ]
+    },
+    "opt/m4-video/20261011/mesa/lib/libGLESv1_CM.so.1.1.0": {
+      "sha256": "7edfe3b254d802ae26aeebd3572875262dcb32888515fc7e53efb290d3e6d789",
+      "license": "MIT",
+      "correspondence": "unverified",
+      "sources": [
+        {
+          "archive": "source/mesa.tar.gz",
+          "sha256": "75c66a3669971936df27a135f26cefb012afe6d592fffe4250f21142510506d9"
+        }
+      ]
+    },
+    "opt/m4-video/20261011/mesa/lib/libGLESv2.so.2.0.0": {
+      "sha256": "b5fed2f5b970db1ee93145afca9159eab484680e6f230d59c1340f066c59095a",
+      "license": "MIT",
+      "correspondence": "unverified",
+      "sources": [
+        {
+          "archive": "source/mesa.tar.gz",
+          "sha256": "75c66a3669971936df27a135f26cefb012afe6d592fffe4250f21142510506d9"
+        }
+      ]
+    },
+    "opt/m4-video/20261011/mesa/lib/libgallium-26.3.0-devel.so": {
+      "sha256": "ce3ec9f55cea61d37d7ecfddf742fe2667773afc15a2e77d411c4d1f81800664",
+      "license": "MIT",
+      "correspondence": "unverified",
+      "sources": [
+        {
+          "archive": "source/mesa.tar.gz",
+          "sha256": "75c66a3669971936df27a135f26cefb012afe6d592fffe4250f21142510506d9"
+        }
+      ]
+    },
+    "opt/m4-video/20261011/mesa/lib/libgbm.so.1.0.0": {
+      "sha256": "e83c251960678b8707d9afbe8b4ca9747fc146166291bdcf651d77555859a46a",
+      "license": "MIT",
+      "correspondence": "unverified",
+      "sources": [
+        {
+          "archive": "source/mesa.tar.gz",
+          "sha256": "75c66a3669971936df27a135f26cefb012afe6d592fffe4250f21142510506d9"
+        }
+      ]
+    },
+    "opt/m4-video/20261011/vaapi/v4l2_request_drv_video.so": {
+      "sha256": "76393532f322cb3bbf12899f3c75c1c5c24321f4518989f1ed58580f1324b9af",
+      "license": "MIT",
+      "correspondence": "unverified",
+      "sources": [
+        {
+          "archive": "source/integration-inputs.tar.gz"
+        },
+        {
+          "archive": "source/build-inputs-final.tar.gz",
+          "sha256": "6a800de13f6c4ab7318d66a91fe0c68bf1a0c8a49a969228fb709772c1576945"
+        }
+      ]
+    },
+    "usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/apple-admac.ko": {
+      "sha256": "cd57f99657e6232e45d58645949a0f73b656372d92e272828c14bcd4e63ea110",
+      "license": "GPL-2.0-only",
+      "correspondence": "rebuilt-identical",
+      "sources": [
+        {
+          "tree": "audio/j713/kernel",
+          "commit": "ee98743a860437ad5797bf5db080c04e0128528d"
+        },
+        {
+          "archive": "source/kernel-controller.tar.gz",
+          "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/reference-sound-exports.symvers",
+          "sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362"
+        }
+      ]
+    },
+    "usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/j713_audio_bootstrap.ko": {
+      "sha256": "1bf6408c629f446e8d73b6962ef58c2a98a3c7ecd5f7b7ae001bcd5bab6c1875",
+      "license": "GPL-2.0-only",
+      "correspondence": "rebuilt-identical",
+      "sources": [
+        {
+          "tree": "audio/j713/bootstrap",
+          "commit": "ee98743a860437ad5797bf5db080c04e0128528d"
+        },
+        {
+          "archive": "source/kernel-controller.tar.gz",
+          "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/reference-sound-exports.symvers",
+          "sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362"
+        }
+      ]
+    },
+    "usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/j713_audio_dt3.ko": {
+      "sha256": "0b115a55e3aaccad6f148ee152c399c403c8ebcbcbf01f22210e33484c166e4e",
+      "license": "GPL-2.0-only",
+      "correspondence": "rebuilt-identical",
+      "sources": [
+        {
+          "tree": "audio/j713/topology",
+          "commit": "ee98743a860437ad5797bf5db080c04e0128528d"
+        },
+        {
+          "archive": "source/kernel-controller.tar.gz",
+          "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/reference-sound-exports.symvers",
+          "sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362"
+        }
+      ]
+    },
+    "usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-apple-mca.ko": {
+      "sha256": "d3194660a28d30ba8ea296b6592836ad4ca9426d9471d05ba8ce3cad284baa1e",
+      "license": "GPL-2.0-only",
+      "correspondence": "rebuilt-identical",
+      "sources": [
+        {
+          "tree": "audio/j713/kernel",
+          "commit": "ee98743a860437ad5797bf5db080c04e0128528d"
+        },
+        {
+          "archive": "source/kernel-controller.tar.gz",
+          "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/reference-sound-exports.symvers",
+          "sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362"
+        }
+      ]
+    },
+    "usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-j713-group.ko": {
+      "sha256": "465a88aa9f70ceac8682499ad6bd9ecd34a33b35a3b5c556b42f7bd1524272d0",
+      "license": "GPL-2.0-only",
+      "correspondence": "rebuilt-identical",
+      "sources": [
+        {
+          "tree": "audio/j713/kernel",
+          "commit": "ee98743a860437ad5797bf5db080c04e0128528d"
+        },
+        {
+          "archive": "source/kernel-controller.tar.gz",
+          "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/reference-sound-exports.symvers",
+          "sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362"
+        }
+      ]
+    },
+    "usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-macaudio.ko": {
+      "sha256": "1dc3a6878b10154676b1b06529b197baf3b1cf1c81b5ef94128b2f52d605ea34",
+      "license": "GPL-2.0-only",
+      "correspondence": "rebuilt-identical",
+      "sources": [
+        {
+          "tree": "audio/j713/kernel",
+          "commit": "ee98743a860437ad5797bf5db080c04e0128528d"
+        },
+        {
+          "archive": "source/kernel-controller.tar.gz",
+          "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/reference-sound-exports.symvers",
+          "sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362"
+        }
+      ]
+    },
+    "usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-tas2764.ko": {
+      "sha256": "dc00caabad80dffe95e872222440a4711ca57a37bd4271ae08e971e22d7d15f7",
+      "license": "GPL-2.0-only",
+      "correspondence": "rebuilt-identical",
+      "sources": [
+        {
+          "tree": "audio/j713/kernel",
+          "commit": "ee98743a860437ad5797bf5db080c04e0128528d"
+        },
+        {
+          "archive": "source/kernel-controller.tar.gz",
+          "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/reference-sound-exports.symvers",
+          "sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362"
+        }
+      ]
+    },
+    "usr/lib/speakersafetyd-j713": {
+      "sha256": "3f5427f631507c71ae25679ea979dbac77eee4a716044c80826da4811f21036d",
+      "license": "MIT",
+      "correspondence": "unverified",
+      "sources": [
+        {
+          "tree": "audio/j713/speakersafetyd"
+        },
+        {
+          "archive": "source/j713-audio-cargo-sources.tar.gz",
+          "sha256": "faf50f21db4b622900bd275441bc321d1a01933afb555e84d1446d38d6027a34"
+        }
+      ]
+    }
+  }
+}

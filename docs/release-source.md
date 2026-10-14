@@ -36,6 +36,60 @@ the owner files into its locally collected firmware package; first Linux boot
 installs regular WAV files before audio registration and first-user creation.
 Widevine binaries are also excluded and acquired separately only after consent.
 
+## Binaries outside packages
+
+The installed root carries some programs, libraries and kernel modules that no
+pacman package owns, such as the GPU module at `/opt/m4-gpu/asahi_m4.ko`.
+`packaging/release-source-joins.json` lists each one by SHA-256 with the source
+that built it. Each entry names archives in this `source/` directory, most of
+them pinned by hash, and tracked paths in `release-integration.tar.gz`. A
+tracked path may be pinned to the commit that built the binary. The assembler
+then refuses unless that path is unchanged in the revision being assembled.
+
+`correspondence` records how the join was established:
+
+- `rebuilt-identical`: a rebuild from the named sources reproduced the exact
+  bytes.
+- `unverified`: the source is the likeliest published one, matched by file name
+  only.
+
+Every GPL binary is `rebuilt-identical`; the 14 MIT userspace entries (Mesa,
+the VA-API driver, the speaker daemon) remain `unverified`.
+
+- **GPU module:** the published `kernel-controller.tar.gz` with the four Air GPU
+  files from `omarchy-j713-v0.1.0-alpha.1-gpu-air-source.tar.gz` reproduces it
+  byte for byte ([issue 77](https://github.com/Kb2uka/Omarchy-M4-Native/issues/77)).
+  That packet is attached to the v0.1.0-alpha.1 release; alpha.1's source packet
+  originally omitted those four files.
+- **Seven audio modules:** `audio/j713/kernel`, `bootstrap` and `topology` at
+  the v0.1.0-alpha.1 tag (`ee98743a`), built against `kernel-controller.tar.gz`
+  with `reference-sound-exports.symvers`, `J713_PROFILE=conservative-v1` and
+  `KCFLAGS=-Werror`. Later revisions build a different `snd-soc-j713-group.ko`
+  (the #61 fix), so these joins are pinned to that commit.
+- **Two video modules:** the module sources and `recipe/BUILD.md` in
+  `build-inputs-final.tar.gz`. `apple-avd.ko` builds against
+  `kernel-decoder.tar.gz`, and `avd-controller.ko` against
+  `kernel-controller.tar.gz`. The AVD driver copy inside the decoder tree is
+  not the shipped source. `recipe/decoder-prepared-to-qualified.patch` records
+  the difference.
+
+All nine were rebuilt on 2026-10-14 with read-only kernel trees and the
+recorded builder images (clang 21.1.8).
+
+`tools/prepare-j713-release.py` scans the finished root and refuses to assemble
+a release in any of these cases:
+
+- an unpackaged ELF file or kernel module is not listed, or its hash differs;
+- a listed binary is no longer present;
+- a named source is missing from the kit or has changed (checked before any
+  output is written, and again on the finished kit);
+- a commit-pinned tree differs in the revision being assembled.
+
+It also refuses `unverified` entries, unless `--allow-unverified-source` is
+given to reassemble alpha.1 itself. `IMAGE.json` then lists those entries in
+`source_correspondence_unverified`. Archives that are not part of the retained
+delivery, like the GPU packet, are supplied with `--join-source`.
+
 ## Kernel and audio build joins
 
 The final private-build-2 kernel adds the startup-retry patch to the archived

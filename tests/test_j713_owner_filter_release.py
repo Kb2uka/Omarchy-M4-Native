@@ -128,6 +128,8 @@ class OwnerFilterReleaseTests(unittest.TestCase):
             (tree / 'audio/j713/owner-fir').mkdir(parents=True)
             for directory in ('tools', 'packaging'):
                 shutil.copytree(ROOT / directory, tree / directory)
+            # This synthetic root carries no unpackaged binaries, so it joins none.
+            (tree / release.SOURCE_JOINS).write_text('{"schema": 1, "binaries": {}}')
             originals = {}
             for index, name in enumerate(release.FIRS):
                 data = bytes([index]) * self.profile['outputs'][name]['size']
@@ -171,7 +173,8 @@ class OwnerFilterReleaseTests(unittest.TestCase):
             startup.assert_called_once_with(root, tree, self.convert())
             decoder.assert_called_once_with(root, tree)
             actual = (root / 'etc/omarchy/j713-audio-manifest.json').read_bytes()
-            self.assertEqual(pin, {'audio': hashlib.sha256(actual).hexdigest(), 'video': 'v' * 64})
+            self.assertEqual(pin, {'audio': hashlib.sha256(actual).hexdigest(), 'video': 'v' * 64,
+                                   'unverified': []})
             self.assertEqual(actual, self.convert())
             self.assertNotEqual(pin['audio'], hashlib.sha256(raw).hexdigest())
             self.assertEqual((root / 'etc/m4-root-id').read_text(), 'new-root-id\n')
