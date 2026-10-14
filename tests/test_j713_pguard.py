@@ -84,7 +84,8 @@ class Policy(unittest.TestCase):
 
     def test_hot_or_hopeless_pins_p4(self):
         self.assertEqual(self.allowed(50, 1, hot=True), 4)
-        self.assertEqual(self.allowed(97, 1), 4, 'no state above P4 fits under the limit')
+        self.assertEqual(self.allowed(97, 1), 5, 'P5 adds 3 C')
+        self.assertEqual(self.allowed(97.5, 1), 4, 'no state above P4 fits under the limit')
         self.assertEqual(self.allowed(120, 4), 4)
 
     def test_cool_die_allows_more_with_fewer_busy_cores(self):
@@ -174,7 +175,7 @@ class ModuleSource(unittest.TestCase):
             self.assertIsNone(re.search(r'\b' + word + r'\b', self.source), word)
 
     def test_cannot_be_unloaded(self):
-        self.assertNotIn('module_exit', self.source)
+        self.assertIsNone(re.search(r'\bmodule_exit\s*\(', self.source))
         self.assertIn('module_init(guard_init);', self.source)
 
     def test_refuses_without_t8132_the_idle_driver_or_the_closed_gate(self):
@@ -205,11 +206,11 @@ class ModuleSource(unittest.TestCase):
         self.assertLess(self.init.rindex('goto remove_req'), self.init.index('open_gate'))
 
     def test_sensor_failure_or_heat_pins_p4(self):
-        wanted = self.source[self.source.index('static u32 wanted_level(void)'):]
+        wanted = self.source[self.source.index('static u32 wanted_level(void)\n{'):]
         wanted = wanted[:wanted.index('\n}\n')]
         self.assertIn('if (!smc_ok)\n\t\treturn PG_BASE_LEVEL;', wanted)
         self.assertIn('hot, level_khz', wanted)
-        slow = self.source[self.source.index('static void slow_work(struct work_struct *w)'):]
+        slow = self.source[self.source.index('static void slow_work(struct work_struct *w)\n{'):]
         slow = slow[:slow.index('\n}\n')]
         self.assertIn('smc_ok = false;', slow)
         self.assertIn('if (mc >= (int)hot_c * 1000)\n\t\t\thot = true;', slow)

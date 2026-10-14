@@ -83,12 +83,12 @@ class RecipeTests(unittest.TestCase):
         self.assertIn("conflicts=('linux-aarch64')", text)
         self.assertIn("provides=('linux=7.1.9' 'linux-aarch64=7.1.9')", text)
 
-    def test_boot_package_carries_the_ecluster_devicetree(self):
+    def test_boot_package_carries_the_boost_devicetree(self):
         text = recipe('omarchy-m4-boot')
-        self.assertIn('releases/download/package-inputs/j713-ecluster.dtb', text)
+        self.assertIn('releases/download/package-inputs/j713-pboost.dtb', text)
         self.assertIn(CHANNEL['devicetree']['sha256'], text)
         self.assertEqual(load('tools/m4-boot-compose.py').KNOWN_DTBS[CHANNEL['devicetree']['sha256']],
-                         'j713-ecluster-thermal')
+                         'j713-pboost')
         self.assertIn("depends=('python' 'pacman' 'omarchy-m4-gpu' 'omarchy-m4-headphones' 'omarchy-m4-cpu')\n",
                       text, 'gst-plugins-good must be able to replace the sinks; the GPU fix, the headphone '
                       'jack and CPU idle must come with this version')

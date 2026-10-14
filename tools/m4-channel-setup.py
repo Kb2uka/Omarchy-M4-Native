@@ -46,6 +46,7 @@ GPU_STOCK = '80cf3669575edd09aed226a93e47aaaf132e70f1070154629c413c0b40d34578'
 HEADPHONES_STAGED = 'usr/lib/omarchy-m4/j713-headphones/snd-soc-j713-headphones.ko'
 HEADPHONES_STATE = 'var/lib/omarchy-m4/headphones'
 CPU_IDLE_STAGED = 'usr/lib/omarchy-m4/cpu/j713_cpuidle.ko'
+CPU_GUARD_STAGED = 'usr/lib/omarchy-m4/cpu/j713_pguard.ko'
 CPU_IDLE_STATE = 'var/lib/omarchy-m4/cpu-idle'
 PACKAGES = ('omarchy-m4-keyring', 'omarchy-m4-boot', 'linux-m4-omarchy', 'omarchy-m4-gst-audio', 'omarchy-m4-speaker',
             'omarchy-m4-gpu', 'omarchy-m4-headphones', 'omarchy-m4-cpu')
@@ -222,15 +223,19 @@ def headphones_pending(root):
 
 
 def cpu_idle_pending(root):
-    """Whether omarchy-m4-cpu staged an idle driver that the next boot will load.
+    """Whether omarchy-m4-cpu staged an idle driver or boost guard that the next boot will load.
 
     Only on a running system (sys/module present), never while switched off
-    (hold) or after a boot that died while loading (attempt).
+    (hold; boost-hold for the guard) or after a boot that died while loading
+    (attempt).
     """
     state = root / CPU_IDLE_STATE
-    return ((root / CPU_IDLE_STAGED).is_file() and (root / 'sys/module').is_dir() and
-            not (root / 'sys/module/j713_cpuidle').exists() and
-            not (state / 'hold').exists() and not (state / 'attempt').exists())
+    if not (root / 'sys/module').is_dir() or (state / 'hold').exists() or (state / 'attempt').exists():
+        return False
+    idle = (root / CPU_IDLE_STAGED).is_file() and not (root / 'sys/module/j713_cpuidle').exists()
+    guard = ((root / CPU_GUARD_STAGED).is_file() and not (root / 'sys/module/j713_pguard').exists() and
+             not (state / 'boost-hold').exists())
+    return idle or guard
 
 
 def boot_digest(root):

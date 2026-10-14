@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 KB2UKA
-"""Load the J713 CPU idle driver (omarchy-m4-cpu, #65).
+"""Load the J713 CPU idle driver and P-cluster boost guard (omarchy-m4-cpu, #65, #66).
 
 m4-cpu-idle.service runs this with --boot. It loads j713_cpuidle, which lets
 idle cores power down instead of spinning under idle=nop. Only the pinned
 module, only on the pinned kernel and board, and only while no other CPU idle
 driver is registered.
+
+Then, when the devicetree carries the closed boost gate, it loads j713_pguard,
+which caps the P cluster from the CPU die temperature and opens the gate
+itself (docs/j713-cpu-boost.md). A guard that is missing, differs from its pin
+or fails to load leaves the gate closed and P at 1800 MHz; CPU idle still
+loads.
 
 One strike: an attempt marker is written durably before the module loads and
 removed only after the cores have idled through it for a settle period. A
@@ -20,6 +26,10 @@ Off switch: --disable writes a hold file, and no boot or --start loads the
 driver until --enable removes it. A loaded driver stays until the next restart:
 the kernel pins an idle driver's module while it is registered. The package
 stays installed, so omarchy-m4-update keeps it current.
+
+Boost alone: --boost off closes the gate now, holding P at 1800 MHz, and no
+boot loads the guard until --boost on, which reopens the gate at once when the
+guard is loaded and otherwise at the next boot. The guard cannot be unloaded.
 """
 import argparse
 import fcntl
@@ -41,6 +51,14 @@ STAGED = 'usr/lib/omarchy-m4/cpu/j713_cpuidle.ko'
 STATE = 'var/lib/omarchy-m4/cpu-idle'
 NAME, DRIVER = 'j713_cpuidle', 'j713_idle'
 PIN = {'sha256': 'a2a7947a1d2260abcfc6eb10d7d63643ad2e191e73e93fedddf605116cdfd5a9', 'size': 12680}
+GUARD_STAGED = 'usr/lib/omarchy-m4/cpu/j713_pguard.ko'
+GUARD_NAME = 'j713_pguard'
+GUARD_PIN = {'sha256': '82800cef5112ad8194bf5fc0a7f8b94547025ff271aa2aa08173ddeb8c4177ce', 'size': 33464}
+# The boost gate: the passive trip on the CPU die zone that the boost devicetree
+# sets to 20 C (closed) and j713_pguard raises to 150 C (open).
+THERMAL = 'sys/class/thermal'
+GATE_ZONE = 'cpu-die-thermal'
+GATE = {'20000': 'closed', '150000': 'open'}
 # The power-down state is state1 on every CPU the driver serves.
 POWER_DOWN = 'cpuidle/state1'
 SETTLE_SECONDS = 120
@@ -121,16 +139,47 @@ def power_downs(root):
     return sum(counts) if counts else None
 
 
+def pinned(path, pin):
+    data = path.read_bytes() if path.is_file() and not path.is_symlink() else None
+    return data is not None and len(data) == pin['size'] and sha(data) == pin['sha256']
+
+
+def gate_trip(root):
+    """The boost gate's trip temperature file and state ('closed' or 'open'), or (None, 'absent')."""
+    for zone in sorted((root / THERMAL).glob('thermal_zone*')):
+        if read(zone / 'type') != GATE_ZONE:
+            continue
+        for kind in sorted(zone.glob('trip_point_*_type')):
+            temp = kind.with_name(kind.name[:-len('type')] + 'temp')
+            if read(kind) == 'passive' and read(temp) in GATE:
+                return temp, GATE[read(temp)]
+    return None, 'absent'
+
+
+def boost_state(report):
+    if report['guard_loaded'] and report['gate'] == 'open':
+        return 'on'
+    if report['boost_held']:
+        return 'off; P stays at 1800 MHz until sudo m4-cpu-idle --boost on'
+    if report['guard_loaded']:
+        return 'off; the gate was closed by hand; sudo m4-cpu-idle --boost on reopens it'
+    if report['gate'] == 'absent':
+        return 'waits for the boost devicetree; restart after omarchy-m4-update'
+    return 'starts with the CPU idle driver at the next boot'
+
+
 def inspect(root):
     compatible = root / COMPATIBLE
     release = root / OSRELEASE
-    staged = root / STAGED
-    data = staged.read_bytes() if staged.is_file() and not staged.is_symlink() else None
     report = {
         'board': compatible.is_file() and BOARD in compatible.read_bytes().split(b'\0'),
         'kernel': release.is_file() and release.read_text().strip() == RELEASE,
-        'staged': data is not None and len(data) == PIN['size'] and sha(data) == PIN['sha256'],
+        'staged': pinned(root / STAGED, PIN),
         'loaded': (root / 'sys/module' / NAME).exists(),
+        'guard_staged': pinned(root / GUARD_STAGED, GUARD_PIN),
+        'guard_loaded': (root / 'sys/module' / GUARD_NAME).exists(),
+        'boost_held': (root / STATE / 'boost-hold').exists(),
+        'gate': gate_trip(root)[1],
         'driver': read(root / CURRENT_DRIVER),
         'power_downs': power_downs(root),
         'attempt_marker': (root / STATE / 'attempt').exists(),
@@ -144,6 +193,7 @@ def inspect(root):
         report['state'] = 'struck'
     else:
         report['state'] = 'not loaded'
+    report['boost'] = boost_state(report)
     return report
 
 
@@ -154,6 +204,25 @@ def settle(root, seconds, sleep):
     after = power_downs(root)
     require(before is not None and after is not None and after > before,
             'The driver loaded but no core powered down through it')
+
+
+def load_guard(root, report, run):
+    """Load the boost guard; called with the attempt marker written. It opens the gate itself."""
+    if report['guard_loaded'] or report['boost_held']:
+        return None
+    if report['gate'] == 'absent':
+        return 'boost waits for the boost devicetree'
+    if report['gate'] != 'closed':
+        return 'boost left off: the gate is open without the guard'
+    if not report['guard_staged']:
+        return 'boost left off: staged j713_pguard.ko is missing or differs from the pin'
+    if run(['insmod', str(root / GUARD_STAGED)]) != 0:
+        return 'boost left off: loading j713_pguard.ko failed; see journalctl -k -b'
+    return 'boost guard loaded'
+
+
+def joined(*parts):
+    return '; '.join(part for part in parts if part)
 
 
 def load(root, report, run, settle_seconds, sleep):
@@ -168,11 +237,51 @@ def load(root, report, run, settle_seconds, sleep):
         remove_state(root, 'attempt')
         raise Refused('Loading j713_cpuidle.ko failed; see journalctl -k -b for the reason')
     try:
+        # The guard needs the idle driver in charge, and its load shares the attempt window.
+        boost = load_guard(root, inspect(root), run)
         settle(root, settle_seconds, sleep)
     finally:
-        # The boot lived through the settle period, so the driver did not take it down.
+        # The boot lived through the settle period, so neither module took it down.
         remove_state(root, 'attempt')
-    return 'loaded; idle cores power down'
+    return joined('loaded; idle cores power down', boost)
+
+
+def start_guard(root, report, run, settle_seconds, sleep):
+    """In a running session with the idle driver loaded, load the guard under the attempt marker."""
+    if report['guard_loaded'] or report['boost_held'] or report['gate'] != 'closed':
+        return None
+    write_state(root, 'attempt', 'loading the P-cluster boost guard\n')
+    try:
+        boost = load_guard(root, report, run)
+        if boost == 'boost guard loaded':
+            settle(root, settle_seconds, sleep)
+    finally:
+        remove_state(root, 'attempt')
+    return boost
+
+
+def set_gate(root, state):
+    """Write the gate's trip; the guard's cap bounds the cluster whenever it is open."""
+    trip, now = gate_trip(root)
+    if trip is None or now == state:
+        return False
+    value = next(temp for temp, name in GATE.items() if name == state)
+    trip.write_text(value + '\n')
+    return True
+
+
+def boost(root, mode):
+    if mode == 'boost-off':
+        write_state(root, 'boost-hold', 'the boost guard stays unloaded until sudo m4-cpu-idle --boost on\n')
+        set_gate(root, 'closed')
+    else:
+        remove_state(root, 'boost-hold')
+        report = inspect(root)
+        if report['guard_loaded']:
+            set_gate(root, 'open')
+    report = inspect(root)
+    report['status'] = 'boost ' + report['boost']
+    return report
 
 
 def run_command(command):
@@ -187,6 +296,8 @@ def run(root, mode, runner=run_command, settle_seconds=SETTLE_SECONDS, sleep=tim
 
 
 def change(root, mode, runner, settle_seconds, sleep):
+    if mode in ('boost-off', 'boost-on'):
+        return boost(root, mode)
     if mode == 'disable':
         write_state(root, 'hold', 'the CPU idle driver stays unloaded until sudo m4-cpu-idle --enable\n')
     elif mode == 'enable':
@@ -204,7 +315,8 @@ def change(root, mode, runner, settle_seconds, sleep):
                 'Run sudo m4-cpu-idle --start to try again in the running session')
         if report['state'] == 'loaded':
             remove_state(root, 'attempt')
-            report = dict(inspect(root), status='current')
+            boost_note = start_guard(root, report, runner, settle_seconds, sleep) if mode == 'start' else None
+            report = dict(inspect(root), status=joined('current', boost_note))
         else:
             status = load(root, report, runner, settle_seconds, sleep)
             report = dict(inspect(root), status=status)
@@ -229,9 +341,13 @@ def main(argv=None):
     action.add_argument('--disable', action='store_true',
                         help='switch CPU idle off: nothing loads at boot until --enable')
     action.add_argument('--enable', action='store_true', help='switch CPU idle back on')
+    action.add_argument('--boost', choices=('on', 'off'),
+                        help='off: hold P at 1800 MHz now and at every boot; on: allow boost again')
     parser.add_argument('--root', type=Path, default=Path('/'), help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     mode = next((name for name in ('boot', 'start', 'disable', 'enable') if getattr(args, name)), 'inspect')
+    if args.boost:
+        mode = 'boost-' + args.boost
     if args.root == Path('/') and mode != 'inspect' and os.geteuid() != 0:
         print('m4-cpu-idle: run with sudo', file=sys.stderr)
         return 1

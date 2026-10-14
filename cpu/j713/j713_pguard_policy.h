@@ -68,11 +68,11 @@ static inline int pg_float_to_mc(u32 bits, int *mc)
 
 /*
  * pg_step is rounded up, which is right for predicting a peak but would make
- * the base too low if subtracted whole: one P core held at P20 settled about
- * 25 C over its starting temperature, against 34 C in the table. So the base
- * subtracts only this share of the step.
+ * the base too low if subtracted whole: one P core held at P17-P20 settled
+ * about 25 C over its starting temperature, 73% of the 34 C in the table. So
+ * the base subtracts only this share of the step, below that ratio.
  */
-#define PG_BASE_SHARE 60	/* percent */
+#define PG_BASE_SHARE 70	/* percent */
 
 /*
  * The base: what the die would read with the cluster back at P4. Heat is

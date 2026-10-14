@@ -182,6 +182,8 @@ def check_package(channel, package, info, files, root):
     elif name == 'omarchy-m4-cpu':
         for path, digest in channel['cpu_idle_module'].items():
             require(files.get(path, (0, ''))[1] == digest, 'Staged CPU idle module differs from the pin: ' + path)
+        for path, digest in channel['cpu_guard_module'].items():
+            require(files.get(path, (0, ''))[1] == digest, 'Staged boost guard differs from the pin: ' + path)
         tool = (ROOT / 'tools/m4-cpu-idle.py').read_bytes()
         require(files.get('usr/bin/m4-cpu-idle') == (0o755, sha(tool)), 'Packaged CPU idle tool differs')
         unit = (ROOT / 'packaging/omarchy-m4/omarchy-m4-cpu/m4-cpu-idle.service').read_bytes()
@@ -189,6 +191,7 @@ def check_package(channel, package, info, files, root):
         # The helper's own pin must be the channel's, or every boot would refuse the staged module.
         helper = runpy.run_path(str(root / 'usr/bin/m4-cpu-idle'))
         require(helper['PIN']['sha256'] == channel['cpu_idle_module'][helper['STAGED']] and
+                helper['GUARD_PIN']['sha256'] == channel['cpu_guard_module'][helper['GUARD_STAGED']] and
                 helper['RELEASE'] == kernel['release'], 'CPU idle tool pins a different module or kernel')
     elif name == 'omarchy-m4-gst-audio':
         for path, digest in channel['gst_audio'].items():
