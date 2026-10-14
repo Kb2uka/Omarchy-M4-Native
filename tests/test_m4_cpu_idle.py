@@ -102,6 +102,7 @@ class CpuIdleLoad(unittest.TestCase):
         self.put('sys/class/thermal/thermal_zone0/type', b'other\n')
         self.put('sys/class/thermal/thermal_zone0/trip_point_0_temp', b'20000\n')
         self.put('sys/class/thermal/thermal_zone0/trip_point_0_type', b'passive\n')
+        self.put(MODULE.RT_FLOOR_KNOB, b'1024\n')
 
     def gate(self):
         return (self.root / GATE_TRIP).read_text().strip()
@@ -262,6 +263,23 @@ class CpuIdleLoad(unittest.TestCase):
         self.assertFalse(self.marker().exists())
         self.assertEqual((report['boost'], report['gate'], self.gate()), ('on', 'open', '150000'))
         self.assertEqual(report['status'], 'loaded; idle cores power down; boost guard loaded')
+        self.assertEqual(report['rt_floor'], str(MODULE.RT_FLOOR), 'real-time tasks keep 1800 MHz, not the boost')
+
+    def test_rt_floor_resolves_to_the_pre_boost_clock(self):
+        # schedutil: frequency = policy maximum * floor / 1024, rounded up to the next table state.
+        p_table = [912000, 1260000, 1512000, 1800000, 2088000]
+        target = 4464000 * MODULE.RT_FLOOR // 1024
+        self.assertEqual(min(f for f in p_table if f >= target), 1800000)
+        self.assertGreater(4464000 * (MODULE.RT_FLOOR + 1) // 1024, 1800000, 'the highest floor that gives 1800 MHz')
+        self.assertEqual(MODULE.RT_DEFAULT, 1024)
+
+    def test_no_rt_floor_without_the_guard(self):
+        self.boost_ready()
+        self.run_mode('boot', Machine(self.root, guard_fails=True))
+        self.assertEqual((self.root / MODULE.RT_FLOOR_KNOB).read_text(), '1024\n')
+        (self.root / MODULE.RT_FLOOR_KNOB).unlink()
+        self.restart()
+        self.assertEqual(self.run_mode('boot', Machine(self.root))['boost'], 'on', 'a kernel without uclamp still boosts')
 
     def test_without_the_boost_devicetree_only_idle_loads(self):
         self.put(MODULE.GUARD_STAGED, GUARD_BYTES)
@@ -302,6 +320,7 @@ class CpuIdleLoad(unittest.TestCase):
         self.run_mode('boot', Machine(self.root))
         report = self.run_mode('boost-off', Machine(self.root))
         self.assertEqual(self.gate(), '20000', 'closed at once, holding P at 1800 MHz')
+        self.assertEqual(report['rt_floor'], '1024', 'the kernel default again')
         self.assertTrue(report['boost'].startswith('off; P stays at 1800 MHz'))
         self.restart()
         machine = Machine(self.root)
@@ -321,6 +340,7 @@ class CpuIdleLoad(unittest.TestCase):
         machine = Machine(self.root)
         report = self.run_mode('boost-on', machine)
         self.assertEqual((self.gate(), report['boost'], machine.commands), ('150000', 'on', []))
+        self.assertEqual(report['rt_floor'], str(MODULE.RT_FLOOR))
         self.put(GATE_TRIP, b'20000\n')
         self.assertTrue(self.run_mode('inspect', Machine(self.root))['boost'].startswith('off; the gate was closed'))
 

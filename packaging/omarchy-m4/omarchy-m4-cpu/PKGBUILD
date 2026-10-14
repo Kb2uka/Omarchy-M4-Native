@@ -16,7 +16,7 @@ options=('!strip' '!debug')
 source=('m4-cpu-idle.py' 'm4-cpu-idle.service' 'MIT.txt' 'GPL-2.0-only.txt'
         "j713_cpuidle.ko::${url}/releases/download/package-inputs/j713_cpuidle-a2a7947a.ko"
         "j713_pguard.ko::${url}/releases/download/package-inputs/j713_pguard-82800cef.ko")
-sha256sums=('974cb7c645e7cb920ee9f912f3689503819907ceb0b9d106d9c6ffa2c3e30485'
+sha256sums=('edd4a08bfbc75590ad100459c8c482318fd653f0678c112677f8d0ea7a62e972'
             'b95a3e45ff9ea7ea00c687ff91f9e7aa5056216b104bbc458b026f38ab96ca14'
             'b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5'
             'aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3'

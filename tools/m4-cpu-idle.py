@@ -12,7 +12,8 @@ Then, when the devicetree carries the closed boost gate, it loads j713_pguard,
 which caps the P cluster from the CPU die temperature and opens the gate
 itself (docs/j713-cpu-boost.md). A guard that is missing, differs from its pin
 or fails to load leaves the gate closed and P at 1800 MHz; CPU idle still
-loads.
+loads. With boost on, real-time tasks get the 1800 MHz floor they had before
+instead of the cluster maximum (RT_FLOOR).
 
 One strike: an attempt marker is written durably before the module loads and
 removed only after the cores have idled through it for a settle period. A
@@ -59,6 +60,13 @@ GUARD_PIN = {'sha256': '82800cef5112ad8194bf5fc0a7f8b94547025ff271aa2aa08173ddeb
 THERMAL = 'sys/class/thermal'
 GATE_ZONE = 'cpu-die-thermal'
 GATE = {'20000': 'closed', '150000': 'open'}
+# schedutil runs a real-time task at its uclamp minimum, by default the policy
+# maximum. Speaker protection is real-time and wakes a P core every few ms, so
+# with boost that held the idle P cluster above 3 GHz half the time (+0.7 W).
+# This floor maps to 4464000 * 412 / 1024 = 1796062 kHz, which resolves to P4,
+# 1800 MHz, the real-time clock before boost; the kernel default is 1024.
+RT_FLOOR_KNOB = 'proc/sys/kernel/sched_util_clamp_min_rt_default'
+RT_FLOOR, RT_DEFAULT = 412, 1024
 # The power-down state is state1 on every CPU the driver serves.
 POWER_DOWN = 'cpuidle/state1'
 SETTLE_SECONDS = 120
@@ -180,6 +188,7 @@ def inspect(root):
         'guard_loaded': (root / 'sys/module' / GUARD_NAME).exists(),
         'boost_held': (root / STATE / 'boost-hold').exists(),
         'gate': gate_trip(root)[1],
+        'rt_floor': read(root / RT_FLOOR_KNOB),
         'driver': read(root / CURRENT_DRIVER),
         'power_downs': power_downs(root),
         'attempt_marker': (root / STATE / 'attempt').exists(),
@@ -218,6 +227,7 @@ def load_guard(root, report, run):
         return 'boost left off: staged j713_pguard.ko is missing or differs from the pin'
     if run(['insmod', str(root / GUARD_STAGED)]) != 0:
         return 'boost left off: loading j713_pguard.ko failed; see journalctl -k -b'
+    set_rt_floor(root, RT_FLOOR)
     return 'boost guard loaded'
 
 
@@ -260,6 +270,13 @@ def start_guard(root, report, run, settle_seconds, sleep):
     return boost
 
 
+def set_rt_floor(root, value):
+    """Set the real-time uclamp floor; a kernel without uclamp has no knob, and that is fine."""
+    knob = root / RT_FLOOR_KNOB
+    if knob.is_file():
+        knob.write_text(f'{value}\n')
+
+
 def set_gate(root, state):
     """Write the gate's trip; the guard's cap bounds the cluster whenever it is open."""
     trip, now = gate_trip(root)
@@ -274,11 +291,13 @@ def boost(root, mode):
     if mode == 'boost-off':
         write_state(root, 'boost-hold', 'the boost guard stays unloaded until sudo m4-cpu-idle --boost on\n')
         set_gate(root, 'closed')
+        set_rt_floor(root, RT_DEFAULT)
     else:
         remove_state(root, 'boost-hold')
         report = inspect(root)
         if report['guard_loaded']:
             set_gate(root, 'open')
+            set_rt_floor(root, RT_FLOOR)
     report = inspect(root)
     report['status'] = 'boost ' + report['boost']
     return report
