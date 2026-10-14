@@ -1,14 +1,15 @@
-# J713 m1n1 dockchannel console hang
+# J713 m1n1 dockchannel TX bound
 
-[Issue #82](https://github.com/Kb2uka/Omarchy-M4-Native/issues/82): on one
-13-inch M4 Air (iBoot1 `mBoot-18000.161.10`), alpha.1 stopped on the m1n1
-logo every boot, with nothing on screen. The reporter's marker builds showed
-stage 1 freezing at a console `printf`. With `dockchannel_uart_init()` made
-to return -1, the same Air booted alpha.1 unattended. The reporter's
-"original" hashes are alpha.1's shipped loaders (stage 1 `18cc4cd1…`,
-stage 2 `3a3f7a64…`).
+m1n1's dockchannel console waits for TX space with no limit. This patch bounds
+that wait. It was written for
+[issue #82](https://github.com/Kb2uka/Omarchy-M4-Native/issues/82), but it
+does not fix #82: the reporter's Air still freezes with it, and their counters
+show its FIFO never fills. The #82 freeze is inside the ANS reset call in
+`nvme_shutdown()`; see [j713-m1n1-issue82-ans-reset.md](j713-m1n1-issue82-ans-reset.md).
+What is left here is hardening for a FIFO that stops draining. That state has
+not been seen on any Air.
 
-## Cause
+## The unbounded wait
 
 m1n1 uses the dockchannel UART as a second console. Its byte writer waits for
 TX space with no limit:
@@ -19,16 +20,12 @@ while (read32(uart_base + DATA_TX_FREE) == 0)
 ```
 
 `iodev_console_write()` checks `DATA_TX_FREE > 0` once, then hands the whole
-pending line to that writer. If nothing drains the FIFO, the first line longer
-than the space left spins forever. The console writes the UART, then the
-dockchannel, then the framebuffer, so the stuck line never reaches the screen.
+pending line to that writer. If nothing drained the FIFO, the first line
+longer than the space left would spin forever. The console writes the UART,
+then the dockchannel, then the framebuffer, so the stuck line would never reach
+the screen. Upstream m1n1 still has the same loop.
 
-The owner's Air (`mBoot-18000.120.36`) and the #57 reporter's Air
-(`mBoot-20457.1.29`) reach Linux, so firmware version alone does not predict
-the hang. Why the FIFO drains on those units and not on this one is not known.
-Upstream m1n1 still has the same loop.
-
-## Fix
+## The patch
 
 `patches-m1n1/dockchannel-tx-bound.patch` changes only
 `src/dockchannel_uart.c`. Every wait for TX space now has a limit:
@@ -43,8 +40,8 @@ Upstream m1n1 still has the same loop.
   full, later bytes are dropped at once, so a stall costs one wait, not one per
   byte. The first byte that finds space clears the stall.
 
-An undrained unit like the #82 Air pays one 100 ms wait per stage and boots. A
-FIFO that drains within the limit behaves exactly as before. A consumer that
+An undrained unit would pay one 100 ms wait per stage and boot. A FIFO that
+drains within the limit behaves exactly as before. A consumer that
 stops for good costs one 2 s wait, then output is dropped. The hardware UART,
 framebuffer, USB proxy and dockchannel reads are unchanged.
 
@@ -61,7 +58,7 @@ and `patch` on `PATH`. It compiles m1n1's real `iodev.c` and
 warning flags, and drives the console as m1n1 does against a simulated 4 KiB
 FIFO and clock:
 
-- `undrained` (the #82 state: 37 bytes free, never drained, 200 lines): the
+- `undrained` (37 bytes free, never drained, 200 lines): the
   shipped source hangs with nothing on screen. The patched source puts every
   line on the screen, keeps the 37 bytes that fit, and waits 100 ms in total.
 - `slow_drain` (a host drains one byte per 200 µs), `fast_host_pause` (a
@@ -126,4 +123,5 @@ kmutil configure-boot -c m1n1-stage1-issue82-test1.bin --raw --entry-point 2048 
   does), so it cannot be updated from Linux. Stage 2 is the start of the
   ESP's `omarchy/boot.bin`.
 - These loaders are test builds. They are not in the installer or the update
-  channel until the #82 reporter's Air and the owner's Air both boot with them.
+  channel. On the #82 Air, test 1's stage 1 froze like alpha.1's; the owner's
+  Air boots test 1's stage 2 with no new kernel errors.
