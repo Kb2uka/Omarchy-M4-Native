@@ -18,6 +18,7 @@ effect at the next boot. M4_M1N1_TEST_* variables are for tests only.
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import sys
 
@@ -56,7 +57,8 @@ def sha(data):
 
 def write(path, data):
     temp = path.with_name(path.name + '.new')
-    require(not temp.exists(), 'Stale temporary file: ' + str(temp))
+    # Only this helper writes this name; a leftover is from a run that stopped.
+    temp.unlink(missing_ok=True)
     with temp.open('xb') as stream:
         stream.write(data)
         stream.flush()
@@ -81,7 +83,10 @@ def read_receipt():
         return None
     try:
         receipt = json.loads(RECEIPT.read_text())
-        valid = set(receipt) == {'installed', 'replaced'} and receipt['replaced'] in KNOWN
+        installed = receipt['installed']
+        valid = (set(receipt) == {'installed', 'replaced'} and receipt['replaced'] in KNOWN and
+                 isinstance(installed, str) and re.fullmatch('[0-9a-f]{64}', installed) is not None and
+                 installed not in KNOWN)
     except (ValueError, TypeError, AttributeError):
         valid = False
     require(valid, f'{RECEIPT} is not a receipt this helper wrote; nothing changed')
@@ -138,7 +143,8 @@ def rollback():
         # Only undo the test build this helper installed, never a loader that replaced it since.
         installed = receipt['installed'] if receipt else None
         require(head == installed or (receipt is None and head in PUBLISHED),
-                f'stage 2 in boot.bin ({head}) is not the installed test build; nothing changed')
+                f'stage 2 in boot.bin ({head}) is not the installed test build; nothing changed. '
+                f'If a newer loader has replaced it, delete {BACKUP} and {RECEIPT}')
         require(BACKUP.is_file(), f'no backup at {BACKUP}; nothing changed')
         saved = BACKUP.read_bytes()
         require(len(saved) == STAGE2 and sha(saved) in KNOWN and (replaced is None or sha(saved) == replaced),

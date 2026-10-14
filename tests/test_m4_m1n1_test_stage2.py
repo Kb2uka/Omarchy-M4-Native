@@ -161,10 +161,38 @@ class M1n1TestStage2Tests(unittest.TestCase):
                 self.assertEqual(self.boot.read_bytes(), boot + PAYLOAD)
                 self.assertEqual(self.backup.exists(), code == 1)
 
+    def test_rollback_refuses_a_backup_the_receipt_does_not_name(self):
+        self.boot.write_bytes(TEST + PAYLOAD)
+        self.backup.write_bytes(REPORTER)
+        self.receipt.write_text(json.dumps({'installed': sha(TEST), 'replaced': sha(STOCK)}))
+        code, _, err = self.run_helper('rollback')
+        self.assertEqual(code, 1)
+        self.assertIn('backup is not the replaced stage 2', err)
+        self.assertEqual(self.boot.read_bytes(), TEST + PAYLOAD)
+
+    def test_receiptless_backup_already_restored_is_cleaned_up(self):
+        self.boot.write_bytes(REPORTER + PAYLOAD)
+        self.backup.write_bytes(REPORTER)
+        code, out, err = self.run_helper('rollback')
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)['restored'], 'already in place')
+        self.assertFalse(self.backup.exists())
+
+    def test_stale_temporary_files_do_not_block(self):
+        self.boot.write_bytes(STOCK + PAYLOAD)
+        for name in ('boot.bin.new', 'stage2.pre-issue82.bin.new', 'stage2.issue82.json.new'):
+            (self.dir / name).write_bytes(b'partial')
+        code, _, err = self.install()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.boot.read_bytes(), TEST + PAYLOAD)
+        self.assertEqual(sorted(p.name for p in self.dir.iterdir() if p.name.endswith('.new')), [])
+
     def test_foreign_receipt_is_refused(self):
         self.boot.write_bytes(TEST + PAYLOAD)
         self.backup.write_bytes(STOCK)
-        for text in ('not json', '[]', json.dumps({'installed': sha(TEST), 'replaced': '0' * 64})):
+        for text in ('not json', '[]', json.dumps({'installed': sha(TEST), 'replaced': '0' * 64}),
+                     json.dumps({'installed': None, 'replaced': sha(STOCK)}),
+                     json.dumps({'installed': sha(STOCK), 'replaced': sha(STOCK)})):
             with self.subTest(text=text[:8]):
                 self.receipt.write_text(text)
                 for command in ('status', 'rollback'):
