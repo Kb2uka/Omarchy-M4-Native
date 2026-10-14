@@ -32,18 +32,21 @@ it differs.
 <!-- m4-board-dtbs:begin -->
 | Board | Model | dtc warnings | Nodes the patches enable | Nodes the patches disable | Broken references added |
 |---|---|---|---|---|---|
-| J604 | Apple MacBook Pro (14-inch, M4, 2024) | 1 | 24 | 0 | 0 |
-| J623 | Apple iMac (24-inch, 2x USB-C, M4, 2024) | 1 | 24 | 0 | 0 |
-| J624 | Apple iMac (24-inch, 4x USB-C, M4, 2024) | 1 | 24 | 0 | 0 |
+| J604 | Apple MacBook Pro (14-inch, M4, 2024) | 1 | 1 | 0 | 0 |
+| J623 | Apple iMac (24-inch, 2x USB-C, M4, 2024) | 1 | 1 | 0 | 0 |
+| J624 | Apple iMac (24-inch, 4x USB-C, M4, 2024) | 1 | 1 | 0 | 0 |
 | J713 | Apple MacBook Air (13-inch, M4, 2025) | 1 | 80 | 14 | 0 |
-| J715 | Apple MacBook Air (15-inch, M4, 2025) | 1 | 24 | 0 | 0 |
-| J773G | Apple Mac mini (M4, 2024) | 1 | 24 | 0 | 0 |
+| J715 | Apple MacBook Air (15-inch, M4, 2025) | 1 | 1 | 0 | 0 |
+| J773G | Apple Mac mini (M4, 2024) | 1 | 1 | 0 | 0 |
 <!-- m4-board-dtbs:end -->
 
-On the five boards other than J713, the patches enable the same 24 nodes: the
-SEP DART and mailbox, the SPMI bus with an `apple,abbey-pmic` PMIC and its
-nvmem cells, two USB-C PHYs (ATC) with their display crossbars, and the PCIe
-pin group. Those descriptions were checked on the J713 only.
+Patch 0017 keeps the board-wired parts the earlier patches added (the SPMI
+PMIC, the SEP mailbox and DART, both USB-C PHYs and their display crossbars)
+disabled in the shared files and enables them in `t8132-j713.dts`, as upstream
+does for the SEP, DWC3 and PCIe nodes that use them. On the other five boards
+the patches now add only the PCIe pin group, an inert pin definition that
+applies when the (disabled) PCIe controller requests it, like the upstream
+I2C pin groups beside it. The J713 record did not change with patch 0017.
 
 Building is not booting. A board that compiles here has never been started
 with this project's kernel. This check also does not compare its J713 build
