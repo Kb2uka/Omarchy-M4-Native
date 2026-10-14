@@ -20,15 +20,11 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
+from m4_board_identities import BOARDS, QUALIFIED, REFUSED, ROOT, SOC, TABLE, TABLE_PATH, identity
 from test_j713_gpu_air_gate import SOURCE as G16, item
 
-ROOT = Path(__file__).resolve().parents[1]
-TABLE_PATH = ROOT / 'packaging/m4-boards.json'
-TABLE = json.loads(TABLE_PATH.read_text())
-BOARDS = TABLE['boards']
-SOC = TABLE['soc']['compatible']
-QUALIFIED = [board for board in BOARDS if board['support'] == 'qualified']
 DOC = ROOT / 'docs/m4-boards.md'
 COMPATIBLE = 'sys/firmware/devicetree/base/compatible'
 SHIPPED = ('tools', 'packaging', 'audio', 'gpu', 'patches', 'patches-kernel', 'patches-m1n1')
@@ -40,11 +36,6 @@ def load(name, path):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-
-
-def identity(board):
-    """The root compatible list m1n1 hands Linux on that Mac (upstream t8132-<board>.dts)."""
-    return f"{board['compatible']}\0{SOC}\0apple,arm-platform\0".encode()
 
 
 def render_rows():
@@ -307,9 +298,7 @@ class LiveBoardGates(unittest.TestCase):
 
     def test_refused_boards_stop_at_the_board_gate(self):
         for name, call, kind, message in GATES:
-            for board in BOARDS:
-                if board['support'] != 'refused':
-                    continue
+            for board in REFUSED:
                 with self.subTest(gate=name, board=board['target']):
                     error, attempts = self.outcome(call, identity(board))
                     self.assertIsInstance(error, kind)
@@ -324,6 +313,51 @@ class LiveBoardGates(unittest.TestCase):
                     error, _ = self.outcome(call, identity(board))
                     self.assertNotIn(message, str(error))
 
+
+
+POWEROFF_FIXTURES = load('poweroff_fixtures', 'tests/test_j713_poweroff_dtb.py')
+# (tool, overlay it is built with): each checks a base devicetree before compiling anything.
+DTB_BUILDERS = (('tools/build-j713-cpufreq-dtb.py', 'patches/j713-cpufreq.dtso'),
+                ('tools/build-j713-cputemp-dtb.py', 'patches/j713-cpu-temperature.dtso'),
+                ('tools/build-j713-poweroff-dtb.py', 'patches/j713-smc-poweroff.dtso'))
+
+
+class DtbBuilderBoardGates(unittest.TestCase):
+    """The J713 devicetree builders refuse a sibling M4 base before compiling or writing.
+
+    Each builder pins its base DTB hash first; the test pins the sibling's hash so
+    the board check itself is what has to refuse.
+    """
+
+    def build(self, tool, overlay, compatible):
+        module = load('builder_' + Path(tool).stem.replace('-', '_'), tool)
+        with tempfile.TemporaryDirectory() as temporary:
+            base, output = Path(temporary) / 'base.dtb', Path(temporary) / 'out.dtb'
+            base.write_bytes(POWEROFF_FIXTURES.dtb({(): {'compatible': compatible}}))
+            with unittest.mock.patch.object(module, 'BASE_SHA256', module.sha(base.read_bytes())), \
+                 unittest.mock.patch.object(module.subprocess, 'run', side_effect=never):
+                try:
+                    module.build(base, output, ROOT / overlay)
+                    error = None
+                except Exception as caught:  # each builder raises ValueError on refusal
+                    error = caught
+            return error, output.exists()
+
+    def test_refused_boards_stop_at_the_board_check(self):
+        for tool, overlay in DTB_BUILDERS:
+            for board in REFUSED:
+                with self.subTest(tool=tool, board=board['target']):
+                    error, written = self.build(tool, overlay, identity(board))
+                    self.assertIsInstance(error, ValueError)
+                    self.assertEqual(str(error), 'Wrong board')
+                    self.assertFalse(written)
+
+    def test_qualified_boards_pass_the_board_check(self):
+        for tool, overlay in DTB_BUILDERS:
+            for board in QUALIFIED:
+                with self.subTest(tool=tool, board=board['target']):
+                    error, _ = self.build(tool, overlay, identity(board))
+                    self.assertNotEqual(str(error), 'Wrong board')
 
 
 class WriteRecorder(unittest.TestCase):
