@@ -237,7 +237,9 @@ MUTATING = {
     'os.chmod': ((0,), (2,)), 'os.chown': ((0,), (3,)), 'os.utime': ((0,), (3,)),
     'os.truncate': ((0,), ()), 'os.symlink': ((1,), (2,)),
     'os.rename': ((0, 1), (2, 3)), 'os.link': ((0, 1), (2, 3)),
+    'os.setxattr': ((0,), ()), 'os.removexattr': ((0,), ()),
 }
+UNSET_DIR_FD = (None, -1)  # CPython reports an omitted dir_fd as -1
 WATCH = {'root': None, 'attempts': []}
 
 
@@ -265,7 +267,7 @@ def record_write_attempts(event, args):
         elif event in MUTATING:
             paths, dir_fds = MUTATING[event]
             hit = (any(touches(args[index], root) for index in paths)
-                   or any(args[index] is not None for index in dir_fds if index < len(args)))
+                   or any(args[index] not in UNSET_DIR_FD for index in dir_fds if index < len(args)))
         else:
             return
         if hit:
@@ -321,6 +323,65 @@ class LiveBoardGates(unittest.TestCase):
                 with self.subTest(gate=name, board=board['target']):
                     error, _ = self.outcome(call, identity(board))
                     self.assertNotIn(message, str(error))
+
+
+
+class WriteRecorder(unittest.TestCase):
+    """The recorder itself: it sees every kind of write under the root, and nothing else."""
+
+    def watched(self, root, action):
+        WATCH.update(root=os.path.realpath(root), attempts=[])
+        try:
+            action()
+        except OSError:  # a refused or failed write still counts as an attempt
+            pass
+        finally:
+            WATCH['root'] = None
+        return list(WATCH['attempts'])
+
+    def test_writes_under_the_root_are_recorded(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'file').write_text('x')
+            (root / 'dir').mkdir()
+            actions = {
+                'open': lambda: (root / 'new').write_text('x'),
+                'os.mkdir': lambda: os.mkdir(root / 'made'),
+                'os.remove': lambda: os.remove(root / 'new'),
+                'os.rename': lambda: os.rename(root / 'made', root / 'moved'),
+                'os.chmod': lambda: os.chmod(root / 'file', 0o600),
+                'os.utime': lambda: os.utime(root / 'file'),
+                'os.truncate': lambda: os.truncate(root / 'file', 0),
+                'os.symlink': lambda: os.symlink('/nonexistent', root / 'link'),
+                'os.link': lambda: os.link(root / 'file', root / 'hard'),
+                'os.rmdir': lambda: os.rmdir(root / 'dir'),
+            }
+            if hasattr(os, 'setxattr'):
+                actions['os.setxattr'] = lambda: os.setxattr(root / 'file', 'user.probe', b'x')
+            if os.mkdir in os.supports_dir_fd:
+                fd = os.open(root, os.O_RDONLY)
+                self.addCleanup(os.close, fd)
+                actions['os.mkdir dir_fd'] = lambda: os.mkdir('missing/probe', dir_fd=fd)
+            for name, action in actions.items():
+                with self.subTest(action=name):
+                    self.assertNotEqual(self.watched(root, action), [])
+
+    def test_reads_and_writes_elsewhere_are_ignored(self):
+        with tempfile.TemporaryDirectory() as watched, tempfile.TemporaryDirectory() as elsewhere:
+            root, other = Path(watched), Path(elsewhere)
+            (root / 'file').write_text('x')
+            actions = {
+                'read under the root': lambda: (root / 'file').read_bytes(),
+                'open elsewhere': lambda: (other / 'new').write_text('x'),
+                'os.mkdir elsewhere': lambda: os.mkdir(other / 'made'),
+                'os.rename elsewhere': lambda: os.rename(other / 'made', other / 'moved'),
+                'os.chmod elsewhere': lambda: os.chmod(other / 'new', 0o600),
+                'os.remove elsewhere': lambda: os.remove(other / 'new'),
+                'os.rmdir elsewhere': lambda: os.rmdir(other / 'moved'),
+            }
+            for name, action in actions.items():
+                with self.subTest(action=name):
+                    self.assertEqual(self.watched(root, action), [])
 
 
 if __name__ == '__main__':
