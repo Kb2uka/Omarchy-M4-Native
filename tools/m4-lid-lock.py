@@ -14,8 +14,9 @@ omarchy-m4-update, so an installed Air gets what a new image already carries
   refused for a helper this tool does not recognise.
 - The two lid binds, appended once to each user's own ~/.config/hypr/hyprland.lua.
   Only an Omarchy Lua configuration that lacks the marker line gets them, and
-  the append runs as that user, never as root. Nothing is reloaded: the binds
-  take effect at the next login.
+  the append runs as that user, never as root. This tool reloads nothing, but a
+  running Hyprland reloads a changed configuration, so the update asks for a
+  fresh login (a reload leaves later-added input devices ignored).
 
 Only on the J713. Inspection is the default and changes nothing.
 """

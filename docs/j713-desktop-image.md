@@ -168,8 +168,10 @@ o.bind("switch:off:Apple SMC power/lid events", nil, "omarchy-brightness-display
 ```
 
 When it changes anything, the update prints a line asking you to log out and
-back in once. Nothing is reloaded: on October 14, 2026 a live `hyprctl reload`
-on the test Air left Hyprland ignoring input devices that were added later.
+back in once. The tool reloads nothing, but a running Hyprland reloads its
+configuration when the file changes, and on October 14, 2026 a reload on the
+test Air left Hyprland ignoring input devices that were added later. A fresh
+login clears that.
 `python3 /usr/lib/omarchy-m4/m4-lid-lock.py` shows what it would do and
 changes nothing.
 
