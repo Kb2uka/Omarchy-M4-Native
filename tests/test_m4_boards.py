@@ -230,29 +230,54 @@ def snapshot(root):
             for path in sorted(root.rglob('*'))}
 
 
-def set_writable(root, writable):
-    paths = [root, *root.rglob('*')]
-    for path in paths if writable else reversed(paths):
-        mode = 0o755 if path.is_dir() else 0o644
-        path.chmod(mode if writable else mode & 0o555)
+WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
+MUTATING = {'os.remove', 'os.rename', 'os.mkdir', 'os.rmdir', 'os.chmod', 'os.chown',
+            'os.link', 'os.symlink', 'os.truncate', 'os.utime'}
+WATCH = {'root': None, 'attempts': []}
+
+
+def under(value, root):
+    if value is None or isinstance(value, int):
+        return False
+    try:
+        path = os.path.realpath(os.fsdecode(os.fspath(value)))
+    except TypeError:
+        return False
+    return path == root or path.startswith(root + os.sep)
+
+
+def record_write_attempts(event, args):
+    """Audit hook: note every attempt to change a file under the watched root, even a caught one."""
+    root = WATCH['root']
+    if root is None:
+        return
+    try:
+        if event == 'open':
+            hit = bool(args[2] and args[2] & WRITE_FLAGS) and under(args[0], root)
+        elif event in MUTATING:
+            hit = any(under(value, root) for value in args[:2])
+        else:
+            return
+        if hit:
+            WATCH['attempts'].append((event, os.fsdecode(os.fspath(args[0]))))
+    except Exception:  # an audit hook must never break the code it watches
+        WATCH['attempts'].append((event, 'unclassified'))
+
+
+sys.addaudithook(record_write_attempts)  # a no-op unless WATCH['root'] is set
 
 
 class LiveBoardGates(unittest.TestCase):
     """Each gate refuses every refused board with its own message and writes nothing."""
 
-    def outcome(self, call, compatible, frozen=False):
-        """Run one gate on a fixture root; frozen makes the tree read-only during the call.
-
-        Read-only modes catch a write that is undone before the refusal, which a
-        content snapshot alone would miss (except as root, where only the snapshot holds).
-        """
+    def outcome(self, call, compatible):
+        """Run one gate on a fixture root; return its error and every write it attempted there."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / COMPATIBLE).parent.mkdir(parents=True)
             (root / COMPATIBLE).write_bytes(compatible)
             before = snapshot(root)
-            if frozen:
-                set_writable(root, False)
+            WATCH.update(root=os.path.realpath(root), attempts=[])
             try:
                 call(root)
                 error = None
@@ -261,8 +286,11 @@ class LiveBoardGates(unittest.TestCase):
             except Exception as caught:  # each gate reports through its own exception type
                 error = caught
             finally:
-                set_writable(root, True)
-            return error, snapshot(root) == before
+                WATCH['root'] = None
+            attempts = list(WATCH['attempts'])
+            if snapshot(root) != before:
+                attempts.append(('snapshot', 'contents changed'))
+            return error, attempts
 
     def test_refused_boards_stop_at_the_board_gate(self):
         for name, call, kind, message in GATES:
@@ -270,10 +298,10 @@ class LiveBoardGates(unittest.TestCase):
                 if board['support'] != 'refused':
                     continue
                 with self.subTest(gate=name, board=board['target']):
-                    error, untouched = self.outcome(call, identity(board), frozen=True)
+                    error, attempts = self.outcome(call, identity(board))
                     self.assertIsInstance(error, kind)
                     self.assertIn(message, str(error))
-                    self.assertTrue(untouched, 'a refused board changed the filesystem')
+                    self.assertEqual(attempts, [], 'a refused board reached a filesystem write')
 
     def test_qualified_boards_pass_the_board_gate(self):
         """Control: the same fixture with a qualified board gets past the board check."""
