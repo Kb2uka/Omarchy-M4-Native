@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import platform
+import re
 import shutil
 import stat
 import subprocess
@@ -40,6 +41,28 @@ def checked_bytes(path, record):
     require(hashlib.sha256(data).hexdigest() == record['sha256'],
             'Unsupported input hash: ' + str(path))
     return data
+
+
+def qualified_input(record):
+    """Read an installed owner input that matches exactly one qualified build."""
+    qualified = record['qualified']
+    require(isinstance(qualified, list) and qualified and
+            all(set(entry) <= {'sha256', 'size', 'macos'} and
+                isinstance(entry['sha256'], str) and
+                re.fullmatch('[0-9a-f]{64}', entry['sha256']) and
+                type(entry['size']) is int and entry['size'] > 0
+                for entry in qualified) and
+            len({entry['sha256'] for entry in qualified}) == len(qualified),
+            'Invalid qualified input list: ' + record['path'])
+    path = Path(record['path'])
+    require(path.is_file() and not path.is_symlink(), 'Missing regular input: ' + str(path))
+    size = path.stat().st_size
+    data = path.read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    matches = [entry for entry in qualified
+               if entry['size'] == size == len(data) and entry['sha256'] == digest]
+    require(len(matches) == 1, 'Unsupported input hash: ' + str(path))
+    return data, matches[0]
 
 
 def unpack_wheel(data_path, destination):
@@ -104,7 +127,7 @@ def generate(bundle, output):
     bundle = bundle.resolve(strict=True)
     manifest_bytes = (bundle / 'manifest.json').read_bytes()
     manifest = json.loads(manifest_bytes)
-    require(manifest['schema'] == 1 and manifest['board'] == 'apple,j713',
+    require(manifest['schema'] == 2 and manifest['board'] == 'apple,j713',
             'Unsupported owner filter bundle.')
     require(set(manifest['sources']) == SOURCE_NAMES and set(manifest['helpers']) == HELPER_NAMES,
             'Incomplete owner filter bundle.')
@@ -115,10 +138,11 @@ def generate(bundle, output):
         checked_bytes(bundle / 'bin' / name, record)
     wheel_path = bundle / 'dependencies' / WHEEL
     checked_bytes(wheel_path, manifest['numpy'])
-    owner_inputs = {}
+    # Several macOS builds may carry different qualified inputs. Each must
+    # still render the single set of pinned outputs checked below.
+    owner_inputs, matched = {}, {}
     for name, record in manifest['owner_inputs'].items():
-        path = Path(record['path'])
-        owner_inputs[name] = checked_bytes(path, record)
+        owner_inputs[name], matched[name] = qualified_input(record)
 
     with tempfile.TemporaryDirectory(prefix='.m4-fir-owner-', dir=output.parent) as temporary:
         work = Path(temporary)
@@ -132,6 +156,8 @@ def generate(bundle, output):
             path = work / name
             path.write_bytes(checked_bytes(bundle / 'bin' / name, manifest['helpers'][name]))
             path.chmod(0o700)
+        (work / 'owner-inputs.json').write_text(
+            json.dumps({name: entry['sha256'] for name, entry in matched.items()}))
 
         run_script(source, work, dependencies, 'inspect_strip.py')
         for name, record in manifest['presets'].items():
@@ -153,16 +179,19 @@ def generate(bundle, output):
             files[name] = checked_bytes(work / 'output' / name, record)
         # Recheck the installed inputs after generation. No unrecognized input
         # or partially generated output becomes an installation payload.
-        for record in manifest['owner_inputs'].values():
-            checked_bytes(Path(record['path']), record)
+        for name, record in manifest['owner_inputs'].items():
+            require(qualified_input(record)[1] == matched[name],
+                    'Owner input changed during generation: ' + record['path'])
         receipt = {
-            'schema': 1,
+            'schema': 2,
             'board': 'apple,j713',
             'method': 'owner-local AudioDSP memory rendering and retained finite FIR pipeline',
             'bundle_manifest_sha256': hashlib.sha256(manifest_bytes).hexdigest(),
             'python_version': platform.python_version(),
             'numpy_version': '2.5.3',
-            'owner_inputs': manifest['owner_inputs'],
+            'macos_version': platform.mac_ver()[0],
+            'owner_inputs': {name: {'path': record['path'], **matched[name]}
+                             for name, record in manifest['owner_inputs'].items()},
             'files': manifest['outputs'],
             'exact_native_outputs': True,
             'hardware_playback_performed': False,

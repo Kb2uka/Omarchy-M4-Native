@@ -72,6 +72,11 @@ def sha(path):
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
+def pinned(path, record):
+    require(path.is_file() and not path.is_symlink() and path.stat().st_size == record['size'] and
+            sha(path) == record['sha256'], 'Owner runtime bundle disagrees with its manifest: ' + path.name)
+
+
 def document(path, value):
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + '\n')
 
@@ -487,19 +492,38 @@ def assemble(args):
     repack_installer(baseline / 'source/installer-source.tar.gz',
                      output / 'source/installer-source.tar.gz', module, True)
     clean_integration(baseline / 'source/integration-inputs.tar.gz', output / 'source/integration-inputs.tar.gz')
+    tracked = [raw.decode() for raw in subprocess.check_output(
+        ['git', '-C', str(tree), 'ls-files', '-z']).split(b'\0') if raw]
     owner = output / 'owner-audio'
+    bundle = owner / 'bundle'
     owner.mkdir()
+    helpers = args.output / 'owner-helpers'
     with tarfile.open(args.owner_bundle) as archive:
-        archive.extractall(owner, filter='data')
-    (owner / 'owner-fir').rename(owner / 'bundle')
-    # Checkout formatting metadata stays in the source archive, not the runtime bundle.
-    attributes = owner / 'bundle/.gitattributes'
+        archive.extractall(helpers, filter='data')
+    attributes = helpers / 'owner-fir/.gitattributes'
     require(attributes.is_file() and not attributes.is_symlink(), 'Owner bundle metadata changed')
-    attributes.unlink()
-    # Retain the pinned native helpers/dependency, but carry this revision's
-    # output identities and documentation into the runtime bundle as well.
-    for name in ('manifest.json', 'README.md'):
-        shutil.copyfile(tree / 'audio/j713/owner-fir' / name, owner / 'bundle' / name)
+    # The pinned archive supplies only the natively built helpers and the wheel.
+    # This revision owns every other runtime file, so scripts and their pins move together.
+    for name in ('bin', 'dependencies'):
+        native = helpers / 'owner-fir' / name
+        require(native.is_dir() and not native.is_symlink(), 'Owner helper bundle lacks ' + name)
+        shutil.copytree(native, bundle / name, symlinks=True)
+    shutil.rmtree(helpers)
+    for name in tracked:
+        relative = name.removeprefix('audio/j713/owner-fir/')
+        # Checkout formatting metadata stays in the source archive, not the runtime bundle.
+        if relative == name or relative == '.gitattributes':
+            continue
+        require(relative.split('/')[0] not in ('bin', 'dependencies'),
+                'Native owner files are tracked in the source: ' + name)
+        target = bundle / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(tree / name, target)
+    require(owner_profile['sources'] and owner_profile['helpers'], 'Incomplete owner filter manifest')
+    for directory, records in (('src', owner_profile['sources']), ('bin', owner_profile['helpers'])):
+        for name, record in records.items():
+            pinned(bundle / directory / name, record)
+    pinned(bundle / 'dependencies' / owner_profile['numpy']['filename'], owner_profile['numpy'])
     shutil.copyfile(tree / 'tools/m4-j713-fir-owner.py', owner / 'm4-j713-fir-owner.py')
     shutil.copyfile(args.numpy_source, output / 'source/numpy-2.5.3.tar.gz')
     shutil.copyfile(args.cargo_source, output / 'source/j713-audio-cargo-sources.tar.gz')
@@ -516,11 +540,7 @@ def assemble(args):
     # The current repository sources are a separate exact archive; private build
     # logs, machine credentials and workflow instructions never enter this archive.
     with tarfile.open(output / 'source/release-integration.tar.gz', 'x:gz') as archive:
-        tracked = subprocess.check_output(['git', '-C', str(tree), 'ls-files', '-z']).split(b'\0')
-        for raw in tracked:
-            if not raw:
-                continue
-            name = raw.decode()
+        for name in tracked:
             if Path(name).name in ('AGENTS.md', 'CLAUDE.md'):
                 continue
             archive.add(tree / name, arcname=name, recursive=False)
