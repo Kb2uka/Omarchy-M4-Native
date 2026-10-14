@@ -36,6 +36,40 @@ the owner files into its locally collected firmware package; first Linux boot
 installs regular WAV files before audio registration and first-user creation.
 Widevine binaries are also excluded and acquired separately only after consent.
 
+## Binaries outside packages
+
+The installed root carries some programs, libraries and kernel modules that no
+pacman package owns, such as the GPU module at `/opt/m4-gpu/asahi_m4.ko`.
+`packaging/release-source-joins.json` lists each one by SHA-256 with the source
+that built it. Each entry names either an archive in this `source/` directory,
+pinned by hash, or a tracked path in `release-integration.tar.gz`.
+
+`correspondence` records how the join was established:
+
+- `rebuilt-identical`: a rebuild from the named sources reproduced the exact
+  bytes.
+- `unverified`: the source is the likeliest published one, matched by file name
+  only.
+
+The GPU module is the only `rebuilt-identical` entry. Rebuilding the published
+`kernel-controller.tar.gz` with the four Air GPU files from
+`omarchy-j713-v0.1.0-alpha.1-gpu-air-source.tar.gz` reproduces it byte for byte
+([issue 77](https://github.com/Kb2uka/Omarchy-M4-Native/issues/77)). That
+packet is attached to the v0.1.0-alpha.1 release. alpha.1's source packet
+originally omitted those four files.
+
+`tools/prepare-j713-release.py` scans the finished root and refuses to assemble
+a release in any of these cases:
+
+- an unpackaged ELF file or kernel module is not listed, or its hash differs;
+- a listed binary is no longer present;
+- a named source is missing from the kit or has changed.
+
+It also refuses `unverified` entries, unless `--allow-unverified-source` is
+given to reassemble alpha.1 itself. `IMAGE.json` then lists those entries in
+`source_correspondence_unverified`. Archives that are not part of the retained
+delivery, like the GPU packet, are supplied with `--join-source`.
+
 ## Kernel and audio build joins
 
 The final private-build-2 kernel adds the startup-retry patch to the archived

@@ -93,6 +93,7 @@ class KernelReleaseTests(unittest.TestCase):
                       'sha256': digest(self.wheel[1])},
         }
         self.save_profile()
+        self.write(self.tree, 'packaging/release-source-joins.json', b'{"schema": 1, "binaries": {}}')
         self.boot = {'bootargs': 'console=tty0 dockchannel_hid.m4_power_v2=1'}
         self.parts = {'kernel': self.original_kernel, 'dtb': b'old DTB',
                       'loader': b'preserved loader', 'initramfs': b'preserved initramfs'}
@@ -140,6 +141,7 @@ class KernelReleaseTests(unittest.TestCase):
             poweroff_dtb=self.dtb, output=self.base / 'output', kernel=self.kernel,
             kernel_receipt=self.receipt_path)
         self.prepared = []
+        self.allowed = []
 
     def write(self, root, name, data):
         path = root / name
@@ -177,10 +179,11 @@ class KernelReleaseTests(unittest.TestCase):
         def sha(path):
             return self.fixed_inputs.get(path) or actual_sha(path)
 
-        def root(source, image, mount, tree, identity, kernel=None):
+        def root(source, image, mount, tree, identity, kernel=None, allow_unverified=False):
             self.prepared.append(kernel)
+            self.allowed.append(allow_unverified)
             image.write_bytes(b'new root')
-            return {'audio': 'a' * 64, 'video': 'v' * 64}
+            return {'audio': 'a' * 64, 'video': 'v' * 64, 'unverified': []}
 
         def copy_archive(source, destination, *args):
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -266,6 +269,41 @@ class KernelReleaseTests(unittest.TestCase):
                 self.save_owner()
                 with self.assertRaisesRegex(RuntimeError, 'Owner helper bundle lacks'):
                     self.assemble()
+
+    def join(self, archive, pin):
+        joins = {'schema': 1, 'binaries': {'opt/m4-gpu/asahi_m4.ko': {
+            'sha256': 'b' * 64, 'correspondence': 'rebuilt-identical',
+            'sources': [{'archive': 'source/' + archive, 'sha256': pin}]}}}
+        return self.write(self.tree, 'packaging/release-source-joins.json', json.dumps(joins).encode())
+
+    def test_pinned_join_source_reaches_the_kit_and_image_records_the_joins(self):
+        packet = self.write(self.base, 'gpu-air-source.tar.gz', b'GPU source packet')
+        joins = self.join(packet.name, digest(packet.read_bytes()))
+        self.args.join_source = [packet]
+        delivery = self.assemble()
+        self.assertEqual((delivery / 'source' / packet.name).read_bytes(), packet.read_bytes())
+        image = json.loads((delivery / 'IMAGE.json').read_bytes())
+        self.assertEqual(image['source_joins_sha256'], digest(joins.read_bytes()))
+        self.assertEqual(image['source_correspondence_unverified'], [])
+        self.assertEqual(self.allowed, [False])
+
+    def test_a_join_naming_an_absent_source_archive_refuses(self):
+        self.join('gpu-air-source.tar.gz', 'c' * 64)
+        with self.assertRaisesRegex(RuntimeError, 'archive missing for opt/m4-gpu/asahi_m4.ko'):
+            self.assemble()
+
+    def test_an_unpinned_join_source_refuses_before_any_output(self):
+        packet = self.write(self.base, 'gpu-air-source.tar.gz', b'another packet')
+        self.join(packet.name, digest(b'GPU source packet'))
+        self.args.join_source = [packet]
+        with self.assertRaisesRegex(RuntimeError, 'not a pinned archive'):
+            self.assemble()
+        self.assertFalse(self.args.output.exists())
+
+    def test_unverified_permission_reaches_root_preparation(self):
+        self.args.allow_unverified_source = True
+        self.assemble()
+        self.assertEqual(self.allowed, [True])
 
     def test_absent_pair_preserves_retained_kernel_and_bootargs(self):
         self.args.kernel = self.args.kernel_receipt = None
