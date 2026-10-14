@@ -196,6 +196,21 @@ class SetupTests(unittest.TestCase):
             self.put(MODULE.GPU_MODULE, 'hand-patched module')
             self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'unknown: never applied')
 
+    def test_restart_reported_when_the_headphone_card_is_new(self):
+        self.put(MODULE.HEADPHONES_STAGED, 'staged card module')
+        self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'not a running system')
+        (self.root / 'sys/module').mkdir(parents=True)
+        result = self.setup_with(FakeSystem(self.root))
+        self.assertEqual((result['restart_needed'], result['status']),
+                         (True, 'connected; restart once to apply the update'))
+        for name in ('hold', 'attempt'):
+            with self.subTest(name):
+                self.put(MODULE.HEADPHONES_STATE + '/' + name, '')
+                self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], name + ': nothing loads')
+                (self.root / MODULE.HEADPHONES_STATE / name).unlink()
+        (self.root / 'sys/module/snd_soc_j713_headphones').mkdir()
+        self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'already loaded')
+
     def test_boot_not_current_is_a_failure(self):
         with self.assertRaisesRegex(MODULE.Refused, 'boot.bin is not in step'):
             self.setup_with(FakeSystem(self.root, boot_status='refused'))

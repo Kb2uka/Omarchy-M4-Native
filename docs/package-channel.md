@@ -15,6 +15,7 @@ reviewers.
 | `omarchy-m4-boot` | `m4-boot-compose`, its pacman hook, the J713 devicetree, the daily update notifier and, from 1-4, the real-time speaker protection drop-in | `1-1`; `1-4` adds CPU frequency scaling and CPU temperature |
 | `linux-m4-omarchy` | The J713 kernel image and its modules | `7.1.9.m4.20261008-2` |
 | `omarchy-m4-gst-audio` | GStreamer's `autodetect` and `pulse` sinks in `/usr/lib/gstreamer-1.0`, for WebKitGTK and GStreamer apps | `1.28.7-1` |
+| `omarchy-m4-headphones` | The headphone jack card: two pinned modules, `m4-headphones`, its registration drop-in, UCM and WirePlumber files | `1-1` |
 
 ### omarchy-m4-boot 1-4 and omarchy-m4-gst-audio 1.28.7-1
 
@@ -104,6 +105,33 @@ The installed alpha.1 package `linux-m4-omarchy 7.1.9.m4.20261008-1` carries an
 older `Image.gz` (`69b92b65…`) than the one in `boot.bin`. Version `-2` corrects
 the package to match what boots. Nothing ever rebuilds `boot.bin` from the `-1`
 file.
+
+### omarchy-m4-headphones 1-1 and omarchy-m4-boot 1-7
+
+- **Playback through the headphone jack** ([J713 headphone jack](j713-headphones.md)).
+  Like every channel package, it arrives with `omarchy-m4-update`; there is no
+  separate install step.
+- **`omarchy-m4-boot` 1-7** depends on `omarchy-m4-headphones`, for the same
+  reason 1-6 depends on `omarchy-m4-gpu`: an Air's installed setup script does
+  not list the new package, so this dependency is what makes its first
+  `omarchy-m4-update` run install it. The setup script from 1-7 lists it and
+  reports that a restart starts the card.
+- **Off switch:** `sudo m4-headphones --disable` keeps the package installed
+  and current but stops the modules loading from the next boot;
+  `sudo m4-headphones --enable` switches it back on. The hold file is
+  `/var/lib/omarchy-m4/headphones/hold`, like the speaker and GPU holds.
+- **Modules:** `j713_hp_dt.ko` (`9ba22f0e…`) and `snd-soc-j713-headphones.ko`
+  (`a73ef565…`), built from `audio/j713/headphones/kernel/` with
+  `tools/build-j713-headphones.sh` and pinned in `package-inputs` and
+  `headphone_modules`. They are staged under `/usr/lib/omarchy-m4/` and never
+  enter the manifest-managed audio module directory.
+- **Loading:** a drop-in on `m4-j713-audio-register.service`
+  (`ExecStartPost=-`) runs `m4-headphones --boot` after the speaker
+  registration succeeds. A refusal or failure never fails the registration,
+  and a boot that dies while loading stops the next boot from trying again.
+- **Protected exceptions:** the drop-in, the two UCM files of the new
+  `J713Headphones` card, the WirePlumber fragment `83-j713-headphones.conf`
+  and its hook. All five are new files; none replaces a speaker or ALSA file.
 
 ## Connecting new installs
 
