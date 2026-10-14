@@ -1,0 +1,67 @@
+{
+  "schema": 1,
+  "soc": {
+    "chip": "T8132",
+    "compatible": "apple,t8132"
+  },
+  "boards": [
+    {
+      "target": "J713",
+      "compatible": "apple,j713",
+      "models": ["Mac16,12"],
+      "name": "MacBook Air (13-inch, M4, 2025)",
+      "support": "qualified",
+      "installer": {"stub": "26.5.1", "expert_only": true}
+    },
+    {
+      "target": "J715",
+      "compatible": "apple,j715",
+      "models": ["Mac16,13"],
+      "name": "MacBook Air (15-inch, M4, 2025)",
+      "support": "refused",
+      "installer": null
+    },
+    {
+      "target": "J604",
+      "compatible": "apple,j604",
+      "models": ["Mac16,1"],
+      "name": "MacBook Pro (14-inch, M4, 2024)",
+      "support": "refused",
+      "installer": null
+    },
+    {
+      "target": "J623",
+      "compatible": "apple,j623",
+      "models": ["Mac16,2"],
+      "name": "iMac (24-inch, 2024, Two ports)",
+      "support": "refused",
+      "installer": null
+    },
+    {
+      "target": "J624",
+      "compatible": "apple,j624",
+      "models": ["Mac16,3"],
+      "name": "iMac (24-inch, 2024, Four ports)",
+      "support": "refused",
+      "installer": null
+    },
+    {
+      "target": "J773g",
+      "compatible": "apple,j773g",
+      "models": ["Mac16,10"],
+      "name": "Mac mini (M4, 2024)",
+      "support": "refused",
+      "installer": {"stub": "26.6.2", "expert_only": false}
+    }
+  ],
+  "other_socs": [
+    {
+      "models": ["Mac16,11"],
+      "name": "Mac mini (M4 Pro, 2024)"
+    },
+    {
+      "models": ["Mac16,5", "Mac16,6", "Mac16,7", "Mac16,8"],
+      "name": "MacBook Pro (14-inch and 16-inch, M4 Pro or M4 Max, 2024)"
+    }
+  ]
+}
