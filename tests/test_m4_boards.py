@@ -24,7 +24,8 @@ import unittest
 from test_j713_gpu_air_gate import SOURCE as G16, item
 
 ROOT = Path(__file__).resolve().parents[1]
-TABLE = json.loads((ROOT / 'packaging/m4-boards.json').read_text())
+TABLE_PATH = ROOT / 'packaging/m4-boards.json'
+TABLE = json.loads(TABLE_PATH.read_text())
 BOARDS = TABLE['boards']
 SOC = TABLE['soc']['compatible']
 QUALIFIED = [board for board in BOARDS if board['support'] == 'qualified']
@@ -116,7 +117,7 @@ class BoardTable(unittest.TestCase):
             if not (ROOT / top).is_dir():
                 continue
             for path in sorted((ROOT / top).rglob('*')):
-                if not path.is_file() or path.suffix == '.md':
+                if not path.is_file() or path.suffix == '.md' or path == TABLE_PATH:
                     continue
                 try:
                     text = path.read_text()
