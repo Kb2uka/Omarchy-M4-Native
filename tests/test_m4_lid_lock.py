@@ -118,6 +118,27 @@ class LidLock(unittest.TestCase):
         self.assertTrue(self.run_tool()['lid_binds']['owner'].startswith('skipped'))
         self.assertEqual(target.read_text(), OMARCHY)
 
+    def test_fifo_config_does_not_hang(self):
+        self.config.unlink()
+        os.mkfifo(self.config)
+        self.assertEqual(self.run_tool()['lid_binds'], {'owner': 'skipped: not a regular file'})
+
+    def test_interrupted_pam_write_is_recovered(self):
+        temp = self.pam.with_name('.' + self.pam.name + '.m4-lid-lock')
+        temp.write_text('half a stack')
+        self.assertEqual(self.run_tool()['lock_pam'], 'written')
+        self.assertEqual(self.pam.read_text(), STACK)
+        self.assertFalse(temp.exists())
+
+    def test_pam_failure_still_adds_binds(self):
+        self.pam.parent.chmod(0o555)
+        self.addCleanup(self.pam.parent.chmod, 0o755)
+        if os.access(self.pam.parent, os.W_OK):
+            self.skipTest('needs an unprivileged runner')
+        report = self.run_tool()
+        self.assertTrue(report['lock_pam'].startswith('refused: '), report)
+        self.assertEqual(report['lid_binds'], {'owner': 'added; takes effect at next login'})
+
     def test_config_without_final_newline(self):
         self.config.write_text(OMARCHY.rstrip('\n'))
         self.run_tool()

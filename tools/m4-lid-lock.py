@@ -72,6 +72,7 @@ def lock_pam(root, apply):
     if not apply:
         return 'missing'
     temp = target.with_name('.' + target.name + '.m4-lid-lock')
+    temp.unlink(missing_ok=True)  # left by an interrupted run; the directory is root's
     fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as stream:
@@ -89,7 +90,8 @@ def lock_pam(root, apply):
 def add_binds(path, apply):
     """Append the binds to one Omarchy configuration. Runs with the owner's rights."""
     try:
-        fd = os.open(path, (os.O_RDWR | os.O_APPEND if apply else os.O_RDONLY) | os.O_NOFOLLOW)
+        # O_NONBLOCK: a FIFO in its place must not hang the update that runs this.
+        fd = os.open(path, (os.O_RDWR | os.O_APPEND if apply else os.O_RDONLY) | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
         return 'no configuration'
     except OSError as error:
@@ -149,7 +151,11 @@ def users(root):
 def run(root, apply, switch_user=True):
     if not is_j713(root):
         return {'status': 'not a J713; nothing to do'}
-    report = {'lock_pam': lock_pam(root, apply), 'lid_binds': {}}
+    try:
+        pam = lock_pam(root, apply)
+    except OSError as error:  # the binds still go in
+        pam = 'refused: ' + str(error)
+    report = {'lock_pam': pam, 'lid_binds': {}}
     for account in users(root):
         path = root / account.pw_dir.lstrip('/') / CONFIG
         if switch_user:
