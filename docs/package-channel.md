@@ -61,6 +61,34 @@ reviewers.
   refused and left untouched, and a refusal never stops registration. Details:
   [speaker protection startup](j713-protection-startup.md#existing-installs).
 
+### omarchy-m4-boot 1-6 and omarchy-m4-gpu 1-1
+
+- **`omarchy-m4-gpu`** delivers the Air GPU power-limit fix
+  ([#57](https://github.com/Kb2uka/Omarchy-M4-Native/issues/57),
+  [#80](https://github.com/Kb2uka/Omarchy-M4-Native/pull/80)). alpha.1's module
+  required a GPU power limit of exactly 24800 mW, which only a 1000 mV top GPU
+  state gives, so other Airs got no GPU and no desktop. The fixed module
+  (`3cf47fa7…`, 390,752 bytes, built from [`gpu/j713/`](../gpu/j713/README.md)
+  on the alpha.1 kernel tree) accepts each Air's own derived limit up to 24800
+  mW. It booted on a 1000 mV and a 980 mV Air. It is pinned in the
+  `package-inputs` release.
+- The GPU module stays under `/opt/m4-gpu`, outside pacman, so the package does
+  not overwrite it. It stages the module under `/usr/lib/omarchy-m4/gpu/`. A
+  drop-in on `m4-gpu.service` (`ExecStartPre=-`, the third
+  `protected_exceptions` file) runs `m4-gpu-module --boot` before
+  `m4-gpu-start` checks `/opt/m4-gpu/runtime.sha256` and loads the module. It
+  swaps the module and exactly its one line in `runtime.sha256`, only from the
+  stock alpha.1 state (`80cf3669…`), or to finish a swap a power cut
+  interrupted. An Air on the #57 test build is already current. Anything else,
+  such as a hand-patched module, is refused and left untouched, and a refusal
+  never stops graphics startup. `sudo m4-gpu-module --rollback` restores alpha.1
+  at the next boot and holds it there.
+- **`omarchy-m4-boot` 1-6** depends on `omarchy-m4-gpu`. An Air's installed
+  setup script (from 1-5) does not list the new package, so this dependency is
+  what makes its first `omarchy-m4-update` run install it. Pacman then prints
+  that the fix applies at the next restart; the setup script from 1-6 also
+  reports the restart.
+
 At launch the channel delivers exactly what a fully updated alpha.1 Air already
 runs:
 
