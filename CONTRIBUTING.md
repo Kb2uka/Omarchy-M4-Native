@@ -54,6 +54,18 @@ does not establish support for another board, codec or power state.
 
 ## M4 packages
 
+**Every update reaches owners through `omarchy-m4-update`.** Like
+`omarchy-update` on stock Omarchy, it is the one command an owner runs, and it
+brings every M4 fix and new feature. Do not add an opt-in package, a manual
+`pacman -S` step, a script to download and run, or any other second install
+path. A new package goes into `packaging/omarchy-m4/channel.json` and the setup
+script's package list. Because an Air runs the setup script it already has,
+also make the next `omarchy-m4-boot` depend on the new package so that the
+first `omarchy-m4-update` run installs it. `omarchy-m4-gpu` is the worked
+example. If a feature needs a way to turn it off, give it an off switch in the
+installed package (as the speaker and GPU packages do with a hold file), not a
+separate install step.
+
 M4 kernel, devicetree and boot changes ship through the signed package channel
 ([package-channel.md](docs/package-channel.md)). Any change to a package's
 contents needs a new `pkgrel` or `pkgver`; CI refuses to rebuild a published

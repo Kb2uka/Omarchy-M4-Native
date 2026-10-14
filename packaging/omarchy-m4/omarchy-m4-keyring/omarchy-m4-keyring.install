@@ -2,6 +2,18 @@ post_upgrade() {
   if usr/bin/pacman-key -l >/dev/null 2>&1; then
     usr/bin/pacman-key --populate omarchy-m4
   fi
+  # Let normal users verify sync databases (issue #71): stock Arch ships the
+  # keyring directory 755 with the public database files 644, while alpha.1
+  # left them readable by root only. Private keys keep their modes, and
+  # symlinks are never followed.
+  if [ -d etc/pacman.d/gnupg ] && [ ! -L etc/pacman.d/gnupg ]; then
+    chmod 755 etc/pacman.d/gnupg
+    for name in pubring.gpg pubring.kbx trustdb.gpg; do
+      if [ -f "etc/pacman.d/gnupg/$name" ] && [ ! -L "etc/pacman.d/gnupg/$name" ]; then
+        chmod 644 "etc/pacman.d/gnupg/$name"
+      fi
+    done
+  fi
 }
 
 post_install() {

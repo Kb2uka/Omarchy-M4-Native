@@ -2,7 +2,7 @@
 # Built and signed by .github/workflows/packages.yml; see docs/package-channel.md.
 pkgname=omarchy-m4-keyring
 pkgver=20261012
-pkgrel=1
+pkgrel=2
 pkgdesc='Signing key for the Omarchy M4 Native package repository'
 arch=('any')
 url='https://github.com/Kb2uka/Omarchy-M4-Native'

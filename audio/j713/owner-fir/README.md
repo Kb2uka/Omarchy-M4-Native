@@ -22,10 +22,19 @@ owner's Mac. The native helpers are built in advance.
 
 All input, extracted-preset, helper, dependency and output hashes are pinned in
 `manifest.json`. Generation requires native arm64 macOS and the installer's
-CPython 3.13.9 without optimization. The current installed system input hashes
-were verified on macOS 26.5.1 (25F80) and 26.5.2 (25F84). A different input or output is a refusal,
-not permission to use a substitute filter. No compatibility claim is made for
-other macOS inputs.
+CPython 3.13.9 without optimization. Each installed system input lists its
+qualified builds under `qualified`; the input must match exactly one entry by
+size and hash. AudioDSP is qualified for macOS 26.5.1 (25F80) and 26.5.2 (25F84),
+and separately for 26.6.2 (25G83), whose different binary rendered the same four
+pinned outputs. Every qualified input must produce the single pinned output set.
+A different input or output is a refusal, not permission to use a substitute
+filter. No compatibility claim is made for other macOS inputs.
+
+The generator passes the matched AudioDSP hash to `run-transfer.py` and
+`run-memory.py` in `owner-inputs.json`, replacing the literal each retained
+script originally asserted. Their mathematical operations are unchanged. It
+rechecks every input against the same entry after generation and records the
+matched entry and macOS version in `receipt.json`.
 
 Success creates exactly four `j713-static-minimal-laneN-48000.wav` files and
 `receipt.json`. The installer must require success and independently verify the
@@ -78,6 +87,8 @@ inputs. A second arm64 Mac has the same AudioDSP hash.
 The complete owner-generation command succeeded on the J713 Air running macOS
 26.5.1 and an arm64 Mac Studio running 26.5.2, using the bundled CPython 3.13.9,
 helpers and NumPy 2.5.3. Both produced the exact same four output hashes.
+On a 13-inch M4 Air (Mac16,12) running macOS 26.6.2 (25G83), the same bundle
+with that build's AudioDSP produced the same four output hashes.
 
 The earlier reference combined native macOS responses using NumPy 2.5.3 on
 x86_64 Linux. The ARM64 results differ at 57 of 10,240 float32 samples, with a

@@ -4,14 +4,15 @@
 # and LICENSES/ by tools/build-m4-packages.py.
 pkgname=omarchy-m4-boot
 pkgver=1
-pkgrel=6
+pkgrel=8
 pkgdesc='Keeps the J713 boot.bin in step with the packaged M4 kernel and devicetree'
 arch=('aarch64')
 url='https://github.com/Kb2uka/Omarchy-M4-Native'
 license=('MIT' 'GPL-2.0-or-later OR MIT')
-# omarchy-m4-gpu: an older installed setup script does not list it, so this pulls it in on
-# the first omarchy-m4-update run that installs this version.
-depends=('python' 'pacman' 'omarchy-m4-gpu')
+# omarchy-m4-gpu (from 1-6) and omarchy-m4-headphones (from 1-7): an older installed setup
+# script does not list them, so this pulls them in on the first omarchy-m4-update run that
+# installs this version.
+depends=('python' 'pacman' 'omarchy-m4-gpu' 'omarchy-m4-headphones')
 install=omarchy-m4-boot.install
 options=('!strip' '!debug')
 # The CPU frequency and CPU temperature devicetree (docs/j713-cpu-temperature.md), and the
@@ -28,7 +29,7 @@ sha256sums=('67cbbe056e4e7b9193e3648ebfff78ae68316ca50a47e2676cd62c36a7918630'
             'b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5'
             'aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3'
             'a116d5a6aa09bc2aec1393ef737f21d9cc0eaac474615cb215f48491b7db8a56'
-            'a73fa3ec09840e1be531160b531fb7f92a922fee9c3055527cee7d9b76474e06'
+            'ab8f1e4b490226d45efeb4b9a332e7ef3d99fd5fc065a1308b6972340bb73f9b'
             'bde52f8012b209e06c0e2b41325413c642ae4c6e6eedce7ff04331ca4d50c0f1'
             '08e8e719381f88a1e50d821c145dad5b2d97fd772609e13d7778e19795e9cad1')
 
