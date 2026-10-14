@@ -13,9 +13,6 @@
     "omarchy-m4-gpu",
     "omarchy-m4-headphones"
   ],
-  "opt_in_packages": [
-    "omarchy-m4-headphones"
-  ],
   "kernel": {
     "release": "7.1.9-m4-gpu-backport-20261008",
     "image_sha256": "c3704cfd2afb7760e73f0b9939a68864a30bd916fcd478bd960e538373123dc9",

@@ -135,6 +135,52 @@ class HeadphoneLoad(unittest.TestCase):
         self.assertEqual([c[1] for c in machine.commands if c[0] == 'insmod'],
                          [str(self.root / MODULE.STAGED / 'snd-soc-j713-headphones.ko')])
 
+    def hold(self):
+        return self.root / MODULE.STATE / 'hold'
+
+    def test_disable_stops_boot_and_start_until_enable(self):
+        report = MODULE.run(self.root, 'disable', Machine(self.root))
+        self.assertTrue(self.hold().is_file())
+        self.assertEqual((report['held'], report['status']), (True, 'off; nothing loads at boot'))
+        self.assertTrue(MODULE.run(self.root, 'inspect', Machine(self.root))['status'].startswith('off;'))
+        for mode in ('boot', 'start'):
+            with self.subTest(mode):
+                machine = Machine(self.root)
+                with self.assertRaisesRegex(MODULE.Refused, 'switched off'):
+                    MODULE.run(self.root, mode, machine)
+                self.assertEqual(machine.commands, [], 'a held jack loads nothing')
+                self.assertFalse(self.marker().exists(), 'a held boot is not a strike')
+        report = MODULE.run(self.root, 'enable', Machine(self.root))
+        self.assertFalse(self.hold().exists())
+        self.assertEqual((report['held'], report['status']), (False, 'loads at the next boot'))
+        self.assertEqual(MODULE.run(self.root, 'boot', Machine(self.root))['state'], 'loaded')
+
+    def test_disable_with_the_card_loaded_says_it_stays_until_restart(self):
+        for name, _, _ in PINS:
+            (self.root / 'sys/module' / name).mkdir()
+        report = MODULE.run(self.root, 'disable', Machine(self.root))
+        self.assertEqual(report['status'], 'off; the loaded modules stay until the next restart')
+        self.assertTrue(MODULE.run(self.root, 'inspect', Machine(self.root))['status'].endswith('until the next restart'))
+
+    def test_disable_and_enable_are_repeatable(self):
+        for mode in ('disable', 'disable', 'enable', 'enable'):
+            MODULE.run(self.root, mode, Machine(self.root))
+            self.assertEqual(self.hold().exists(), mode == 'disable')
+
+    def test_enable_keeps_a_strike(self):
+        self.put(MODULE.STATE + '/attempt', b'loading\n')
+        MODULE.run(self.root, 'disable', Machine(self.root))
+        self.assertEqual(MODULE.run(self.root, 'enable', Machine(self.root))['state'], 'struck')
+        with self.assertRaisesRegex(MODULE.Refused, 'previous boot stopped'):
+            MODULE.run(self.root, 'boot', Machine(self.root))
+
+    def test_the_command_line_needs_root_for_every_change(self):
+        with mock.patch.object(MODULE.os, 'geteuid', return_value=1000), \
+                mock.patch.object(MODULE, 'run') as run, mock.patch('sys.stderr'):
+            for flag in ('--boot', '--start', '--disable', '--enable'):
+                self.assertEqual(MODULE.main([flag]), 1, flag)
+            run.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()

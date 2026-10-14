@@ -16,8 +16,6 @@ SPEC = importlib.util.spec_from_file_location('m4_channel_setup', ROOT / 'tools/
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 CHANNEL = json.loads((ROOT / 'packaging/omarchy-m4/channel.json').read_text())
-# Setup installs every channel package except the opt-in ones, which owners install themselves.
-DEFAULT_PACKAGES = [p for p in CHANNEL['packages'] if p not in CHANNEL['opt_in_packages']]
 
 # The installed alpha.1 Air's pacman.conf, without comments (observed 2026-10-12).
 AIR_CONF = '''[options]
@@ -93,7 +91,7 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(pacman[0][-2:], ['-Q', 'linux-m4-omarchy'])
         self.assertEqual(pacman[1][-2:], ['-Q', 'gst-plugins-good'])
         self.assertEqual(pacman[2][-1], '-Sy')
-        expected = ['-S', '--needed', '--noconfirm', *DEFAULT_PACKAGES, '--noscriptlet']
+        expected = ['-S', '--needed', '--noconfirm', *CHANNEL['packages'], '--noscriptlet']
         self.assertEqual(pacman[3][-len(expected):], expected)
         for command in pacman:
             self.assertFalse(any(arg.startswith('-') and not arg.startswith('--') and 'u' in arg for arg in command),
@@ -198,6 +196,21 @@ class SetupTests(unittest.TestCase):
             self.put(MODULE.GPU_MODULE, 'hand-patched module')
             self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'unknown: never applied')
 
+    def test_restart_reported_when_the_headphone_card_is_new(self):
+        self.put(MODULE.HEADPHONES_STAGED, 'staged card module')
+        self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'not a running system')
+        (self.root / 'sys/module').mkdir(parents=True)
+        result = self.setup_with(FakeSystem(self.root))
+        self.assertEqual((result['restart_needed'], result['status']),
+                         (True, 'connected; restart once to apply the update'))
+        for name in ('hold', 'attempt'):
+            with self.subTest(name):
+                self.put(MODULE.HEADPHONES_STATE + '/' + name, '')
+                self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], name + ': nothing loads')
+                (self.root / MODULE.HEADPHONES_STATE / name).unlink()
+        (self.root / 'sys/module/snd_soc_j713_headphones').mkdir()
+        self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'already loaded')
+
     def test_boot_not_current_is_a_failure(self):
         with self.assertRaisesRegex(MODULE.Refused, 'boot.bin is not in step'):
             self.setup_with(FakeSystem(self.root, boot_status='refused'))
@@ -268,7 +281,7 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(MODULE.FINGERPRINT, CHANNEL['signing_fingerprint'])
         self.assertEqual(MODULE.SERVER, CHANNEL['server'])
         self.assertEqual(MODULE.REPOSITORY, CHANNEL['repository'])
-        self.assertEqual(list(MODULE.PACKAGES), DEFAULT_PACKAGES)
+        self.assertEqual(list(MODULE.PACKAGES), CHANNEL['packages'])
 
 
 if __name__ == '__main__':

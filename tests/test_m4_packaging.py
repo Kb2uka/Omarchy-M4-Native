@@ -88,8 +88,9 @@ class RecipeTests(unittest.TestCase):
         self.assertIn(CHANNEL['devicetree']['sha256'], text)
         self.assertEqual(load('tools/m4-boot-compose.py').KNOWN_DTBS[CHANNEL['devicetree']['sha256']],
                          'j713-cpu-temperature')
-        self.assertIn("depends=('python' 'pacman' 'omarchy-m4-gpu')\n", text,
-                      'gst-plugins-good must be able to replace the sinks; the GPU fix must come with this version')
+        self.assertIn("depends=('python' 'pacman' 'omarchy-m4-gpu' 'omarchy-m4-headphones')\n", text,
+                      'gst-plugins-good must be able to replace the sinks; the GPU fix and the headphone '
+                      'jack must come with this version')
 
     def test_gpu_recipe_pins_the_channel_module(self):
         text = recipe('omarchy-m4-gpu')
@@ -230,12 +231,15 @@ class PolicyTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     CHECK.check_package(CHANNEL, *self.package('omarchy-m4-speaker', files))
 
-    def test_boot_package_must_bring_the_gpu_package(self):
+    def test_boot_package_must_bring_the_gpu_and_headphone_packages(self):
         realtime = (PACKAGING / 'omarchy-m4-boot/speakersafetyd-j713-realtime.conf').read_bytes()
         files = {**self.boot_files(), CHECK.REALTIME: (0o644, hashlib.sha256(realtime).hexdigest())}
         CHECK.check_package(CHANNEL, *self.boot_package(files))
         with self.assertRaisesRegex(ValueError, 'must require the GPU module package'):
             CHECK.check_package(CHANNEL, *self.boot_package(files, {**self.boot_info(), 'depend': ['python', 'pacman']}))
+        with self.assertRaisesRegex(ValueError, 'must require the headphone jack package'):
+            CHECK.check_package(CHANNEL, *self.boot_package(
+                files, {**self.boot_info(), 'depend': ['python', 'pacman', 'omarchy-m4-gpu']}))
 
     def test_gpu_package_must_be_the_pin(self):
         good = {path: (0o644, digest) for path, digest in CHANNEL['gpu_module'].items()}
@@ -277,9 +281,10 @@ class PolicyTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     CHECK.check_package(CHANNEL, *self.package('omarchy-m4-headphones', files))
 
-    def test_opt_in_packages_are_channel_packages(self):
-        self.assertEqual(CHANNEL['opt_in_packages'], ['omarchy-m4-headphones'])
-        self.assertTrue(set(CHANNEL['opt_in_packages']) <= set(CHANNEL['packages']))
+    def test_every_channel_package_comes_with_the_update(self):
+        # One update path: omarchy-m4-update installs every channel package, none is opt-in.
+        self.assertNotIn('opt_in_packages', CHANNEL)
+        self.assertEqual(list(load('tools/m4-channel-setup.py').PACKAGES), CHANNEL['packages'])
 
     def test_headphone_drop_in_runs_after_registration_and_cannot_fail_it(self):
         text = (PACKAGING / 'omarchy-m4-headphones/30-m4-headphones.conf').read_text()
@@ -299,7 +304,7 @@ class PolicyTests(unittest.TestCase):
 
     def boot_info(self):
         return {'pkgname': ['omarchy-m4-boot'], 'pkgver': ['1-4'], 'arch': ['aarch64'],
-                'depend': ['python', 'pacman', 'omarchy-m4-gpu']}
+                'depend': ['python', 'pacman', 'omarchy-m4-gpu', 'omarchy-m4-headphones']}
 
     def boot_files(self):
         """A boot package that passes every check except the ones under test, unpacked on disk."""

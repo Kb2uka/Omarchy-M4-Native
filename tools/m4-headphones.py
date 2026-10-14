@@ -15,6 +15,10 @@ and removed once both have loaded. If a boot dies while loading, the next boot
 finds the marker and loads nothing, because the Air has no boot menu to recover
 from. --start loads the modules in the running session instead (and clears a
 marker left by such a boot). Inspection is the default.
+
+Off switch: --disable writes a hold file, and no boot or --start loads the
+modules until --enable removes it. Modules already loaded stay until the next
+restart. The package stays installed, so omarchy-m4-update keeps it current.
 """
 import argparse
 import hashlib
@@ -92,6 +96,7 @@ def inspect(root):
         'board': compatible.is_file() and BOARD in compatible.read_bytes().split(b'\0'),
         'kernel': release.is_file() and release.read_text().strip() == RELEASE,
         'staged': {}, 'loaded': {}, 'attempt_marker': (root / STATE / 'attempt').exists(),
+        'held': (root / STATE / 'hold').exists(),
     }
     for name, filename, pin in MODULES:
         path = root / STAGED / filename
@@ -107,6 +112,23 @@ def inspect(root):
     else:
         report['state'] = 'not loaded'
     return report
+
+
+def hold(root, held):
+    """Turn the off switch on (write the hold file) or off (remove it), durably."""
+    state = root / STATE
+    path = state / 'hold'
+    if held:
+        state.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(b'the headphone modules stay unloaded until sudo m4-headphones --enable\n')
+            stream.flush()
+            os.fsync(stream.fileno())
+        sync_directory(state)
+    elif path.exists() or path.is_symlink():
+        path.unlink()
+        sync_directory(state)
 
 
 def load(root, report, run):
@@ -132,8 +154,16 @@ def run_command(command):
 
 
 def run(root, mode, runner=run_command):
+    if mode in ('disable', 'enable'):
+        hold(root, mode == 'disable')
     report = inspect(root)
+    if mode == 'disable':
+        report['status'] = ('off; the loaded modules stay until the next restart'
+                            if report['state'] in ('loaded', 'partial') else 'off; nothing loads at boot')
+        return report
     if mode in ('boot', 'start'):
+        require(not report['held'],
+                'The headphone jack is switched off. Run sudo m4-headphones --enable to switch it back on')
         require(mode == 'start' or not report['attempt_marker'],
                 'A previous boot stopped while loading the headphone modules, so this boot loads none. '
                 'Run sudo m4-headphones --start to try again in the running session')
@@ -142,13 +172,16 @@ def run(root, mode, runner=run_command):
         else:
             status = load(root, report, runner) + '; the J713Headphones card is starting'
             report = dict(inspect(root), status=status)
-    else:
+    else:  # inspect or enable
         report['status'] = {
             'loaded': 'current',
             'partial': 'only some modules are loaded; restart to start the card cleanly',
             'struck': 'a boot stopped while loading; nothing loads at boot until sudo m4-headphones --start',
             'not loaded': 'loads at the next boot',
         }[report['state']]
+        if report['held']:
+            report['status'] = 'off; nothing loads at boot until sudo m4-headphones --enable' + (
+                '; the loaded modules stay until the next restart' if report['state'] in ('loaded', 'partial') else '')
     return report
 
 
@@ -158,12 +191,15 @@ def main(argv=None):
     action.add_argument('--boot', action='store_true',
                         help='load the modules; only m4-j713-audio-register.service runs this')
     action.add_argument('--start', action='store_true', help='load the modules now, in the running session')
+    action.add_argument('--disable', action='store_true',
+                        help='switch the headphone jack off: nothing loads at boot until --enable')
+    action.add_argument('--enable', action='store_true', help='switch the headphone jack back on')
     parser.add_argument('--root', type=Path, default=Path('/'), help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
-    if args.root == Path('/') and (args.boot or args.start) and os.geteuid() != 0:
+    mode = next((name for name in ('boot', 'start', 'disable', 'enable') if getattr(args, name)), 'inspect')
+    if args.root == Path('/') and mode != 'inspect' and os.geteuid() != 0:
         print('m4-headphones: run with sudo', file=sys.stderr)
         return 1
-    mode = 'boot' if args.boot else 'start' if args.start else 'inspect'
     try:
         report = run(args.root, mode)
     except (Refused, OSError, ValueError) as error:

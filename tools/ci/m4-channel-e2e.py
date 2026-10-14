@@ -26,6 +26,8 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 CHANNEL = json.loads((ROOT / 'packaging/omarchy-m4/channel.json').read_text())
 RELEASE = CHANNEL['kernel']['release']
+# Packages an Air's 1-5 setup script does not list; omarchy-m4-boot's dependencies bring them.
+BROUGHT_BY_BOOT = ('omarchy-m4-gpu', 'omarchy-m4-headphones')
 STUB = '''pkgname=e2e-system
 pkgver=1
 pkgrel=1
@@ -190,15 +192,15 @@ def main():
             require(plan['applied'] is False and plan['pacman_conf_changes'], 'Inspection did not plan the change')
             require(snapshot(root) == before, 'Inspection changed files')
             # The first run is the setup script an Air already has from omarchy-m4-boot 1-5,
-            # which does not list omarchy-m4-gpu; boot 1-6's dependency must bring it.
+            # which lists neither omarchy-m4-gpu nor omarchy-m4-headphones; the dependencies
+            # of boot 1-6 (GPU) and 1-7 (headphone jack) must bring them.
             source = (ROOT / 'tools/m4-channel-setup.py').read_text()
             listed = source[source.index('PACKAGES = ('):source.index(')', source.index('PACKAGES = (')) + 1]
             older = scratch / 'm4-channel-setup-1-5.py'
             older.write_text(source.replace(listed, 'PACKAGES = (' + ', '.join(
-                repr(p) for p in CHANNEL['packages']
-                if p != 'omarchy-m4-gpu' and p not in CHANNEL['opt_in_packages']) + ')'))
-            require('omarchy-m4-gpu' not in older.read_text().split('PACKAGES = (')[1].split(')')[0],
-                    'The 1-5 setup script stand-in still lists omarchy-m4-gpu')
+                repr(p) for p in CHANNEL['packages'] if p not in BROUGHT_BY_BOOT) + ')'))
+            require(not any(p in older.read_text().split('PACKAGES = (')[1].split(')')[0] for p in BROUGHT_BY_BOOT),
+                    'The 1-5 setup script stand-in still lists a package the boot package brings')
             results = []
             for attempt in range(2):
                 command = [setup[0], older, *setup[2:]] if attempt == 0 else setup
@@ -207,18 +209,15 @@ def main():
                 require(result.returncode == 0, f'Setup attempt {attempt + 1} failed')
                 results.append(json.loads(result.stdout))
                 if attempt == 0:
-                    require('omarchy-m4-gpu' not in results[0]['install'] and
-                            run(*pacman, '-Q', 'omarchy-m4-gpu', check=False).returncode == 0,
-                            'The first run from the 1-5 setup script did not install omarchy-m4-gpu')
+                    for brought in BROUGHT_BY_BOOT:
+                        require(brought not in results[0]['install'] and
+                                run(*pacman, '-Q', brought, check=False).returncode == 0,
+                                'The first run from the 1-5 setup script did not install ' + brought)
                 conf = (root / 'etc/pacman.conf').read_text()
                 require(conf.count('Include = ' + str(root / 'etc/pacman.d/omarchy-m4.conf')) == 1,
                         'The channel include is missing or duplicated')
             require(all(r['status'].startswith('connected') and r['boot'] == 'current' and
                         r['restart_needed'] is False for r in results), 'Setup did not report a current boot.bin')
-            # The headphone jack package is opt-in: setup leaves it out and the owner installs it.
-            require(run(*pacman, '-Q', 'omarchy-m4-headphones', check=False, capture_output=True).returncode != 0,
-                    'Setup installed the opt-in headphone package')
-            sudo(*pacman, '-S', '--noconfirm', 'omarchy-m4-headphones')
             repos = run('pacman-conf', '--config', root / 'etc/pacman.conf', '--repo-list',
                         capture_output=True, text=True).stdout.split()
             require(repos == ['omarchy-m4', 'core'], 'The channel is not searched first: ' + ' '.join(repos))

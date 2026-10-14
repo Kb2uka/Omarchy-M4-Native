@@ -152,6 +152,7 @@ def check_package(channel, package, info, files, root):
         # An older installed setup script does not list omarchy-m4-gpu; this dependency
         # makes its first omarchy-m4-update run install it with the new boot package.
         require('omarchy-m4-gpu' in names, 'Boot package must require the GPU module package')
+        require('omarchy-m4-headphones' in names, 'Boot package must require the headphone jack package')
     elif name == 'omarchy-m4-speaker':
         for path, digest in channel['speaker_module'].items():
             require(files.get(path, (0, ''))[1] == digest, 'Staged speaker module differs from the pin: ' + path)

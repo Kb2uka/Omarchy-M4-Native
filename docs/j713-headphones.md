@@ -74,8 +74,8 @@ It reads `TX_ACTIVE` (`+0x168`). It never touches `+0x100` (the speaker's
 written only while cluster 2's clocks are off and `TX_ACTIVE` bit 2 is clear.
 `kernel/test/plan_test.c` enforces this contract.
 
-**Package.** `omarchy-m4-headphones` is opt-in: the connect step and
-`omarchy-m4-update` do not install it. It installs:
+**Package.** `omarchy-m4-headphones` arrives with `omarchy-m4-update`, like
+every M4 package (`omarchy-m4-boot` 1-7 depends on it). It installs:
 
 - the two pinned modules under `/usr/lib/omarchy-m4/j713-headphones/`;
 - `m4-headphones`;
@@ -88,7 +88,10 @@ succeeded, and only the pinned files on the pinned kernel and board. A refusal
 or failure never fails the registration. The Air has no boot menu, so the
 tool also writes an attempt marker durably before it loads anything. If a boot
 dies during the load, the next boot loads nothing and says so in the journal;
-`sudo m4-headphones --start` retries in the running session. Five package
+`sudo m4-headphones --start` retries in the running session.
+`sudo m4-headphones --disable` is the off switch: it writes
+`/var/lib/omarchy-m4/headphones/hold`, and nothing loads at boot until
+`sudo m4-headphones --enable`. Five package
 paths fall under protected prefixes. Each is an exact `protected_exceptions`
 entry in `channel.json`: the drop-in, the two UCM files, the WirePlumber
 fragment and its hook. None of them replaces or edits a speaker file.
@@ -125,17 +128,19 @@ The modules loaded on the test Air have these hashes and build IDs.
 
 ## Existing installs
 
-On an Air connected to M4 updates:
+On an Air connected to M4 updates, run the update and restart once:
 
 ```bash
-sudo pacman -S omarchy-m4-headphones
+omarchy-m4-update
 ```
 
-Restart once. Then, with a headset plugged in, "Headphones" is the default
-output. Check with `m4-headphones` (inspection only) and `wpctl status`.
+Then, with a headset plugged in, "Headphones" is the default output. Check with
+`m4-headphones` (inspection only) and `wpctl status`.
 
-**Remove:** `sudo pacman -R omarchy-m4-headphones`, then restart. The overlay
-stays applied until then. The speakers are not affected.
+**Switch it off:** `sudo m4-headphones --disable`, then restart. The package
+stays installed and current, and the overlay stays applied until the restart.
+`sudo m4-headphones --enable` and a restart switch it back on. The speakers are
+not affected either way.
 
 ## Known issue
 
