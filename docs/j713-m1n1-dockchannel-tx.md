@@ -102,9 +102,12 @@ sudo python3 m4-m1n1-test-stage2.py status
 ```
 
 It replaces only the first 0x110000 bytes of `boot.bin`, and only when they
-are alpha.1's stage 2 or the #82 reporter's dockchannel-off build. The old
-bytes are kept as `stage2.pre-issue82.bin` beside `boot.bin`. `rollback` writes
-them back, keeping any devicetree update made in between.
+are alpha.1's stage 2 or the #82 reporter's dockchannel-off build. Beside
+`boot.bin` it keeps the old bytes as `stage2.pre-issue82.bin` and a receipt
+naming both loaders as `stage2.issue82.json`. `rollback` writes the old bytes
+back, keeping any devicetree update made in between, and only while stage 2 is
+still the installed test build. It also finishes an interrupted install or
+rollback.
 
 Stage 1 is installed from macOS recoveryOS (1TR) with the command installer
 step 2 uses, run against the test stage 1 instead of the kit's `boot/m1n1.bin`:

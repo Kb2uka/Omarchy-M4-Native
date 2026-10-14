@@ -29,12 +29,13 @@ class M1n1TestStage2Tests(unittest.TestCase):
         self.dir = Path(temporary.name)
         self.boot = self.dir / 'boot.bin'
         self.backup = self.dir / 'stage2.pre-issue82.bin'
-        self.installed = self.dir / 'stage2.issue82-installed.sha256'
+        self.receipt = self.dir / 'stage2.issue82.json'
         self.download = self.dir / 'm1n1-stage2-issue82-test1.bin'
         self.download.write_bytes(TEST)
 
-    def run_helper(self, *args, known=(STOCK, REPORTER)):
-        env = dict(os.environ, M4_M1N1_TEST_BOOT=str(self.boot), M4_M1N1_TEST_KNOWN=','.join(sha(k) for k in known))
+    def run_helper(self, *args, known=(STOCK, REPORTER), published=()):
+        env = dict(os.environ, M4_M1N1_TEST_BOOT=str(self.boot), M4_M1N1_TEST_KNOWN=','.join(sha(k) for k in known),
+                   M4_M1N1_TEST_PUBLISHED=','.join(sha(p) for p in published))
         result = subprocess.run([sys.executable, str(HELPER), *args], capture_output=True, text=True, env=env)
         return result.returncode, result.stdout, result.stderr
 
@@ -46,7 +47,7 @@ class M1n1TestStage2Tests(unittest.TestCase):
             with self.subTest(start=start[:1]):
                 self.boot.write_bytes(start + PAYLOAD)
                 self.backup.unlink(missing_ok=True)
-                self.installed.unlink(missing_ok=True)
+                self.receipt.unlink(missing_ok=True)
                 code, out, err = self.install()
                 self.assertEqual(code, 0, err)
                 self.assertEqual(self.boot.read_bytes(), TEST + PAYLOAD)
@@ -61,7 +62,7 @@ class M1n1TestStage2Tests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(self.boot.read_bytes(), STOCK + PAYLOAD + b' updated devicetree')
         self.assertFalse(self.backup.exists())
-        self.assertFalse(self.installed.exists())
+        self.assertFalse(self.receipt.exists())
         self.assertEqual(self.run_helper('rollback')[0], 1)
 
     def test_refusals_change_nothing(self):
@@ -89,7 +90,7 @@ class M1n1TestStage2Tests(unittest.TestCase):
         self.assertEqual(self.install()[0], 0)
         code, _, err = self.install()
         self.assertEqual(code, 1)
-        self.assertIn('roll back first', err)
+        self.assertIn('run rollback first', err)
         self.assertEqual(self.backup.read_bytes(), STOCK)
 
     def test_rollback_refusals_change_nothing(self):
@@ -98,7 +99,7 @@ class M1n1TestStage2Tests(unittest.TestCase):
         self.backup.write_bytes(b'X' * STAGE2)
         code, _, err = self.run_helper('rollback')
         self.assertEqual(code, 1)
-        self.assertIn('backup is not a known stage 2', err)
+        self.assertIn('backup is not the replaced stage 2', err)
         self.assertEqual(self.boot.read_bytes(), TEST + PAYLOAD)
         # Another loader, known or not, replaced the test build since: keep it.
         self.backup.write_bytes(STOCK)
@@ -130,7 +131,47 @@ class M1n1TestStage2Tests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)['stage2_sha256'], sha(STOCK))
         self.install()
-        self.assertEqual(json.loads(self.run_helper('status')[1])['stage2'], 'test build or unknown')
+        status = json.loads(self.run_helper('status')[1])
+        self.assertEqual(status['stage2'], 'test build or unknown')
+        self.assertEqual(status['receipt'], {'installed': sha(TEST), 'replaced': sha(STOCK)})
+
+    def test_rollback_finishes_interrupted_states(self):
+        receipt = json.dumps({'installed': sha(TEST), 'replaced': sha(STOCK)})
+        # Stopped after the receipt, after the backup, or after rollback removed the backup.
+        for name, files in (('receipt only', {'receipt'}), ('receipt and backup', {'receipt', 'backup'})):
+            with self.subTest(name):
+                self.boot.write_bytes(STOCK + PAYLOAD)
+                self.receipt.write_text(receipt)
+                if 'backup' in files:
+                    self.backup.write_bytes(STOCK)
+                self.assertEqual(self.install()[0], 1)
+                code, out, err = self.run_helper('rollback')
+                self.assertEqual(code, 0, err)
+                self.assertEqual(json.loads(out)['restored'], 'already in place')
+                self.assertEqual(self.boot.read_bytes(), STOCK + PAYLOAD)
+                self.assertFalse(self.receipt.exists() or self.backup.exists())
+
+    def test_rollback_of_a_receiptless_install_needs_a_published_build(self):
+        # The first published helper kept only the backup.
+        for published, code, boot in (((), 1, TEST), ((TEST,), 0, STOCK)):
+            with self.subTest(published=bool(published)):
+                self.boot.write_bytes(TEST + PAYLOAD)
+                self.backup.write_bytes(STOCK)
+                self.assertEqual(self.run_helper('rollback', published=published)[0], code)
+                self.assertEqual(self.boot.read_bytes(), boot + PAYLOAD)
+                self.assertEqual(self.backup.exists(), code == 1)
+
+    def test_foreign_receipt_is_refused(self):
+        self.boot.write_bytes(TEST + PAYLOAD)
+        self.backup.write_bytes(STOCK)
+        for text in ('not json', '[]', json.dumps({'installed': sha(TEST), 'replaced': '0' * 64})):
+            with self.subTest(text=text[:8]):
+                self.receipt.write_text(text)
+                for command in ('status', 'rollback'):
+                    code, _, err = self.run_helper(command)
+                    self.assertEqual(code, 1)
+                    self.assertIn('not a receipt this helper wrote', err)
+                self.assertEqual(self.boot.read_bytes(), TEST + PAYLOAD)
 
 
 if __name__ == '__main__':

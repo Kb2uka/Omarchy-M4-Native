@@ -8,8 +8,11 @@
   sudo python3 m4-m1n1-test-stage2.py status
 
 Stage 2 is the first 0x110000 bytes of boot.bin; the payload after it is never
-changed. The replaced stage 2 is kept beside boot.bin, and rollback writes only
-those bytes back, so a devicetree update made in between survives. Changes take
+changed. Beside boot.bin, install keeps the replaced stage 2 in
+stage2.pre-issue82.bin and a receipt naming both loaders in
+stage2.issue82.json. Rollback writes only the replaced bytes back, so a
+devicetree update made in between survives, and only while stage 2 is still the
+test build. It also finishes an interrupted install or rollback. Changes take
 effect at the next boot. M4_M1N1_TEST_* variables are for tests only.
 """
 import hashlib
@@ -25,12 +28,16 @@ KNOWN = {
     '3a3f7a64c65fc366d5ac9aece3e1bee64119be012aa1ec5b15d2743c6f91fce4': 'alpha.1',
     '97550b7c505879ad8c2b8e79618b4f0581e10d2e3eb6043182016882d0a0407e': '#82 reporter dockchannel-off build',
 }
+# Published test builds. The first helper wrote no receipt, so rollback
+# recognises these by hash when the receipt is missing.
+PUBLISHED = {'7bc78b9138ae449eeab08d0a713c96f25e0d7477b7a48f2804da2c17509a9609'}
 BOOT = Path(os.environ.get('M4_M1N1_TEST_BOOT', '/boot/efi/omarchy/boot.bin'))
 if 'M4_M1N1_TEST_BOOT' in os.environ and 'M4_M1N1_TEST_KNOWN' in os.environ:
     # Tests cannot carry real loaders, so a test boot.bin may name its own.
     KNOWN = dict.fromkeys(os.environ['M4_M1N1_TEST_KNOWN'].split(','), 'test fixture')
+    PUBLISHED = set(filter(None, os.environ.get('M4_M1N1_TEST_PUBLISHED', '').split(',')))
 BACKUP = BOOT.with_name('stage2.pre-issue82.bin')
-INSTALLED = BOOT.with_name('stage2.issue82-installed.sha256')
+RECEIPT = BOOT.with_name('stage2.issue82.json')
 CHOSEN = Path('/proc/device-tree/chosen')
 
 
@@ -69,6 +76,18 @@ def read_boot():
     return boot
 
 
+def read_receipt():
+    if not RECEIPT.exists():
+        return None
+    try:
+        receipt = json.loads(RECEIPT.read_text())
+        valid = set(receipt) == {'installed', 'replaced'} and receipt['replaced'] in KNOWN
+    except (ValueError, TypeError, AttributeError):
+        valid = False
+    require(valid, f'{RECEIPT} is not a receipt this helper wrote; nothing changed')
+    return receipt
+
+
 def replace_stage2(boot, stage2):
     result = stage2 + boot[STAGE2:]
     # Narrow the window against another tool rewriting boot.bin meanwhile.
@@ -81,8 +100,7 @@ def replace_stage2(boot, stage2):
 def status():
     head = sha(read_boot()[:STAGE2])
     receipt = {'boot': str(BOOT), 'stage2_sha256': head, 'stage2': KNOWN.get(head, 'test build or unknown'),
-               'backup': str(BACKUP) if BACKUP.exists() else None,
-               'installed_test': INSTALLED.read_text().strip() if INSTALLED.exists() else None}
+               'backup': str(BACKUP) if BACKUP.exists() else None, 'receipt': read_receipt()}
     for stage in ('stage1', 'stage2'):
         tag = CHOSEN / f'asahi,m1n1-{stage}-version'
         if tag.exists():
@@ -95,33 +113,42 @@ def install(file, want):
     require(len(loader) == STAGE2, f'{file} is {len(loader)} bytes, not a stage 2 loader')
     require(sha(loader) == want, f'{file} does not match {want}; download it again')
     require(want not in KNOWN, 'that is not a test build; use rollback')
-    require(not BACKUP.exists() and not INSTALLED.exists(), f'{BACKUP} already exists; roll back first')
+    require(not BACKUP.exists() and not RECEIPT.exists(), 'a test build was installed before; run rollback first')
     boot = read_boot()
     head = sha(boot[:STAGE2])
     require(head in KNOWN, f'stage 2 in boot.bin is not a known loader ({head}); nothing changed')
+    # Receipt, then backup, then boot.bin: rollback recovers from a stop after any step.
+    write(RECEIPT, json.dumps({'installed': want, 'replaced': head}).encode() + b'\n')
     write(BACKUP, boot[:STAGE2])
     require(BACKUP.read_bytes() == boot[:STAGE2], 'Backup does not match')
-    write(INSTALLED, (want + '\n').encode())
     result = replace_stage2(boot, loader)
     return {'status': 'installed; takes effect at next boot', 'replaced': KNOWN[head], 'backup': str(BACKUP),
             'boot_sha256': sha(result), 'rollback': 'sudo python3 m4-m1n1-test-stage2.py rollback'}
 
 
 def rollback():
-    require(BACKUP.is_file() and INSTALLED.is_file(), f'no backup at {BACKUP}')
-    saved = BACKUP.read_bytes()
-    require(len(saved) == STAGE2 and sha(saved) in KNOWN, 'backup is not a known stage 2; nothing changed')
-    installed = INSTALLED.read_text().strip()
+    receipt = read_receipt()
+    require(receipt is not None or BACKUP.exists(), 'no test build was installed; nothing to roll back')
     boot = read_boot()
     head = sha(boot[:STAGE2])
-    # Only undo the test build this helper installed, never a loader that replaced it since.
-    require(boot[:STAGE2] == saved or head == installed,
-            f'stage 2 in boot.bin ({head}) is not the installed test build {installed}; nothing changed')
-    if boot[:STAGE2] != saved:
+    replaced = receipt['replaced'] if receipt else None
+    if head == replaced or (BACKUP.exists() and boot[:STAGE2] == BACKUP.read_bytes()):
+        restored = 'already in place'
+    else:
+        # Only undo the test build this helper installed, never a loader that replaced it since.
+        installed = receipt['installed'] if receipt else None
+        require(head == installed or (receipt is None and head in PUBLISHED),
+                f'stage 2 in boot.bin ({head}) is not the installed test build; nothing changed')
+        require(BACKUP.is_file(), f'no backup at {BACKUP}; nothing changed')
+        saved = BACKUP.read_bytes()
+        require(len(saved) == STAGE2 and sha(saved) in KNOWN and (replaced is None or sha(saved) == replaced),
+                'backup is not the replaced stage 2; nothing changed')
         replace_stage2(boot, saved)
-    BACKUP.unlink()
-    INSTALLED.unlink()
-    return {'status': 'restored; takes effect at next boot', 'restored': KNOWN[sha(saved)]}
+        restored = KNOWN[sha(saved)]
+    # Backup first, then receipt: a stop in between is finished by the next rollback.
+    BACKUP.unlink(missing_ok=True)
+    RECEIPT.unlink(missing_ok=True)
+    return {'status': 'restored; takes effect at next boot', 'restored': restored}
 
 
 def main(argv):
