@@ -120,7 +120,7 @@ def hold(root, held):
     path = state / 'hold'
     if held:
         state.mkdir(parents=True, exist_ok=True)
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, 'wb') as stream:
             stream.write(b'the headphone modules stay unloaded until sudo m4-headphones --enable\n')
             stream.flush()

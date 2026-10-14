@@ -18,7 +18,7 @@ source=('m4-headphones.py' '30-m4-headphones.conf' 'J713Headphones.conf' 'HiFi.c
         '83-j713-headphones.conf' 'j713-headphones.lua' 'MIT.txt' 'GPL-2.0-only.txt'
         "j713_hp_dt.ko::${url}/releases/download/package-inputs/j713_hp_dt-9ba22f0e.ko"
         "snd-soc-j713-headphones.ko::${url}/releases/download/package-inputs/snd-soc-j713-headphones-a73ef565.ko")
-sha256sums=('31f924d97860c0087b452bed8b931a656b259659afcf9c0c2ee03055d1c9022e'
+sha256sums=('3bab5bc4c97c2be8bbe74cc0bf40a704107150e1fe48d4ce648d6e6eb9c10e44'
             '2db802990b7514f3cd1f54168ce3c8adef9ec2dd061743d341490ee3985a9de2'
             '847dfe9dfe8f69877bfcb56ccd1f9c6425d9e28ba0ea826d96096152f7ce66b2'
             'b976cd08240b51065d8034dfd90ba79ae5ffc23c65ed83096ade1019a018bdb6'
