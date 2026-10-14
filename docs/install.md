@@ -11,8 +11,10 @@ development computer or USB drive afterward.
 
 ## Download
 
-Get `download-j713.command` from the **v0.1.0-alpha.1** GitHub release. In macOS
-Terminal, run the downloaded file:
+Get `download-j713.command` from the **v0.1.0-alpha.1-update.2** GitHub release.
+It installs the same alpha.1 system as the original v0.1.0-alpha.1 kit; its
+speaker-filter step also accepts macOS 26.6.2. In macOS Terminal, run the
+downloaded file:
 
 ```sh
 bash "$HOME/Downloads/download-j713.command"
@@ -26,7 +28,7 @@ ZIP as an installer. Downloads become publicly accessible when the repository
 becomes public; before then, GitHub authentication is required to acquire assets.
 
 The resulting kit is at:
-`~/Downloads/Omarchy-M4-v0.1.0-alpha.1/installer/`.
+`~/Downloads/Omarchy-M4-v0.1.0-alpha.1-update.2/installer/`.
 You may copy that complete directory to an exFAT USB drive. Keep its directory
 layout intact. If using USB, use the **port closest to the hinge**: the current
 Linux image leaves the front port disabled. macOS may recognize both ports.
@@ -37,12 +39,13 @@ Linux image leaves the front port disabled. macOS may recognize both ports.
    An administrator account is required; run from native ARM64 macOS, not Rosetta.
    The installer firmware profile requires macOS **26.5.1 or newer**. Audio input
    compatibility is narrower: this release recognizes exact Apple AudioDSP and
-   AID37 tuning files recorded in `owner-audio/bundle/manifest.json`. Different
-   macOS builds may be refused before any partition changes.
+   AID37 tuning files recorded in `owner-audio/bundle/manifest.json`: macOS
+   26.5.1, 26.5.2 and 26.6.2 (25G83) are qualified. Different macOS builds may be
+   refused before any partition changes.
 2. Change into the kit directory. For the default download location:
 
    ```sh
-   cd "$HOME/Downloads/Omarchy-M4-v0.1.0-alpha.1/installer"
+   cd "$HOME/Downloads/Omarchy-M4-v0.1.0-alpha.1-update.2/installer"
    bash Install.command --install
    ```
 
@@ -134,7 +137,7 @@ Air once. From then on, Shut Down turns it off, and `omarchy-m4-update` brings
 new M4 fixes. [Details, messages and rollback](updates.md).
 
 A later installer will do this step on its own (the published v0.1.0-alpha.1
-installer does not). Once your
+installers, including update 2, do not). Once your
 account exists and the Air is online, a background service
 (`m4-channel-connect.timer`) runs the same setup within about 20 minutes and
 retries until it succeeds; restart once afterwards. Check it with
