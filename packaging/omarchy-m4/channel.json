@@ -37,7 +37,7 @@
       "usr/lib/systemd/user/omarchy-m4-update-check.timer",
       "usr/share/licenses/omarchy-m4-boot/",
       "usr/bin/omarchy-m4-update",
-      "usr/lib/omarchy-m4/m4-channel-setup.py"
+      "usr/lib/omarchy-m4/m4-channel-setup.py", "usr/lib/omarchy-m4/m4-lid-lock.py"
     ],
     "linux-m4-omarchy": [
       "usr/lib/modules/7.1.9-m4-gpu-backport-20261008/",

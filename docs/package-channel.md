@@ -133,6 +133,31 @@ file.
   `J713Headphones` card, the WirePlumber fragment `83-j713-headphones.conf`
   and its hook. All five are new files; none replaces a speaker or ALSA file.
 
+### omarchy-m4-keyring 20261012-2 and omarchy-m4-boot 1-8
+
+- **User-level pacman verifies the channel database** (issue #71). alpha.1
+  leaves `/etc/pacman.d/gnupg` readable by root only, so with
+  `DatabaseRequired` every `pacman` run as the desktop user printed keyring
+  errors. The directory becomes `755` and `pubring.gpg`, `pubring.kbx` and
+  `trustdb.gpg` become `644`, as on stock Arch. Private keys, revocation
+  certificates and agent sockets keep their modes, and symlinks are never
+  followed.
+- **`omarchy-m4-keyring` 20261012-2** applies the modes from its install
+  scriptlet, so an Air that is already connected is fixed by its next
+  `omarchy-m4-update` run.
+- **`omarchy-m4-boot` 1-8** ships the setup script that applies the same modes
+  when a new install connects.
+
+### omarchy-m4-boot 1-9
+
+- **Lid close locks the screen on installed Airs** ([#84](https://github.com/Kb2uka/Omarchy-M4-Native/issues/84)).
+  The image fix (#85) reached only new images; this delivers it through
+  `omarchy-m4-update`. The install script runs `m4-lid-lock.py`, which writes
+  the lock screen's PAM file when it is missing and appends the two lid binds
+  once to each user's Omarchy configuration, as that user. Details:
+  [J713 desktop image](j713-desktop-image.md#lid-close-and-the-lock-screen).
+- The binds take effect at the next login. A refusal never fails the update.
+
 ## Connecting new installs
 
 The release root builder (`tools/prepare-j713-release.py`) adds
@@ -217,6 +242,13 @@ wrappers), Widevine state, `/usr/lib/omarchy` (audio modules and helpers),
 the speaker and ALSA/WirePlumber configuration, firmware, or system service
 units. The only user units are the notifier's own two files. The boot object
 is written only by the composer.
+
+Install scripts never install files there either. Their tools change state
+outside the package only in known states and refuse anything else: the
+speaker and GPU tools swap only their own module and its pin, and from
+`omarchy-m4-boot` 1-9 `m4-lid-lock.py` writes the lock screen's PAM file when
+it is missing and appends the lid binds once to each user's Omarchy
+configuration, running as that user.
 
 These protected components stay manifest-managed outside pacman, as alpha.1
 installed them. pacman refuses to install over files it does not own, and

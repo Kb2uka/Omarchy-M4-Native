@@ -25,6 +25,7 @@ STAGED = {
                         'm4-update-check.py': 'tools/m4-update-check.py',
                         'm4-channel-setup.py': 'tools/m4-channel-setup.py',
                         'omarchy-m4-update': 'tools/omarchy-m4-update',
+                        'm4-lid-lock.py': 'tools/m4-lid-lock.py',
                         'MIT.txt': 'LICENSES/MIT.txt',
                         'GPL-2.0-or-later.txt': 'LICENSES/GPL-2.0-or-later.txt'},
     'omarchy-m4-speaker': {'m4-speaker-module.py': 'tools/m4-speaker-module.py',
