@@ -148,7 +148,7 @@ def changed(before, after):
     for path in sorted(set(before) & set(after)):
         old, new = before[path], after[path]
         for name in sorted(set(old) | set(new)):
-            if name != 'phandle' and old.get(name) != new.get(name):
+            if old.get(name) != new.get(name):
                 found.append(f'{path} {name}')
     return found
 
@@ -157,7 +157,8 @@ def describe(dtb, warnings):
     root = audit.parse_dtb(dtb)
     enabled = enabled_nodes(root)
     phandles = audit.fdt_phandles(root)
-    props = {node.path: {name: comparable(name, value, phandles) for name, value in node.props.items()}
+    props = {node.path: {name: comparable(name, value, phandles) for name, value in node.props.items()
+                         if name not in ('phandle', 'linux,phandle')}
              for node in audit.fdt_walk(root)}
     return {'compatible': audit.node_compatibles(root), 'warnings': warnings, 'props': props,
             'props_raw': {node.path: node.props for node in audit.fdt_walk(root)},
