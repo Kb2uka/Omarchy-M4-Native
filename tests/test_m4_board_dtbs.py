@@ -136,6 +136,19 @@ class BoardDevicetreeTool(unittest.TestCase):
                             'the fixture must actually renumber phandles')
         self.assertEqual(MODULE.changed(before['props'], after['props']), ['/good@4 iommus'])
 
+    def test_enabled_digest_ignores_renumbering_and_disabled_nodes_only(self):
+        quiet = SYNTHETIC.replace(
+            '    off: iommu@1',
+            '    first@0 { compatible = "test,first"; reg = <0>; power-domains = <&extra>; status = "disabled"; };\n'
+            '    extra: power@a { compatible = "test,power"; reg = <0xa>; #power-domain-cells = <0>; status = "disabled"; };\n'
+            '    off: iommu@1')
+        edited = quiet.replace('iommus = <&on 7>, <&on 8>', 'iommus = <&on 7>, <&on 9>')
+        digest = lambda source: MODULE.describe(subprocess.run(
+            ['dtc', '-I', 'dts', '-O', 'dtb'], input=source.encode(), capture_output=True, check=True).stdout,
+            [])['enabled_digest']
+        self.assertEqual(digest(quiet), digest(SYNTHETIC))
+        self.assertNotEqual(digest(edited), digest(SYNTHETIC))
+
     def test_warning_location_is_stripped(self):
         line = '<stdin>:12.3-40.5: Warning (simple_bus_reg): /soc/x@1: message'
         self.assertEqual(MODULE.LOCATION.sub('', line), 'Warning (simple_bus_reg): /soc/x@1: message')

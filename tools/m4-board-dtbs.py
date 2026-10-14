@@ -6,11 +6,13 @@
 Usage: m4-board-dtbs.py <asahi-tree>
 The tree comes from tools/ci/fetch-asahi-dts.sh. Prints a JSON report: for each
 board, the dtc warnings, the nodes this repository's patches/00*.patch enable or
-disable compared with upstream, and the enabled nodes whose iommus, phys,
+disable or change compared with upstream, a digest of every enabled node's
+properties (phandles compared by target), and the enabled nodes whose iommus, phys,
 power-domains or mboxes point at a node that is missing or disabled. Only the
 J713 board is qualified; the others show what the shared patches change on
 Macs nobody here has booted.
 """
+import hashlib
 import importlib.util
 import json
 import os
@@ -160,7 +162,9 @@ def describe(dtb, warnings):
     return {'compatible': audit.node_compatibles(root), 'warnings': warnings, 'props': props,
             'props_raw': {node.path: node.props for node in audit.fdt_walk(root)},
             'model': audit.cstrings(root.props.get('model', b''))[0] if 'model' in root.props else '',
-            'enabled': enabled, 'dangling': dangling(root, enabled)}
+            'enabled': enabled, 'dangling': dangling(root, enabled),
+            'enabled_digest': hashlib.sha256(json.dumps({path: props[path] for path in enabled},
+                                                        sort_keys=True).encode()).hexdigest()}
 
 
 def report(tree, patches=PATCHES):
@@ -181,6 +185,7 @@ def report(tree, patches=PATCHES):
                                              if path not in before['enabled']),
                 'disabled_by_patches': sorted(path for path in before['enabled'] if path not in after['enabled']),
                 'changed_by_patches': changed(before['props'], after['props']),
+                'enabled_digest': after['enabled_digest'],
                 'dangling_upstream': before['dangling'],
                 'dangling_added': sorted(set(after['dangling']) - set(before['dangling'])),
             }
