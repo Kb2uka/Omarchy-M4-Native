@@ -29,6 +29,9 @@ STAGED = {
     'omarchy-m4-speaker': {'m4-speaker-module.py': 'tools/m4-speaker-module.py',
                            'MIT.txt': 'LICENSES/MIT.txt',
                            'GPL-2.0-only.txt': 'LICENSES/GPL-2.0-only.txt'},
+    'omarchy-m4-gpu': {'m4-gpu-module.py': 'tools/m4-gpu-module.py',
+                       'MIT.txt': 'LICENSES/MIT.txt',
+                       'GPL-2.0-only.txt': 'LICENSES/GPL-2.0-only.txt'},
 }
 MAKEPKG_CONF = '''\
 CARCH="aarch64"
