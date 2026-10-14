@@ -270,22 +270,22 @@ int main(int argc, char **argv)
         if (dock_len != stream_len || memcmp(dock, stream, stream_len))
             return fail("a paused host lost bytes");
     } else if (!strcmp(which, "slow_host_pause")) {
-        /* A host slower than the writes keeps the FIFO full, then pauses 150 ms: nothing may be lost. */
-        fifo_free = 8;
+        /*
+         * A proxy reply to a host slower than the writes: the FIFO stays full and
+         * every drain lands inside a wait. Then the host pauses 150 ms mid-reply.
+         */
+        char reply[800];
+        for (size_t i = 0; i < sizeof(reply); i++)
+            reply[i] = (char)('a' + i % 26);
+        fifo_free = 0;
         drain_every = 200;
         dockchannel_uart_init();
-        for (int i = 0; i < 10; i++)
-            console_line(i);
-        settle();
+        iodev_write(IODEV_DOCKCHANNEL_UART, reply, 400);
         pause_from = now_us;
         pause_until = now_us + 150000;
-        for (int i = 10; i < 20; i++)
-            console_line(i);
-        settle();
-        if (!screen_complete())
-            return fail("screen missed console output");
-        if (dock_len != stream_len || memcmp(dock, stream, stream_len))
-            return fail("a paused slow host lost bytes");
+        iodev_write(IODEV_DOCKCHANNEL_UART, reply + 400, 400);
+        if (dock_len != sizeof(reply) || memcmp(dock, reply, sizeof(reply)))
+            return fail("a paused slow host lost reply bytes");
     } else if (!strcmp(which, "consumer_vanishes")) {
         /* A host drains, then stops for good: still one bounded wait, then no more. */
         fifo_free = 64;
