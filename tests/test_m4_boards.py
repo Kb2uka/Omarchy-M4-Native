@@ -80,11 +80,22 @@ class BoardTable(unittest.TestCase):
                     self.assertEqual(set(installer), {'stub', 'expert_only'})
 
     def test_install_command_accepts_exactly_the_qualified_models(self):
+        """Run Install.command's real model gate for every model, with sysctl stubbed."""
         script = (ROOT / 'packaging/Install.command').read_text()
         gates = [line for line in script.splitlines() if 'sysctl -n hw.model' in line]
         self.assertEqual(len(gates), 1, 'Install.command must have one hardware-model gate')
-        accepted = set(re.findall(r'== (Mac\d+,\d+)', gates[0]))
-        self.assertEqual(accepted, {model for board in QUALIFIED for model in board['models']})
+        self.assertIn('/usr/sbin/sysctl -n hw.model', gates[0])
+        gate = 'sysctl() { printf "%s\\n" "$MODEL"; }\n' + gates[0].replace('/usr/sbin/sysctl', 'sysctl')
+        qualified = {model for board in QUALIFIED for model in board['models']}
+        models = [model for board in BOARDS for model in board['models']]
+        models += [model for entry in TABLE['other_socs'] for model in entry['models']]
+        for model in models + ['Mac15,12', '']:
+            with self.subTest(model=model):
+                result = subprocess.run(['bash', '-c', gate], capture_output=True, text=True,
+                                        env={'MODEL': model, 'PATH': os.environ.get('PATH', '/usr/bin:/bin')})
+                self.assertEqual(result.returncode == 0, model in qualified, result.stderr)
+                if model not in qualified:
+                    self.assertIn('This release supports only', result.stderr)
 
     def test_installer_profiles_match_the_table(self):
         patch = (ROOT / 'patches/installer/j713-recovery-radio-profile.patch').read_text()
@@ -219,15 +230,29 @@ def snapshot(root):
             for path in sorted(root.rglob('*'))}
 
 
+def set_writable(root, writable):
+    paths = [root, *root.rglob('*')]
+    for path in paths if writable else reversed(paths):
+        mode = 0o755 if path.is_dir() else 0o644
+        path.chmod(mode if writable else mode & 0o555)
+
+
 class LiveBoardGates(unittest.TestCase):
     """Each gate refuses every refused board with its own message and writes nothing."""
 
-    def outcome(self, call, compatible):
+    def outcome(self, call, compatible, frozen=False):
+        """Run one gate on a fixture root; frozen makes the tree read-only during the call.
+
+        Read-only modes catch a write that is undone before the refusal, which a
+        content snapshot alone would miss (except as root, where only the snapshot holds).
+        """
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / COMPATIBLE).parent.mkdir(parents=True)
             (root / COMPATIBLE).write_bytes(compatible)
             before = snapshot(root)
+            if frozen:
+                set_writable(root, False)
             try:
                 call(root)
                 error = None
@@ -235,6 +260,8 @@ class LiveBoardGates(unittest.TestCase):
                 raise
             except Exception as caught:  # each gate reports through its own exception type
                 error = caught
+            finally:
+                set_writable(root, True)
             return error, snapshot(root) == before
 
     def test_refused_boards_stop_at_the_board_gate(self):
@@ -243,7 +270,7 @@ class LiveBoardGates(unittest.TestCase):
                 if board['support'] != 'refused':
                     continue
                 with self.subTest(gate=name, board=board['target']):
-                    error, untouched = self.outcome(call, identity(board))
+                    error, untouched = self.outcome(call, identity(board), frozen=True)
                     self.assertIsInstance(error, kind)
                     self.assertIn(message, str(error))
                     self.assertTrue(untouched, 'a refused board changed the filesystem')
