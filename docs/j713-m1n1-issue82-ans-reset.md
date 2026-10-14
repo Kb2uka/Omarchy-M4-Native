@@ -38,7 +38,7 @@ builds and from counters handed to Linux. Addresses are in test 1's stage 1
 From the published stage 1 source and test 1's disassembly:
 
 ```text
-0x23e7c  bl rtkit_sleep        ANS acks SLEEP, then its CPU RUN bit is cleared
+0x23e7c  bl rtkit_sleep        ask ANS to SLEEP, wait for the ack, clear CPU RUN
 0x23e90  bl pmgr_reset "ANS"   -> pmgr_reset_device():
 0x26934    ldr  PMGR power-state register (must be active)
 0x26954    bl   debug_printf   29 bytes to the dockchannel, nothing on screen
@@ -55,8 +55,12 @@ From the published stage 1 source and test 1's disassembly:
   slow the sleep handshake.
 - On the boot CPU SError is unmasked. `exc_serr()` prints a register dump to
   the console and reboots through the watchdog, which resets this model (see
-  [air-watchdog.md](air-watchdog.md)). A freeze with no reboot is therefore
-  not a plain SError.
+  [air-watchdog.md](air-watchdog.md)). An SError whose report completes would
+  therefore reboot, not freeze. One whose report stalls, for example on a
+  dockchannel access, would look like this freeze, so SError is not excluded.
+- `rtkit_sleep()` returns and stops the ANS CPU even if the SLEEP handshake
+  failed (its `ret < 0` check never fires on a `bool`). Phase 3 shows only
+  that it returned, not that ANS acknowledged SLEEP.
 - Upstream m1n1 (AsahiLinux/m1n1 `94395ad`, 2026-10-13) has the same
   `nvme_shutdown()`, `pmgr_reset_device()` and dockchannel code.
 - alpha.1's kernel (companion `kernel-controller`, `drivers/nvme/host/apple.c`
@@ -80,10 +84,8 @@ explanations fit everything above:
   that delay. With the dockchannel off the reset comes sooner; in Linux it
   comes much later; both work.
 
-Jev (`jev-1.13.0`, advisory) put B ahead: "reset timing" 0.74, and 0.97 as
-the best fit among five explanations. It gave the dockchannel stall 0.23,
-layout alone 0.18, and the FIFO-full theory 0.05. All planted false
-controls scored 0.06–0.22.
+B fits more of the evidence: it explains why the same reset works in Linux,
+and needs no stall in the console hardware. Neither is proven.
 
 ## The experiment loaders
 
@@ -103,10 +105,9 @@ booted.
 `v2` separates A from B. `v1` is the candidate fix in the layout that
 freezes. ANS is still put to sleep and stopped, as upstream m1n1 does for an
 ANS left running by iBoot (`nvme_ensure_shutdown()`), and Linux resets it
-later. `v3` checks that the print inside the window is needed at all. Jev
-chose `v2` first (0.83), rated the risk to a reporter who already recovers
-through 1TR as low (0.74, medium 0.25), and rated `v1` as support for the
-candidate fix at 0.77.
+later. `v3` checks that the print inside the window is needed at all. Boot
+`v2` first. The worst expected result of each is the same freeze, recovered
+through 1TR as before.
 
 ```sh
 python3 patches-m1n1/issue82-variants.py m1n1-stage1-issue82-test1.bin out/

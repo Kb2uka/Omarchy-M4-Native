@@ -16,6 +16,12 @@ variants = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(variants)
 
 SIZE = 0x120000
+# Written out here, not read from the script, so a dropped or moved site fails.
+EXPECTED = {
+    'v1': {0x23e90: 0x94000ace, 0x23ea0: 0x94000aca},
+    'v2': {0x26964: 0xb9000288, 0x26974: 0xb9000288, 0x26988: 0xb9000288, 0x26998: 0xb9000288},
+    'v3': {0x26954: 0x940028b5},
+}
 
 
 def stage1():
@@ -34,6 +40,10 @@ def changed(before, after):
 
 
 class Issue82VariantTests(unittest.TestCase):
+    def test_sites_match_the_disassembly_of_test1(self):
+        self.assertEqual({name: {o: w for o, (w, _, _) in sites.items()} for name, sites in variants.SITES.items()},
+                         EXPECTED)
+
     def test_each_variant_nops_only_its_sites_and_retags(self):
         data = stage1()
         tags = [data.find(variants.TAG), data.rfind(variants.TAG)]
@@ -92,6 +102,29 @@ class Issue82VariantTests(unittest.TestCase):
         data = stage1().replace(variants.TAG, b'x' * len(variants.TAG), 1)
         with self.assertRaisesRegex(variants.Refused, 'copies of the -dctx1 tag'):
             variants.make_variant(data, 'v2', expected_sha=None)
+
+    def test_cli_writes_each_variant_and_its_sum(self):
+        data = stage1()
+        saved = variants.TEST1
+        variants.TEST1 = hashlib.sha256(data).hexdigest()
+        try:
+            with tempfile.TemporaryDirectory() as temporary:
+                source = Path(temporary) / 'stage1.bin'
+                source.write_bytes(data)
+                out = Path(temporary) / 'out'
+                self.assertEqual(variants.main(['issue82-variants.py', str(source), str(out)]), 0)
+                names = ['m1n1-stage1-issue82-%s.bin' % name for name in EXPECTED]
+                self.assertEqual(sorted(p.name for p in out.iterdir()), sorted(names + ['SHA256SUMS']))
+                sums = (out / 'SHA256SUMS').read_text().splitlines()
+                self.assertEqual(len(sums), len(names))
+                for name, line in zip(EXPECTED, sums):
+                    written = (out / ('m1n1-stage1-issue82-%s.bin' % name)).read_bytes()
+                    self.assertEqual(line, '%s  m1n1-stage1-issue82-%s.bin' % (hashlib.sha256(written).hexdigest(), name))
+                    self.assertNotEqual(written, data)
+                    for offset in EXPECTED[name]:
+                        self.assertEqual(struct.unpack_from('<I', written, offset)[0], variants.NOP)
+        finally:
+            variants.TEST1 = saved
 
     def test_cli_refuses_and_writes_nothing_for_a_wrong_input(self):
         with tempfile.TemporaryDirectory() as temporary:

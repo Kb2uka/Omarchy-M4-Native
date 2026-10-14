@@ -86,7 +86,7 @@ def main(argv):
         return 2
     data = Path(argv[1]).read_bytes()
     try:
-        made = {'m1n1-stage1-issue82-%s.bin' % name: make_variant(data, name) for name in SITES}
+        made = {'m1n1-stage1-issue82-%s.bin' % name: make_variant(data, name, TEST1) for name in SITES}
     except Refused as error:
         print('refused: %s' % error, file=sys.stderr)
         return 1
