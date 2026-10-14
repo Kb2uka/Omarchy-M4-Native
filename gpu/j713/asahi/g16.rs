@@ -26,6 +26,27 @@ fn air_bootstrap_allowed(firmware: &[u8], board: &[u8], enabled: u32, probe_only
         && firmware_allowed(firmware, board, true)
 }
 
+/// The loader derives the GPU power limit per chip: top-state voltage times
+/// its 24800 mA clamp. Only a 1000 mV top state reaches 24800 mW, so accept
+/// each Air's own value up to that ceiling instead of one unit's exact value.
+const AIR_MAX_POWER_MW: u32 = 24800;
+
+/// Names the first Air platform value outside the qualified ten-core GPU.
+fn air_platform_rejection(core_mask: u32, groups: usize, max_mhz: u32, max_power: u32)
+    -> Option<&'static str> {
+    if core_mask != 0x3ff {
+        Some("core mask")
+    } else if groups != 10 {
+        Some("performance groups")
+    } else if max_mhz != 1470 {
+        Some("maximum frequency")
+    } else if max_power == 0 || max_power > AIR_MAX_POWER_MW {
+        Some("maximum power")
+    } else {
+        None
+    }
+}
+
 /// Validate reserved resources after the caller selects an allowed qualification mode.
 pub(crate) fn validate_boot_resources(pdev: &platform::Device<Core>, probe_only: bool) -> Result {
     let dev = pdev.as_ref();
@@ -265,14 +286,24 @@ impl Bootstrap {
             let board: KVec<u8> = kernel::of::root().ok_or(EINVAL)?.get_property(c_str!("compatible"))?;
             if !air_bootstrap_allowed(&firmware, &board, qualification,
                                      *crate::module_parameters::probe_only.value()) {
+                dev_err!(pdev.as_ref(), "G16: Air bootstrap refused: firmware-build {} or board not qualified\n",
+                         core::str::from_utf8(&firmware).unwrap_or("?").trim_end_matches('\0'));
                 return Err(ENOTSUPP);
             }
         }
         validate_boot_resources(pdev, qualification == 1)?;
         let platform = crate::g16_platform::Platform::new(pdev.as_ref())?;
-        if qualification == 1 && (platform.core_mask != 0x3ff || platform.freq_a.len() != 10
-            || platform.maximum_frequency_mhz() != 1470 || platform.maximum_power != 24800) {
-            return Err(EINVAL);
+        if qualification == 1 {
+            let max_mhz = platform.maximum_frequency_mhz();
+            if let Some(field) = air_platform_rejection(platform.core_mask, platform.freq_a.len(),
+                                                        max_mhz, platform.maximum_power) {
+                dev_err!(pdev.as_ref(),
+                         "G16: Air platform rejected ({}): mask={:#x} groups={} max-frequency={} MHz max-power={} mW\n",
+                         field, platform.core_mask, platform.freq_a.len(), max_mhz, platform.maximum_power);
+                return Err(EINVAL);
+            }
+            dev_info!(pdev.as_ref(), "G16: Air platform accepted; max-power={} mW\n",
+                      platform.maximum_power);
         }
         use core::mem::ManuallyDrop;
         // This bounded qualification build retains transport and mapped memory
