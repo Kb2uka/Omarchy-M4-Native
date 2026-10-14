@@ -166,6 +166,23 @@ class CpuIdleLoad(unittest.TestCase):
         self.assertFalse(self.hold().exists())
         self.assertEqual(self.run_mode('boot', Machine(self.root))['state'], 'loaded')
 
+    def test_start_waits_for_a_boot_that_is_still_settling(self):
+        state = self.root / MODULE.STATE
+        state.mkdir(parents=True)
+        import fcntl, os
+        fd = os.open(state / 'lock', os.O_WRONLY | os.O_CREAT, 0o600)
+        self.addCleanup(os.close, fd)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        self.put(MODULE.STATE + '/attempt', b'loading\n')
+        for mode in ('start', 'boot', 'disable', 'enable'):
+            with self.subTest(mode):
+                machine = Machine(self.root)
+                with self.assertRaisesRegex(MODULE.Refused, 'loading or settling'):
+                    self.run_mode(mode, machine)
+                self.assertEqual(machine.commands, [])
+                self.assertTrue(self.marker().exists(), 'the settling boot keeps its marker')
+        self.assertEqual(self.run_mode('inspect', Machine(self.root))['state'], 'struck')
+
     def test_disable_while_loaded_says_it_stays_until_restart(self):
         self.run_mode('boot', Machine(self.root))
         report = self.run_mode('disable', Machine(self.root))
@@ -216,6 +233,11 @@ class ModuleSource(unittest.TestCase):
         pushes = self.asm.index('stp x18, x19'), self.asm.index('"wfi\\n"'), self.asm.index('ldp x18, x19')
         self.assertEqual(sorted(pushes), list(pushes), 'registers must be saved before WFI and restored after')
         self.assertIn('mrs x0, ISR_EL1', self.asm)
+        enter = self.source[self.source.index('static __cpuidle int j713_enter_pd'):]
+        enter = enter[:enter.index('\n}\n')]
+        calls = [enter.index(c) for c in ('cpu_pm_enter()', 'ct_cpuidle_enter();', 'j713_cpu_wfi_saved();',
+                                           'ct_cpuidle_exit();', 'cpu_pm_exit();')]
+        self.assertEqual(sorted(calls), calls, 'the power-down state must save, idle in WFI, then restore')
 
     def test_t8132_only_with_a_safe_state_that_never_executes_wfi(self):
         self.assertIn('of_machine_is_compatible("apple,t8132")', self.source)

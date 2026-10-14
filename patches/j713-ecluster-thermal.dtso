@@ -9,9 +9,10 @@
  * E2-E5 (1080, 1476, 1860, 2172 MHz) are the ADT voltage-states1-sram entries
  * with one-based state numbers, as in j713-cpufreq.dtso. Six E cores at E5 held
  * about 73 C in the #60 bench; the long combined soak is in
- * docs/j713-cpu-idle.md. capacity-dmips-mhz stays 663: throughput at E5 rose
- * 2.420x for a 2.413x clock, so the per-MHz work is unchanged and the kernel
- * now reports E cores at 800 against P at 1024. The P table is unchanged.
+ * docs/j713-cpu-idle.md. capacity-dmips-mhz stays 663: in the #60 six-core
+ * bench, throughput at E5 rose 2.420x for a 2.413x clock, so the per-MHz work
+ * is unchanged and the kernel now reports E cores at 800 against P at 1024.
+ * The P table is unchanged.
  *
  * The thermal zone reads TCMz (CPU Die Max), temperature channel 6 of the SMC
  * hwmon node in this devicetree's child order, and steps both clusters down

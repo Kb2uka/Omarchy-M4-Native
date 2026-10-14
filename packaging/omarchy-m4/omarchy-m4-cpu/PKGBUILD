@@ -15,7 +15,7 @@ install=omarchy-m4-cpu.install
 options=('!strip' '!debug')
 source=('m4-cpu-idle.py' 'm4-cpu-idle.service' 'MIT.txt' 'GPL-2.0-only.txt'
         "j713_cpuidle.ko::${url}/releases/download/package-inputs/j713_cpuidle-a2a7947a.ko")
-sha256sums=('c250d28c63c281c7157aba1b5e14754f1dc7f0a1f4ec063f5e532fd337025477'
+sha256sums=('a36c44f90892aa8c1334a1b3bb33d5be9f7732874941d2db4f07342905bed0b3'
             'b95a3e45ff9ea7ea00c687ff91f9e7aa5056216b104bbc458b026f38ab96ca14'
             'b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5'
             'aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3'

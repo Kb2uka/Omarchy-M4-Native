@@ -22,6 +22,7 @@ the kernel pins an idle driver's module while it is registered. The package
 stays installed, so omarchy-m4-update keeps it current.
 """
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -64,6 +65,26 @@ def sync_directory(path):
         os.fsync(directory)
     finally:
         os.close(directory)
+
+
+class Locked:
+    """Hold the loader lock, so a --start cannot clear the marker of a boot that is still settling."""
+
+    def __init__(self, root):
+        self.state = root / STATE
+
+    def __enter__(self):
+        self.state.mkdir(parents=True, exist_ok=True)
+        self.fd = os.open(self.state / 'lock', os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        try:
+            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(self.fd)
+            raise Refused('Another m4-cpu-idle run is loading or settling the driver; try again in two minutes')
+        return self
+
+    def __exit__(self, *exc):
+        os.close(self.fd)
 
 
 def write_state(root, name, text):
@@ -159,6 +180,13 @@ def run_command(command):
 
 
 def run(root, mode, runner=run_command, settle_seconds=SETTLE_SECONDS, sleep=time.sleep):
+    if mode == 'inspect':
+        return change(root, mode, runner, settle_seconds, sleep)
+    with Locked(root):
+        return change(root, mode, runner, settle_seconds, sleep)
+
+
+def change(root, mode, runner, settle_seconds, sleep):
     if mode == 'disable':
         write_state(root, 'hold', 'the CPU idle driver stays unloaded until sudo m4-cpu-idle --enable\n')
     elif mode == 'enable':

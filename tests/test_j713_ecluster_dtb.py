@@ -23,10 +23,6 @@ E_TABLE, P_TABLE = 11, 12
 CHANNEL_KEYS = ('Te0S', 'Te05', 'Tp0D', 'Tp09', 'Tp05', 'Tp01', 'TCMz')
 
 
-def path(nodes_path):
-    return '/' + '/'.join(nodes_path)
-
-
 def base_nodes():
     nodes = {(): {'compatible': b'apple,j713\0apple,t8132\0apple,arm-platform\0'},
              ('cpus',): {'#address-cells': U32(2), '#size-cells': U32(0)}}
