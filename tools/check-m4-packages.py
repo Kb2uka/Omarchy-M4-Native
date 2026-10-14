@@ -27,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CHANNEL = ROOT / 'packaging/omarchy-m4/channel.json'
 REALTIME = 'usr/lib/systemd/system/speakersafetyd-j713.service.d/50-realtime.conf'
 SPEAKER_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/20-m4-speaker-module.conf'
+GPU_DROP_IN = 'usr/lib/systemd/system/m4-gpu.service.d/20-m4-gpu-module.conf'
 
 
 def require(condition, message):
@@ -141,6 +142,9 @@ def check_package(channel, package, info, files, root):
             require(files.get(path, (0, ''))[1] == sha((ROOT / source).read_bytes()), 'Boot package differs: ' + path)
         names = [re.split('[<>=]', d, maxsplit=1)[0] for d in info.get('depend', [])]
         require('omarchy-m4-gst-audio' not in names, 'Boot package must not require the GStreamer sinks')
+        # An older installed setup script does not list omarchy-m4-gpu; this dependency
+        # makes its first omarchy-m4-update run install it with the new boot package.
+        require('omarchy-m4-gpu' in names, 'Boot package must require the GPU module package')
     elif name == 'omarchy-m4-speaker':
         for path, digest in channel['speaker_module'].items():
             require(files.get(path, (0, ''))[1] == digest, 'Staged speaker module differs from the pin: ' + path)
@@ -148,6 +152,13 @@ def check_package(channel, package, info, files, root):
         require(files.get('usr/bin/m4-speaker-module') == (0o755, sha(tool)), 'Packaged speaker module tool differs')
         drop_in = (ROOT / 'packaging/omarchy-m4/omarchy-m4-speaker/20-m4-speaker-module.conf').read_bytes()
         require(files.get(SPEAKER_DROP_IN) == (0o644, sha(drop_in)), 'Speaker module drop-in differs')
+    elif name == 'omarchy-m4-gpu':
+        for path, digest in channel['gpu_module'].items():
+            require(files.get(path, (0, ''))[1] == digest, 'Staged GPU module differs from the pin: ' + path)
+        tool = (ROOT / 'tools/m4-gpu-module.py').read_bytes()
+        require(files.get('usr/bin/m4-gpu-module') == (0o755, sha(tool)), 'Packaged GPU module tool differs')
+        drop_in = (ROOT / 'packaging/omarchy-m4/omarchy-m4-gpu/20-m4-gpu-module.conf').read_bytes()
+        require(files.get(GPU_DROP_IN) == (0o644, sha(drop_in)), 'GPU module drop-in differs')
     elif name == 'omarchy-m4-gst-audio':
         for path, digest in channel['gst_audio'].items():
             require(files.get(path, (0, ''))[1] == digest, 'GStreamer sink differs from the pin: ' + path)

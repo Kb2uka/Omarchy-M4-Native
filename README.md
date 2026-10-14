@@ -142,6 +142,7 @@ once applies them:
 | CPU die temperature in Linux ([#62](https://github.com/Kb2uka/Omarchy-M4-Native/pull/62)) | `omarchy-m4-boot` 1-4 |
 | Speaker protection starts reliably at boot ([#61](https://github.com/Kb2uka/Omarchy-M4-Native/pull/61)); applied at the next boot ([details](docs/j713-protection-startup.md#existing-installs)) | `omarchy-m4-speaker` 1-1 |
 | Sound in Zeus Link and other WebKitGTK and GStreamer apps ([#54](https://github.com/Kb2uka/Omarchy-M4-Native/pull/54), [#63](https://github.com/Kb2uka/Omarchy-M4-Native/pull/63)) | `omarchy-m4-gst-audio` 1.28.7-1 |
+| GPU and desktop on Airs whose GPU power limit is below 24800 mW ([#57](https://github.com/Kb2uka/Omarchy-M4-Native/issues/57)); applied at the next boot | `omarchy-m4-gpu` 1-1 |
 
 A devicetree you applied by hand from the guides is kept; the update never
 moves an Air back to an older one. An Air connected before

@@ -1,0 +1,82 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Swap the alpha.1 Air GPU module for a test build, and back.
+#
+#   sudo bash m4-gpu-test-module install asahi_m4.ko SHA256
+#   sudo bash m4-gpu-test-module rollback
+#   bash m4-gpu-test-module status
+#
+# The module is loaded once at startup and stays loaded, so every change
+# takes effect on the next boot. M4_GPU_TEST_* variables are for tests only.
+set -euo pipefail
+export PATH=${M4_GPU_TEST_PATH:+$M4_GPU_TEST_PATH:}/usr/bin:/bin:/usr/sbin:/sbin
+
+root=${M4_GPU_TEST_ROOT:-}
+gpu=$root/opt/m4-gpu
+module=$gpu/asahi_m4.ko
+sums=$gpu/runtime.sha256
+backup=$gpu/alpha1-backup
+entry=/opt/m4-gpu/asahi_m4.ko
+stock=80cf3669575edd09aed226a93e47aaaf132e70f1070154629c413c0b40d34578
+abi='7.1.9-m4-gpu-backport-20261008 SMP preempt mod_unload aarch64'
+# Tests cannot carry the real module, so a test root may name its own.
+[ -z "$root" ] || stock=${M4_GPU_TEST_STOCK:-$stock}
+
+die() { printf 'm4-gpu-test-module: %s\n' "$*" >&2; exit 1; }
+hash_of() { sha256sum "$1" | cut -d' ' -f1; }
+pinned() { awk -v p="$entry" '$2 == p { n++; h = $1 } END { if (n == 1) print h }' "$sums"; }
+
+# Replace a file in one rename, keeping its mode.
+replace() {
+    local tmp
+    tmp=$(mktemp "$2.XXXXXX")
+    cat "$1" > "$tmp"
+    chmod --reference="$2" "$tmp"
+    mv -f "$tmp" "$2"
+}
+
+status() {
+    local h
+    h=$(hash_of "$module")
+    if [ "$h" = "$stock" ]; then
+        echo "alpha.1 module ($h)"
+    elif [ -f "$backup/asahi_m4.ko" ]; then
+        echo "test module ($h); rollback restores alpha.1"
+    else
+        echo "unknown module ($h)"
+    fi
+}
+
+install_test() {
+    local file=$1 want=$2 tmp
+    [ "$want" != "$stock" ] || die "that is the alpha.1 module; use rollback"
+    [ "$(hash_of "$file")" = "$want" ] || die "$file does not match $want; download it again"
+    [ "$(modinfo -F vermagic "$file")" = "$abi" ] || die "$file is not built for this kernel"
+    [ "$(hash_of "$module")" = "$stock" ] || die "installed module is not alpha.1 ($(status)); nothing changed"
+    [ "$(pinned)" = "$stock" ] || die "$sums does not pin the alpha.1 module; nothing changed"
+    mkdir -p "$backup"
+    cp -p "$module" "$backup/asahi_m4.ko"
+    cp -p "$sums" "$backup/runtime.sha256"
+    tmp=$(mktemp "$sums.new.XXXXXX")
+    awk -v p="$entry" -v h="$want" '$2 == p { print h "  " p; next } { print }' "$sums" > "$tmp"
+    replace "$file" "$module"
+    replace "$tmp" "$sums"
+    rm -f "$tmp"
+    echo "Installed test module $want. Reboot to use it."
+}
+
+rollback() {
+    [ -f "$backup/asahi_m4.ko" ] && [ -f "$backup/runtime.sha256" ] || die "no alpha.1 backup in $backup"
+    [ "$(hash_of "$backup/asahi_m4.ko")" = "$stock" ] || die "backup module is not alpha.1; nothing changed"
+    replace "$backup/asahi_m4.ko" "$module"
+    replace "$backup/runtime.sha256" "$sums"
+    rm -rf "$backup"
+    echo "Restored the alpha.1 module. Reboot to use it."
+}
+
+case "${1:-}" in
+    install) [ "$#" = 3 ] || die "usage: install FILE SHA256"; install_test "$2" "$3" ;;
+    rollback) [ "$#" = 1 ] || die "usage: rollback"; rollback ;;
+    status) status ;;
+    *) die "usage: install FILE SHA256 | rollback | status" ;;
+esac

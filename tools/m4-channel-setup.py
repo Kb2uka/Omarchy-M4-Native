@@ -39,7 +39,12 @@ LOCK = 'run/lock/omarchy-m4-setup.lock'
 SPEAKER_STAGED = 'usr/lib/omarchy-m4/j713-audio/snd-soc-j713-group.ko'
 SPEAKER_MODULE = 'usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-j713-group.ko'
 SPEAKER_HOLD = 'var/lib/omarchy-m4/speaker-module/hold'
-PACKAGES = ('omarchy-m4-keyring', 'omarchy-m4-boot', 'linux-m4-omarchy', 'omarchy-m4-gst-audio', 'omarchy-m4-speaker')
+GPU_STAGED = 'usr/lib/omarchy-m4/gpu/asahi_m4.ko'
+GPU_MODULE = 'opt/m4-gpu/asahi_m4.ko'
+GPU_HOLD = 'var/lib/omarchy-m4/gpu-module/hold'
+GPU_STOCK = '80cf3669575edd09aed226a93e47aaaf132e70f1070154629c413c0b40d34578'
+PACKAGES = ('omarchy-m4-keyring', 'omarchy-m4-boot', 'linux-m4-omarchy', 'omarchy-m4-gst-audio', 'omarchy-m4-speaker',
+            'omarchy-m4-gpu')
 SINKS = 'omarchy-m4-gst-audio'  # gst-plugins-good already has both sinks and conflicts with it
 BOARD = b'apple,j713'
 CONF = 'etc/pacman.conf'
@@ -168,6 +173,14 @@ def speaker_pending(root):
     return hashlib.sha256(module.read_bytes()).digest() != hashlib.sha256(staged.read_bytes()).digest()
 
 
+def gpu_pending(root):
+    """Whether omarchy-m4-gpu staged a module that the next boot will swap in for alpha.1's."""
+    staged, module = root / GPU_STAGED, root / GPU_MODULE
+    if not staged.is_file() or not module.is_file() or (root / GPU_HOLD).exists():
+        return False
+    return hashlib.sha256(module.read_bytes()).hexdigest() == GPU_STOCK
+
+
 def boot_digest(root):
     path = root / BOOT
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
@@ -247,7 +260,7 @@ def connect(root, apply, server, key, fingerprint, output):
             f'({boot}); boot.bin keeps booting what it booted before. See the message above, '
             'fix the cause, then run this again')
     machine.start_notifier()
-    restart = boot_digest(root) != before or speaker_pending(root)
+    restart = boot_digest(root) != before or speaker_pending(root) or gpu_pending(root)
     plan.update(applied=True, boot=boot, restart_needed=restart,
                 status=('connected; restart once to apply the update' if restart else
                         'connected; future M4 fixes arrive with omarchy-m4-update'))
