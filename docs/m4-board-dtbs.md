@@ -43,12 +43,12 @@ it differs.
 Patch 0017 keeps the board-wired parts the earlier patches added (the SPMI
 PMIC, the SEP mailbox and DART, both USB-C PHYs and their display crossbars)
 disabled in the shared files and enables them in `t8132-j713.dts`, as this
-repository's patches already do for the SEP, DWC3 and PCIe nodes that use them. On the other five boards
-the patches now add only the PCIe pin group, an inert pin definition that
-applies when the (disabled) PCIe controller requests it, like the upstream
-I2C pin groups beside it. The J713 devicetree has the same content after patch
-0017; only those seven nodes now carry an explicit `status = "okay"`, which the
-record treats as no status.
+repository's patches already do for the SEP, DWC3 and PCIe nodes that use them.
+On the other five boards the patches now add only the PCIe pin group, an inert
+pin definition that applies when the (disabled) PCIe controller requests it,
+like the upstream I2C pin groups beside it. The J713 devicetree has the same
+content after patch 0017; only those seven nodes now carry an explicit `status
+= "okay"`, which the record treats as no status.
 
 Building is not booting. A board that compiles here has never been started
 with this project's kernel. This check also does not compare its J713 build
