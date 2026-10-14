@@ -90,6 +90,32 @@ alpha.1's shipped hash, then builds the patched loader with the version tag
 `/proc/device-tree/chosen/asahi,m1n1-stage{1,2}-version`, which tells you
 which loader booted.
 
+## Testing on an installed Air
+
+Stage 2 is replaced from Linux with `patches-m1n1/m4-m1n1-test-stage2.py`:
+
+```sh
+sudo python3 m4-m1n1-test-stage2.py install m1n1-stage2-issue82-test1.bin SHA256
+sudo reboot
+sudo python3 m4-m1n1-test-stage2.py status
+```
+
+It replaces only the first 0x110000 bytes of `boot.bin`, and only when they
+are alpha.1's stage 2 or the #82 reporter's dockchannel-off build. The old
+bytes are kept as `stage2.pre-issue82.bin` beside `boot.bin`. `rollback` writes
+them back, keeping any devicetree update made in between.
+
+Stage 1 is installed from macOS recoveryOS (1TR) with the command installer
+step 2 uses, run against the test stage 1 instead of the kit's `boot/m1n1.bin`:
+
+```sh
+kmutil configure-boot -c m1n1-stage1-issue82-test1.bin --raw --entry-point 2048 \
+  --lowest-virtual-address 0 -v <Omarchy stub system volume>
+```
+
+`status` reports the running loaders from
+`/proc/device-tree/chosen/asahi,m1n1-stage{1,2}-version`.
+
 ## Limits
 
 - Stage 1 is installed by macOS (`kmutil configure-boot`, as installer step 2
