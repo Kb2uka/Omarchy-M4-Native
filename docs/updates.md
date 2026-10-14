@@ -119,6 +119,16 @@ over `omarchy/boot.bin`. A rollback lasts until the next M4 package update
 composes the boot object again; report the problem in issue #49 before
 updating again.
 
+## Installer update 2 (macOS 26.6.2)
+
+`v0.1.0-alpha.1-update.2` is a refreshed installer kit for **new installations
+only**. The original alpha.1 kit stops before any partition change on macOS
+26.6.2 (25G83), because that release ships a different AudioDSP build than the
+speaker-filter step knew. Update 2 qualifies it
+([#83](https://github.com/Kb2uka/Omarchy-M4-Native/pull/83)). The system image
+is the same alpha.1 image, byte for byte. An Air that is already installed needs
+nothing from it.
+
 ## Shutdown fix for alpha.1
 
 **Connecting to M4 updates (above) already applies this fix**; the composer
