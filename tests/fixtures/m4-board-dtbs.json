@@ -40,7 +40,7 @@
     "/soc/spmi@388714000/pmic@e/nvmem-layout/rtc-offset@2100",
     "/soc/spmi@388714000/pmic@e/nvmem-layout/socd@8b00"
    ],
-   "enabled_digest": "3b0995206614afca8b5cd754ebfdb000a2009655ce78aa4abf24d07f5a5a3158",
+   "enabled_digest": "aa8f57b6f128b37f1666e303353254d707bcc98de65d8a6c278bcda7c3370d21",
    "model": "Apple MacBook Pro (14-inch, M4, 2024)",
    "warnings": [
     "Warning (simple_bus_reg): /soc/interrupt-controller@381180000: simple-bus unit address format error, expected \"381000000\""
@@ -85,7 +85,7 @@
     "/soc/spmi@388714000/pmic@e/nvmem-layout/rtc-offset@2100",
     "/soc/spmi@388714000/pmic@e/nvmem-layout/socd@8b00"
    ],
-   "enabled_digest": "18207f6a2edbf714ce0c718b791a99054703ec21083851c144f1749503b5882d",
+   "enabled_digest": "4ca2e64ba9de0aa337d3ad3ca687068803fce192e8162a3653d3590440ed1716",
    "model": "Apple iMac (24-inch, 2x USB-C, M4, 2024)",
    "warnings": [
     "Warning (simple_bus_reg): /soc/interrupt-controller@381180000: simple-bus unit address format error, expected \"381000000\""
@@ -130,7 +130,7 @@
     "/soc/spmi@388714000/pmic@e/nvmem-layout/rtc-offset@2100",
     "/soc/spmi@388714000/pmic@e/nvmem-layout/socd@8b00"
    ],
-   "enabled_digest": "344db64e167a3ca77bae8dbce2a9d8fab9de9f89be88e63a1ffbd4547f00f735",
+   "enabled_digest": "1b9c6727508b222158bcdedc3b9dcf2669828218739a705047a3509a1e201dbf",
    "model": "Apple iMac (24-inch, 4x USB-C, M4, 2024)",
    "warnings": [
     "Warning (simple_bus_reg): /soc/interrupt-controller@381180000: simple-bus unit address format error, expected \"381000000\""
@@ -248,7 +248,7 @@
     "/soc/usb@40a280000/ports/port@1",
     "/soc/usb@40a280000/ports/port@1/endpoint"
    ],
-   "enabled_digest": "ccd0ffe5c5d8e57e5cfea4e176e72ad42ea14468f9e229845cb6bb8a2662302c",
+   "enabled_digest": "0abfac1e14dbcd90d35a06ebcd58eda6bf10b74a38b8ab7dfeb1874ff6cb6693",
    "model": "Apple MacBook Air (13-inch, M4, 2025)",
    "warnings": [
     "Warning (simple_bus_reg): /soc/interrupt-controller@381180000: simple-bus unit address format error, expected \"381000000\""
@@ -293,7 +293,7 @@
     "/soc/spmi@388714000/pmic@e/nvmem-layout/rtc-offset@2100",
     "/soc/spmi@388714000/pmic@e/nvmem-layout/socd@8b00"
    ],
-   "enabled_digest": "a5f90303117da40b363dc880dcec717e549d54e9741737533698f3fd9ef523ef",
+   "enabled_digest": "2dd2429ff9b4bcc53008e2d05e389a988a09f0326e9494f364e38399e81500d8",
    "model": "Apple MacBook Air (15-inch, M4, 2025)",
    "warnings": [
     "Warning (simple_bus_reg): /soc/interrupt-controller@381180000: simple-bus unit address format error, expected \"381000000\""
@@ -338,7 +338,7 @@
     "/soc/spmi@388714000/pmic@e/nvmem-layout/rtc-offset@2100",
     "/soc/spmi@388714000/pmic@e/nvmem-layout/socd@8b00"
    ],
-   "enabled_digest": "8ab60a501b9b91dc531db132c643e00163c08959dea381a705e2d73e205a62db",
+   "enabled_digest": "ed1195418f1ea9479ee3454d0c9221c047ed8d5c6f77a9cb34b34022bd531250",
    "model": "Apple Mac mini (M4, 2024)",
    "warnings": [
     "Warning (simple_bus_reg): /soc/interrupt-controller@381180000: simple-bus unit address format error, expected \"381000000\""
