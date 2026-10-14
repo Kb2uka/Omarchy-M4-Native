@@ -106,6 +106,46 @@ final block; the scalar settings override earlier assignments. A named monitor
 rule can still take precedence over the fallback monitor rule. Other packaged
 and personal settings retain their normal loading order.
 
+### Lid close
+
+The same block binds the lid
+([issue #84](https://github.com/Kb2uka/Omarchy-M4-Native/issues/84)). Closing
+the lid locks the session and opening it lights the lock screen, as Omarchy does
+on a laptop whose logind ignores the lid. Without these binds the lid does
+nothing on J713:
+
+- The Air reports its lid as the input switch `Apple SMC power/lid events`
+  (`macsmc-input`). Omarchy 4.0.4 binds only `Lid Switch`.
+- Omarchy 4.0.4's lid check, `omarchy-hw-laptop-closed`, reads
+  `/proc/acpi/button/lid`, which arm64 lacks, so its lid-close helper never
+  locks here. The binds call `omarchy-system-lock` directly.
+- The lock screen turns the display off after five seconds, and a lid switch
+  is not a key press, so the open bind runs `omarchy-brightness-display on`.
+
+The image's `/etc/systemd/logind.conf.d/90-m4-ram.conf` keeps
+`HandleLidSwitch=ignore`, so closing the lid does not suspend. Suspend and
+resume are unqualified on J713. Linux also has no panel backlight control here
+yet (`/sys/class/backlight` is empty under simpledrm). The lock blanks the
+picture, but whether the panel itself goes dark with the lid shut has not been
+measured. External displays are not handled, so the lid locks even with one
+attached. macOS-style sleep on lid close needs that qualification first.
+
+Upstream Omarchy added its own Apple SMC lid binds after 4.0.4 (commit
+`e1b0e5e`, not yet in a release). Remove these two lines once the installed
+Omarchy carries them.
+
+An existing install can add the binds itself. This appends them once and
+reloads Hyprland:
+
+```bash
+grep -q 'Apple SMC power/lid events' ~/.config/hypr/hyprland.lua || cat >>~/.config/hypr/hyprland.lua <<'EOF'
+-- J713 lid (issue #84): lock on close, light the lock screen on open.
+o.bind("switch:on:Apple SMC power/lid events", nil, "omarchy-system-lock", { locked = true })
+o.bind("switch:off:Apple SMC power/lid events", nil, "omarchy-brightness-display on", { locked = true })
+EOF
+hyprctl reload
+```
+
 The configuration tool performs no package installation, network operation,
 locale compilation or power action. `--check` is read-only; `--apply` is for
 an offline build candidate, not an installed user's customized desktop.

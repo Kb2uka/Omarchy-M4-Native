@@ -25,6 +25,12 @@ hl.config({
 hl.on("hyprland.start", function()
   hl.exec_cmd("uwsm finalize HYPRLAND_INSTANCE_SIGNATURE OMARCHY_PATH && systemctl --user start pipewire.service wireplumber.service wayland-wm-app-daemon.service")
 end)
+-- The Air's lid is "Apple SMC power/lid events", not the "Lid Switch" Omarchy
+-- 4.0.4 binds, and its lid check reads ACPI, which arm64 lacks. Lock on close
+-- and light the lock screen on open. logind still ignores the lid: J713
+-- suspend is unqualified.
+o.bind("switch:on:Apple SMC power/lid events", nil, "omarchy-system-lock", { locked = true })
+o.bind("switch:off:Apple SMC power/lid events", nil, "omarchy-brightness-display on", { locked = true })
 '''
 
 
