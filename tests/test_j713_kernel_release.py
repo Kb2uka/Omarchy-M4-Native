@@ -287,10 +287,11 @@ class KernelReleaseTests(unittest.TestCase):
         self.assertEqual(image['source_correspondence_unverified'], [])
         self.assertEqual(self.allowed, [False])
 
-    def test_a_join_naming_an_absent_source_archive_refuses(self):
+    def test_a_join_naming_an_absent_source_archive_refuses_before_any_output(self):
         self.join('gpu-air-source.tar.gz', 'c' * 64)
-        with self.assertRaisesRegex(RuntimeError, 'archive missing for opt/m4-gpu/asahi_m4.ko'):
+        with self.assertRaisesRegex(RuntimeError, 'will not be in the kit for opt/m4-gpu/asahi_m4.ko'):
             self.assemble()
+        self.assertFalse(self.args.output.exists(), 'refused before root preparation and repacking')
 
     def test_an_unpinned_join_source_refuses_before_any_output(self):
         packet = self.write(self.base, 'gpu-air-source.tar.gz', b'another packet')

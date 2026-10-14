@@ -116,10 +116,62 @@ class JoinSourceTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'archive missing for opt/m4-gpu/asahi_m4.ko'):
             release.check_join_sources(self.output, self.tracked, self.joins)
 
+    def test_an_unpinned_archive_must_still_be_present(self):
+        self.joins['binaries']['opt/m4-gpu/asahi_m4.ko']['sources'].append({'archive': 'source/inputs.tar.gz'})
+        with self.assertRaisesRegex(RuntimeError, 'archive missing for opt/m4-gpu/asahi_m4.ko: source/inputs.tar.gz'):
+            release.check_join_sources(self.output, self.tracked, self.joins)
+        (self.output / 'source/inputs.tar.gz').write_bytes(b'any contents')
+        release.check_join_sources(self.output, self.tracked, self.joins)
+
     def test_a_tree_outside_the_release_integration_is_refused(self):
         for tracked in (['tools/prepare-j713-release.py'], ['audio/j713/kernel-old/mca.c']):
             with self.subTest(tracked=tracked), self.assertRaisesRegex(RuntimeError, 'audio/j713/kernel'):
                 release.check_join_sources(self.output, tracked, self.joins)
+
+
+class PlannedSourceTests(unittest.TestCase):
+    """check_planned_sources runs before any output exists."""
+
+    COMMIT = 'e' * 40
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.packet = Path(self.temp.name) / 'kernel.tar.gz'
+        self.packet.write_bytes(b'kernel tree')
+        self.joins = {'schema': 1, 'binaries': {'opt/m4/mod.ko': joined(ELF, sources=[
+            {'archive': 'source/kernel.tar.gz', 'sha256': digest(b'kernel tree')},
+            {'archive': 'source/integration-inputs.tar.gz'},
+            {'tree': 'audio/j713/kernel', 'commit': self.COMMIT}])}}
+        self.planned = {'source/kernel.tar.gz': self.packet, 'source/integration-inputs.tar.gz': None}
+        self.trees = {(self.COMMIT, 'audio/j713/kernel'): 'tree-a', ('HEAD', 'audio/j713/kernel'): 'tree-a'}
+
+    def check(self):
+        with mock.patch.object(release, 'git_tree_id', side_effect=lambda tree, rev, path: self.trees.get((rev, path))):
+            release.check_planned_sources(Path(self.temp.name), self.joins, self.planned)
+
+    def test_planned_pinned_archives_and_an_unchanged_tree_pass(self):
+        self.check()
+
+    def test_an_archive_the_kit_will_not_carry_is_refused(self):
+        del self.planned['source/kernel.tar.gz']
+        with self.assertRaisesRegex(RuntimeError, 'will not be in the kit for opt/m4/mod.ko: source/kernel.tar.gz'):
+            self.check()
+
+    def test_a_planned_archive_that_changed_is_refused(self):
+        self.packet.write_bytes(b'another tree')
+        with self.assertRaisesRegex(RuntimeError, 'archive changed for opt/m4/mod.ko: source/kernel.tar.gz'):
+            self.check()
+
+    def test_a_commit_pinned_tree_must_be_unchanged_at_head(self):
+        for head, label in (('tree-b', 'changed since the commit'), (None, 'absent at head')):
+            with self.subTest(label):
+                self.trees[('HEAD', 'audio/j713/kernel')] = head
+                with self.assertRaisesRegex(RuntimeError, 'audio/j713/kernel differs from eeeeeeeeeeee'):
+                    self.check()
+        self.trees = {}
+        with self.assertRaisesRegex(RuntimeError, 'differs from'):
+            self.check()
 
 
 class ManifestTests(unittest.TestCase):
@@ -135,13 +187,17 @@ class ManifestTests(unittest.TestCase):
         for entry in ({**good, 'sha256': 'abc'}, {**good, 'correspondence': 'probably'},
                       {**good, 'sources': []}, {**good, 'sources': [{'archive': 'kernel.tar.gz'}]},
                       {**good, 'sources': [{'archive': 'source/nested/kernel.tar.gz'}]},
-                      {**good, 'sources': [{'url': 'https://example.invalid/kernel.tar.gz'}]}):
+                      {**good, 'sources': [{'url': 'https://example.invalid/kernel.tar.gz'}]},
+                      {**good, 'sources': [{'tree': 'audio/j713/kernel', 'commit': 'ee98743a'}]},
+                      {**good, 'sources': [{'archive': 'source/kernel.tar.gz', 'commit': 'e' * 40}]}):
             with self.subTest(entry=entry), self.assertRaises(RuntimeError):
                 self.load({'schema': 1, 'binaries': {'opt/tool': entry}})
         with self.assertRaises(RuntimeError):
             self.load({'schema': 2, 'binaries': {}})
+        self.load({'schema': 1, 'binaries': {'opt/tool': {
+            **good, 'sources': [{'tree': 'audio/j713/kernel', 'commit': 'e' * 40}]}}})
 
-    def test_repository_joins_cover_alpha1_and_only_the_gpu_module_is_proven(self):
+    def test_repository_joins_cover_alpha1_and_every_gpl_binary_is_proven(self):
         joins = release.source_joins(ROOT)
         binaries = joins['binaries']
         self.assertEqual(len(binaries), 24)
@@ -154,8 +210,21 @@ class ManifestTests(unittest.TestCase):
              'sha256': 'c19a7c97184b3f954795c50dfeff857e8baf685f901524845710da839cbd2562'}])
         documented = (ROOT / 'docs/j713-gpu-normal-root.md').read_text()
         self.assertIn('| GPU module | `' + gpu['sha256'] + '` |', documented)
-        self.assertEqual({name for name, entry in binaries.items() if entry['correspondence'] == 'unverified'},
-                         set(binaries) - {'opt/m4-gpu/asahi_m4.ko'})
+        # Every GPL binary was rebuilt byte for byte from published source (GPU: issue 77;
+        # audio and video modules: 2026-10-14). The MIT userspace remains unverified.
+        for name, entry in binaries.items():
+            with self.subTest(name=name):
+                self.assertEqual(entry['correspondence'],
+                                 'rebuilt-identical' if entry['license'].startswith('GPL') else 'unverified')
+        audio = [entry for name, entry in binaries.items() if '/j713-audio/' in name and name.endswith('.ko')]
+        self.assertEqual(len(audio), 7)
+        for entry in audio:
+            tree, = [source for source in entry['sources'] if 'tree' in source]
+            self.assertEqual(tree['commit'], 'ee98743a860437ad5797bf5db080c04e0128528d', 'the v0.1.0-alpha.1 tag')
+        for name in ('apple-avd.ko', 'avd-controller.ko'):
+            sources = binaries['opt/m4-video/20261011/kernel/' + name]['sources']
+            self.assertIn({'archive': 'source/build-inputs-final.tar.gz',
+                           'sha256': '6a800de13f6c4ab7318d66a91fe0c68bf1a0c8a49a969228fb709772c1576945'}, sources)
         tracked = [path.relative_to(ROOT).as_posix() for path in (ROOT / 'audio').rglob('*') if path.is_file()]
         for name, entry in binaries.items():
             for source in entry['sources']:
@@ -224,6 +293,24 @@ class RootGateTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'not verified by an identical rebuild: opt/m4/tool'):
             self.prepare()
         self.assertFalse(self.filled)
+
+    def refused_with(self, name, data, message):
+        original = self.mount
+
+        def mount(*args):
+            original(*args)
+            if args[0] == 'mount':
+                self.write(self.root, name, data)
+
+        with mock.patch.object(self, 'mount', mount), self.assertRaisesRegex(RuntimeError, message):
+            self.prepare(allow_unverified=True)
+        self.assertFalse(self.filled)
+
+    def test_an_unlisted_binary_in_the_real_root_is_refused(self):
+        self.refused_with('opt/m4/extra', ELF + b'extra', 'Binaries without a source join: opt/m4/extra')
+
+    def test_a_changed_binary_in_the_real_root_is_refused(self):
+        self.refused_with('opt/m4/tool', ELF + b'rebuilt', 'different build of opt/m4/tool')
 
     def test_permitted_unverified_binary_is_reported(self):
         self.assertEqual(self.prepare(allow_unverified=True)['unverified'], ['opt/m4/tool'])

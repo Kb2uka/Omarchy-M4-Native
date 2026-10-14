@@ -65,6 +65,10 @@ SOURCE_JOINS = 'packaging/release-source-joins.json'
 CORRESPONDENCE = ('rebuilt-identical', 'unverified')
 KERNEL_MODULES = ('.ko', '.ko.gz', '.ko.xz', '.ko.zst')
 VIRTUAL_TREES = ('dev', 'proc', 'run', 'sys', 'tmp')
+# source/ files the assembler writes itself rather than copying in.
+GENERATED_SOURCES = ('source/integration-inputs.tar.gz', 'source/installer-source.tar.gz',
+                     'source/release-integration.tar.gz', 'source/README.md', 'source/j713-poweroff.md',
+                     'source/j713-kernel-receipt.json')
 
 
 def require(condition, message):
@@ -91,8 +95,10 @@ def source_joins(tree):
                 entry.get('correspondence') in CORRESPONDENCE and entry.get('sources'),
                 'Incomplete source join: ' + name)
         for source in entry['sources']:
-            require(set(source) in ({'tree'}, {'archive'}, {'archive', 'sha256'}),
+            require(set(source) in ({'tree'}, {'tree', 'commit'}, {'archive'}, {'archive', 'sha256'}),
                     'Unknown source reference for ' + name)
+            require('commit' not in source or re.fullmatch(r'[0-9a-f]{40}', source['commit']),
+                    'A joined tree commit is a full commit ID: ' + name)
             require('tree' in source or (source['archive'].startswith('source/') and
                                          '/' not in source['archive'][7:]),
                     'Source archives live directly in source/: ' + name)
@@ -144,6 +150,31 @@ def check_binary_joins(found, joins, allow_unverified=False):
     require(allow_unverified or not unverified,
             'Source correspondence not verified by an identical rebuild: ' + ', '.join(unverified))
     return unverified
+
+
+def git_tree_id(tree, revision, path):
+    """The git tree object of path at revision, or None when it does not exist there."""
+    result = subprocess.run(['git', '-C', str(tree), 'rev-parse', '--verify', '--quiet', revision + ':' + path],
+                            capture_output=True, text=True)
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def check_planned_sources(tree, joins, planned):
+    """Before any output exists: every joined archive will be in the kit at its pin, and every
+    commit-pinned tree is unchanged in the revision whose sources the kit carries."""
+    for name, entry in sorted(joins['binaries'].items()):
+        for source in entry['sources']:
+            if 'commit' in source:
+                pinned = git_tree_id(tree, source['commit'], source['tree'])
+                require(pinned is not None and pinned == git_tree_id(tree, 'HEAD', source['tree']),
+                        'Joined source tree ' + source['tree'] + ' differs from ' + source['commit'][:12] +
+                        ' for ' + name + '; assemble from that commit or join the source that built it')
+            elif 'archive' in source:
+                require(source['archive'] in planned,
+                        'Joined source archive will not be in the kit for ' + name + ': ' + source['archive'])
+                path = planned[source['archive']]
+                require('sha256' not in source or path is None or sha(path) == source['sha256'],
+                        'Joined source archive changed for ' + name + ': ' + source['archive'])
 
 
 def check_join_sources(output, tracked, joins):
@@ -539,6 +570,16 @@ def assemble(args):
         name = 'source/' + path.name
         require(path.is_file() and not path.is_symlink() and archives.get(name) and sha(path) == archives[name],
                 'Join source is not a pinned archive any join names: ' + str(path))
+    # Where each source/ file of the kit comes from (None: written by this assembler).
+    planned = {'source/' + path.name: path for path in sorted((baseline / 'source').glob('*'))
+               if path.is_file()}
+    planned.update({'source/numpy-2.5.3.tar.gz': args.numpy_source,
+                    'source/j713-audio-cargo-sources.tar.gz': args.cargo_source,
+                    'source/reference-sound-exports.symvers': args.sound_exports,
+                    'source/j713-audio-reconstruction.tar': args.reconstruction})
+    planned.update({'source/' + path.name: path for path in join_sources})
+    planned.update(dict.fromkeys(GENERATED_SOURCES))
+    check_planned_sources(tree, joins, planned)
     allow_unverified = getattr(args, 'allow_unverified_source', False)
     args.output.mkdir(mode=0o700)
     output = args.output / 'delivery'

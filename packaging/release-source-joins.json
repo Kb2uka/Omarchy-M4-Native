@@ -88,22 +88,30 @@
     "opt/m4-video/20261011/kernel/apple-avd.ko": {
       "sha256": "89ff8a98cd971392e1ec9d8b6c2b74ff09669e0c681ef35eee4d447aabad9fba",
       "license": "GPL-2.0-only",
-      "correspondence": "unverified",
+      "correspondence": "rebuilt-identical",
       "sources": [
         {
           "archive": "source/kernel-decoder.tar.gz",
           "sha256": "13b89bb0d66b84be2d576873e2b7f84952921c223846f32b804775fc14cbb506"
+        },
+        {
+          "archive": "source/build-inputs-final.tar.gz",
+          "sha256": "6a800de13f6c4ab7318d66a91fe0c68bf1a0c8a49a969228fb709772c1576945"
         }
       ]
     },
     "opt/m4-video/20261011/kernel/avd-controller.ko": {
       "sha256": "ade00c8882ccc32aa8480eba13e9232f3765ba3a461942d2967c22beb7d5ab2d",
       "license": "GPL-2.0-only",
-      "correspondence": "unverified",
+      "correspondence": "rebuilt-identical",
       "sources": [
         {
-          "archive": "source/kernel-decoder.tar.gz",
-          "sha256": "13b89bb0d66b84be2d576873e2b7f84952921c223846f32b804775fc14cbb506"
+          "archive": "source/kernel-controller.tar.gz",
+          "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/build-inputs-final.tar.gz",
+          "sha256": "6a800de13f6c4ab7318d66a91fe0c68bf1a0c8a49a969228fb709772c1576945"
         }
       ]
     },
@@ -190,98 +198,133 @@
     "usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/apple-admac.ko": {
       "sha256": "cd57f99657e6232e45d58645949a0f73b656372d92e272828c14bcd4e63ea110",
       "license": "GPL-2.0-only",
-      "correspondence": "unverified",
+      "correspondence": "rebuilt-identical",
       "sources": [
         {
-          "tree": "audio/j713/kernel"
+          "tree": "audio/j713/kernel",
+          "commit": "ee98743a860437ad5797bf5db080c04e0128528d"
         },
         {
           "archive": "source/kernel-controller.tar.gz",
           "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/reference-sound-exports.symvers",
+          "sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362"
         }
       ]
     },
     "usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/j713_audio_bootstrap.ko": {
       "sha256": "1bf6408c629f446e8d73b6962ef58c2a98a3c7ecd5f7b7ae001bcd5bab6c1875",
       "license": "GPL-2.0-only",
-      "correspondence": "unverified",
+      "correspondence": "rebuilt-identical",
       "sources": [
         {
-          "tree": "audio/j713/bootstrap"
+          "tree": "audio/j713/bootstrap",
+          "commit": "ee98743a860437ad5797bf5db080c04e0128528d"
         },
         {
           "archive": "source/kernel-controller.tar.gz",
           "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/reference-sound-exports.symvers",
+          "sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362"
         }
       ]
     },
     "usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/j713_audio_dt3.ko": {
       "sha256": "0b115a55e3aaccad6f148ee152c399c403c8ebcbcbf01f22210e33484c166e4e",
       "license": "GPL-2.0-only",
-      "correspondence": "unverified",
+      "correspondence": "rebuilt-identical",
       "sources": [
         {
-          "tree": "audio/j713/topology"
+          "tree": "audio/j713/topology",
+          "commit": "ee98743a860437ad5797bf5db080c04e0128528d"
         },
         {
           "archive": "source/kernel-controller.tar.gz",
           "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/reference-sound-exports.symvers",
+          "sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362"
         }
       ]
     },
     "usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-apple-mca.ko": {
       "sha256": "d3194660a28d30ba8ea296b6592836ad4ca9426d9471d05ba8ce3cad284baa1e",
       "license": "GPL-2.0-only",
-      "correspondence": "unverified",
+      "correspondence": "rebuilt-identical",
       "sources": [
         {
-          "tree": "audio/j713/kernel"
+          "tree": "audio/j713/kernel",
+          "commit": "ee98743a860437ad5797bf5db080c04e0128528d"
         },
         {
           "archive": "source/kernel-controller.tar.gz",
           "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/reference-sound-exports.symvers",
+          "sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362"
         }
       ]
     },
     "usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-j713-group.ko": {
       "sha256": "465a88aa9f70ceac8682499ad6bd9ecd34a33b35a3b5c556b42f7bd1524272d0",
       "license": "GPL-2.0-only",
-      "correspondence": "unverified",
+      "correspondence": "rebuilt-identical",
       "sources": [
         {
-          "tree": "audio/j713/kernel"
+          "tree": "audio/j713/kernel",
+          "commit": "ee98743a860437ad5797bf5db080c04e0128528d"
         },
         {
           "archive": "source/kernel-controller.tar.gz",
           "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/reference-sound-exports.symvers",
+          "sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362"
         }
       ]
     },
     "usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-macaudio.ko": {
       "sha256": "1dc3a6878b10154676b1b06529b197baf3b1cf1c81b5ef94128b2f52d605ea34",
       "license": "GPL-2.0-only",
-      "correspondence": "unverified",
+      "correspondence": "rebuilt-identical",
       "sources": [
         {
-          "tree": "audio/j713/kernel"
+          "tree": "audio/j713/kernel",
+          "commit": "ee98743a860437ad5797bf5db080c04e0128528d"
         },
         {
           "archive": "source/kernel-controller.tar.gz",
           "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/reference-sound-exports.symvers",
+          "sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362"
         }
       ]
     },
     "usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-tas2764.ko": {
       "sha256": "dc00caabad80dffe95e872222440a4711ca57a37bd4271ae08e971e22d7d15f7",
       "license": "GPL-2.0-only",
-      "correspondence": "unverified",
+      "correspondence": "rebuilt-identical",
       "sources": [
         {
-          "tree": "audio/j713/kernel"
+          "tree": "audio/j713/kernel",
+          "commit": "ee98743a860437ad5797bf5db080c04e0128528d"
         },
         {
           "archive": "source/kernel-controller.tar.gz",
           "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/reference-sound-exports.symvers",
+          "sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362"
         }
       ]
     },
