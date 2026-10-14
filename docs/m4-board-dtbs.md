@@ -18,8 +18,12 @@ then builds all six boards with and without the patches using
   differs from the record in `tests/fixtures/m4-board-dtbs.json`. The record
   lists, per board, the nodes the patches enable or disable, the properties
   they change on existing nodes, and a digest of every enabled node's
-  properties, so editing a value on any board changes it too. Phandles are
-  compared by the node they point to, so renumbering alone is not a change.
+  properties, so editing a value on any board changes it too. Phandles in the
+  common reference properties (`PHANDLE_LISTS` in the tool) are compared by
+  the node they point to, so renumbering alone does not change those; a
+  renumbering that reaches another phandle property shows as a change and is
+  re-recorded. The record also names the `dtc` version, so a runner update
+  that changes warnings fails with the cause in view.
 
 A patch that changes another board therefore changes that record in the same
 pull request, where a reviewer can see it. The test prints the new record when

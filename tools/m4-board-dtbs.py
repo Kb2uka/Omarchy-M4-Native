@@ -38,7 +38,7 @@ PHANDLE_LISTS = {'iommus': '#iommu-cells', 'phys': '#phy-cells', 'power-domains'
                  'dmas': '#dma-cells', 'interrupts-extended': '#interrupt-cells', 'pwms': '#pwm-cells',
                  'nvmem-cells': '#nvmem-cell-cells', 'io-channels': '#io-channel-cells',
                  'thermal-sensors': '#thermal-sensor-cells', 'sound-dai': '#sound-dai-cells',
-                 'interrupt-parent': 0, 'memory-region': 0, 'remote-endpoint': 0, 'gpio-ranges': 3}
+                 'assigned-clocks': '#clock-cells', 'interrupt-parent': 0, 'memory-region': 0, 'remote-endpoint': 0, 'gpio-ranges': 3}
 LOCATION = re.compile(r'^.*?: (?=(?:Warning|ERROR) \()')
 
 spec = importlib.util.spec_from_file_location('adt_audit', ROOT / 'tools/adt-audit.py')
@@ -173,7 +173,9 @@ def report(tree, patches=PATCHES):
     include, upstream_apple = tree / 'include', tree / APPLE
     with tempfile.TemporaryDirectory() as workspace:
         patched_apple = apply_patches(upstream_apple, patches, workspace)
-        result = {'asahi_commit': ASAHI_COMMIT, 'patches': [patch.name for patch in patches], 'boards': {}}
+        dtc = subprocess.run(['dtc', '--version'], capture_output=True, text=True, check=True).stdout.strip()
+        result = {'asahi_commit': ASAHI_COMMIT, 'dtc': dtc, 'patches': [patch.name for patch in patches],
+                  'boards': {}}
         for board in boards(upstream_apple):
             before = describe(*compile_board(upstream_apple, include, board))
             after = describe(*compile_board(patched_apple, include, board))

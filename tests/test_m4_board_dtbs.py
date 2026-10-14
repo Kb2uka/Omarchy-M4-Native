@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,9 +66,15 @@ class BoardDevicetrees(unittest.TestCase):
             with self.subTest(board=board):
                 self.assertEqual(entry['dangling_added'], [])
 
-    def test_every_patch_was_applied(self):
-        self.assertEqual(self.report['patches'], [patch.name for patch in MODULE.PATCHES])
+    def test_patch_set_is_complete_and_a_bad_patch_is_refused(self):
         self.assertGreaterEqual(len(self.report['patches']), 16)
+        with tempfile.TemporaryDirectory() as temporary:
+            bad = Path(temporary) / '9999-bad.patch'
+            bad.write_text('--- a/arch/arm64/boot/dts/apple/t8132.dtsi\n'
+                           '+++ b/arch/arm64/boot/dts/apple/t8132.dtsi\n'
+                           '@@ -1,1 +1,1 @@\n-no such line in the file\n+replacement\n')
+            with self.assertRaisesRegex(RuntimeError, '9999-bad.patch does not apply'):
+                MODULE.apply_patches(Path(TREE) / MODULE.APPLE, [bad], Path(temporary) / 'work')
 
     def test_j713_keeps_its_single_warning_baseline(self):
         """tools/mkdtb.sh documents exactly one simple_bus_reg warning for the J713 build."""
@@ -85,7 +92,10 @@ SYNTHETIC = """/dts-v1/;
     on: iommu@2 { compatible = "test,iommu"; reg = <2>; #iommu-cells = <1>; };
     domain: power@3 { compatible = "test,power"; reg = <3>; #power-domain-cells = <0>; };
     good@4 { compatible = "test,good"; reg = <4>; iommus = <&on 7>, <&on 8>; power-domains = <&domain>; };
-    stale@5 { compatible = "test,stale"; reg = <5>; iommus = <&on 1>, <&off 2>; };
+    stale@5 { compatible = "test,stale"; reg = <5>; iommus = <&on 1>, <&off 2>;
+              phys = <&offphy>; mboxes = <&offmbox>; };
+    offphy: phy@9 { compatible = "test,phy"; reg = <9>; #phy-cells = <0>; status = "disabled"; };
+    offmbox: mbox@b { compatible = "test,mbox"; reg = <0xb>; #mbox-cells = <0>; status = "disabled"; };
     orphan@6 { compatible = "test,orphan"; reg = <6>; power-domains = <0x7777>; };
     quiet@7 { compatible = "test,quiet"; reg = <7>; iommus = <&off 3>; status = "disabled"; };
     bus@8 {
@@ -120,6 +130,8 @@ class BoardDevicetreeTool(unittest.TestCase):
         self.assertEqual(MODULE.dangling(self.root, self.enabled), [
             '/orphan@6 power-domains -> missing phandle 0x7777',
             '/stale@5 iommus -> disabled /iommu@1',
+            '/stale@5 mboxes -> disabled /mbox@b',
+            '/stale@5 phys -> disabled /phy@9',
         ])
 
     def test_changed_ignores_phandle_renumbering_but_not_real_edits(self):
