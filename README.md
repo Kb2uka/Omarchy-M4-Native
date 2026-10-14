@@ -144,6 +144,10 @@ once applies them:
 | Sound in Zeus Link and other WebKitGTK and GStreamer apps ([#54](https://github.com/Kb2uka/Omarchy-M4-Native/pull/54), [#63](https://github.com/Kb2uka/Omarchy-M4-Native/pull/63)) | `omarchy-m4-gst-audio` 1.28.7-1 |
 | GPU and desktop on Airs whose GPU power limit is below 24800 mW ([#57](https://github.com/Kb2uka/Omarchy-M4-Native/issues/57)); applied at the next boot | `omarchy-m4-gpu` 1-1 |
 
+**Headphone jack (opt-in):** `sudo pacman -S omarchy-m4-headphones` on a
+connected Air, then restart once. Playback only; see
+[J713 headphone jack](docs/j713-headphones.md).
+
 A devicetree you applied by hand from the guides is kept; the update never
 moves an Air back to an older one. An Air connected before
 `omarchy-m4-gst-audio` was published gets it by running the connect line once
@@ -172,6 +176,7 @@ As of October 11, 2026, with the pinned experimental runtime:
 | Shut Down | With update 1, Shut Down turns the Air off and it stays off; the next power-on boots normally (October 12). |
 | Graphics | Experimental Apple M4 GPU rendering is active. Scanout still uses simpledrm; this is not complete display-controller support or proof of physical panel timing. |
 | Speakers | Protected internal-speaker playback and automatic startup have worked on the test Air. Broad acoustic calibration, all failure conditions and suspend/resume remain unqualified. |
+| Headphone jack | With the opt-in `omarchy-m4-headphones` package (October 14-15, 2026): clean stereo playback beside the protected speakers, and the output follows plug and unplug. The headset microphone and suspend/resume are not supported. |
 | Browser video | H264 8-bit and VP9 Profile 0 hardware decoding have been observed with the qualified decoder/graphics stack. Ordinary 1080p30 playback works in the tested cases. This is not hardware support for every codec or protected video. |
 | Normal media-player launch | A 10-second normal mpv file-open check used `vaapi-copy` with zero reported frame/decoder drops; an AV1 control reached EOF in software with one startup frame drop. `vaapi-copy` still uses the hardware decoder, with a copy into CPU-accessible memory afterward. |
 | Protected movies | A tested Widevine movie used CPU decoding and played. Hardware decoding is not promised for protected content, and no license or DRM restrictions are bypassed. |

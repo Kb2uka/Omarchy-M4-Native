@@ -259,6 +259,41 @@ class PolicyTests(unittest.TestCase):
         text = (PACKAGING / 'omarchy-m4-speaker/20-m4-speaker-module.conf').read_text()
         self.assertIn('ExecStartPre=-/usr/bin/m4-speaker-module --boot\n', text)
 
+    def test_headphone_package_must_be_the_pin(self):
+        good = {path: (0o644, digest) for path, digest in CHANNEL['headphone_modules'].items()}
+        good['usr/bin/m4-headphones'] = (0o755, file_sha('tools/m4-headphones.py'))
+        good[CHECK.HEADPHONES_DROP_IN] = (0o644, file_sha('packaging/omarchy-m4/omarchy-m4-headphones/30-m4-headphones.conf'))
+        for path in CHECK.HEADPHONES_POLICY:
+            good[path] = (0o644, file_sha('audio/j713/headphones/policy/' + path))
+        CHECK.check_package(CHANNEL, *self.package('omarchy-m4-headphones', good))
+        staged = next(iter(CHANNEL['headphone_modules']))
+        speaker_policy = 'usr/share/wireplumber/wireplumber.conf.d/82-j713-protected-default.conf'
+        for files, message in (({**good, staged: (0o644, '0' * 64)}, 'differs from the pin'),
+                               ({**good, 'usr/bin/m4-headphones': (0o755, '0' * 64)}, 'tool differs'),
+                               ({**good, CHECK.HEADPHONES_DROP_IN: (0o644, '0' * 64)}, 'drop-in differs'),
+                               ({**good, CHECK.HEADPHONES_POLICY[0]: (0o644, '0' * 64)}, 'policy differs'),
+                               ({**good, speaker_policy: (0o644, 'x')}, 'unlisted path')):
+            with self.subTest(message):
+                with self.assertRaisesRegex(ValueError, message):
+                    CHECK.check_package(CHANNEL, *self.package('omarchy-m4-headphones', files))
+
+    def test_opt_in_packages_are_channel_packages(self):
+        self.assertEqual(CHANNEL['opt_in_packages'], ['omarchy-m4-headphones'])
+        self.assertTrue(set(CHANNEL['opt_in_packages']) <= set(CHANNEL['packages']))
+
+    def test_headphone_drop_in_runs_after_registration_and_cannot_fail_it(self):
+        text = (PACKAGING / 'omarchy-m4-headphones/30-m4-headphones.conf').read_text()
+        self.assertIn('ExecStartPost=-/usr/bin/m4-headphones --boot\n', text)
+        self.assertNotIn('ExecStartPre', text)
+
+    def test_headphone_pins_agree(self):
+        tool = load('tools/m4-headphones.py')
+        self.assertEqual({f'{tool.STAGED}/{filename}': pin['sha256'] for _, filename, pin in tool.MODULES},
+                         CHANNEL['headphone_modules'])
+        sums = re.search(r'^sha256sums=\((.*?)\)', recipe('omarchy-m4-headphones'), re.M | re.S).group(1)
+        for digest in CHANNEL['headphone_modules'].values():
+            self.assertIn(f"'{digest}'", sums)
+
     def boot_package(self, files, info=None):
         return Path('omarchy-m4-boot-1-4-aarch64.pkg.tar.zst'), info or self.boot_info(), files, self.boot_root
 

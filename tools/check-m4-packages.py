@@ -28,6 +28,13 @@ CHANNEL = ROOT / 'packaging/omarchy-m4/channel.json'
 REALTIME = 'usr/lib/systemd/system/speakersafetyd-j713.service.d/50-realtime.conf'
 SPEAKER_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/20-m4-speaker-module.conf'
 GPU_DROP_IN = 'usr/lib/systemd/system/m4-gpu.service.d/20-m4-gpu-module.conf'
+HEADPHONES_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/30-m4-headphones.conf'
+# Installed paths of the headphone UCM and WirePlumber files, relative to their
+# source tree audio/j713/headphones/policy/.
+HEADPHONES_POLICY = ('usr/share/alsa/ucm2/conf.d/J713Headphones/J713Headphones.conf',
+                     'usr/share/alsa/ucm2/conf.d/J713Headphones/HiFi.conf',
+                     'usr/share/wireplumber/wireplumber.conf.d/83-j713-headphones.conf',
+                     'usr/share/wireplumber/scripts/default-nodes/j713-headphones.lua')
 
 
 def require(condition, message):
@@ -159,6 +166,16 @@ def check_package(channel, package, info, files, root):
         require(files.get('usr/bin/m4-gpu-module') == (0o755, sha(tool)), 'Packaged GPU module tool differs')
         drop_in = (ROOT / 'packaging/omarchy-m4/omarchy-m4-gpu/20-m4-gpu-module.conf').read_bytes()
         require(files.get(GPU_DROP_IN) == (0o644, sha(drop_in)), 'GPU module drop-in differs')
+    elif name == 'omarchy-m4-headphones':
+        for path, digest in channel['headphone_modules'].items():
+            require(files.get(path, (0, ''))[1] == digest, 'Staged headphone module differs from the pin: ' + path)
+        tool = (ROOT / 'tools/m4-headphones.py').read_bytes()
+        require(files.get('usr/bin/m4-headphones') == (0o755, sha(tool)), 'Packaged headphone tool differs')
+        drop_in = (ROOT / 'packaging/omarchy-m4/omarchy-m4-headphones/30-m4-headphones.conf').read_bytes()
+        require(files.get(HEADPHONES_DROP_IN) == (0o644, sha(drop_in)), 'Headphone drop-in differs')
+        for path in HEADPHONES_POLICY:
+            source = (ROOT / 'audio/j713/headphones/policy' / path).read_bytes()
+            require(files.get(path) == (0o644, sha(source)), 'Packaged headphone policy differs: ' + path)
     elif name == 'omarchy-m4-gst-audio':
         for path, digest in channel['gst_audio'].items():
             require(files.get(path, (0, ''))[1] == digest, 'GStreamer sink differs from the pin: ' + path)

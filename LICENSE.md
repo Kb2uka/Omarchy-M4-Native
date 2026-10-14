@@ -28,7 +28,12 @@ Existing file-level notices using KB2UKA remain valid and are preserved.
 | `patches-kernel/j713-input/dockchannel-power-v2.patch`: Asahi DockChannel HID hunks | GPL-2.0-only OR MIT |
 | `patches/installer/`: changes to the Gravity/Asahi installer and original added helpers/tests | MIT, retaining the upstream Asahi notice |
 | `patches/omarchy/offline-node-arm64.patch`, `tests/fixtures/mise-work-v4.0.4.sh` | Omarchy MIT terms, retaining its upstream notice in `tests/fixtures/omarchy-LICENSE` |
+| `audio/j713/headphones/kernel/` | GPL-2.0-only |
+| `audio/j713/headphones/policy/` and `README.md`, `tools/m4-headphones.py`, `tools/build-j713-headphones.sh`, `packaging/omarchy-m4/omarchy-m4-headphones/`, `docs/j713-headphones.md` and the headphone tests | MIT |
 | Full texts in `LICENSES/` | Reproduced license documents; their own terms apply |
+
+The J713 headphone jack rows above are Copyright (c) 2026 Luthfi Hizb, under
+the same terms.
 
 An `OR` grants a choice between the listed alternatives for that material.
 A patch containing multiple source files keeps the terms of each affected

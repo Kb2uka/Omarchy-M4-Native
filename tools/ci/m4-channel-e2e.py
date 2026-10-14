@@ -195,7 +195,8 @@ def main():
             listed = source[source.index('PACKAGES = ('):source.index(')', source.index('PACKAGES = (')) + 1]
             older = scratch / 'm4-channel-setup-1-5.py'
             older.write_text(source.replace(listed, 'PACKAGES = (' + ', '.join(
-                repr(p) for p in CHANNEL['packages'] if p != 'omarchy-m4-gpu') + ')'))
+                repr(p) for p in CHANNEL['packages']
+                if p != 'omarchy-m4-gpu' and p not in CHANNEL['opt_in_packages']) + ')'))
             require('omarchy-m4-gpu' not in older.read_text().split('PACKAGES = (')[1].split(')')[0],
                     'The 1-5 setup script stand-in still lists omarchy-m4-gpu')
             results = []
@@ -214,6 +215,10 @@ def main():
                         'The channel include is missing or duplicated')
             require(all(r['status'].startswith('connected') and r['boot'] == 'current' and
                         r['restart_needed'] is False for r in results), 'Setup did not report a current boot.bin')
+            # The headphone jack package is opt-in: setup leaves it out and the owner installs it.
+            require(run(*pacman, '-Q', 'omarchy-m4-headphones', check=False, capture_output=True).returncode != 0,
+                    'Setup installed the opt-in headphone package')
+            sudo(*pacman, '-S', '--noconfirm', 'omarchy-m4-headphones')
             repos = run('pacman-conf', '--config', root / 'etc/pacman.conf', '--repo-list',
                         capture_output=True, text=True).stdout.split()
             require(repos == ['omarchy-m4', 'core'], 'The channel is not searched first: ' + ' '.join(repos))
@@ -237,6 +242,10 @@ def main():
                 require(sha((root / path).read_bytes()) == digest, 'Staged GPU module missing or wrong: ' + path)
             require((root / 'usr/lib/systemd/system/m4-gpu.service.d/20-m4-gpu-module.conf').is_file()
                     and os.access(root / 'usr/bin/m4-gpu-module', os.X_OK), 'The GPU module step is missing')
+            for path, digest in CHANNEL['headphone_modules'].items():
+                require(sha((root / path).read_bytes()) == digest, 'Staged headphone module missing or wrong: ' + path)
+            require((root / 'usr/lib/systemd/system/m4-j713-audio-register.service.d/30-m4-headphones.conf').is_file()
+                    and os.access(root / 'usr/bin/m4-headphones', os.X_OK), 'The headphone step is missing')
             require(os.access(root / 'usr/bin/omarchy-m4-update', os.X_OK) and
                     (root / 'usr/lib/omarchy-m4/m4-channel-setup.py').is_file(), 'omarchy-m4-update is missing')
             require((root / 'usr/lib/systemd/user/omarchy-m4-update-check.timer').is_file() and
