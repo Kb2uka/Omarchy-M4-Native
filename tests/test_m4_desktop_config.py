@@ -646,9 +646,40 @@ hl.config({
 hl.on("hyprland.start", function()
   hl.exec_cmd("uwsm finalize HYPRLAND_INSTANCE_SIGNATURE OMARCHY_PATH && systemctl --user start pipewire.service wireplumber.service wayland-wm-app-daemon.service")
 end)
+-- The Air's lid is "Apple SMC power/lid events", not the "Lid Switch" Omarchy
+-- 4.0.4 binds, and its lid check reads ACPI, which arm64 lacks. Lock on close
+-- and light the lock screen on open. logind still ignores the lid: J713
+-- suspend is unqualified.
+o.bind("switch:on:Apple SMC power/lid events", nil, "omarchy-system-lock", { locked = true })
+o.bind("switch:off:Apple SMC power/lid events", nil, "omarchy-brightness-display on", { locked = true })
 '''
         actual = (self.root / "etc/skel/.config/hypr/hyprland.lua").read_text(encoding="utf-8")
         self.assertEqual(actual, self.stock.rstrip() + "\n" + expected)
+
+    def test_lid_switch_binds_lock_on_close_and_wake_on_open(self):
+        desktop.configure(self.root, apply=True)
+        config = (self.root / "etc/skel/.config/hypr/hyprland.lua").read_text(encoding="utf-8")
+        self.assertTrue(config.startswith(self.stock.rstrip() + "\n"))
+        block = self.root.parent / "m4-block.lua"
+        block.write_text(config[len(self.stock.rstrip() + "\n"):], encoding="utf-8")
+        # Run the generated M4 block under real Lua, with Hyprland and Omarchy's
+        # o.bind stubbed to record what would be bound.
+        harness = self.root.parent / "harness.lua"
+        harness.write_text('''
+local binds = {}
+hl = { monitor = function() end, config = function() end, on = function() end }
+o = { bind = function(keys, description, command, options)
+  binds[#binds + 1] = { keys, tostring(description), command, tostring(options and options.locked) }
+end }
+dofile(arg[1])
+for _, b in ipairs(binds) do print(table.concat(b, "\\t")) end
+''', encoding="utf-8")
+        result = subprocess.run([os.environ.get("LUA", "lua"), str(harness), str(block)],
+                                capture_output=True, text=True, check=True)
+        self.assertEqual(result.stdout.splitlines(), [
+            "switch:on:Apple SMC power/lid events\tnil\tomarchy-system-lock\ttrue",
+            "switch:off:Apple SMC power/lid events\tnil\tomarchy-brightness-display on\ttrue",
+        ])
 
     def test_widget_clone_keeps_public_docs_and_omits_internal_markdown(self):
         source = "usr/share/omarchy/shell/plugins/agents/"
