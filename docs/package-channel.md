@@ -133,6 +133,21 @@ file.
   `J713Headphones` card, the WirePlumber fragment `83-j713-headphones.conf`
   and its hook. All five are new files; none replaces a speaker or ALSA file.
 
+### omarchy-m4-keyring 20261012-2 and omarchy-m4-boot 1-8
+
+- **User-level pacman verifies the channel database** (issue #71). alpha.1
+  leaves `/etc/pacman.d/gnupg` readable by root only, so with
+  `DatabaseRequired` every `pacman` run as the desktop user printed keyring
+  errors. The directory becomes `755` and `pubring.gpg`, `pubring.kbx` and
+  `trustdb.gpg` become `644`, as on stock Arch. Private keys, revocation
+  certificates and agent sockets keep their modes, and symlinks are never
+  followed.
+- **`omarchy-m4-keyring` 20261012-2** applies the modes from its install
+  scriptlet, so an Air that is already connected is fixed by its next
+  `omarchy-m4-update` run.
+- **`omarchy-m4-boot` 1-8** ships the setup script that applies the same modes
+  when a new install connects.
+
 ## Connecting new installs
 
 The release root builder (`tools/prepare-j713-release.py`) adds

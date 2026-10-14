@@ -72,6 +72,15 @@ class SetupTests(unittest.TestCase):
         (self.root / MODULE.CONF).chmod(0o640)
         self.put(MODULE.BOOT, 'alpha.1 boot')
         self.include = 'Include = ' + str(self.root / MODULE.SNIPPET)
+        # alpha.1 ships the pacman keyring directory readable by root only;
+        # pacman-key leaves the public database files world-readable (issue #71).
+        gnupg = self.root / MODULE.GNUPG
+        gnupg.mkdir(parents=True, exist_ok=True)
+        gnupg.chmod(0o700)
+        for name in ('pubring.gpg', 'trustdb.gpg'):
+            path = gnupg / name
+            path.write_bytes(b'public')
+            path.chmod(0o644)
 
     def put(self, name, text):
         path = self.root / name
@@ -282,6 +291,73 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(MODULE.SERVER, CHANNEL['server'])
         self.assertEqual(MODULE.REPOSITORY, CHANNEL['repository'])
         self.assertEqual(list(MODULE.PACKAGES), CHANNEL['packages'])
+
+    def test_keyring_made_readable_for_users(self):
+        gnupg = self.root / MODULE.GNUPG
+        private = gnupg / 'private-keys-v1.d'
+        private.mkdir(exist_ok=True)
+        private.chmod(0o700)
+        secret = private / 'secret.key'
+        secret.write_bytes(b'private')
+        secret.chmod(0o600)
+        kbx = gnupg / 'pubring.kbx'
+        kbx.write_bytes(b'public')
+        kbx.chmod(0o600)
+        result = self.setup_with(FakeSystem(self.root))
+        self.assertTrue(result['keyring_readable'])
+        self.assertEqual(gnupg.stat().st_mode & 0o777, 0o755)
+        for name in ('pubring.gpg', 'pubring.kbx', 'trustdb.gpg'):
+            self.assertEqual((gnupg / name).stat().st_mode & 0o777, 0o644, name)
+        self.assertEqual(private.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(secret.stat().st_mode & 0o777, 0o600)
+
+    def test_symlinked_keyring_material_is_never_followed(self):
+        gnupg = self.root / MODULE.GNUPG
+        outside = self.root / 'outside'
+        outside.mkdir(exist_ok=True)
+        target = outside / 'real-pubring.gpg'
+        target.write_bytes(b'not ours')
+        target.chmod(0o600)
+        (gnupg / 'pubring.gpg').unlink()
+        (gnupg / 'pubring.gpg').symlink_to(target)
+        result = self.setup_with(FakeSystem(self.root))
+        self.assertTrue(result['keyring_readable'])
+        self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(target.read_bytes(), b'not ours')
+        self.assertEqual(gnupg.stat().st_mode & 0o777, 0o755)
+
+    def test_symlinked_keyring_dir_refuses(self):
+        gnupg = self.root / MODULE.GNUPG
+        real = self.root / 'real-gnupg'
+        real.mkdir(exist_ok=True)
+        for path in sorted(gnupg.rglob('*')):
+            if path.is_symlink() or path.is_file():
+                path.unlink()
+            else:
+                path.rmdir()
+        gnupg.rmdir()
+        gnupg.symlink_to(real)
+        with self.assertRaisesRegex(MODULE.Refused, 'Missing /' + MODULE.GNUPG):
+            self.setup_with(FakeSystem(self.root))
+        self.assertEqual((self.root / MODULE.CONF).read_text(), AIR_CONF)
+        self.assertFalse((self.root / MODULE.SNIPPET).exists())
+
+    def test_inspection_leaves_keyring_alone(self):
+        gnupg = self.root / MODULE.GNUPG
+        result = self.setup_with(FakeSystem(self.root), apply=False)
+        self.assertNotIn('keyring_readable', result)
+        self.assertEqual(gnupg.stat().st_mode & 0o777, 0o700)
+        self.assertEqual((gnupg / 'pubring.gpg').stat().st_mode & 0o777, 0o644)
+
+    def test_missing_keyring_dir_refuses_before_changes(self):
+        gnupg = self.root / MODULE.GNUPG
+        for path in sorted(gnupg.rglob('*')):
+            path.unlink()
+        gnupg.rmdir()
+        with self.assertRaisesRegex(MODULE.Refused, 'Missing /' + MODULE.GNUPG):
+            self.setup_with(FakeSystem(self.root))
+        self.assertEqual((self.root / MODULE.CONF).read_text(), AIR_CONF)
+        self.assertFalse((self.root / MODULE.SNIPPET).exists())
 
 
 if __name__ == '__main__':

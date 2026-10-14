@@ -51,6 +51,11 @@ SINKS = 'omarchy-m4-gst-audio'  # gst-plugins-good already has both sinks and co
 BOARD = b'apple,j713'
 CONF = 'etc/pacman.conf'
 SNIPPET = 'etc/pacman.d/omarchy-m4.conf'
+GNUPG = 'etc/pacman.d/gnupg'
+# Public keyring material a normal user must read to verify sync databases,
+# as on stock Arch (directory 755, these files 644). Private material is
+# never touched: anything else under GNUPG keeps its mode.
+PUBLIC_KEYRING_FILES = ('pubring.gpg', 'pubring.kbx', 'trustdb.gpg')
 BACKUP = '.pre-omarchy-m4'
 MANIFESTS = ('etc/omarchy/j713-video-manifest.json', 'etc/omarchy/j713-audio-manifest.json')
 COMPATIBLE = 'sys/firmware/devicetree/base/compatible'
@@ -99,6 +104,25 @@ def write(path, text, mode):
         os.fsync(stream.fileno())
     os.chmod(temp, mode)
     os.replace(temp, path)
+
+
+def make_keyring_readable(root):
+    """Let normal users verify sync databases (issue #71, stock Arch layout).
+
+    alpha.1 ships /etc/pacman.d/gnupg mode 700 root, so with DatabaseRequired
+    every user-level pacman run prints keyring errors. Relax only the
+    directory and the public database files; private keys keep their modes.
+    """
+    directory = root / GNUPG
+    require(directory.is_dir() and not directory.is_symlink(), 'Missing /' + GNUPG)
+    # Intended world-readable modes (stock Arch layout), not a leak: the
+    # directory must be traversable and these database files readable for
+    # user-level signature verification; private keys below keep their modes.
+    os.chmod(directory, 0o755)
+    for name in PUBLIC_KEYRING_FILES:
+        path = directory / name
+        if path.is_file() and not path.is_symlink():
+            os.chmod(path, 0o644)
 
 
 class Machine:
@@ -246,6 +270,8 @@ def connect(root, apply, server, key, fingerprint, output):
         require(machine.pacman_key('--add', str(key_file)) == 0, 'pacman-key could not add the channel key')
         require(machine.pacman_key('--lsign-key', fingerprint) == 0,
                 'pacman-key could not trust the channel key ' + fingerprint)
+        make_keyring_readable(root)
+        plan['keyring_readable'] = True
         try:
             if current != wanted:
                 write(root / SNIPPET, wanted, conf.stat().st_mode & 0o777)  # readable like pacman.conf
