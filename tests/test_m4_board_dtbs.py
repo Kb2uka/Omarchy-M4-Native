@@ -68,7 +68,7 @@ class BoardDevicetrees(unittest.TestCase):
                 self.assertEqual(entry['dangling_added'], [])
 
     def test_patch_set_is_complete_and_a_bad_patch_is_refused(self):
-        self.assertGreaterEqual(len(self.report['patches']), 16)
+        self.assertGreaterEqual(len(self.report['patches']), 17)
         with tempfile.TemporaryDirectory() as temporary:
             bad = Path(temporary) / '9999-bad.patch'
             bad.write_text('--- a/arch/arm64/boot/dts/apple/t8132.dtsi\n'

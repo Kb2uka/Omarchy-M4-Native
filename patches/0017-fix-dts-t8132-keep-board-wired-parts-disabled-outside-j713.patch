@@ -7,7 +7,8 @@ The shared T8132 patches enabled the SPMI PMIC, the SEP mailbox and DART,
 and both USB-C PHYs with their display crossbars on every M4 board. They
 were checked on the J713 only. Keep them disabled in t8132.dtsi, like the
 SEP, DWC3 and PCIe nodes that use them, and enable them in t8132-j713.dts.
-The J713 devicetree is unchanged.
+The J713 devicetree keeps the same content; the seven nodes now carry an
+explicit status = "okay".
 ---
  arch/arm64/boot/dts/apple/t8132-j713.dts | 33 ++++++++++++++++++++++++
  arch/arm64/boot/dts/apple/t8132.dtsi     |  7 +++++
