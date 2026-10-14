@@ -17,6 +17,15 @@ QUALIFIED = [board for board in BOARDS if board['support'] == 'qualified']
 REFUSED = [board for board in BOARDS if board['support'] == 'refused']
 
 
+# The J713 board name on another SoC (M2): a gate that checks only the board accepts it.
+FOREIGN_SOC = ('J713 on T8112', b'apple,j713\0apple,t8112\0apple,arm-platform\0')
+
+
 def identity(board):
     """The root compatible list m1n1 hands Linux on that Mac (upstream t8132-<board>.dts)."""
     return f"{board['compatible']}\0{SOC}\0apple,arm-platform\0".encode()
+
+
+def refused_identities():
+    """(label, compatible) pairs a gate that checks both board and SoC must refuse."""
+    return [(board['target'], identity(board)) for board in REFUSED] + [FOREIGN_SOC]

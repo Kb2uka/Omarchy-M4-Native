@@ -14,7 +14,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
 from m4_audio_package import digest, dtb_compatible
-from m4_board_identities import REFUSED, identity
+from m4_board_identities import refused_identities
 
 
 def load(name, filename):
@@ -272,8 +272,8 @@ class ImageTests(unittest.TestCase):
                 self.assert_no_install()
 
     def test_qualified_board_dtb_both_compat_and_hash(self):
-        # Each sibling M4 Mac's real identity, and an M2 board name on the M4 SoC.
-        for compatible in [identity(board) for board in REFUSED] + [b'apple,j413\0apple,t8132\0']:
+        # Each sibling M4 Mac's real identity, the J713 name on an M2 SoC, and an M2 name on the M4 SoC.
+        for compatible in [compatible for _, compatible in refused_identities()] + [b'apple,j413\0apple,t8132\0']:
             with self.subTest(compatible=compatible):
                 self.dtb.write_bytes(tree(compatible))
                 self.manifest['base_dtb_sha256'] = [digest(self.dtb.read_bytes())]

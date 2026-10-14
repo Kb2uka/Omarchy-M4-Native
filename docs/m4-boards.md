@@ -41,8 +41,9 @@ a mini.
   `m4-session-placement`, `m4-j713-audio-ready` and `m4-j713-audio-register`.
   Each sibling is fed the `compatible` list m1n1 hands Linux on that Mac
   (`apple,<board>`, `apple,t8132`, `apple,arm-platform`);
-- a gate that reads a devicetree file accepts a sibling M4 identity: the J713
-  devicetree builders (`build-j713-cpufreq-dtb.py`, `build-j713-cputemp-dtb.py`,
+- a gate that reads a devicetree file does not refuse each sibling M4
+  identity, or the J713 name on an M2 SoC: the J713 devicetree builders
+  (`build-j713-cpufreq-dtb.py`, `build-j713-cputemp-dtb.py`,
   `build-j713-poweroff-dtb.py`, with their base hash pinned to the sibling so
   the board check itself must refuse, before compiling or writing), the audio
   package's base-DTB check (`tests/test_j713_audio_installer.py`) and the video

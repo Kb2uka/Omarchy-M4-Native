@@ -22,7 +22,8 @@ import tempfile
 import unittest
 import unittest.mock
 
-from m4_board_identities import BOARDS, QUALIFIED, REFUSED, ROOT, SOC, TABLE, TABLE_PATH, identity
+from m4_board_identities import (BOARDS, QUALIFIED, REFUSED, ROOT, SOC, TABLE, TABLE_PATH, identity,
+                                 refused_identities)
 from test_j713_gpu_air_gate import SOURCE as G16, item
 
 DOC = ROOT / 'docs/m4-boards.md'
@@ -345,9 +346,9 @@ class DtbBuilderBoardGates(unittest.TestCase):
 
     def test_refused_boards_stop_at_the_board_check(self):
         for tool, overlay in DTB_BUILDERS:
-            for board in REFUSED:
-                with self.subTest(tool=tool, board=board['target']):
-                    error, written = self.build(tool, overlay, identity(board))
+            for label, compatible in refused_identities():
+                with self.subTest(tool=tool, board=label):
+                    error, written = self.build(tool, overlay, compatible)
                     self.assertIsInstance(error, ValueError)
                     self.assertEqual(str(error), 'Wrong board')
                     self.assertFalse(written)
