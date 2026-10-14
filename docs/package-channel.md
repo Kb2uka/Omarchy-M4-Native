@@ -179,6 +179,22 @@ file.
   thermal zone with a 95 C passive trip. The composer and updater accept it only
   after the CPU temperature devicetree.
 
+### omarchy-m4-cpu 1-2 and omarchy-m4-boot 1-11
+
+- **P-core boost** ([J713 P-core boost](j713-cpu-boost.md), #66): P cores run
+  up to 4464 MHz and E cores up to 2808 MHz, with P capped by a predictive guard
+  that keeps the CPU die's predicted peak at or below 100 C.
+- **Module:** `j713_pguard.ko` (`82800cef…`), built with the idle module by
+  `cpu/j713/build-module.sh` and pinned in `package-inputs` and
+  `cpu_guard_module`. `m4-cpu-idle` loads it inside the idle driver's
+  one-strike window, and with boost on sets the real-time uclamp floor to
+  1800 MHz. `sudo m4-cpu-idle --boost off` closes the boost gate at once
+  (hold file `/var/lib/omarchy-m4/cpu-idle/boost-hold`).
+- **`omarchy-m4-boot` 1-11** carries devicetree `c4f036b8…` (`j713-pboost`):
+  the boost states with P held at 1800 MHz by a boost gate on the CPU die zone
+  until the guard opens it. The composer and updater accept it only after the
+  E-cluster devicetree.
+
 ## Connecting new installs
 
 The release root builder (`tools/prepare-j713-release.py`) adds
