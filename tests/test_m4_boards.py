@@ -231,18 +231,26 @@ def snapshot(root):
 
 
 WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
-MUTATING = {'os.remove', 'os.rename', 'os.mkdir', 'os.rmdir', 'os.chmod', 'os.chown',
-            'os.link', 'os.symlink', 'os.truncate', 'os.utime'}
+# Mutating os.* audit events: (argument positions holding a target path, positions holding a dir_fd).
+MUTATING = {
+    'os.remove': ((0,), (1,)), 'os.rmdir': ((0,), (1,)), 'os.mkdir': ((0,), (2,)),
+    'os.chmod': ((0,), (2,)), 'os.chown': ((0,), (3,)), 'os.utime': ((0,), (3,)),
+    'os.truncate': ((0,), ()), 'os.symlink': ((1,), (2,)),
+    'os.rename': ((0, 1), (2, 3)), 'os.link': ((0, 1), (2, 3)),
+}
 WATCH = {'root': None, 'attempts': []}
 
 
-def under(value, root):
-    if value is None or isinstance(value, int):
+def touches(value, root):
+    """True unless the target is provably outside root; a bare fd or relative path cannot be placed."""
+    if value is None:
         return False
-    try:
-        path = os.path.realpath(os.fsdecode(os.fspath(value)))
-    except TypeError:
-        return False
+    if isinstance(value, int):
+        return True
+    path = os.fsdecode(os.fspath(value))
+    if not os.path.isabs(path):
+        return True
+    path = os.path.realpath(path)
     return path == root or path.startswith(root + os.sep)
 
 
@@ -253,13 +261,15 @@ def record_write_attempts(event, args):
         return
     try:
         if event == 'open':
-            hit = bool(args[2] and args[2] & WRITE_FLAGS) and under(args[0], root)
+            hit = bool(args[2] and args[2] & WRITE_FLAGS) and touches(args[0], root)
         elif event in MUTATING:
-            hit = any(under(value, root) for value in args[:2])
+            paths, dir_fds = MUTATING[event]
+            hit = (any(touches(args[index], root) for index in paths)
+                   or any(args[index] is not None for index in dir_fds if index < len(args)))
         else:
             return
         if hit:
-            WATCH['attempts'].append((event, os.fsdecode(os.fspath(args[0]))))
+            WATCH['attempts'].append((event, repr(args[0])))
     except Exception:  # an audit hook must never break the code it watches
         WATCH['attempts'].append((event, 'unclassified'))
 
@@ -288,6 +298,7 @@ class LiveBoardGates(unittest.TestCase):
             finally:
                 WATCH['root'] = None
             attempts = list(WATCH['attempts'])
+            # The hook sees only this process; the snapshot also catches a child process's writes.
             if snapshot(root) != before:
                 attempts.append(('snapshot', 'contents changed'))
             return error, attempts
