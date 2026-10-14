@@ -38,8 +38,8 @@ nvmem cells, two USB-C PHYs (ATC) with their display crossbars, and the PCIe
 pin group. Those descriptions were checked on the J713 only.
 
 Building is not booting. A board that compiles here has never been started
-with this project's kernel, and the shipped J713 devicetree is built by the
-release process, not by this check.
+with this project's kernel. This check also does not compare its J713 build
+with the devicetree that ships to the Air.
 
 To run it elsewhere: `tools/ci/fetch-asahi-dts.sh <dir>`, then
 `M4_ASAHI_TREE=<dir> python -m unittest discover -s tests -p test_m4_board_dtbs.py`,
