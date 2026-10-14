@@ -200,6 +200,7 @@ class RootGateTests(unittest.TestCase):
                 {'schema': 1, 'profile': profile, 'consent': 'owner-requested'}).encode())
         self.write(self.root, 'etc/omarchy/j713-audio-manifest.json', b'{}')
         self.write(self.root, 'opt/m4/tool', self.tool)
+        (self.root / 'etc/systemd/system/multi-user.target.wants').mkdir(parents=True)
 
     def prepare(self, **options):
         filled = mock.Mock()
