@@ -356,8 +356,11 @@ class WriteRecorder(unittest.TestCase):
                 'os.link': lambda: os.link(root / 'file', root / 'hard'),
                 'os.rmdir': lambda: os.rmdir(root / 'dir'),
             }
+            if hasattr(os, 'chown'):
+                actions['os.chown'] = lambda: os.chown(root / 'file', os.getuid(), os.getgid())
             if hasattr(os, 'setxattr'):
                 actions['os.setxattr'] = lambda: os.setxattr(root / 'file', 'user.probe', b'x')
+                actions['os.removexattr'] = lambda: os.removexattr(root / 'file', 'user.probe')
             if os.mkdir in os.supports_dir_fd:
                 fd = os.open(root, os.O_RDONLY)
                 self.addCleanup(os.close, fd)
