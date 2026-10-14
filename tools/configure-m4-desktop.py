@@ -25,6 +25,7 @@ hl.config({
 hl.on("hyprland.start", function()
   hl.exec_cmd("uwsm finalize HYPRLAND_INSTANCE_SIGNATURE OMARCHY_PATH && systemctl --user start pipewire.service wireplumber.service wayland-wm-app-daemon.service")
 end)
+-- J713 lid (issue #84): lock on close, light the lock screen on open.
 -- The Air's lid is "Apple SMC power/lid events", not the "Lid Switch" Omarchy
 -- 4.0.4 binds, and its lid check reads ACPI, which arm64 lacks. Lock on close
 -- and light the lock screen on open. Omarchy's clamshell check is skipped:

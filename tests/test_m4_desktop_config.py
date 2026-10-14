@@ -655,6 +655,7 @@ hl.config({
 hl.on("hyprland.start", function()
   hl.exec_cmd("uwsm finalize HYPRLAND_INSTANCE_SIGNATURE OMARCHY_PATH && systemctl --user start pipewire.service wireplumber.service wayland-wm-app-daemon.service")
 end)
+-- J713 lid (issue #84): lock on close, light the lock screen on open.
 -- The Air's lid is "Apple SMC power/lid events", not the "Lid Switch" Omarchy
 -- 4.0.4 binds, and its lid check reads ACPI, which arm64 lacks. Lock on close
 -- and light the lock screen on open. Omarchy's clamshell check is skipped:
@@ -671,6 +672,10 @@ o.bind("switch:off:Apple SMC power/lid events", nil, "omarchy-brightness-display
         desktop.configure(self.root, apply=True)
         config = (self.root / "etc/skel/.config/hypr/hyprland.lua").read_text(encoding="utf-8")
         self.assertTrue(config.startswith(self.stock.rstrip() + "\n"))
+        # The existing-install step in docs/j713-desktop-image.md skips a
+        # config that carries this line, so an image-built config is never
+        # given the binds twice.
+        self.assertEqual(config.count("\n-- J713 lid (issue #84)"), 1)
         block = self.root.parent / "m4-block.lua"
         block.write_text(config[len(self.stock.rstrip() + "\n"):], encoding="utf-8")
         # Run the generated M4 block under real Lua, with Hyprland and Omarchy's
@@ -696,10 +701,27 @@ for _, b in ipairs(binds) do print(table.concat(b, "\\t")) end
         desktop.configure(self.root, apply=True)
         pam = self.root / "etc/pam.d/omarchy-lock-password"
         self.assertEqual(pam.read_text(encoding="utf-8"), self.lock_pam)
-        if os.name != "nt":
-            self.assertEqual(pam.stat().st_mode & 0o777, 0o644)
         self.assertFalse((self.root / "etc/pam.d/omarchy-lock-fingerprint").exists())
         desktop.configure(self.root)
+
+    @unittest.skipIf(os.name == "nt", "POSIX image permissions")
+    def test_lock_screen_pam_stays_readable_by_the_session(self):
+        # The lock screen runs as the owner and reads this file itself.
+        previous = os.umask(0o077)
+        try:
+            desktop.configure(self.root, apply=True)
+        finally:
+            os.umask(previous)
+        pam = self.root / "etc/pam.d/omarchy-lock-password"
+        self.assertEqual(pam.stat().st_mode & 0o777, 0o644)
+        for mode in (0o600, 0o666):
+            with self.subTest(mode=oct(mode)):
+                pam.chmod(mode)
+                with self.assertRaisesRegex(ValueError, "omarchy-lock-password"):
+                    desktop.configure(self.root)
+                report = desktop.configure(self.root, apply=True)
+                self.assertIn("etc/pam.d/omarchy-lock-password", report["changed_files"])
+                self.assertEqual(pam.stat().st_mode & 0o777, 0o644)
 
     def test_unexpected_lock_screen_helper_fails_before_writes(self):
         stack = "as_root tee /etc/pam.d/omarchy-lock-password >/dev/null <<'EOF'\n" + self.lock_pam + "EOF\n"

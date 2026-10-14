@@ -156,7 +156,8 @@ sudo omarchy-apply-lock
 ```
 
 Then add the binds. This appends them once, only to an existing Omarchy
-configuration:
+configuration. It skips a configuration that already starts the block with the
+`-- J713 lid (issue #84)` line, as one made from an image with this change does:
 
 ```bash
 f=~/.config/hypr/hyprland.lua
