@@ -54,3 +54,5 @@ test confined it to one E core.
   clock and throughput.
 - `zone_test.py TRIP_C SECONDS OUT.csv` (root): lowers the thermal zone's trip,
   loads all cores, and always restores the 95 C trip.
+- `errdiff.sh BASE NEW`: kernel warning and error kinds that appear only in
+  boot NEW, compared with boot BASE (journalctl offsets), numbers masked.

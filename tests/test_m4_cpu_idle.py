@@ -40,6 +40,16 @@ class Machine:
 
     def sleep(self, seconds):
         self.slept.append((seconds, (self.root / MODULE.STATE / 'attempt').is_file()))
+        # The loader must hold its lock exclusively for the whole settle period.
+        import fcntl, os
+        fd = os.open(self.root / MODULE.STATE / 'lock', os.O_RDONLY)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            self.lock_free_while_settling = True
+        except BlockingIOError:
+            self.lock_free_while_settling = False
+        finally:
+            os.close(fd)
         if self.idles:
             for usage in (self.root / MODULE.CPUS).glob('cpu*/' + MODULE.POWER_DOWN + '/usage'):
                 usage.write_text(str(int(usage.read_text()) + 500) + '\n')
@@ -88,6 +98,7 @@ class CpuIdleLoad(unittest.TestCase):
         self.assertEqual(machine.commands, [['insmod', str(self.root / MODULE.STAGED)]])
         self.assertEqual(machine.marked, [True], 'marker must be durable before the load')
         self.assertEqual(machine.slept, [(120, True)], 'marker must cover the settle period')
+        self.assertFalse(machine.lock_free_while_settling, 'the loader must hold its lock exclusively while settling')
         self.assertFalse(self.marker().exists())
         self.assertEqual((report['state'], report['driver'], report['power_downs']), ('loaded', 'j713_idle', 5000))
         self.assertTrue(report['status'].startswith('loaded'))
