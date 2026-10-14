@@ -18,17 +18,29 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGING = ROOT / 'packaging/omarchy-m4'
+HEADPHONES = 'audio/j713/headphones/policy/usr/share/'
 # Repository files a PKGBUILD lists by bare name, staged next to it.
 STAGED = {
     'omarchy-m4-boot': {'m4-boot-compose.py': 'tools/m4-boot-compose.py',
                         'm4-update-check.py': 'tools/m4-update-check.py',
                         'm4-channel-setup.py': 'tools/m4-channel-setup.py',
                         'omarchy-m4-update': 'tools/omarchy-m4-update',
+                        'm4-lid-lock.py': 'tools/m4-lid-lock.py',
                         'MIT.txt': 'LICENSES/MIT.txt',
                         'GPL-2.0-or-later.txt': 'LICENSES/GPL-2.0-or-later.txt'},
     'omarchy-m4-speaker': {'m4-speaker-module.py': 'tools/m4-speaker-module.py',
                            'MIT.txt': 'LICENSES/MIT.txt',
                            'GPL-2.0-only.txt': 'LICENSES/GPL-2.0-only.txt'},
+    'omarchy-m4-gpu': {'m4-gpu-module.py': 'tools/m4-gpu-module.py',
+                       'MIT.txt': 'LICENSES/MIT.txt',
+                       'GPL-2.0-only.txt': 'LICENSES/GPL-2.0-only.txt'},
+    'omarchy-m4-headphones': {'m4-headphones.py': 'tools/m4-headphones.py',
+                              'J713Headphones.conf': HEADPHONES + 'alsa/ucm2/conf.d/J713Headphones/J713Headphones.conf',
+                              'HiFi.conf': HEADPHONES + 'alsa/ucm2/conf.d/J713Headphones/HiFi.conf',
+                              '83-j713-headphones.conf': HEADPHONES + 'wireplumber/wireplumber.conf.d/83-j713-headphones.conf',
+                              'j713-headphones.lua': HEADPHONES + 'wireplumber/scripts/default-nodes/j713-headphones.lua',
+                              'MIT.txt': 'LICENSES/MIT.txt',
+                              'GPL-2.0-only.txt': 'LICENSES/GPL-2.0-only.txt'},
 }
 MAKEPKG_CONF = '''\
 CARCH="aarch64"

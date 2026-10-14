@@ -15,6 +15,7 @@ reviewers.
 | `omarchy-m4-boot` | `m4-boot-compose`, its pacman hook, the J713 devicetree, the daily update notifier and, from 1-4, the real-time speaker protection drop-in | `1-1`; `1-4` adds CPU frequency scaling and CPU temperature |
 | `linux-m4-omarchy` | The J713 kernel image and its modules | `7.1.9.m4.20261008-2` |
 | `omarchy-m4-gst-audio` | GStreamer's `autodetect` and `pulse` sinks in `/usr/lib/gstreamer-1.0`, for WebKitGTK and GStreamer apps | `1.28.7-1` |
+| `omarchy-m4-headphones` | The headphone jack card: two pinned modules, `m4-headphones`, its registration drop-in, UCM and WirePlumber files | `1-1` |
 
 ### omarchy-m4-boot 1-4 and omarchy-m4-gst-audio 1.28.7-1
 
@@ -61,6 +62,34 @@ reviewers.
   refused and left untouched, and a refusal never stops registration. Details:
   [speaker protection startup](j713-protection-startup.md#existing-installs).
 
+### omarchy-m4-boot 1-6 and omarchy-m4-gpu 1-1
+
+- **`omarchy-m4-gpu`** delivers the Air GPU power-limit fix
+  ([#57](https://github.com/Kb2uka/Omarchy-M4-Native/issues/57),
+  [#80](https://github.com/Kb2uka/Omarchy-M4-Native/pull/80)). alpha.1's module
+  required a GPU power limit of exactly 24800 mW, which only a 1000 mV top GPU
+  state gives, so other Airs got no GPU and no desktop. The fixed module
+  (`3cf47fa7…`, 390,752 bytes, built from [`gpu/j713/`](../gpu/j713/README.md)
+  on the alpha.1 kernel tree) accepts each Air's own derived limit up to 24800
+  mW. It booted on a 1000 mV and a 980 mV Air. It is pinned in the
+  `package-inputs` release.
+- The GPU module stays under `/opt/m4-gpu`, outside pacman, so the package does
+  not overwrite it. It stages the module under `/usr/lib/omarchy-m4/gpu/`. A
+  drop-in on `m4-gpu.service` (`ExecStartPre=-`, the third
+  `protected_exceptions` file) runs `m4-gpu-module --boot` before
+  `m4-gpu-start` checks `/opt/m4-gpu/runtime.sha256` and loads the module. It
+  swaps the module and exactly its one line in `runtime.sha256`, only from the
+  stock alpha.1 state (`80cf3669…`), or to finish a swap a power cut
+  interrupted. An Air on the #57 test build is already current. Anything else,
+  such as a hand-patched module, is refused and left untouched, and a refusal
+  never stops graphics startup. `sudo m4-gpu-module --rollback` restores alpha.1
+  at the next boot and holds it there.
+- **`omarchy-m4-boot` 1-6** depends on `omarchy-m4-gpu`. An Air's installed
+  setup script (from 1-5) does not list the new package, so this dependency is
+  what makes its first `omarchy-m4-update` run install it. Pacman then prints
+  that the fix applies at the next restart; the setup script from 1-6 also
+  reports the restart.
+
 At launch the channel delivers exactly what a fully updated alpha.1 Air already
 runs:
 
@@ -76,6 +105,58 @@ The installed alpha.1 package `linux-m4-omarchy 7.1.9.m4.20261008-1` carries an
 older `Image.gz` (`69b92b65…`) than the one in `boot.bin`. Version `-2` corrects
 the package to match what boots. Nothing ever rebuilds `boot.bin` from the `-1`
 file.
+
+### omarchy-m4-headphones 1-1 and omarchy-m4-boot 1-7
+
+- **Playback through the headphone jack** ([J713 headphone jack](j713-headphones.md)).
+  Like every channel package, it arrives with `omarchy-m4-update`; there is no
+  separate install step.
+- **`omarchy-m4-boot` 1-7** depends on `omarchy-m4-headphones`, for the same
+  reason 1-6 depends on `omarchy-m4-gpu`: an Air's installed setup script does
+  not list the new package, so this dependency is what makes its first
+  `omarchy-m4-update` run install it. The setup script from 1-7 lists it and
+  reports that a restart starts the card.
+- **Off switch:** `sudo m4-headphones --disable` keeps the package installed
+  and current but stops the modules loading from the next boot;
+  `sudo m4-headphones --enable` switches it back on. The hold file is
+  `/var/lib/omarchy-m4/headphones/hold`, like the speaker and GPU holds.
+- **Modules:** `j713_hp_dt.ko` (`9ba22f0e…`) and `snd-soc-j713-headphones.ko`
+  (`a73ef565…`), built from `audio/j713/headphones/kernel/` with
+  `tools/build-j713-headphones.sh` and pinned in `package-inputs` and
+  `headphone_modules`. They are staged under `/usr/lib/omarchy-m4/` and never
+  enter the manifest-managed audio module directory.
+- **Loading:** a drop-in on `m4-j713-audio-register.service`
+  (`ExecStartPost=-`) runs `m4-headphones --boot` after the speaker
+  registration succeeds. A refusal or failure never fails the registration,
+  and a boot that dies while loading stops the next boot from trying again.
+- **Protected exceptions:** the drop-in, the two UCM files of the new
+  `J713Headphones` card, the WirePlumber fragment `83-j713-headphones.conf`
+  and its hook. All five are new files; none replaces a speaker or ALSA file.
+
+### omarchy-m4-keyring 20261012-2 and omarchy-m4-boot 1-8
+
+- **User-level pacman verifies the channel database** (issue #71). alpha.1
+  leaves `/etc/pacman.d/gnupg` readable by root only, so with
+  `DatabaseRequired` every `pacman` run as the desktop user printed keyring
+  errors. The directory becomes `755` and `pubring.gpg`, `pubring.kbx` and
+  `trustdb.gpg` become `644`, as on stock Arch. Private keys, revocation
+  certificates and agent sockets keep their modes, and symlinks are never
+  followed.
+- **`omarchy-m4-keyring` 20261012-2** applies the modes from its install
+  scriptlet, so an Air that is already connected is fixed by its next
+  `omarchy-m4-update` run.
+- **`omarchy-m4-boot` 1-8** ships the setup script that applies the same modes
+  when a new install connects.
+
+### omarchy-m4-boot 1-9
+
+- **Lid close locks the screen on installed Airs** ([#84](https://github.com/Kb2uka/Omarchy-M4-Native/issues/84)).
+  The image fix (#85) reached only new images; this delivers it through
+  `omarchy-m4-update`. The install script runs `m4-lid-lock.py`, which writes
+  the lock screen's PAM file when it is missing and appends the two lid binds
+  once to each user's Omarchy configuration, as that user. Details:
+  [J713 desktop image](j713-desktop-image.md#lid-close-and-the-lock-screen).
+- The binds take effect at the next login. A refusal never fails the update.
 
 ## Connecting new installs
 
@@ -161,6 +242,13 @@ wrappers), Widevine state, `/usr/lib/omarchy` (audio modules and helpers),
 the speaker and ALSA/WirePlumber configuration, firmware, or system service
 units. The only user units are the notifier's own two files. The boot object
 is written only by the composer.
+
+Install scripts never install files there either. Their tools change state
+outside the package only in known states and refuse anything else: the
+speaker and GPU tools swap only their own module and its pin, and from
+`omarchy-m4-boot` 1-9 `m4-lid-lock.py` writes the lock screen's PAM file when
+it is missing and appends the lid binds once to each user's Omarchy
+configuration, running as that user.
 
 These protected components stay manifest-managed outside pacman, as alpha.1
 installed them. pacman refuses to install over files it does not own, and

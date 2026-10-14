@@ -72,6 +72,15 @@ class SetupTests(unittest.TestCase):
         (self.root / MODULE.CONF).chmod(0o640)
         self.put(MODULE.BOOT, 'alpha.1 boot')
         self.include = 'Include = ' + str(self.root / MODULE.SNIPPET)
+        # alpha.1 ships the pacman keyring directory readable by root only;
+        # pacman-key leaves the public database files world-readable (issue #71).
+        gnupg = self.root / MODULE.GNUPG
+        gnupg.mkdir(parents=True, exist_ok=True)
+        gnupg.chmod(0o700)
+        for name in ('pubring.gpg', 'trustdb.gpg'):
+            path = gnupg / name
+            path.write_bytes(b'public')
+            path.chmod(0o644)
 
     def put(self, name, text):
         path = self.root / name
@@ -179,6 +188,38 @@ class SetupTests(unittest.TestCase):
         self.put(MODULE.SPEAKER_MODULE, 'fixed module')
         self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'already swapped')
 
+    def test_restart_reported_when_a_gpu_swap_is_pending(self):
+        alpha1 = b'alpha.1 gpu module'
+        with mock.patch.object(MODULE, 'GPU_STOCK', MODULE.hashlib.sha256(alpha1).hexdigest()):
+            (self.root / MODULE.GPU_MODULE).parent.mkdir(parents=True)
+            (self.root / MODULE.GPU_MODULE).write_bytes(alpha1)
+            self.put(MODULE.GPU_STAGED, 'fixed module')
+            result = self.setup_with(FakeSystem(self.root))
+            self.assertEqual((result['restart_needed'], result['status']),
+                             (True, 'connected; restart once to apply the update'))
+            self.put(MODULE.GPU_HOLD, '')
+            self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'held: nothing applies')
+            (self.root / MODULE.GPU_HOLD).unlink()
+            self.put(MODULE.GPU_MODULE, 'fixed module')
+            self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'already swapped')
+            self.put(MODULE.GPU_MODULE, 'hand-patched module')
+            self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'unknown: never applied')
+
+    def test_restart_reported_when_the_headphone_card_is_new(self):
+        self.put(MODULE.HEADPHONES_STAGED, 'staged card module')
+        self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'not a running system')
+        (self.root / 'sys/module').mkdir(parents=True)
+        result = self.setup_with(FakeSystem(self.root))
+        self.assertEqual((result['restart_needed'], result['status']),
+                         (True, 'connected; restart once to apply the update'))
+        for name in ('hold', 'attempt'):
+            with self.subTest(name):
+                self.put(MODULE.HEADPHONES_STATE + '/' + name, '')
+                self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], name + ': nothing loads')
+                (self.root / MODULE.HEADPHONES_STATE / name).unlink()
+        (self.root / 'sys/module/snd_soc_j713_headphones').mkdir()
+        self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'already loaded')
+
     def test_boot_not_current_is_a_failure(self):
         with self.assertRaisesRegex(MODULE.Refused, 'boot.bin is not in step'):
             self.setup_with(FakeSystem(self.root, boot_status='refused'))
@@ -250,6 +291,73 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(MODULE.SERVER, CHANNEL['server'])
         self.assertEqual(MODULE.REPOSITORY, CHANNEL['repository'])
         self.assertEqual(list(MODULE.PACKAGES), CHANNEL['packages'])
+
+    def test_keyring_made_readable_for_users(self):
+        gnupg = self.root / MODULE.GNUPG
+        private = gnupg / 'private-keys-v1.d'
+        private.mkdir(exist_ok=True)
+        private.chmod(0o700)
+        secret = private / 'secret.key'
+        secret.write_bytes(b'private')
+        secret.chmod(0o600)
+        kbx = gnupg / 'pubring.kbx'
+        kbx.write_bytes(b'public')
+        kbx.chmod(0o600)
+        result = self.setup_with(FakeSystem(self.root))
+        self.assertTrue(result['keyring_readable'])
+        self.assertEqual(gnupg.stat().st_mode & 0o777, 0o755)
+        for name in ('pubring.gpg', 'pubring.kbx', 'trustdb.gpg'):
+            self.assertEqual((gnupg / name).stat().st_mode & 0o777, 0o644, name)
+        self.assertEqual(private.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(secret.stat().st_mode & 0o777, 0o600)
+
+    def test_symlinked_keyring_material_is_never_followed(self):
+        gnupg = self.root / MODULE.GNUPG
+        outside = self.root / 'outside'
+        outside.mkdir(exist_ok=True)
+        target = outside / 'real-pubring.gpg'
+        target.write_bytes(b'not ours')
+        target.chmod(0o600)
+        (gnupg / 'pubring.gpg').unlink()
+        (gnupg / 'pubring.gpg').symlink_to(target)
+        result = self.setup_with(FakeSystem(self.root))
+        self.assertTrue(result['keyring_readable'])
+        self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(target.read_bytes(), b'not ours')
+        self.assertEqual(gnupg.stat().st_mode & 0o777, 0o755)
+
+    def test_symlinked_keyring_dir_refuses(self):
+        gnupg = self.root / MODULE.GNUPG
+        real = self.root / 'real-gnupg'
+        real.mkdir(exist_ok=True)
+        for path in sorted(gnupg.rglob('*')):
+            if path.is_symlink() or path.is_file():
+                path.unlink()
+            else:
+                path.rmdir()
+        gnupg.rmdir()
+        gnupg.symlink_to(real)
+        with self.assertRaisesRegex(MODULE.Refused, 'Missing /' + MODULE.GNUPG):
+            self.setup_with(FakeSystem(self.root))
+        self.assertEqual((self.root / MODULE.CONF).read_text(), AIR_CONF)
+        self.assertFalse((self.root / MODULE.SNIPPET).exists())
+
+    def test_inspection_leaves_keyring_alone(self):
+        gnupg = self.root / MODULE.GNUPG
+        result = self.setup_with(FakeSystem(self.root), apply=False)
+        self.assertNotIn('keyring_readable', result)
+        self.assertEqual(gnupg.stat().st_mode & 0o777, 0o700)
+        self.assertEqual((gnupg / 'pubring.gpg').stat().st_mode & 0o777, 0o644)
+
+    def test_missing_keyring_dir_refuses_before_changes(self):
+        gnupg = self.root / MODULE.GNUPG
+        for path in sorted(gnupg.rglob('*')):
+            path.unlink()
+        gnupg.rmdir()
+        with self.assertRaisesRegex(MODULE.Refused, 'Missing /' + MODULE.GNUPG):
+            self.setup_with(FakeSystem(self.root))
+        self.assertEqual((self.root / MODULE.CONF).read_text(), AIR_CONF)
+        self.assertFalse((self.root / MODULE.SNIPPET).exists())
 
 
 if __name__ == '__main__':

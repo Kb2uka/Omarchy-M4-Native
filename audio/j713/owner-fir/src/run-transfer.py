@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import subprocess
 
-assert hashlib.sha256(Path("/System/Library/Components/AudioDSP.component/Contents/MacOS/AudioDSP").read_bytes()).hexdigest() == "5c52d15a92f505524fa6c09e5cacbbb31062c3135768835149be409d9591b4bd"
+assert hashlib.sha256(Path("/System/Library/Components/AudioDSP.component/Contents/MacOS/AudioDSP").read_bytes()).hexdigest() == json.loads(Path("owner-inputs.json").read_text())["AudioDSP"]
 rows = []
 for bypass, amplitude in ((0, "0.0001"), (0, "0.0002"), (1, "0.0001")):
     for lane in range(4):

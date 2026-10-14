@@ -9,7 +9,9 @@
     "omarchy-m4-boot",
     "linux-m4-omarchy",
     "omarchy-m4-gst-audio",
-    "omarchy-m4-speaker"
+    "omarchy-m4-speaker",
+    "omarchy-m4-gpu",
+    "omarchy-m4-headphones"
   ],
   "kernel": {
     "release": "7.1.9-m4-gpu-backport-20261008",
@@ -35,7 +37,7 @@
       "usr/lib/systemd/user/omarchy-m4-update-check.timer",
       "usr/share/licenses/omarchy-m4-boot/",
       "usr/bin/omarchy-m4-update",
-      "usr/lib/omarchy-m4/m4-channel-setup.py"
+      "usr/lib/omarchy-m4/m4-channel-setup.py", "usr/lib/omarchy-m4/m4-lid-lock.py"
     ],
     "linux-m4-omarchy": [
       "usr/lib/modules/7.1.9-m4-gpu-backport-20261008/",
@@ -53,6 +55,22 @@
       "usr/lib/omarchy-m4/j713-audio/snd-soc-j713-group.ko",
       "usr/lib/systemd/system/m4-j713-audio-register.service.d/20-m4-speaker-module.conf",
       "usr/share/licenses/omarchy-m4-speaker/"
+    ],
+    "omarchy-m4-gpu": [
+      "usr/bin/m4-gpu-module",
+      "usr/lib/omarchy-m4/gpu/asahi_m4.ko",
+      "usr/lib/systemd/system/m4-gpu.service.d/20-m4-gpu-module.conf",
+      "usr/share/licenses/omarchy-m4-gpu/"
+    ],
+    "omarchy-m4-headphones": [
+      "usr/bin/m4-headphones",
+      "usr/lib/omarchy-m4/j713-headphones/",
+      "usr/lib/systemd/system/m4-j713-audio-register.service.d/30-m4-headphones.conf",
+      "usr/share/alsa/ucm2/conf.d/J713Headphones/J713Headphones.conf",
+      "usr/share/alsa/ucm2/conf.d/J713Headphones/HiFi.conf",
+      "usr/share/wireplumber/wireplumber.conf.d/83-j713-headphones.conf",
+      "usr/share/wireplumber/scripts/default-nodes/j713-headphones.lua",
+      "usr/share/licenses/omarchy-m4-headphones/"
     ]
   },
   "protected_paths": [
@@ -82,9 +100,22 @@
   },
   "protected_exceptions": {
     "usr/lib/systemd/system/speakersafetyd-j713.service.d/50-realtime.conf": "real-time speaker protection required by the CPU frequency devicetree (docs/j713-cpufreq.md)",
-    "usr/lib/systemd/system/m4-j713-audio-register.service.d/20-m4-speaker-module.conf": "applies the fixed speaker module (#61) before registration loads any audio module"
+    "usr/lib/systemd/system/m4-j713-audio-register.service.d/20-m4-speaker-module.conf": "applies the fixed speaker module (#61) before registration loads any audio module",
+    "usr/lib/systemd/system/m4-gpu.service.d/20-m4-gpu-module.conf": "applies the fixed Air GPU module (#57) before m4-gpu-start checks and loads it",
+    "usr/lib/systemd/system/m4-j713-audio-register.service.d/30-m4-headphones.conf": "loads the headphone jack modules after the speaker registration succeeds; a failure never fails it",
+    "usr/share/alsa/ucm2/conf.d/J713Headphones/J713Headphones.conf": "UCM for the new J713Headphones card only; no speaker or other card file",
+    "usr/share/alsa/ucm2/conf.d/J713Headphones/HiFi.conf": "UCM for the new J713Headphones card only; no speaker or other card file",
+    "usr/share/wireplumber/wireplumber.conf.d/83-j713-headphones.conf": "names the headphone sink and adds its default-output hook as an optional component",
+    "usr/share/wireplumber/scripts/default-nodes/j713-headphones.lua": "the headphone default-output hook; it only selects the headphone sink while it is available"
   },
   "speaker_module": {
     "usr/lib/omarchy-m4/j713-audio/snd-soc-j713-group.ko": "aaad802eb136ff6cb915feaa123001b3eb848bc2f038d0a5b71c8e2ff35d2581"
+  },
+  "gpu_module": {
+    "usr/lib/omarchy-m4/gpu/asahi_m4.ko": "3cf47fa706630ddc5fc55a3bce00ab31e8a4c5ee48e1ba563e26a0406da196f8"
+  },
+  "headphone_modules": {
+    "usr/lib/omarchy-m4/j713-headphones/j713_hp_dt.ko": "9ba22f0eb586052606eb6e9d98fa9d05663c12e3197c1b41c4bdc833afe41f07",
+    "usr/lib/omarchy-m4/j713-headphones/snd-soc-j713-headphones.ko": "a73ef5655d453c1ebd424922b0b6141a77159c01cbe718d4c972be61ec5be87d"
   }
 }

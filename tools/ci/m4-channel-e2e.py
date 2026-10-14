@@ -26,6 +26,8 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 CHANNEL = json.loads((ROOT / 'packaging/omarchy-m4/channel.json').read_text())
 RELEASE = CHANNEL['kernel']['release']
+# Packages an Air's 1-5 setup script does not list; omarchy-m4-boot's dependencies bring them.
+BROUGHT_BY_BOOT = ('omarchy-m4-gpu', 'omarchy-m4-headphones')
 STUB = '''pkgname=e2e-system
 pkgver=1
 pkgrel=1
@@ -189,12 +191,28 @@ def main():
             plan = json.loads(sudo(*setup, capture_output=True, text=True).stdout)
             require(plan['applied'] is False and plan['pacman_conf_changes'], 'Inspection did not plan the change')
             require(snapshot(root) == before, 'Inspection changed files')
+            # The first run is the setup script an Air already has from omarchy-m4-boot 1-5,
+            # which lists neither omarchy-m4-gpu nor omarchy-m4-headphones; the dependencies
+            # of boot 1-6 (GPU) and 1-7 (headphone jack) must bring them.
+            source = (ROOT / 'tools/m4-channel-setup.py').read_text()
+            listed = source[source.index('PACKAGES = ('):source.index(')', source.index('PACKAGES = (')) + 1]
+            older = scratch / 'm4-channel-setup-1-5.py'
+            older.write_text(source.replace(listed, 'PACKAGES = (' + ', '.join(
+                repr(p) for p in CHANNEL['packages'] if p not in BROUGHT_BY_BOOT) + ')'))
+            require(not any(p in older.read_text().split('PACKAGES = (')[1].split(')')[0] for p in BROUGHT_BY_BOOT),
+                    'The 1-5 setup script stand-in still lists a package the boot package brings')
             results = []
             for attempt in range(2):
-                result = sudo(*setup, '--apply', capture_output=True, text=True, check=False)
+                command = [setup[0], older, *setup[2:]] if attempt == 0 else setup
+                result = sudo(*command, '--apply', capture_output=True, text=True, check=False)
                 print(result.stdout + result.stderr)
                 require(result.returncode == 0, f'Setup attempt {attempt + 1} failed')
                 results.append(json.loads(result.stdout))
+                if attempt == 0:
+                    for brought in BROUGHT_BY_BOOT:
+                        require(brought not in results[0]['install'] and
+                                run(*pacman, '-Q', brought, check=False).returncode == 0,
+                                'The first run from the 1-5 setup script did not install ' + brought)
                 conf = (root / 'etc/pacman.conf').read_text()
                 require(conf.count('Include = ' + str(root / 'etc/pacman.d/omarchy-m4.conf')) == 1,
                         'The channel include is missing or duplicated')
@@ -219,6 +237,14 @@ def main():
                 require(sha((root / path).read_bytes()) == digest, 'Staged speaker module missing or wrong: ' + path)
             require((root / 'usr/lib/systemd/system/m4-j713-audio-register.service.d/20-m4-speaker-module.conf').is_file()
                     and os.access(root / 'usr/bin/m4-speaker-module', os.X_OK), 'The speaker module step is missing')
+            for path, digest in CHANNEL['gpu_module'].items():
+                require(sha((root / path).read_bytes()) == digest, 'Staged GPU module missing or wrong: ' + path)
+            require((root / 'usr/lib/systemd/system/m4-gpu.service.d/20-m4-gpu-module.conf').is_file()
+                    and os.access(root / 'usr/bin/m4-gpu-module', os.X_OK), 'The GPU module step is missing')
+            for path, digest in CHANNEL['headphone_modules'].items():
+                require(sha((root / path).read_bytes()) == digest, 'Staged headphone module missing or wrong: ' + path)
+            require((root / 'usr/lib/systemd/system/m4-j713-audio-register.service.d/30-m4-headphones.conf').is_file()
+                    and os.access(root / 'usr/bin/m4-headphones', os.X_OK), 'The headphone step is missing')
             require(os.access(root / 'usr/bin/omarchy-m4-update', os.X_OK) and
                     (root / 'usr/lib/omarchy-m4/m4-channel-setup.py').is_file(), 'omarchy-m4-update is missing')
             require((root / 'usr/lib/systemd/user/omarchy-m4-update-check.timer').is_file() and

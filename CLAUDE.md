@@ -16,4 +16,8 @@ authorize removing or replacing another author's credit.
 Contributor PRs target `develop`; `main` is reserved for maintainer release
 promotions. Report only checks actually run and results actually observed.
 
+Every update targets the `omarchy-m4-update` channel: owners get every fix and
+new feature by running `omarchy-m4-update`, never through an opt-in package or
+a manual install step. See "M4 packages" in [CONTRIBUTING.md](CONTRIBUTING.md).
+
 Maintainer: **studioxradio aka kb2uka**.

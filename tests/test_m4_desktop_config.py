@@ -45,6 +45,15 @@ class DesktopImageTests(unittest.TestCase):
         self.write("var/lib/pacman/local/neovim-1-1/desc", "%NAME%\nneovim\n\n%PROVIDES%\nnvim\nvim-plugin-runtime\n")
         self.write("var/lib/pacman/local/dotnet-runtime-bin-1-1/desc", "%NAME%\ndotnet-runtime-bin\n\n%PROVIDES%\ndotnet-runtime=10.0.12\n\n%ARCH%\naarch64\n")
         self.write("etc/skel/.config/hypr/hyprland.lua", 'require("default.hypr.bindings.tiling")\n')
+        self.lock_pam = ("#%PAM-1.0\n"
+                         "auth       [success=1 default=bad]     pam_unix.so try_first_pass nullok\n"
+                         "account    include                     system-local-login\n")
+        self.apply_lock = ("#!/bin/bash\n\n"
+                           "as_root tee /etc/pam.d/omarchy-lock-password >/dev/null <<'EOF'\n"
+                           + self.lock_pam + "EOF\n\n"
+                           "  as_root tee /etc/pam.d/omarchy-lock-fingerprint >/dev/null <<'EOF'\n"
+                           "#%PAM-1.0\nauth       required                    pam_fprintd.so\nEOF\n")
+        self.write("usr/bin/omarchy-apply-lock", self.apply_lock)
         self.write("etc/locale.gen", "#en_US.UTF-8 UTF-8  \n#de_DE.UTF-8 UTF-8\n")
         self.write("etc/locale.conf", "LANG=C\n")
         self.zram = "[zram0]\nzram-size = ram\ncompression-algorithm = zstd\n"
@@ -646,9 +655,88 @@ hl.config({
 hl.on("hyprland.start", function()
   hl.exec_cmd("uwsm finalize HYPRLAND_INSTANCE_SIGNATURE OMARCHY_PATH && systemctl --user start pipewire.service wireplumber.service wayland-wm-app-daemon.service")
 end)
+-- J713 lid (issue #84): lock on close, light the lock screen on open.
+-- The Air's lid is "Apple SMC power/lid events", not the "Lid Switch" Omarchy
+-- 4.0.4 binds, and its lid check reads ACPI, which arm64 lacks. Lock on close
+-- and light the lock screen on open. Omarchy's clamshell check is skipped:
+-- omarchy-hw-external-monitors counts the simpledrm panel (Unknown-1) as
+-- external, so it would never lock. logind still ignores the lid: J713
+-- suspend is unqualified.
+o.bind("switch:on:Apple SMC power/lid events", nil, "omarchy-system-lock", { locked = true })
+o.bind("switch:off:Apple SMC power/lid events", nil, "omarchy-brightness-display on", { locked = true })
 '''
         actual = (self.root / "etc/skel/.config/hypr/hyprland.lua").read_text(encoding="utf-8")
         self.assertEqual(actual, self.stock.rstrip() + "\n" + expected)
+
+    def test_lid_switch_binds_lock_on_close_and_wake_on_open(self):
+        desktop.configure(self.root, apply=True)
+        config = (self.root / "etc/skel/.config/hypr/hyprland.lua").read_text(encoding="utf-8")
+        self.assertTrue(config.startswith(self.stock.rstrip() + "\n"))
+        # The existing-install step in docs/j713-desktop-image.md skips a
+        # config that carries this line, so an image-built config is never
+        # given the binds twice.
+        self.assertEqual(config.count("\n-- J713 lid (issue #84)"), 1)
+        block = self.root.parent / "m4-block.lua"
+        block.write_text(config[len(self.stock.rstrip() + "\n"):], encoding="utf-8")
+        # Run the generated M4 block under real Lua, with Hyprland and Omarchy's
+        # o.bind stubbed to record what would be bound.
+        harness = self.root.parent / "harness.lua"
+        harness.write_text('''
+local binds = {}
+hl = { monitor = function() end, config = function() end, on = function() end }
+o = { bind = function(keys, description, command, options)
+  binds[#binds + 1] = { keys, tostring(description), command, tostring(options and options.locked) }
+end }
+dofile(arg[1])
+for _, b in ipairs(binds) do print(table.concat(b, "\\t")) end
+''', encoding="utf-8")
+        result = subprocess.run([os.environ.get("LUA", "lua"), str(harness), str(block)],
+                                capture_output=True, text=True, check=True)
+        self.assertEqual(result.stdout.splitlines(), [
+            "switch:on:Apple SMC power/lid events\tnil\tomarchy-system-lock\ttrue",
+            "switch:off:Apple SMC power/lid events\tnil\tomarchy-brightness-display on\ttrue",
+        ])
+
+    def test_lock_screen_pam_comes_from_the_packaged_helper(self):
+        desktop.configure(self.root, apply=True)
+        pam = self.root / "etc/pam.d/omarchy-lock-password"
+        self.assertEqual(pam.read_text(encoding="utf-8"), self.lock_pam)
+        self.assertFalse((self.root / "etc/pam.d/omarchy-lock-fingerprint").exists())
+        desktop.configure(self.root)
+
+    @unittest.skipIf(os.name == "nt", "POSIX image permissions")
+    def test_lock_screen_pam_stays_readable_by_the_session(self):
+        # The lock screen runs as the owner and reads this file itself.
+        previous = os.umask(0o077)
+        try:
+            desktop.configure(self.root, apply=True)
+        finally:
+            os.umask(previous)
+        pam = self.root / "etc/pam.d/omarchy-lock-password"
+        self.assertEqual(pam.stat().st_mode & 0o777, 0o644)
+        for mode in (0o600, 0o666):
+            with self.subTest(mode=oct(mode)):
+                pam.chmod(mode)
+                with self.assertRaisesRegex(ValueError, "omarchy-lock-password"):
+                    desktop.configure(self.root)
+                report = desktop.configure(self.root, apply=True)
+                self.assertIn("etc/pam.d/omarchy-lock-password", report["changed_files"])
+                self.assertEqual(pam.stat().st_mode & 0o777, 0o644)
+
+    def test_unexpected_lock_screen_helper_fails_before_writes(self):
+        stack = "as_root tee /etc/pam.d/omarchy-lock-password >/dev/null <<'EOF'\n" + self.lock_pam + "EOF\n"
+        for helper in (None, "#!/bin/bash\n", self.apply_lock + stack,
+                       self.apply_lock.replace("#%PAM-1.0\nauth       [", "auth       [")):
+            with self.subTest(helper=helper):
+                path = self.root / "usr/bin/omarchy-apply-lock"
+                if helper is None:
+                    path.unlink()
+                else:
+                    path.write_text(helper, encoding="utf-8")
+                before = self.snapshot()
+                with self.assertRaisesRegex((ValueError, FileNotFoundError), "lock screen PAM|omarchy-apply-lock"):
+                    desktop.configure(self.root, apply=True)
+                self.assertEqual(self.snapshot(), before)
 
     def test_widget_clone_keeps_public_docs_and_omits_internal_markdown(self):
         source = "usr/share/omarchy/shell/plugins/agents/"

@@ -106,6 +106,75 @@ final block; the scalar settings override earlier assignments. A named monitor
 rule can still take precedence over the fallback monitor rule. Other packaged
 and personal settings retain their normal loading order.
 
+### Lid close and the lock screen
+
+The same block binds the lid
+([issue #84](https://github.com/Kb2uka/Omarchy-M4-Native/issues/84)). Closing
+the lid locks the session and opening it lights the lock screen, as Omarchy does
+on a laptop whose logind ignores the lid. Without this change the lid does
+nothing on J713:
+
+- The Air reports its lid as the input switch `Apple SMC power/lid events`
+  (`macsmc-input`). Omarchy 4.0.4 binds only `Lid Switch`.
+- Omarchy 4.0.4's lid check, `omarchy-hw-laptop-closed`, reads
+  `/proc/acpi/button/lid`, which arm64 lacks, so its lid-close helper never
+  locks here. The binds call `omarchy-system-lock` directly.
+- Omarchy's lid-close helper also skips the lock when
+  `omarchy-hw-external-monitors` succeeds, which is clamshell mode. That helper
+  treats any connector not named `eDP`, `LVDS` or `DSI` as external, and the
+  J713 panel is the simpledrm connector `Unknown-1`, so it always succeeds. The
+  binds leave the check out. External displays do not work on J713 yet
+  ([#58](https://github.com/Kb2uka/Omarchy-M4-Native/issues/58)); once they do,
+  closing the lid will still lock.
+- The lock screen itself refused to lock (`omarchy-shell lock lock` answered
+  `missing-pam`). Omarchy's installer runs `omarchy-apply-lock` to write
+  `/etc/pam.d/omarchy-lock-password`, and the offline image never ran it. The
+  configuration tool now writes that file, mode 0644, from the stack in the
+  image's packaged `usr/bin/omarchy-apply-lock`, and refuses an image whose
+  helper it does not recognise. This also makes the idle lock and the lock
+  shortcut work.
+- The lock screen turns the display off after five seconds, and a lid switch
+  is not a key press, so the open bind runs `omarchy-brightness-display on`.
+
+The image's `/etc/systemd/logind.conf.d/90-m4-ram.conf` keeps
+`HandleLidSwitch=ignore`, so closing the lid does not suspend. Suspend and
+resume are unqualified on J713. Linux also has no panel backlight control here
+yet (`/sys/class/backlight` is empty under simpledrm). The lock blanks the
+picture, but whether the panel itself goes dark with the lid shut has not been
+measured. macOS-style sleep on lid close needs that qualification first.
+
+Upstream Omarchy added its own Apple SMC lid binds after 4.0.4 (commit
+`e1b0e5e`, not yet in a release). They go through the lid-close helper and its
+external-monitor check, so they would not lock on J713 either. Keep these binds
+until the panel has a display-controller connector.
+
+An installed Air gets both parts from `omarchy-m4-update`. From
+`omarchy-m4-boot` 1-9, the package's install script runs
+`/usr/lib/omarchy-m4/m4-lid-lock.py` on every update:
+
+- It writes `/etc/pam.d/omarchy-lock-password`, mode 0644, only when the file
+  is missing, from the stack in the installed `omarchy-apply-lock`. It refuses
+  a helper it does not recognise.
+- It appends the binds once to each user's own `~/.config/hypr/hyprland.lua`,
+  running as that user, never as root. Only an Omarchy Lua configuration that
+  lacks the `-- J713 lid (issue #84)` line gets them, so a configuration made
+  from an image with this change, or one that already has the binds, is left
+  alone. Symlinks are never followed. The appended lines are:
+
+```lua
+-- J713 lid (issue #84): lock on close, light the lock screen on open.
+o.bind("switch:on:Apple SMC power/lid events", nil, "omarchy-system-lock", { locked = true })
+o.bind("switch:off:Apple SMC power/lid events", nil, "omarchy-brightness-display on", { locked = true })
+```
+
+When it changes anything, the update prints a line asking you to log out and
+back in once. The tool reloads nothing, but a running Hyprland reloads its
+configuration when the file changes, and on October 14, 2026 a reload on the
+test Air left Hyprland ignoring input devices that were added later. A fresh
+login clears that.
+`python3 /usr/lib/omarchy-m4/m4-lid-lock.py` shows what it would do and
+changes nothing.
+
 The configuration tool performs no package installation, network operation,
 locale compilation or power action. `--check` is read-only; `--apply` is for
 an offline build candidate, not an installed user's customized desktop.
