@@ -2,6 +2,10 @@
  "asahi_commit": "77cb8f24c2381a8abb7272d7bbdec548d6426a8a",
  "boards": {
   "j604": {
+   "changed_by_patches": [
+    "/aliases atcphy0",
+    "/aliases atcphy1"
+   ],
    "compatible": [
     "apple,j604",
     "apple,t8132",
@@ -36,12 +40,17 @@
     "/soc/spmi@388714000/pmic@e/nvmem-layout/rtc-offset@2100",
     "/soc/spmi@388714000/pmic@e/nvmem-layout/socd@8b00"
    ],
+   "enabled_digest": "3b0995206614afca8b5cd754ebfdb000a2009655ce78aa4abf24d07f5a5a3158",
    "model": "Apple MacBook Pro (14-inch, M4, 2024)",
    "warnings": [
     "Warning (simple_bus_reg): /soc/interrupt-controller@381180000: simple-bus unit address format error, expected \"381000000\""
    ]
   },
   "j623": {
+   "changed_by_patches": [
+    "/aliases atcphy0",
+    "/aliases atcphy1"
+   ],
    "compatible": [
     "apple,j623",
     "apple,t8132",
@@ -76,12 +85,17 @@
     "/soc/spmi@388714000/pmic@e/nvmem-layout/rtc-offset@2100",
     "/soc/spmi@388714000/pmic@e/nvmem-layout/socd@8b00"
    ],
+   "enabled_digest": "18207f6a2edbf714ce0c718b791a99054703ec21083851c144f1749503b5882d",
    "model": "Apple iMac (24-inch, 2x USB-C, M4, 2024)",
    "warnings": [
     "Warning (simple_bus_reg): /soc/interrupt-controller@381180000: simple-bus unit address format error, expected \"381000000\""
    ]
   },
   "j624": {
+   "changed_by_patches": [
+    "/aliases atcphy0",
+    "/aliases atcphy1"
+   ],
    "compatible": [
     "apple,j624",
     "apple,t8132",
@@ -116,12 +130,19 @@
     "/soc/spmi@388714000/pmic@e/nvmem-layout/rtc-offset@2100",
     "/soc/spmi@388714000/pmic@e/nvmem-layout/socd@8b00"
    ],
+   "enabled_digest": "344db64e167a3ca77bae8dbce2a9d8fab9de9f89be88e63a1ffbd4547f00f735",
    "model": "Apple iMac (24-inch, 4x USB-C, M4, 2024)",
    "warnings": [
     "Warning (simple_bus_reg): /soc/interrupt-controller@381180000: simple-bus unit address format error, expected \"381000000\""
    ]
   },
   "j713": {
+   "changed_by_patches": [
+    "/ model",
+    "/aliases atcphy0",
+    "/aliases atcphy1",
+    "/aliases keyboard"
+   ],
    "compatible": [
     "apple,j713",
     "apple,t8132",
@@ -227,12 +248,17 @@
     "/soc/usb@40a280000/ports/port@1",
     "/soc/usb@40a280000/ports/port@1/endpoint"
    ],
+   "enabled_digest": "ccd0ffe5c5d8e57e5cfea4e176e72ad42ea14468f9e229845cb6bb8a2662302c",
    "model": "Apple MacBook Air (13-inch, M4, 2025)",
    "warnings": [
     "Warning (simple_bus_reg): /soc/interrupt-controller@381180000: simple-bus unit address format error, expected \"381000000\""
    ]
   },
   "j715": {
+   "changed_by_patches": [
+    "/aliases atcphy0",
+    "/aliases atcphy1"
+   ],
    "compatible": [
     "apple,j715",
     "apple,t8132",
@@ -267,12 +293,17 @@
     "/soc/spmi@388714000/pmic@e/nvmem-layout/rtc-offset@2100",
     "/soc/spmi@388714000/pmic@e/nvmem-layout/socd@8b00"
    ],
+   "enabled_digest": "a5f90303117da40b363dc880dcec717e549d54e9741737533698f3fd9ef523ef",
    "model": "Apple MacBook Air (15-inch, M4, 2025)",
    "warnings": [
     "Warning (simple_bus_reg): /soc/interrupt-controller@381180000: simple-bus unit address format error, expected \"381000000\""
    ]
   },
   "j773g": {
+   "changed_by_patches": [
+    "/aliases atcphy0",
+    "/aliases atcphy1"
+   ],
    "compatible": [
     "apple,j773g",
     "apple,t8132",
@@ -307,6 +338,7 @@
     "/soc/spmi@388714000/pmic@e/nvmem-layout/rtc-offset@2100",
     "/soc/spmi@388714000/pmic@e/nvmem-layout/socd@8b00"
    ],
+   "enabled_digest": "8ab60a501b9b91dc531db132c643e00163c08959dea381a705e2d73e205a62db",
    "model": "Apple Mac mini (M4, 2024)",
    "warnings": [
     "Warning (simple_bus_reg): /soc/interrupt-controller@381180000: simple-bus unit address format error, expected \"381000000\""

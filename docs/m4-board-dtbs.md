@@ -14,8 +14,12 @@ then builds all six boards with and without the patches using
 - a patch adds a reference (`iommus`, `phys`, `power-domains`, `mboxes`) from
   an enabled node to a missing or disabled node, on any board;
 - the J713 build loses its single documented `simple_bus_reg` warning;
-- what any board's devicetree turns on, turns off or warns about differs from
-  the record in `tests/fixtures/m4-board-dtbs.json`.
+- what any board's devicetree turns on, turns off, changes or warns about
+  differs from the record in `tests/fixtures/m4-board-dtbs.json`. The record
+  lists, per board, the nodes the patches enable or disable, the properties
+  they change on existing nodes, and a digest of every enabled node's
+  properties, so editing a value on any board changes it too. Phandles are
+  compared by the node they point to, so renumbering alone is not a change.
 
 A patch that changes another board therefore changes that record in the same
 pull request, where a reviewer can see it. The test prints the new record when
