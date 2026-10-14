@@ -8,7 +8,7 @@ import struct
 import subprocess
 
 FRAMES = 73728
-assert hashlib.sha256(Path('/System/Library/Components/AudioDSP.component/Contents/MacOS/AudioDSP').read_bytes()).hexdigest() == '5c52d15a92f505524fa6c09e5cacbbb31062c3135768835149be409d9591b4bd'
+assert hashlib.sha256(Path('/System/Library/Components/AudioDSP.component/Contents/MacOS/AudioDSP').read_bytes()).hexdigest() == json.loads(Path('owner-inputs.json').read_text())['AudioDSP']
 for name, sha in {'Tone1':'6c90f3d56b362ac1833ade1684cc63a77dbb126130fe803d36d6c414294e98c1', 'Tone2':'d0924cea31ddd106155f67d8856d667b804fcfd59439c5c0e8ff645258159f57','Tone3':'0a6db4c22206053c84477fbd67c640f3e12fc132a4de17ef42fe8a3d4dae1c5b'}.items():
     assert hashlib.sha256(Path('decoded',name+'.aupreset').read_bytes()).hexdigest() == sha
 rows=[]

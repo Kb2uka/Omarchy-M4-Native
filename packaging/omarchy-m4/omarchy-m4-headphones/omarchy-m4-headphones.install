@@ -1,0 +1,7 @@
+post_install() {
+  echo '==> Restart once to start the headphone jack (J713Headphones).'
+}
+
+post_remove() {
+  echo '==> The headphone card stays until the next restart.'
+}

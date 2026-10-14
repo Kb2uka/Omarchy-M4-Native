@@ -1,0 +1,70 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * J713 headphone jack: CS42L84 on i2c1, the AUDIO_MCA2_M power domain and
+ * the omarchy,j713-headphones card node.
+ *
+ * 0xfeed00NN cells are placeholders that j713_hp_dt_loader.c replaces with
+ * live phandles, looked up by path (the speaker overlays create some of
+ * these nodes, so their phandles differ between boots):
+ *   01 audio_p pwrstate   02 audio_mca0_m pwrstate   03 base-ns ADMAC
+ *   05 nub pinctrl        06 AP pinctrl
+ * (04 was /clock-ref in the bring-up overlay; the card no longer uses it.)
+ */
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+
+/ {
+	fragment@0 {
+		target-path = "/soc/i2c@3ad014000";
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+
+			jack_codec: codec@4b {
+				compatible = "cirrus,cs42l84";
+				reg = <0x4b>;
+				reset-gpios = <0xfeed0005 17 GPIO_ACTIVE_HIGH>;
+				interrupts-extended = <0xfeed0006 98 IRQ_TYPE_LEVEL_LOW>;
+				#sound-dai-cells = <0>;
+				sound-name-prefix = "Jack";
+			};
+		};
+	};
+
+	fragment@1 {
+		target-path = "/soc/power-management@388284000";
+		__overlay__ {
+			audio_mca2: power-controller@f8 {
+				compatible = "apple,t8132-pmgr-pwrstate", "apple,t8103-pmgr-pwrstate";
+				reg = <0xf8 4>;
+				#power-domain-cells = <0>;
+				#reset-cells = <0>;
+				label = "audio_mca2_m";
+				power-domains = <0xfeed0001>;
+			};
+		};
+	};
+
+	fragment@2 {
+		target-path = "/";
+		__overlay__ {
+			/*
+			 * No reg and no clocks: the MCA windows sit inside the
+			 * speaker's i2s@393600000 range and the driver maps them
+			 * itself; the clock is the PMGR mux mck2 on nco3.
+			 */
+			headphones {
+				compatible = "omarchy,j713-headphones";
+				power-domains = <0xfeed0001>, <0xfeed0002>, <&audio_mca2>;
+				dmas = <0xfeed0003 4>;
+				dma-names = "tx";
+				omarchy,codec = <&jack_codec>;
+				#sound-dai-cells = <0>;
+			};
+		};
+	};
+};

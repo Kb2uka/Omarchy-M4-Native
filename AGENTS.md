@@ -21,4 +21,12 @@ authorize removing or replacing another author's credit.
 - Keep changes focused, run `git diff --check` and relevant checks, and report
   only results actually observed. Identify unverified hardware behavior.
 
+## Updates
+
+Every update targets the `omarchy-m4-update` channel. Owners get fixes and new
+features only by running `omarchy-m4-update`: no opt-in packages, manual
+`pacman -S` steps or other install paths. New packages go in `channel.json`
+and the setup script's package list, and the next `omarchy-m4-boot` depends on
+them. See "M4 packages" in [CONTRIBUTING.md](CONTRIBUTING.md).
+
 Maintainer: **studioxradio aka kb2uka**.
