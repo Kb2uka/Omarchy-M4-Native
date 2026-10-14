@@ -105,10 +105,22 @@ def dangling(root, enabled):
     return sorted(set(found))
 
 
+def changed(before, after):
+    """Properties a patch added, removed or changed on nodes that exist both before and after."""
+    found = []
+    for path in sorted(set(before) & set(after)):
+        old, new = before[path], after[path]
+        for name in sorted(set(old) | set(new)):
+            if name != 'phandle' and old.get(name) != new.get(name):
+                found.append(f'{path} {name}')
+    return found
+
+
 def describe(dtb, warnings):
     root = audit.parse_dtb(dtb)
     enabled = enabled_nodes(root)
-    return {'compatible': audit.node_compatibles(root), 'warnings': warnings,
+    props = {node.path: node.props for node in audit.fdt_walk(root)}
+    return {'compatible': audit.node_compatibles(root), 'warnings': warnings, 'props': props,
             'model': audit.cstrings(root.props.get('model', b''))[0] if 'model' in root.props else '',
             'enabled': enabled, 'dangling': dangling(root, enabled)}
 
@@ -130,6 +142,7 @@ def report(tree, patches=PATCHES):
                                              for path, compatible in after['enabled'].items()
                                              if path not in before['enabled']),
                 'disabled_by_patches': sorted(path for path in before['enabled'] if path not in after['enabled']),
+                'changed_by_patches': changed(before['props'], after['props']),
                 'dangling_upstream': before['dangling'],
                 'dangling_added': sorted(set(after['dangling']) - set(before['dangling'])),
             }
