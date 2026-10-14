@@ -74,8 +74,10 @@ contributors. Their authorship and licenses remain theirs.
 
 ## Download and install
 
-**[v0.1.0-alpha.1 release and installer](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1)**,
-based on **Omarchy 4.0.4**. Download the release's `download-j713.command` and
+**[v0.1.0-alpha.1 installer, update 2](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1-update.2)**,
+based on **Omarchy 4.0.4**. It installs the same alpha.1 system as the
+[original release](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1)
+and also works on macOS 26.6.2. Download the release's `download-j713.command` and
 run it from macOS Terminal:
 
 ```sh
@@ -91,8 +93,8 @@ installer starts in macOS; it is not a bootable PC ISO. GitHub's automatic
 
 **Every alpha.1 install needs this once, whether you installed today or earlier.**
 It turns on M4 updates and, if your Air does not have it yet, the shutdown fix.
-The published v0.1.0-alpha.1 installer does not do this by itself; a later
-installer will ([details](docs/install.md#last-step-connect-to-m4-updates-required)).
+The published v0.1.0-alpha.1 installers (including update 2) do not do this by
+themselves; a later installer will ([details](docs/install.md#last-step-connect-to-m4-updates-required)).
 
 1. On the Air, join Wi-Fi (`nmtui`) and open a terminal in Omarchy.
 2. Paste this one line, press Enter, and type your password when asked:
