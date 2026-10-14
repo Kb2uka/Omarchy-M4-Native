@@ -10,6 +10,10 @@
 # stage is first rebuilt unpatched and must match alpha.1's shipped hash, so a
 # test loader differs from alpha.1 only by PATCH and its version tag.
 set -euo pipefail
+if [ $# -ne 3 ]; then
+    echo "usage: $0 COMPANION_SOURCE_DIR PATCH OUT_DIR" >&2
+    exit 2
+fi
 src=$1 patch=$(realpath "$2") out=$3
 declare -A source_sha=(
     [stage1]=6c14369619d19612c68f67ed4467ac27158138c6b4b2ec2bc831075945eef4af
@@ -22,11 +26,20 @@ declare -A stock_sha=(
 export PATH=/usr/lib/llvm-21/bin:$PATH
 mkdir -p "$out"
 
+# alpha.1 was built at these paths. Refuse to reuse one, and remove them on any exit.
+trees=(/job/bootloader-air-knownbase-stage1 /job/bootloader-air-knownbase-stage2)
+for tree in "${trees[@]}"; do
+    if [ -e "$tree" ]; then
+        echo "$tree exists; remove it first" >&2
+        exit 1
+    fi
+done
+trap 'rm -rf "${trees[@]}"' EXIT
+
 build() {
     local stage=$1 kind=$2 tag=$3 chain=0
     local tree=/job/bootloader-air-knownbase-$stage
     test "$stage" != stage1 || chain=1
-    test ! -e "$tree"
     mkdir "$tree"
     tar xzf "$src/m1n1-$stage-source.tar.gz" -C "$tree" --strip-components=1
     # The archive keeps the generated headers; alpha.1 was built without them.
@@ -37,7 +50,7 @@ build() {
     (
         cd "$tree"
         export M1N1_VERSION_TAG=$tag
-        # alpha.1 ran make twice; the second pass must be a no-op.
+        # alpha.1 ran make twice; do the same.
         for pass in 1 2; do
             make BUILDSTD=1 USE_CLANG=1 TOOLCHAIN=/usr/lib/llvm-21/bin/ LLDDIR=/usr/lib/llvm-21/bin/ \
                 RELEASE=1 CHAINLOADING="$chain" NO_DISPLAY=1 -j8

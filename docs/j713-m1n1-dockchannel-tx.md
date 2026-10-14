@@ -31,19 +31,22 @@ Upstream m1n1 still has the same loop.
 ## Fix
 
 `patches-m1n1/dockchannel-tx-bound.patch` changes only
-`src/dockchannel_uart.c`:
+`src/dockchannel_uart.c`. Every wait for TX space now has a limit:
 
-- When the FIFO is full, the writer waits at most 100 ms (`TX_TIMEOUT_US`)
-  for space, using m1n1's existing `timeout_calculate()`/`timeout_expired()`.
-- On timeout it latches a stall and returns. While stalled and still full,
-  later bytes are dropped at once, so an undrained unit pays one 100 ms wait
-  per stage instead of one per byte.
-- The first byte that finds space clears the stall. A host that starts
-  draining later gets output again.
+- Until anything has been seen draining the FIFO, the writer waits at most
+  100 ms (`TX_TIMEOUT_US`). It tracks how much space its own writes leave.
+  More space than that means a consumer drained the FIFO.
+- Once a consumer has been seen, the limit is 2 s (`TX_CONSUMER_TIMEOUT_US`),
+  so a debug host using m1n1's proxy over the dockchannel can pause briefly
+  without losing reply bytes.
+- On timeout the writer latches a stall and returns. While stalled and still
+  full, later bytes are dropped at once, so a stall costs one wait, not one per
+  byte. The first byte that finds space clears the stall.
 
-A FIFO that drains within 100 ms per byte behaves exactly as before. The
-hardware UART, framebuffer, USB proxy and dockchannel reads are unchanged. On
-an undrained unit, dockchannel output is lost, as it already was in practice.
+An undrained unit like the #82 Air pays one 100 ms wait per stage and boots. A
+FIFO that drains within the limit behaves exactly as before. A consumer that
+stops for good costs one 2 s wait, then output is dropped. The hardware UART,
+framebuffer, USB proxy and dockchannel reads are unchanged.
 
 `patches-m1n1/base/` holds the three unmodified MIT files the test compiles
 (`dockchannel_uart.c`, `iodev.c`, `iodev.h`). `SHA256SUMS` pins them to the
@@ -52,21 +55,27 @@ per-file hashes in alpha.1's published `m1n1-stage1-files.json` and
 
 ## Proof
 
-`tests/test_m1n1_dockchannel_tx.py` runs in the hosted CI suite. It compiles
-m1n1's real `iodev.c` and `dockchannel_uart.c` into
-`tests/m1n1_dockchannel_tx_fixture.c` and drives the console as m1n1 does,
-against a simulated 4 KiB FIFO and clock:
+`tests/test_m1n1_dockchannel_tx.py` runs in the hosted CI suite. It needs `cc`
+and `patch` on `PATH`. It compiles m1n1's real `iodev.c` and
+`dockchannel_uart.c` into `tests/m1n1_dockchannel_tx_fixture.c`, with m1n1's
+warning flags, and drives the console as m1n1 does against a simulated 4 KiB
+FIFO and clock:
 
 - `undrained` (the #82 state: 37 bytes free, never drained, 200 lines): the
-  shipped source hangs. The patched source puts every line on the screen,
-  keeps the 37 bytes that fit, and waits between 100 and 200 ms in total.
-- `slow_drain` (a host drains one byte per 200 µs): every byte arrives in
-  order, unpatched and patched.
+  shipped source hangs with nothing on screen. The patched source puts every
+  line on the screen, keeps the 37 bytes that fit, and waits 100 ms in total.
+- `slow_drain` (a host drains one byte per 200 µs) and `fast_host_pause` (a
+  host keeps up, then pauses 150 ms): every byte arrives in order, unpatched
+  and patched.
 - `recover` (stall, then a host starts draining): everything written after
   the host attaches arrives whole.
+- `consumer_vanishes` (a host drains, then stops for good): one 2 s wait, and
+  every line still reaches the screen.
+- `secondary` (a secondary CPU prints before the MMU is up, after a stall): no
+  wait.
 
-Five mutants must each fail: no timeout, no latch check, latch never set,
-latch never cleared, and a zero timeout.
+Eleven mutants must each fail a case. They cover the timeout, the stall latch,
+consumer detection and both limits.
 
 The host test does not emulate the hardware FIFO or iBoot's handoff state.
 Hardware qualification is below.

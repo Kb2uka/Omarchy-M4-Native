@@ -45,10 +45,13 @@ typedef struct {
 #define REG_TX_FREE   (FIFO_BASE + 0x4014)
 #define REG_RX_COUNT  (FIFO_BASE + 0x402c)
 #define STREAM_MAX    65536
-/* The documented bound, fixed here so a changed constant cannot pass. */
-#define BOUND_US      100000ULL
+/* The documented bounds, fixed here so a changed constant cannot pass. */
+#define BOUND_US          100000ULL
+#define CONSUMER_BOUND_US 2000000ULL
+#define SLACK_US          1000ULL
 
-static u64 now_us, reads, drain_every, drain_tick;
+static u64 now_us, reads, drain_every, drain_tick, pause_from, pause_until;
+static int boot_cpu = 1;
 static u32 fifo_free;
 static char dock[STREAM_MAX], fb[STREAM_MAX], stream[STREAM_MAX];
 static size_t dock_len, fb_len, stream_len;
@@ -61,7 +64,8 @@ static inline u32 read32(u64 addr)
         _exit(3);
     }
     now_us++;
-    if (drain_every && ++drain_tick >= drain_every) {
+    bool paused = now_us >= pause_from && now_us < pause_until;
+    if (drain_every && !paused && ++drain_tick >= drain_every) {
         drain_tick = 0;
         if (fifo_free < FIFO_SIZE)
             fifo_free++;
@@ -111,7 +115,7 @@ static inline bool mmu_active(void)
 
 static inline int is_boot_cpu(void)
 {
-    return 1;
+    return boot_cpu;
 }
 
 static void *adt;
@@ -219,7 +223,7 @@ int main(int argc, char **argv)
             return fail("dockchannel did not keep the bytes that fit");
         if (now_us < BOUND_US)
             return fail("gave up before the timeout");
-        if (now_us > 2 * BOUND_US)
+        if (now_us > BOUND_US + SLACK_US)
             return fail("waited longer than one timeout");
     } else if (!strcmp(which, "slow_drain")) {
         /* A host drains one byte per 200 us, well inside the timeout: nothing may be lost. */
@@ -249,6 +253,51 @@ int main(int argc, char **argv)
             return fail("screen missed console output");
         if (dock_len < tail || memcmp(dock + dock_len - tail, stream + later, tail))
             return fail("output after the host attached was lost");
+    } else if (!strcmp(which, "fast_host_pause")) {
+        /* A debug host keeps the FIFO from filling, then pauses 150 ms: nothing may be lost. */
+        fifo_free = 64;
+        drain_every = 1;
+        dockchannel_uart_init();
+        for (int i = 0; i < 10; i++)
+            console_line(i);
+        pause_from = now_us;
+        pause_until = now_us + 150000;
+        for (int i = 10; i < 50; i++)
+            console_line(i);
+        settle();
+        if (!screen_complete())
+            return fail("screen missed console output");
+        if (dock_len != stream_len || memcmp(dock, stream, stream_len))
+            return fail("a paused host lost bytes");
+    } else if (!strcmp(which, "consumer_vanishes")) {
+        /* A host drains, then stops for good: still one bounded wait, then no more. */
+        fifo_free = 64;
+        drain_every = 1;
+        dockchannel_uart_init();
+        for (int i = 0; i < 10; i++)
+            console_line(i);
+        drain_every = 0;
+        u64 start = now_us;
+        for (int i = 10; i < 200; i++)
+            console_line(i);
+        if (!screen_complete())
+            return fail("screen missed console output");
+        if (now_us - start < CONSUMER_BOUND_US)
+            return fail("gave up before the longer timeout");
+        if (now_us - start > CONSUMER_BOUND_US + SLACK_US)
+            return fail("waited longer than one longer timeout");
+    } else if (!strcmp(which, "secondary")) {
+        /* After a stall, a secondary CPU printing before the MMU is up must not wait. */
+        fifo_free = 37;
+        dockchannel_uart_init();
+        for (int i = 0; i < 20; i++)
+            console_line(i);
+        boot_cpu = 0;
+        u64 start = now_us;
+        for (int i = 20; i < 30; i++)
+            console_line(i);
+        if (now_us - start > SLACK_US)
+            return fail("secondary CPU waited on a stalled FIFO");
     } else {
         fprintf(stderr, "unknown case\n");
         return 2;

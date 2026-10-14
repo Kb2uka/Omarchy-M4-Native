@@ -26,7 +26,7 @@ PUBLISHED = {
     "iodev.c": "6f6c633a7cf842444ae17fc72d3b8ae679f3998ffdc6a96942454c446e39a702",
     "iodev.h": "46edd5802ea95b66c0a54cd8b9ef5ae892dd11b6fd0fbfca6484aff076c0c180",
 }
-CASES = ("undrained", "slow_drain", "recover")
+CASES = ("undrained", "slow_drain", "recover", "fast_host_pause", "consumer_vanishes", "secondary")
 
 # Each mutant undoes one part of the fix; the named case must catch it.
 MUTANTS = {
@@ -34,8 +34,17 @@ MUTANTS = {
                    "undrained"),
     "no_latch_check": ("        if (tx_stalled)\n            return;\n", "", "undrained"),
     "latch_never_set": ("                tx_stalled = true;\n", "", "undrained"),
-    "latch_never_cleared": ("    tx_stalled = false;\n    write32", "    write32", "recover"),
-    "zero_timeout": ("#define TX_TIMEOUT_US 100000", "#define TX_TIMEOUT_US 0", "slow_drain"),
+    "latch_never_cleared": ("    tx_stalled = false;\n    tx_free", "    tx_free", "recover"),
+    "zero_timeout": ("#define TX_TIMEOUT_US          100000", "#define TX_TIMEOUT_US          0", "slow_drain"),
+    "longer_timeout": ("#define TX_TIMEOUT_US          100000", "#define TX_TIMEOUT_US          150000", "undrained"),
+    "consumer_never_seen": ("    if (space > tx_free)\n        tx_consumer = true;\n", "", "fast_host_pause"),
+    "expectation_never_updated": ("    tx_free = space - 1;\n", "", "fast_host_pause"),
+    "short_consumer_timeout": ("#define TX_CONSUMER_TIMEOUT_US 2000000", "#define TX_CONSUMER_TIMEOUT_US 100000",
+                               "fast_host_pause"),
+    "unbounded_consumer_wait": ("#define TX_CONSUMER_TIMEOUT_US 2000000", "#define TX_CONSUMER_TIMEOUT_US 0xffffffff",
+                                "consumer_vanishes"),
+    "secondary_waits": ("        if (tx_stalled)\n            return;\n", "        if (tx_stalled && is_boot_cpu())\n            return;\n",
+                        "secondary"),
 }
 
 
@@ -64,7 +73,8 @@ class M1n1DockchannelTxTests(unittest.TestCase):
     def build(self, name, src):
         exe = self.work / "bin" / name
         exe.parent.mkdir(exist_ok=True)
-        subprocess.run(["cc", "-std=gnu11", "-O2", "-Wall", "-Werror", "-iquote", str(src), "-iquote",
+        subprocess.run(["cc", "-std=gnu11", "-O2", "-Wall", "-Wsign-compare", "-Wundef", "-Wunused-parameter",
+                        "-Werror", "-iquote", str(src), "-iquote",
                         str(self.work / "stubs"), str(FIXTURE), "-o", str(exe)], check=True)
         return exe
 
@@ -100,8 +110,10 @@ class M1n1DockchannelTxTests(unittest.TestCase):
 
     def test_shipped_source_already_passes_the_drained_cases(self):
         exe = self.build("before_drained", BASE)
-        code, output = self.run_case(exe, "slow_drain")
-        self.assertEqual(code, 0, output)
+        for case in ("slow_drain", "fast_host_pause"):
+            with self.subTest(case=case):
+                code, output = self.run_case(exe, case)
+                self.assertEqual(code, 0, output)
 
     def test_each_mutant_is_caught(self):
         source = (self.after / "dockchannel_uart.c").read_text()
