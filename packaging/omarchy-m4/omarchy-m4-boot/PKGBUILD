@@ -22,7 +22,7 @@ source=('m4-boot-compose.py' '90-omarchy-m4-boot.hook' 'm4-update-check.py'
         'omarchy-m4-update-check.service' 'omarchy-m4-update-check.timer' 'MIT.txt' 'GPL-2.0-or-later.txt'
         'speakersafetyd-j713-realtime.conf' 'm4-channel-setup.py' 'omarchy-m4-update'
         "j713-ecluster.dtb::${url}/releases/download/package-inputs/j713-ecluster.dtb")
-sha256sums=('67cbbe056e4e7b9193e3648ebfff78ae68316ca50a47e2676cd62c36a7918630'
+sha256sums=('860ac4ce8b0568ff98288367f65953616efda3f5f73feb4b1ad7ee9440b7df62'
             '22514358734721ffcb4478f9c3c2c91f55b858bbd40aba6278c395e7a35de810'
             'bf06541caba3709e81b261c60563886e95fff902d811b74f2b49c03e70ee1685'
             '8ecdbfc8303276d8db5922f6a06aa945f58ebca27b83520f76e9155561b9c5b0'
@@ -30,7 +30,7 @@ sha256sums=('67cbbe056e4e7b9193e3648ebfff78ae68316ca50a47e2676cd62c36a7918630'
             'b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5'
             'aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3'
             'a116d5a6aa09bc2aec1393ef737f21d9cc0eaac474615cb215f48491b7db8a56'
-            'ab8f1e4b490226d45efeb4b9a332e7ef3d99fd5fc065a1308b6972340bb73f9b'
+            '24a56c1d1e00082b6493f7fef2647a5ce84d40dbaa30a02f146e189acb565629'
             'bde52f8012b209e06c0e2b41325413c642ae4c6e6eedce7ff04331ca4d50c0f1'
             'fdedc09f2fe8ed681a61208589024e01fb5efa77beebbd0eb4ad267c08e77f7c')
 

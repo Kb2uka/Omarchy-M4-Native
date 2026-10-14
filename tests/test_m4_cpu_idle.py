@@ -213,7 +213,7 @@ class ModuleSource(unittest.TestCase):
     def test_power_down_saves_state_around_wfi(self):
         self.assertIn('cpu_pm_enter()', self.source)
         self.assertIn('cpu_pm_exit()', self.source)
-        pushes = self.asm.index('stp x18, x19'), self.asm.index('wfi'), self.asm.index('ldp x18, x19')
+        pushes = self.asm.index('stp x18, x19'), self.asm.index('"wfi\\n"'), self.asm.index('ldp x18, x19')
         self.assertEqual(sorted(pushes), list(pushes), 'registers must be saved before WFI and restored after')
         self.assertIn('mrs x0, ISR_EL1', self.asm)
 
