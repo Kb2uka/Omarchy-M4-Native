@@ -95,7 +95,7 @@ The builder refuses any result that differs from the base beyond those nodes,
 checks that channel 6 is `TCMz` and that phandles `0x07` and `0x01` are the P
 and E policy CPUs. DTC 1.8.1 (Arch `dtc` 1:1.8.1-1) produced 49,616 bytes,
 SHA-256 `fdedc09f2fe8ed681a61208589024e01fb5efa77beebbd0eb4ad267c08e77f7c`.
-`omarchy-m4-boot` 1-9 carries it; the updater and composer accept it only after
+`omarchy-m4-boot` 1-10 carries it; the updater and composer accept it only after
 the CPU temperature devicetree (backup `boot.bin.pre-ecluster`).
 
 ## Results on the owner's Air
@@ -175,7 +175,7 @@ The script is [`cpu/j713/bench/zone_test.py`](../cpu/j713/bench/zone_test.py).
 ## Existing installs
 
 **Connected to M4 updates? You get this automatically.** `omarchy-m4-update`
-installs `omarchy-m4-boot` 1-9 and `omarchy-m4-cpu` 1-1; restart once. Check:
+installs `omarchy-m4-boot` 1-10 and `omarchy-m4-cpu` 1-1; restart once. Check:
 
 ```bash
 m4-cpu-idle                                          # "state": "loaded"

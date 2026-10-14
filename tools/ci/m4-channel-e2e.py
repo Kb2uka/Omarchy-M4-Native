@@ -193,7 +193,7 @@ def main():
             require(snapshot(root) == before, 'Inspection changed files')
             # The first run is the setup script an Air already has from omarchy-m4-boot 1-5,
             # which lists none of omarchy-m4-gpu, omarchy-m4-headphones and omarchy-m4-cpu; the
-            # dependencies of boot 1-6 (GPU), 1-7 (headphone jack) and 1-9 (CPU idle) must bring them.
+            # dependencies of boot 1-6 (GPU), 1-7 (headphone jack) and 1-10 (CPU idle) must bring them.
             source = (ROOT / 'tools/m4-channel-setup.py').read_text()
             listed = source[source.index('PACKAGES = ('):source.index(')', source.index('PACKAGES = (')) + 1]
             older = scratch / 'm4-channel-setup-1-5.py'

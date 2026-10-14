@@ -1,15 +1,15 @@
 # Maintainer: KB2UKA
 # Built and signed by .github/workflows/packages.yml; see docs/package-channel.md.
-# m4-boot-compose.py, m4-update-check.py, MIT.txt and GPL-2.0-or-later.txt are staged from tools/
+# m4-boot-compose.py, m4-update-check.py, m4-lid-lock.py, MIT.txt and GPL-2.0-or-later.txt are staged from tools/
 # and LICENSES/ by tools/build-m4-packages.py.
 pkgname=omarchy-m4-boot
 pkgver=1
-pkgrel=9
+pkgrel=10
 pkgdesc='Keeps the J713 boot.bin in step with the packaged M4 kernel and devicetree'
 arch=('aarch64')
 url='https://github.com/Kb2uka/Omarchy-M4-Native'
 license=('MIT' 'GPL-2.0-or-later OR MIT')
-# omarchy-m4-gpu (from 1-6), omarchy-m4-headphones (from 1-7) and omarchy-m4-cpu (from 1-9):
+# omarchy-m4-gpu (from 1-6), omarchy-m4-headphones (from 1-7) and omarchy-m4-cpu (from 1-10):
 # an older installed setup script does not list them, so this pulls them in on the first
 # omarchy-m4-update run that installs this version.
 depends=('python' 'pacman' 'omarchy-m4-gpu' 'omarchy-m4-headphones' 'omarchy-m4-cpu')
@@ -20,7 +20,7 @@ options=('!strip' '!debug')
 # (docs/j713-cpufreq.md, "All three parts").
 source=('m4-boot-compose.py' '90-omarchy-m4-boot.hook' 'm4-update-check.py'
         'omarchy-m4-update-check.service' 'omarchy-m4-update-check.timer' 'MIT.txt' 'GPL-2.0-or-later.txt'
-        'speakersafetyd-j713-realtime.conf' 'm4-channel-setup.py' 'omarchy-m4-update'
+        'speakersafetyd-j713-realtime.conf' 'm4-channel-setup.py' 'omarchy-m4-update' 'm4-lid-lock.py'
         "j713-ecluster.dtb::${url}/releases/download/package-inputs/j713-ecluster.dtb")
 sha256sums=('860ac4ce8b0568ff98288367f65953616efda3f5f73feb4b1ad7ee9440b7df62'
             '22514358734721ffcb4478f9c3c2c91f55b858bbd40aba6278c395e7a35de810'
@@ -32,6 +32,7 @@ sha256sums=('860ac4ce8b0568ff98288367f65953616efda3f5f73feb4b1ad7ee9440b7df62'
             'a116d5a6aa09bc2aec1393ef737f21d9cc0eaac474615cb215f48491b7db8a56'
             '24a56c1d1e00082b6493f7fef2647a5ce84d40dbaa30a02f146e189acb565629'
             'bde52f8012b209e06c0e2b41325413c642ae4c6e6eedce7ff04331ca4d50c0f1'
+            'f605580fc7e8e672cee85f5afee930550b8f445f026b5a04c1828e52c88ea6de'
             'fdedc09f2fe8ed681a61208589024e01fb5efa77beebbd0eb4ad267c08e77f7c')
 
 package() {
@@ -40,6 +41,7 @@ package() {
   install -Dm755 m4-update-check.py "$pkgdir/usr/bin/omarchy-m4-update-check"
   install -Dm755 omarchy-m4-update "$pkgdir/usr/bin/omarchy-m4-update"
   install -Dm644 m4-channel-setup.py "$pkgdir/usr/lib/omarchy-m4/m4-channel-setup.py"
+  install -Dm644 m4-lid-lock.py "$pkgdir/usr/lib/omarchy-m4/m4-lid-lock.py"
   install -Dm644 -t "$pkgdir/usr/lib/systemd/user" omarchy-m4-update-check.service omarchy-m4-update-check.timer
   install -Dm644 j713-ecluster.dtb "$pkgdir/usr/lib/omarchy-m4/j713.dtb"
   install -Dm644 speakersafetyd-j713-realtime.conf \

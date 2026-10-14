@@ -149,7 +149,17 @@ file.
 - **`omarchy-m4-boot` 1-8** ships the setup script that applies the same modes
   when a new install connects.
 
-### omarchy-m4-cpu 1-1 and omarchy-m4-boot 1-9
+### omarchy-m4-boot 1-9
+
+- **Lid close locks the screen on installed Airs** ([#84](https://github.com/Kb2uka/Omarchy-M4-Native/issues/84)).
+  The image fix (#85) reached only new images; this delivers it through
+  `omarchy-m4-update`. The install script runs `m4-lid-lock.py`, which writes
+  the lock screen's PAM file when it is missing and appends the two lid binds
+  once to each user's Omarchy configuration, as that user. Details:
+  [J713 desktop image](j713-desktop-image.md#lid-close-and-the-lock-screen).
+- The binds take effect at the next login. A refusal never fails the update.
+
+### omarchy-m4-cpu 1-1 and omarchy-m4-boot 1-10
 
 - **CPU idle** ([J713 CPU idle](j713-cpu-idle.md), #65): idle cores power down
   instead of spinning under `idle=nop`. Idle system power on the owner's Air
@@ -163,7 +173,7 @@ file.
   dies while loading or in the 120 s settle period stops the next boot from
   trying again; `sudo m4-cpu-idle --disable` is the off switch (hold file
   `/var/lib/omarchy-m4/cpu-idle/hold`).
-- **`omarchy-m4-boot` 1-9** depends on `omarchy-m4-cpu`, as 1-6 and 1-7 do for
+- **`omarchy-m4-boot` 1-10** depends on `omarchy-m4-cpu`, as 1-6 and 1-7 do for
   the GPU and headphone packages, and carries devicetree `fdedc09f…`
   (`j713-ecluster-thermal`): E-cluster states up to 2172 MHz and a CPU die
   thermal zone with a 95 C passive trip. The composer and updater accept it only
@@ -254,6 +264,13 @@ wrappers), Widevine state, `/usr/lib/omarchy` (audio modules and helpers),
 the speaker and ALSA/WirePlumber configuration, firmware, or system service
 units. The only user units are the notifier's own two files. The boot object
 is written only by the composer.
+
+Install scripts never install files there either. Their tools change state
+outside the package only in known states and refuse anything else: the
+speaker and GPU tools swap only their own module and its pin, and from
+`omarchy-m4-boot` 1-9 `m4-lid-lock.py` writes the lock screen's PAM file when
+it is missing and appends the lid binds once to each user's Omarchy
+configuration, running as that user.
 
 These protected components stay manifest-managed outside pacman, as alpha.1
 installed them. pacman refuses to install over files it does not own, and

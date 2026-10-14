@@ -74,8 +74,10 @@ contributors. Their authorship and licenses remain theirs.
 
 ## Download and install
 
-**[v0.1.0-alpha.1 release and installer](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1)**,
-based on **Omarchy 4.0.4**. Download the release's `download-j713.command` and
+**[v0.1.0-alpha.1 installer, update 2](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1-update.2)**,
+based on **Omarchy 4.0.4**. It installs the same alpha.1 system as the
+[original release](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1)
+and also works on macOS 26.6.2. Download the release's `download-j713.command` and
 run it from macOS Terminal:
 
 ```sh
@@ -91,8 +93,8 @@ installer starts in macOS; it is not a bootable PC ISO. GitHub's automatic
 
 **Every alpha.1 install needs this once, whether you installed today or earlier.**
 It turns on M4 updates and, if your Air does not have it yet, the shutdown fix.
-The published v0.1.0-alpha.1 installer does not do this by itself; a later
-installer will ([details](docs/install.md#last-step-connect-to-m4-updates-required)).
+The published v0.1.0-alpha.1 installers (including update 2) do not do this by
+themselves; a later installer will ([details](docs/install.md#last-step-connect-to-m4-updates-required)).
 
 1. On the Air, join Wi-Fi (`nmtui`) and open a terminal in Omarchy.
 2. Paste this one line, press Enter, and type your password when asked:
@@ -145,7 +147,7 @@ once applies them:
 | GPU and desktop on Airs whose GPU power limit is below 24800 mW ([#57](https://github.com/Kb2uka/Omarchy-M4-Native/issues/57)); applied at the next boot | `omarchy-m4-gpu` 1-1 |
 | Headphone jack playback ([#88](https://github.com/Kb2uka/Omarchy-M4-Native/pull/88)); starts at the next boot ([details](docs/j713-headphones.md#existing-installs)) | `omarchy-m4-headphones` 1-1 |
 | CPU idle: idle cores power down, so the idle Air runs cooler and draws less ([#65](https://github.com/Kb2uka/Omarchy-M4-Native/issues/65)); starts at the next boot ([details](docs/j713-cpu-idle.md#existing-installs)) | `omarchy-m4-cpu` 1-1 |
-| E cores up to 2172 MHz and a CPU die thermal safety net ([#66](https://github.com/Kb2uka/Omarchy-M4-Native/issues/66)) | `omarchy-m4-boot` 1-9 |
+| E cores up to 2172 MHz and a CPU die thermal safety net ([#66](https://github.com/Kb2uka/Omarchy-M4-Native/issues/66)) | `omarchy-m4-boot` 1-10 |
 
 A devicetree you applied by hand from the guides is kept; the update never
 moves an Air back to an older one. An Air connected before
