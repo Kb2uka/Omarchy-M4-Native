@@ -76,6 +76,56 @@ class BoardDevicetrees(unittest.TestCase):
         self.assertIn('Warning (simple_bus_reg)', warnings[0])
 
 
+SYNTHETIC = """/dts-v1/;
+/ {
+    compatible = "test,board";
+    #address-cells = <1>;
+    #size-cells = <0>;
+    off: iommu@1 { compatible = "test,iommu"; reg = <1>; #iommu-cells = <1>; status = "disabled"; };
+    on: iommu@2 { compatible = "test,iommu"; reg = <2>; #iommu-cells = <1>; };
+    domain: power@3 { compatible = "test,power"; reg = <3>; #power-domain-cells = <0>; };
+    good@4 { compatible = "test,good"; reg = <4>; iommus = <&on 7>, <&on 8>; power-domains = <&domain>; };
+    stale@5 { compatible = "test,stale"; reg = <5>; iommus = <&on 1>, <&off 2>; };
+    orphan@6 { compatible = "test,orphan"; reg = <6>; power-domains = <0x7777>; };
+    quiet@7 { compatible = "test,quiet"; reg = <7>; iommus = <&off 3>; status = "disabled"; };
+    bus@8 {
+        compatible = "test,bus"; reg = <8>; status = "disabled";
+        #address-cells = <1>; #size-cells = <0>;
+        child@0 { compatible = "test,child"; reg = <0>; };
+    };
+};
+"""
+
+
+class BoardDevicetreeTool(unittest.TestCase):
+    """The tool's own logic, on a small synthetic devicetree with known answers."""
+
+    @classmethod
+    def setUpClass(cls):
+        if shutil.which('dtc') is None:
+            if os.environ.get('CI'):
+                raise AssertionError('dtc is required in CI')
+            raise unittest.SkipTest('dtc not installed')
+        dtb = subprocess.run(['dtc', '-I', 'dts', '-O', 'dtb'], input=SYNTHETIC.encode(),
+                             capture_output=True, check=True).stdout
+        cls.root = MODULE.audit.parse_dtb(dtb)
+        cls.enabled = MODULE.enabled_nodes(cls.root)
+
+    def test_enabled_nodes_follow_status_and_parents(self):
+        self.assertEqual(sorted(self.enabled), ['/', '/good@4', '/iommu@2', '/orphan@6', '/power@3', '/stale@5'])
+        self.assertEqual(self.enabled['/good@4'], 'test,good')
+
+    def test_dangling_finds_disabled_and_missing_targets_only(self):
+        self.assertEqual(MODULE.dangling(self.root, self.enabled), [
+            '/orphan@6 power-domains -> missing phandle 0x7777',
+            '/stale@5 iommus -> disabled /iommu@1',
+        ])
+
+    def test_warning_location_is_stripped(self):
+        line = '<stdin>:12.3-40.5: Warning (simple_bus_reg): /soc/x@1: message'
+        self.assertEqual(MODULE.LOCATION.sub('', line), 'Warning (simple_bus_reg): /soc/x@1: message')
+
+
 class BoardDevicetreeRecord(unittest.TestCase):
     """The committed record itself; runs everywhere, no tree needed."""
 
@@ -83,6 +133,10 @@ class BoardDevicetreeRecord(unittest.TestCase):
         golden = json.loads(GOLDEN.read_text())
         self.assertEqual(golden['asahi_commit'], MODULE.ASAHI_COMMIT)
         self.assertEqual(sorted(golden['boards']), ['j604', 'j623', 'j624', 'j713', 'j715', 'j773g'])
+
+    def test_fetch_script_pins_the_same_commit(self):
+        script = (ROOT / 'tools/ci/fetch-asahi-dts.sh').read_text()
+        self.assertIn(f'commit={MODULE.ASAHI_COMMIT}\n', script)
 
     def test_doc_table_matches_the_record(self):
         text = DOC.read_text()
