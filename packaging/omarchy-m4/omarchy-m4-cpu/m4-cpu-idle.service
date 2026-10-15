@@ -1,0 +1,14 @@
+# Installed by omarchy-m4-cpu. Loads the J713 CPU idle driver (#65) once the root
+# filesystem is writable; a refusal never fails the boot. Type=exec, so the
+# helper's settle period never holds up the desktop.
+[Unit]
+Description=J713 CPU idle driver (omarchy-m4-cpu)
+After=local-fs.target
+ConditionPathExists=/usr/lib/omarchy-m4/cpu/j713_cpuidle.ko
+
+[Service]
+Type=exec
+ExecStart=-/usr/bin/m4-cpu-idle --boot
+
+[Install]
+WantedBy=multi-user.target

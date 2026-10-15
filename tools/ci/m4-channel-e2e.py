@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[2]
 CHANNEL = json.loads((ROOT / 'packaging/omarchy-m4/channel.json').read_text())
 RELEASE = CHANNEL['kernel']['release']
 # Packages an Air's 1-5 setup script does not list; omarchy-m4-boot's dependencies bring them.
-BROUGHT_BY_BOOT = ('omarchy-m4-gpu', 'omarchy-m4-headphones')
+BROUGHT_BY_BOOT = ('omarchy-m4-gpu', 'omarchy-m4-headphones', 'omarchy-m4-cpu')
 STUB = '''pkgname=e2e-system
 pkgver=1
 pkgrel=1
@@ -192,8 +192,8 @@ def main():
             require(plan['applied'] is False and plan['pacman_conf_changes'], 'Inspection did not plan the change')
             require(snapshot(root) == before, 'Inspection changed files')
             # The first run is the setup script an Air already has from omarchy-m4-boot 1-5,
-            # which lists neither omarchy-m4-gpu nor omarchy-m4-headphones; the dependencies
-            # of boot 1-6 (GPU) and 1-7 (headphone jack) must bring them.
+            # which lists none of omarchy-m4-gpu, omarchy-m4-headphones and omarchy-m4-cpu; the
+            # dependencies of boot 1-6 (GPU), 1-7 (headphone jack) and 1-10 (CPU idle) must bring them.
             source = (ROOT / 'tools/m4-channel-setup.py').read_text()
             listed = source[source.index('PACKAGES = ('):source.index(')', source.index('PACKAGES = (')) + 1]
             older = scratch / 'm4-channel-setup-1-5.py'
@@ -245,6 +245,10 @@ def main():
                 require(sha((root / path).read_bytes()) == digest, 'Staged headphone module missing or wrong: ' + path)
             require((root / 'usr/lib/systemd/system/m4-j713-audio-register.service.d/30-m4-headphones.conf').is_file()
                     and os.access(root / 'usr/bin/m4-headphones', os.X_OK), 'The headphone step is missing')
+            for path, digest in CHANNEL['cpu_idle_module'].items():
+                require(sha((root / path).read_bytes()) == digest, 'Staged CPU idle module missing or wrong: ' + path)
+            require((root / 'usr/lib/systemd/system/m4-cpu-idle.service').is_file()
+                    and os.access(root / 'usr/bin/m4-cpu-idle', os.X_OK), 'The CPU idle step is missing')
             require(os.access(root / 'usr/bin/omarchy-m4-update', os.X_OK) and
                     (root / 'usr/lib/omarchy-m4/m4-channel-setup.py').is_file(), 'omarchy-m4-update is missing')
             require((root / 'usr/lib/systemd/user/omarchy-m4-update-check.timer').is_file() and
