@@ -20,6 +20,7 @@ GUARD_PIN = {'sha256': hashlib.sha256(GUARD_BYTES).hexdigest(), 'size': len(GUAR
 CPUS = 10
 ZONE = 'sys/class/thermal/thermal_zone2'
 GATE_TRIP = ZONE + '/trip_point_0_temp'
+SUSTAIN_TRIP = ZONE + '/trip_point_1_temp'
 
 
 class Machine:
@@ -36,8 +37,11 @@ class Machine:
             # The real guard refuses without the idle driver, and opens the gate itself.
             if self.guard_fails or not (self.root / 'sys/module' / MODULE.NAME).exists():
                 return 1
+            if (self.root / GATE_TRIP).read_text() != '20000\n' or (self.root / SUSTAIN_TRIP).read_text() != '95000\n':
+                return 1  # the real guard refuses without both trips as the devicetree sets them
             (self.root / 'sys/module' / MODULE.GUARD_NAME).mkdir(parents=True)
             (self.root / GATE_TRIP).write_text('150000\n')
+            (self.root / SUSTAIN_TRIP).write_text('100000\n')
             return 0
         if self.fail:
             return 1
@@ -107,6 +111,9 @@ class CpuIdleLoad(unittest.TestCase):
     def gate(self):
         return (self.root / GATE_TRIP).read_text().strip()
 
+    def sustain(self):
+        return (self.root / SUSTAIN_TRIP).read_text().strip()
+
     def restart(self):
         """What a restart resets: loaded modules, and the gate back to the devicetree's 20 C."""
         for name in (MODULE.NAME, MODULE.GUARD_NAME):
@@ -115,6 +122,7 @@ class CpuIdleLoad(unittest.TestCase):
                 path.rmdir()
         if (self.root / GATE_TRIP).exists():
             self.put(GATE_TRIP, b'20000\n')
+            self.put(SUSTAIN_TRIP, b'95000\n')
         import shutil
         shutil.rmtree(self.root / MODULE.CPUS)
         for cpu in range(CPUS):
@@ -264,6 +272,26 @@ class CpuIdleLoad(unittest.TestCase):
         self.assertEqual((report['boost'], report['gate'], self.gate()), ('on', 'open', '150000'))
         self.assertEqual(report['status'], 'loaded; idle cores power down; boost guard loaded')
         self.assertEqual(report['rt_floor'], str(MODULE.RT_FLOOR), 'real-time tasks keep 1800 MHz, not the boost')
+        self.assertEqual((report['sustained_trip'], self.sustain()), ('boost', '100000'))
+
+    def test_boost_off_and_on_move_the_sustained_trip_with_the_gate(self):
+        self.boost_ready()
+        self.run_mode('boot', Machine(self.root))
+        report = self.run_mode('boost-off', Machine(self.root))
+        self.assertEqual((self.gate(), self.sustain(), report['sustained_trip']), ('20000', '95000', 'normal'))
+        report = self.run_mode('boost-on', Machine(self.root))
+        self.assertEqual((self.gate(), self.sustain(), report['sustained_trip']), ('150000', '100000', 'boost'))
+
+    def test_a_sustained_trip_raised_without_the_guard_goes_back_to_95_c(self):
+        self.boost_ready()
+        self.put(SUSTAIN_TRIP, b'100000\n')
+        machine = Machine(self.root, guard_fails=True)
+        report = self.run_mode('boot', machine)
+        self.assertEqual(machine.commands, [self.idle_insmod(), self.guard_insmod()])
+        self.assertEqual((self.sustain(), report['sustained_trip']), ('95000', 'normal'), 'only behind the guard')
+        self.restart()
+        self.put(SUSTAIN_TRIP, b'100000\n')
+        self.assertEqual(self.run_mode('boot', Machine(self.root))['boost'], 'on', 'reset, then the guard loads')
 
     def test_rt_floor_resolves_to_the_pre_boost_clock(self):
         # schedutil: frequency = policy maximum * floor / CPU capacity, rounded up to the next table state.
@@ -377,6 +405,21 @@ class CpuIdleLoad(unittest.TestCase):
         machine = Machine(self.root)
         self.assertEqual(self.run_mode('boot', machine)['boost'], 'on')
         self.assertEqual(machine.commands, [self.idle_insmod(), self.guard_insmod()])
+
+    def test_trips_raised_by_hand_are_reset_even_with_boost_off(self):
+        self.boost_ready()
+        self.run_mode('boost-off', Machine(self.root))
+        self.put(GATE_TRIP, b'150000\n')
+        self.put(SUSTAIN_TRIP, b'100000\n')
+        machine = Machine(self.root)
+        self.run_mode('boot', machine)
+        self.assertEqual(machine.commands, [self.idle_insmod()], 'boost is off: no guard')
+        self.assertEqual((self.gate(), self.sustain()), ('20000', '95000'), 'nothing raised without the guard')
+
+    def test_boost_on_without_the_guard_leaves_both_trips(self):
+        self.boost_ready()
+        self.run_mode('boost-on', Machine(self.root))
+        self.assertEqual((self.gate(), self.sustain()), ('20000', '95000'))
 
     def test_boost_on_reopens_the_gate_only_behind_a_loaded_guard(self):
         self.boost_ready()

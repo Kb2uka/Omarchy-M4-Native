@@ -67,29 +67,83 @@ static inline int pg_float_to_mc(u32 bits, int *mc)
 }
 
 /*
- * pg_step is rounded up, which is right for predicting a peak but would make
- * the base too low if subtracted whole: one P core held at P17-P20 settled
- * about 25 C over its starting temperature, 73% of the 34 C in the table. So
- * the base subtracts only this share of the step, below that ratio.
+ * Fast heat: how much of a P state's rise leaves the CPU die within two
+ * seconds of the cluster returning to P4, by busy P cores. Measured on the
+ * owner's Air with each state held 15 s, twice (cpu/j713/bench/settle.py,
+ * docs/j713-cpu-boost.md). The rest of the rise, 0-12 C of slow creep, is
+ * package heat that stays after the drop, so it belongs in the base.
+ *
+ * Every state from P5 to the first that reached the bench's 95 C abort is
+ * measured, except P9, P11, P13 and P16 for one core. Each takes the lower of
+ * the two runs, rounded down; a state not measured takes the next measured
+ * state below it; then each row is made non-decreasing from the top down by
+ * a running minimum, because one busy core asking for P20 runs P17 and measured less.
+ * Where a state was measured for more busy cores, no entry for fewer is higher
+ * (two cores at P5 take 2 C, three cores' 2.6 C rounded down), because the base uses the fewest
+ * busy cores of the look-back while more may have joined. The base subtracts
+ * these, so it can only err high.
  */
-#define PG_BASE_SHARE 70	/* percent */
+static const u32 pg_fast[PG_P_CPUS + 1][PG_TOP_LEVEL + 1] = {
+	[1] = { [5] = 1000, [6] = 3000, [7] = 5000, [8] = 7000, [9] = 7000, [10] = 13000, [11] = 13000, [12] = 20000, [13] = 20000,
+		[14] = 26000, [15] = 26000, [16] = 26000, [17] = 26000, [18] = 26000, [19] = 26000,
+		[20] = 26000 },
+	[2] = { [5] = 2000, [6] = 5000, [7] = 6000, [8] = 10000, [9] = 14000, [10] = 16000, [11] = 25000, [12] = 27000, [13] = 27000,
+		[14] = 27000, [15] = 27000, [16] = 27000, [17] = 27000, [18] = 27000, [19] = 27000,
+		[20] = 27000 },
+	[3] = { [5] = 2000, [6] = 5000, [7] = 8000, [8] = 10000, [9] = 16000, [10] = 21000, [11] = 21000,
+		[12] = 21000, [13] = 21000, [14] = 21000, [15] = 21000, [16] = 21000, [17] = 21000,
+		[18] = 21000, [19] = 21000, [20] = 21000 },
+	[4] = { [5] = 3000, [6] = 6000, [7] = 8000, [8] = 11000, [9] = 18000, [10] = 18000, [11] = 18000,
+		[12] = 18000, [13] = 18000, [14] = 18000, [15] = 18000, [16] = 18000, [17] = 18000,
+		[18] = 18000, [19] = 18000, [20] = 18000 },
+};
+
+/*
+ * How far back the base looks for the lowest P state and the fewest busy P
+ * cores: PG_RECENT_MS of whole slow ticks kept, plus the current tick, so
+ * 750-1000 ms at the default 250 ms period. The fast heat comes and goes with
+ * a time constant of about 0.25 s, so after 750 ms less than 5% of an earlier
+ * state's fast heat is left; a dip longer ago no longer holds the base up.
+ */
+#define PG_RECENT_MS 750
+#define PG_RECENT_MAX 16	/* ticks kept: 750 ms at the shortest period, 50 ms */
+
+/* Keep a finished tick's lowest state and busy count in the ring of n; returns the next position. */
+static inline unsigned int pg_keep(u32 *recent, u32 *recent_busy, unsigned int pos, unsigned int n,
+				   u32 tick, u32 tick_busy)
+{
+	recent[pos] = tick;
+	recent_busy[pos] = tick_busy;
+	return (pos + 1) % n;
+}
+
+/* The lowest of the n values kept for recent ticks and the current tick's. */
+static inline u32 pg_lowest(const u32 *recent, unsigned int n, u32 now)
+{
+	unsigned int i;
+
+	for (i = 0; i < n; i++)
+		if (recent[i] < now)
+			now = recent[i];
+	return now;
+}
 
 /*
  * The base: what the die would read with the cluster back at P4. Heat is
  * subtracted only when a P core was busy through the window that the new
- * reading covers (pg_window_busy), and then only PG_BASE_SHARE of the step
- * for the fewest busy P cores and the lowest P state seen in that window.
- * Any other window subtracts nothing, so the base errs high.
+ * reading covers (pg_window_busy), and then only the fast heat (pg_fast) of
+ * the fewest busy P cores and the lowest P state seen in the last
+ * PG_RECENT_MS. Any other window subtracts nothing, so the base errs high.
  */
-static inline int pg_base(int reading_mc, bool window_busy, unsigned int min_busy, u32 window_min_level)
+static inline int pg_base(int reading_mc, bool window_busy, unsigned int min_busy, u32 recent_level)
 {
-	if (!window_busy || window_min_level <= PG_BASE_LEVEL || window_min_level > PG_TOP_LEVEL)
+	if (!window_busy || recent_level <= PG_BASE_LEVEL || recent_level > PG_TOP_LEVEL)
 		return reading_mc;
 	if (min_busy == 0)
 		min_busy = 1;
 	if (min_busy > PG_P_CPUS)
 		min_busy = PG_P_CPUS;
-	return reading_mc - (int)(pg_step[min_busy][window_min_level] * PG_BASE_SHARE / 100);
+	return reading_mc - (int)pg_fast[min_busy][recent_level];
 }
 
 /* A P core not idle for at least 90% of the window: the cluster ran loaded throughout. */

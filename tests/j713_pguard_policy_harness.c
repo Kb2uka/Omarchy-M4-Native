@@ -14,9 +14,9 @@ u32 step(unsigned int busy, unsigned int level)
 	return pg_step[busy][level];
 }
 
-int share(void)
+u32 fast(unsigned int busy, unsigned int level)
 {
-	return PG_BASE_SHARE;
+	return pg_fast[busy][level];
 }
 
 int e_heat(unsigned int e_busy, u32 e_khz)
@@ -32,6 +32,26 @@ int float_to_mc(u32 bits, int *mc)
 int base(int reading_mc, bool window_busy, unsigned int min_busy, u32 window_min_level)
 {
 	return pg_base(reading_mc, window_busy, min_busy, window_min_level);
+}
+
+unsigned int keep(u32 *recent, u32 *recent_busy, unsigned int pos, unsigned int n, u32 tick, u32 tick_busy)
+{
+	return pg_keep(recent, recent_busy, pos, n, tick, tick_busy);
+}
+
+u32 lowest(const u32 *recent, unsigned int n, u32 now)
+{
+	return pg_lowest(recent, n, now);
+}
+
+int recent_ms(void)
+{
+	return PG_RECENT_MS;
+}
+
+int recent_max(void)
+{
+	return PG_RECENT_MAX;
 }
 
 bool window_busy(const u64 *d_idle, const u64 *d_wall, unsigned int n)
