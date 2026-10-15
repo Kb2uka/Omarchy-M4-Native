@@ -150,6 +150,7 @@ once applies them:
 | E cores up to 2172 MHz and a CPU die thermal safety net ([#66](https://github.com/Kb2uka/Omarchy-M4-Native/issues/66)) | `omarchy-m4-boot` 1-10 |
 | P cores boost up to 4464 MHz and E cores up to 2808 MHz under a predictive heat guard ([#66](https://github.com/Kb2uka/Omarchy-M4-Native/issues/66)); starts at the next boot, off switch `sudo m4-cpu-idle --boost off` ([details](docs/j713-cpu-boost.md#existing-installs)) | `omarchy-m4-boot` 1-11, `omarchy-m4-cpu` 1-2 |
 | The boost guard's limits match macOS on the fanless Air (105 C bursts, 100 C sustained), so one busy core runs at its top boost (4.04 GHz, bursts to 4.46 GHz) for most of a 45 s job, and it estimates the die's temperature from heat measured on the Air ([#66](https://github.com/Kb2uka/Omarchy-M4-Native/issues/66), [details](docs/j713-cpu-boost.md#settled-heat-the-base-estimate)) | `omarchy-m4-cpu` 1-3 |
+| Headset microphone on the headphone jack ([#105](https://github.com/Kb2uka/Omarchy-M4-Native/pull/105)); starts at the next boot ([details](docs/j713-headphones.md#headset-microphone)) | `omarchy-m4-headphones` 1-2 |
 
 A devicetree you applied by hand from the guides is kept; the update never
 moves an Air back to an older one. An Air connected before
@@ -179,7 +180,7 @@ As of October 11, 2026, with the pinned experimental runtime:
 | Shut Down | With update 1, Shut Down turns the Air off and it stays off; the next power-on boots normally (October 12). |
 | Graphics | Experimental Apple M4 GPU rendering is active. Scanout still uses simpledrm; this is not complete display-controller support or proof of physical panel timing. |
 | Speakers | Protected internal-speaker playback and automatic startup have worked on the test Air. Broad acoustic calibration, all failure conditions and suspend/resume remain unqualified. |
-| Headphone jack | With `omarchy-m4-headphones` from `omarchy-m4-update` (October 14-15, 2026): clean stereo playback beside the protected speakers, and the output follows plug and unplug. The headset microphone and suspend/resume are not supported. |
+| Headphone jack | With `omarchy-m4-headphones` from `omarchy-m4-update` (October 14-15, 2026): clean stereo playback beside the protected speakers, and the output follows plug and unplug. Headset microphone with `omarchy-m4-headphones` 1-2 (October 15): clean mono capture, alone and during playback, a clean two-way video call, and input that follows plug and unplug. Suspend/resume is not supported. |
 | Browser video | H264 8-bit and VP9 Profile 0 hardware decoding have been observed with the qualified decoder/graphics stack. Ordinary 1080p30 playback works in the tested cases. This is not hardware support for every codec or protected video. |
 | Normal media-player launch | A 10-second normal mpv file-open check used `vaapi-copy` with zero reported frame/decoder drops; an AV1 control reached EOF in software with one startup frame drop. `vaapi-copy` still uses the hardware decoder, with a copy into CPU-accessible memory afterward. |
 | Protected movies | A tested Widevine movie used CPU decoding and played. Hardware decoding is not promised for protected content, and no license or DRM restrictions are bypassed. |

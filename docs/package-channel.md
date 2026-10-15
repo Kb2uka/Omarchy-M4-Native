@@ -15,7 +15,7 @@ reviewers.
 | `omarchy-m4-boot` | `m4-boot-compose`, its pacman hook, the J713 devicetree, the daily update notifier and, from 1-4, the real-time speaker protection drop-in | `1-1`; `1-4` adds CPU frequency scaling and CPU temperature |
 | `linux-m4-omarchy` | The J713 kernel image and its modules | `7.1.9.m4.20261008-2` |
 | `omarchy-m4-gst-audio` | GStreamer's `autodetect` and `pulse` sinks in `/usr/lib/gstreamer-1.0`, for WebKitGTK and GStreamer apps | `1.28.7-1` |
-| `omarchy-m4-headphones` | The headphone jack card: two pinned modules, `m4-headphones`, its registration drop-in, UCM and WirePlumber files | `1-1` |
+| `omarchy-m4-headphones` | The headphone jack card: two pinned modules, `m4-headphones`, its registration drop-in, UCM and WirePlumber files | `1-1`; `1-2` adds the headset microphone |
 | `omarchy-m4-cpu` | The CPU idle driver: one pinned module, `m4-cpu-idle` and its boot unit | `1-1` |
 
 ### omarchy-m4-boot 1-4 and omarchy-m4-gst-audio 1.28.7-1
@@ -205,6 +205,27 @@ file.
   state instead of 70% of its predicted step, and looks back 750-1000 ms for the
   lowest state. Guard `j713_pguard.ko` `91fe247e…`, pinned in
   `package-inputs` and `cpu_guard_module`.
+
+### omarchy-m4-headphones 1-2
+
+- **The headset microphone on the headphone jack**
+  ([J713 headphone jack](j713-headphones.md#headset-microphone)). It is part of
+  the same package, so `omarchy-m4-update` brings it as an ordinary upgrade:
+  no new package, no setup-script or boot-package change (`omarchy-m4-boot`
+  1-7 already depends on `omarchy-m4-headphones`).
+- **Restart notice on upgrade.** The install script gains `post_upgrade`, so
+  the upgrade prints "Restart once to start the headphone jack and headset
+  microphone". `omarchy-m4-update` reports a needed restart only while the card
+  module is not loaded, so on an Air running 1-1 this line is the notice.
+- **Off switch:** unchanged. `sudo m4-headphones --disable` switches the mic
+  off together with the headphones.
+- **Modules:** `j713_hp_dt.ko` (`3f501c61…`; its card node now also names ADMAC
+  channel 5, `rx`) and `snd-soc-j713-headphones.ko` (`2e743937…`), built with
+  `tools/build-j713-headphones.sh` and pinned in `package-inputs` and
+  `headphone_modules`, as for 1-1. `apple-admac` and every other speaker
+  module stay as qualified.
+- **Protected exceptions:** the same five paths. The reasons for the
+  WirePlumber fragment and its hook now name the headset mic source too.
 
 ## Connecting new installs
 

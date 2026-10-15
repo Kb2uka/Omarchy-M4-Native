@@ -95,11 +95,13 @@ local function node(name, priority, class)
            ["priority.session"] = priority, ["object.serial"] = "10" }
 end
 local function run(nodes, configured, history, kind)
+  kind = kind or "audio.sink"
+  local key_base = "default.configured." .. kind
   metadata_values, writes = {}, {}
   for key in pairs(stored) do stored[key] = nil end
-  if configured then metadata_values["default.configured.audio.sink"] = { name = configured } end
+  if configured then metadata_values[key_base] = { name = configured } end
   for i, name in ipairs(history or {}) do
-    stored["default.configured.audio.sink" .. (i == 1 and "" or "." .. (i - 2))] = name
+    stored[key_base .. (i == 1 and "" or "." .. (i - 2))] = name
   end
   local si_om = { iterate = function()
     local i = 0
@@ -114,12 +116,14 @@ local function run(nodes, configured, history, kind)
     end
   end }
   -- Actual upstream collection excludes nodes without ports or available routes.
-  local collected = collectAvailableNodes(si_om, {}, "in", { "Audio/Sink" })
+  local collected = kind == "audio.source"
+    and collectAvailableNodes(si_om, {}, "out", { "Audio/Source", "Audio/Sink" })
+    or collectAvailableNodes(si_om, {}, "in", { "Audio/Sink" })
   local plain = {}
   for _, value in ipairs(collected) do plain[#plain + 1] = value:parse() end
   local data = { ["available-nodes"] = Json.Array(plain) }
   local event = {
-    get_properties = function() return { ["default-node.type"] = kind or "audio.sink" } end,
+    get_properties = function() return { ["default-node.type"] = kind } end,
     get_source = function() return source end,
     get_data = function(_, key) return data[key] end,
     set_data = function(_, key, value)
@@ -132,10 +136,10 @@ local function run(nodes, configured, history, kind)
     end,
   }
   for _, hook in ipairs(order) do hook.execute(event) end
-  assert(metadata_values["default.configured.audio.sink"] == nil or
-    metadata_values["default.configured.audio.sink"].name == configured, "changed owner choice")
+  assert(metadata_values[key_base] == nil or metadata_values[key_base].name == configured,
+    "changed owner choice")
   for _, key in ipairs(writes) do assert(not key:find("default.configured", 1, true)) end
-  return data["selected-node"], metadata_values["default." .. (kind or "audio.sink")], data
+  return data["selected-node"], metadata_values["default." .. kind], data
 end
 local failures, passed = 0, 0
 local function test(name, check)
@@ -143,9 +147,9 @@ local function test(name, check)
   if ok then passed = passed + 1; print("PASS " .. name)
   else failures = failures + 1; print("FAIL " .. name .. ": " .. tostring(reason)) end
 end
-local function expect(name, expected, nodes, configured, history)
+local function expect(name, expected, nodes, configured, history, kind)
   test(name, function()
-    local result, applied = run(nodes, configured, history)
+    local result, applied = run(nodes, configured, history, kind)
     assert(result == expected, "selected " .. tostring(result) .. ", expected " .. tostring(expected))
     assert((applied and applied.name) == expected, "wrong applied default")
   end)
@@ -170,14 +174,40 @@ expect("raw speakers stay hidden with headphones unplugged", PROTECTED, with(unp
 expect("the jack-less fallback sink is never forced", PROTECTED,
   with(node("alsa_output.platform-j713-headphones.stereo-fallback", 0)))
 expect("a similar name is never forced", PROTECTED, with(node(HP .. ".custom", 0)))
-test("audio source selection untouched", function()
-  local result = run({ node(HP, 0, "Audio/Source"), node("mic", 1000, "Audio/Source") },
-    nil, nil, "audio.source")
-  assert(result == "mic", "selected " .. tostring(result))
-end)
 test("headphone node of another media class ignored", function()
   local result = run(with(node(HP, 0, "Audio/Duplex")))
   assert(result == PROTECTED, "selected " .. tostring(result))
 end)
+
+-- The headset mic: the same rule for the default input, keyed on the source type.
+local MIC = "alsa_input.j713.Headset"
+local function source(name, priority) return node(name, priority, "Audio/Source") end
+local function expect_source(name, expected, nodes, configured, history)
+  expect(name, expected, nodes, configured, history, "audio.source")
+end
+local three_pole = source(MIC, 0); three_pole.test_routes = false
+expect_source("plugged headset mic becomes the default source", MIC, { source(MIC, 0) })
+expect_source("headset mic wins over a configured source", MIC,
+  { source(MIC, 0), source("usb-mic", 0) }, "usb-mic")
+expect_source("headset mic wins over a stored source", MIC,
+  { source(MIC, 0), source("usb-mic", 0) }, nil, {"usb-mic"})
+expect_source("headset mic wins over a higher-priority source", MIC,
+  { source(MIC, 0), source("usb-mic", 35000) })
+expect_source("3-pole plug: other sources untouched", "mic", { three_pole, source("mic", 1000) })
+expect_source("3-pole plug keeps the configured source", "usb-mic",
+  { three_pole, source("usb-mic", 0), source("mic", 1000) }, "usb-mic")
+expect_source("3-pole plug keeps the stored source", "usb-mic",
+  { three_pole, source("usb-mic", 0), source("mic", 1000) }, nil, {"usb-mic"})
+expect_source("other sources untouched while the headset mic is unavailable", "mic",
+  { source(HP, 0), source("mic", 1000), three_pole })
+expect_source("the headphone sink is never the default source", "mic",
+  { node(HP, 0), source("mic", 1000) })
+expect_source("a similar source name is never forced", "mic",
+  { source(MIC .. ".custom", 0), source("mic", 1000) })
+expect_source("headset mic node of another media class ignored", "mic",
+  { node(MIC, 0, "Audio/Source/Virtual"), source("mic", 1000) })
+expect("the headset mic is never the default output", PROTECTED, with(source(MIC, 0)))
+expect("plugged headset: headphones stay the default output", HP,
+  with(node(HP, 0), source(MIC, 0)))
 print(string.format("%d passed, %d failed", passed, failures))
 os.exit(failures == 0 and 0 or 1)
