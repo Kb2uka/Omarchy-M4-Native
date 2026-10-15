@@ -26,6 +26,7 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[1]
 CHANNEL = ROOT / 'packaging/omarchy-m4/channel.json'
 REALTIME = 'usr/lib/systemd/system/speakersafetyd-j713.service.d/50-realtime.conf'
+NOTCH_UNIT = 'usr/lib/systemd/user/omarchy-m4-notch.service'
 SPEAKER_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/20-m4-speaker-module.conf'
 GPU_DROP_IN = 'usr/lib/systemd/system/m4-gpu.service.d/20-m4-gpu-module.conf'
 HEADPHONES_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/30-m4-headphones.conf'
@@ -155,6 +156,16 @@ def check_package(channel, package, info, files, root):
         require('omarchy-m4-gpu' in names, 'Boot package must require the GPU module package')
         require('omarchy-m4-headphones' in names, 'Boot package must require the headphone jack package')
         require('omarchy-m4-cpu' in names, 'Boot package must require the CPU idle package')
+        # The opt-in notch stage 2 (#89): its pin, the tool's own pin, and the login unit.
+        for path, digest in channel['notch_loader'].items():
+            require(files.get(path) == (0o644, digest), 'Staged notch stage 2 differs from the pin: ' + path)
+        tool = (ROOT / 'tools/m4-notch.py').read_bytes()
+        require(files.get('usr/bin/m4-notch') == (0o755, sha(tool)), 'Packaged notch tool differs')
+        unit = (ROOT / 'packaging/omarchy-m4/omarchy-m4-boot/omarchy-m4-notch.service').read_bytes()
+        require(files.get(NOTCH_UNIT) == (0o644, sha(unit)), 'Notch login unit differs')
+        notch = runpy.run_path(str(root / 'usr/bin/m4-notch'))
+        require(channel['notch_loader'].get(notch['STAGED']) == notch['NOTCH']['sha256'],
+                'Notch tool pins a different stage 2 than the channel')
     elif name == 'omarchy-m4-speaker':
         for path, digest in channel['speaker_module'].items():
             require(files.get(path, (0, ''))[1] == digest, 'Staged speaker module differs from the pin: ' + path)

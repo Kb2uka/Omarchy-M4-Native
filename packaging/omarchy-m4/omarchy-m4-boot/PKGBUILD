@@ -1,14 +1,15 @@
 # Maintainer: KB2UKA
 # Built and signed by .github/workflows/packages.yml; see docs/package-channel.md.
-# m4-boot-compose.py, m4-update-check.py, m4-lid-lock.py, MIT.txt and GPL-2.0-or-later.txt are staged from tools/
-# and LICENSES/ by tools/build-m4-packages.py.
+# m4-boot-compose.py, m4-update-check.py, m4-lid-lock.py, m4-notch.py, MIT.txt and GPL-2.0-or-later.txt are staged
+# from tools/ and LICENSES/, and the m1n1-* notices from display/j713/m1n1-base/, by tools/build-m4-packages.py.
 pkgname=omarchy-m4-boot
 pkgver=1
-pkgrel=11
+pkgrel=12
 pkgdesc='Keeps the J713 boot.bin in step with the packaged M4 kernel and devicetree'
 arch=('aarch64')
 url='https://github.com/Kb2uka/Omarchy-M4-Native'
-license=('MIT' 'GPL-2.0-or-later OR MIT')
+# The notch stage 2 is an m1n1 build: MIT, with the embedded parts its README lists.
+license=('MIT' 'GPL-2.0-or-later OR MIT' 'BSD-2-Clause OR GPL-2.0-or-later' 'BSD-3-Clause' 'Zlib' 'CC0-1.0' 'OFL-1.1')
 # omarchy-m4-gpu (from 1-6), omarchy-m4-headphones (from 1-7) and omarchy-m4-cpu (from 1-10):
 # an older installed setup script does not list them, so this pulls them in on the first
 # omarchy-m4-update run that installs this version.
@@ -21,7 +22,13 @@ options=('!strip' '!debug')
 source=('m4-boot-compose.py' '90-omarchy-m4-boot.hook' 'm4-update-check.py'
         'omarchy-m4-update-check.service' 'omarchy-m4-update-check.timer' 'MIT.txt' 'GPL-2.0-or-later.txt'
         'speakersafetyd-j713-realtime.conf' 'm4-channel-setup.py' 'omarchy-m4-update' 'm4-lid-lock.py'
-        "j713-pboost.dtb::${url}/releases/download/package-inputs/j713-pboost.dtb")
+        "j713-pboost.dtb::${url}/releases/download/package-inputs/j713-pboost.dtb"
+        'm4-notch.py' 'omarchy-m4-notch.service'
+        # The opt-in notch stage 2 (#89), built by display/j713/build-notch-loader.sh.
+        "m1n1-stage2-notch.bin::${url}/releases/download/package-inputs/j713-m1n1-stage2-notch1.bin"
+        'm1n1-LICENSE' 'm1n1-README.md' 'm1n1-LICENSE.BSD-2.libfdt' 'm1n1-LICENSE.BSD-3.arm'
+        'm1n1-LICENSE.BSD-3.dwc3' 'm1n1-LICENSE.CC0' 'm1n1-LICENSE.GPL-2' 'm1n1-LICENSE.minlzma'
+        'm1n1-LICENSE.OFL-1.1' 'm1n1-LICENSE.tinf')
 sha256sums=('f1aabd31099ea5abc5db99b3dfb2c3c42b605d7eba7163d73786df3b1c2312f7'
             '22514358734721ffcb4478f9c3c2c91f55b858bbd40aba6278c395e7a35de810'
             'bf06541caba3709e81b261c60563886e95fff902d811b74f2b49c03e70ee1685'
@@ -33,7 +40,20 @@ sha256sums=('f1aabd31099ea5abc5db99b3dfb2c3c42b605d7eba7163d73786df3b1c2312f7'
             '472c583b4bbc6125df9beda80e6a381934d0d9485554f8a8e851da2bc3a20c41'
             'bde52f8012b209e06c0e2b41325413c642ae4c6e6eedce7ff04331ca4d50c0f1'
             'f605580fc7e8e672cee85f5afee930550b8f445f026b5a04c1828e52c88ea6de'
-            'c4f036b819ce757ce790b01779a3f7532eacd5cb1c1097fa20286d1a9c9ec6ca')
+            'c4f036b819ce757ce790b01779a3f7532eacd5cb1c1097fa20286d1a9c9ec6ca'
+            'ce24a1f480812030cd75094ed51c1a187cd08afed628ffe524ad53b807eabfaf'
+            'a5847d4ae7b237753f18609ab71b12e569366e7d6df8edfc50ba884eb5698e6c'
+            'f2417a74d13838004847a6fbdf946b524005301b88b5a403b1e79cb36d0ec7ca'
+            '11ca423a564b52d3b7f260398baa20d016c25ae180fbdd0067c27b7d1ed7b420'
+            '0b52b29a5d4e161adb31cf25f8aed28772e4dff0761a0db0f32c7966d4b1dc8c'
+            'b410d206e6a11b2eb4aa7766a01b6cdf705b2a3c8ea26a00530587859ad873cd'
+            'ba420ebd24cc61d4b97d7173acd216e742524ed304ee2b2df6cf8546fbfca48e'
+            'aaef31cc73e25d5b48fa903957fae7243db7628f270b0511bf4232be871c5434'
+            'a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499'
+            '86dc744860e6dfacfeba2f33fea908db03fe67c7e37a878285b7aae8e4596735'
+            'c8d8f2121d2bd6ffbe66f9ee9ade1076dc2951f685f6d0c65992121c21fbf12e'
+            '2e14ee65e55dbcc7d66347cd7c76a10a1a18ac49dd7989a2b3838b479676f746'
+            'f39b507b81b9ba1edce7fe742bbd68fda4b852063ce7299274ae97991d48814b')
 
 package() {
   install -Dm755 m4-boot-compose.py "$pkgdir/usr/bin/m4-boot-compose"
@@ -44,6 +64,13 @@ package() {
   install -Dm644 m4-lid-lock.py "$pkgdir/usr/lib/omarchy-m4/m4-lid-lock.py"
   install -Dm644 -t "$pkgdir/usr/lib/systemd/user" omarchy-m4-update-check.service omarchy-m4-update-check.timer
   install -Dm644 j713-pboost.dtb "$pkgdir/usr/lib/omarchy-m4/j713.dtb"
+  install -Dm755 m4-notch.py "$pkgdir/usr/bin/m4-notch"
+  install -Dm644 m1n1-stage2-notch.bin "$pkgdir/usr/lib/omarchy-m4/m1n1-stage2-notch.bin"
+  install -Dm644 omarchy-m4-notch.service "$pkgdir/usr/lib/systemd/user/omarchy-m4-notch.service"
+  for notice in LICENSE README.md LICENSE.BSD-2.libfdt LICENSE.BSD-3.arm LICENSE.BSD-3.dwc3 LICENSE.CC0 \
+                LICENSE.GPL-2 LICENSE.minlzma LICENSE.OFL-1.1 LICENSE.tinf; do
+    install -Dm644 "m1n1-$notice" "$pkgdir/usr/share/licenses/$pkgname/m1n1/$notice"
+  done
   install -Dm644 speakersafetyd-j713-realtime.conf \
     "$pkgdir/usr/lib/systemd/system/speakersafetyd-j713.service.d/50-realtime.conf"
   install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" MIT.txt GPL-2.0-or-later.txt

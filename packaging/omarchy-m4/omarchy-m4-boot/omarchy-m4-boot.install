@@ -1,5 +1,7 @@
 post_install() {
   systemctl --global enable omarchy-m4-update-check.timer >/dev/null 2>&1 || true
+  # Follows the boot at each login; it changes nothing until the owner runs sudo m4-notch --show (#89).
+  systemctl --global enable omarchy-m4-notch.service >/dev/null 2>&1 || true
   # Lid close locks the J713 (issue #84); a refusal never fails the update.
   if [ -x usr/bin/python3 ]; then
     usr/bin/python3 usr/lib/omarchy-m4/m4-lid-lock.py --hook || true
@@ -12,4 +14,5 @@ post_upgrade() {
 
 pre_remove() {
   systemctl --global disable omarchy-m4-update-check.timer >/dev/null 2>&1 || true
+  systemctl --global disable omarchy-m4-notch.service >/dev/null 2>&1 || true
 }
