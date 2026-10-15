@@ -19,6 +19,8 @@ REFUSED = [board for board in BOARDS if board['support'] == 'refused']
 
 # The J713 board name on another SoC (M2): a gate that checks only the board accepts it.
 FOREIGN_SOC = ('J713 on T8112', b'apple,j713\0apple,t8112\0apple,arm-platform\0')
+# Names that start with the qualified board and SoC: a substring match accepts them.
+NEAR_MISS = ('near-miss names', b'apple,j713x\0apple,t8132x\0apple,arm-platform\0')
 
 
 def identity(board):
@@ -28,4 +30,4 @@ def identity(board):
 
 def refused_identities():
     """(label, compatible) pairs a gate that checks both board and SoC must refuse."""
-    return [(board['target'], identity(board)) for board in REFUSED] + [FOREIGN_SOC]
+    return [(board['target'], identity(board)) for board in REFUSED] + [FOREIGN_SOC, NEAR_MISS]
