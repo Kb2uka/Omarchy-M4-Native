@@ -10,6 +10,7 @@ import re
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGING = ROOT / 'packaging/omarchy-m4'
@@ -82,15 +83,15 @@ class RecipeTests(unittest.TestCase):
         self.assertIn("conflicts=('linux-aarch64')", text)
         self.assertIn("provides=('linux=7.1.9' 'linux-aarch64=7.1.9')", text)
 
-    def test_boot_package_carries_the_cpu_temperature_devicetree(self):
+    def test_boot_package_carries_the_boost_devicetree(self):
         text = recipe('omarchy-m4-boot')
-        self.assertIn('releases/download/package-inputs/j713-cputemp.dtb', text)
+        self.assertIn('releases/download/package-inputs/j713-pboost.dtb', text)
         self.assertIn(CHANNEL['devicetree']['sha256'], text)
         self.assertEqual(load('tools/m4-boot-compose.py').KNOWN_DTBS[CHANNEL['devicetree']['sha256']],
-                         'j713-cpu-temperature')
-        self.assertIn("depends=('python' 'pacman' 'omarchy-m4-gpu' 'omarchy-m4-headphones')\n", text,
-                      'gst-plugins-good must be able to replace the sinks; the GPU fix and the headphone '
-                      'jack must come with this version')
+                         'j713-pboost')
+        self.assertIn("depends=('python' 'pacman' 'omarchy-m4-gpu' 'omarchy-m4-headphones' 'omarchy-m4-cpu')\n",
+                      text, 'gst-plugins-good must be able to replace the sinks; the GPU fix, the headphone '
+                      'jack and CPU idle must come with this version')
 
     def test_gpu_recipe_pins_the_channel_module(self):
         text = recipe('omarchy-m4-gpu')
@@ -281,6 +282,53 @@ class PolicyTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     CHECK.check_package(CHANNEL, *self.package('omarchy-m4-headphones', files))
 
+    def test_cpu_idle_package_must_be_the_pin(self):
+        good = {path: (0o644, digest)
+                for path, digest in {**CHANNEL['cpu_idle_module'], **CHANNEL['cpu_guard_module']}.items()}
+        good['usr/bin/m4-cpu-idle'] = (0o755, file_sha('tools/m4-cpu-idle.py'))
+        good[CHECK.CPU_IDLE_UNIT] = (0o644, file_sha('packaging/omarchy-m4/omarchy-m4-cpu/m4-cpu-idle.service'))
+        package, info, files, root = self.package('omarchy-m4-cpu', good)
+        (root / 'usr/bin').mkdir(parents=True, exist_ok=True)
+        (root / 'usr/bin/m4-cpu-idle').write_bytes((ROOT / 'tools/m4-cpu-idle.py').read_bytes())
+        CHECK.check_package(CHANNEL, package, info, files, root)
+        staged = next(iter(CHANNEL['cpu_idle_module']))
+        guard = next(iter(CHANNEL['cpu_guard_module']))
+        other_unit = 'usr/lib/systemd/system/m4-gpu.service'
+        for changed, message in (({**good, staged: (0o644, '0' * 64)}, 'differs from the pin'),
+                                 ({**good, guard: (0o644, '0' * 64)}, 'boost guard differs from the pin'),
+                                 ({**good, 'usr/bin/m4-cpu-idle': (0o755, '0' * 64)}, 'tool differs'),
+                                 ({**good, CHECK.CPU_IDLE_UNIT: (0o644, '0' * 64)}, 'unit differs'),
+                                 ({**good, other_unit: (0o644, 'x')}, 'unlisted path')):
+            with self.subTest(message):
+                with self.assertRaisesRegex(ValueError, message):
+                    CHECK.check_package(CHANNEL, package, info, changed, root)
+
+    def test_cpu_idle_tool_pin_must_match_the_channel(self):
+        for key in ('cpu_idle_module', 'cpu_guard_module'):
+            with self.subTest(key):
+                self.tool_pin_refused(next(iter(CHANNEL[key].values())))
+
+    def tool_pin_refused(self, pinned):
+        good = {path: (0o644, digest)
+                for path, digest in {**CHANNEL['cpu_idle_module'], **CHANNEL['cpu_guard_module']}.items()}
+        tool = (ROOT / 'tools/m4-cpu-idle.py').read_text()
+        other = tool.replace(pinned, '1' * 64)
+        self.assertNotEqual(other, tool)
+        good['usr/bin/m4-cpu-idle'] = (0o755, hashlib.sha256(other.encode()).hexdigest())
+        good[CHECK.CPU_IDLE_UNIT] = (0o644, file_sha('packaging/omarchy-m4/omarchy-m4-cpu/m4-cpu-idle.service'))
+        package, info, files, root = self.package('omarchy-m4-cpu', good)
+        (root / 'usr/bin').mkdir(parents=True, exist_ok=True)
+        (root / 'usr/bin/m4-cpu-idle').write_text(other)
+        with patch.object(CHECK, 'ROOT', root.parent / 'fake-repo'):
+            fake = root.parent / 'fake-repo'
+            for name in ('tools/m4-cpu-idle.py', 'packaging/omarchy-m4/omarchy-m4-cpu/m4-cpu-idle.service'):
+                (fake / name).parent.mkdir(parents=True, exist_ok=True)
+            (fake / 'tools/m4-cpu-idle.py').write_text(other)
+            (fake / 'packaging/omarchy-m4/omarchy-m4-cpu/m4-cpu-idle.service').write_bytes(
+                (PACKAGING / 'omarchy-m4-cpu/m4-cpu-idle.service').read_bytes())
+            with self.assertRaisesRegex(ValueError, 'pins a different module'):
+                CHECK.check_package(CHANNEL, package, info, files, root)
+
     def test_every_channel_package_comes_with_the_update(self):
         # One update path: omarchy-m4-update installs every channel package, none is opt-in.
         self.assertNotIn('opt_in_packages', CHANNEL)
@@ -304,7 +352,7 @@ class PolicyTests(unittest.TestCase):
 
     def boot_info(self):
         return {'pkgname': ['omarchy-m4-boot'], 'pkgver': ['1-4'], 'arch': ['aarch64'],
-                'depend': ['python', 'pacman', 'omarchy-m4-gpu', 'omarchy-m4-headphones']}
+                'depend': ['python', 'pacman', 'omarchy-m4-gpu', 'omarchy-m4-headphones', 'omarchy-m4-cpu']}
 
     def boot_files(self):
         """A boot package that passes every check except the ones under test, unpacked on disk."""

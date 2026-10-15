@@ -1,0 +1,85 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
+// Copyright (c) 2026 KB2UKA
+/dts-v1/;
+/plugin/;
+
+/*
+ * Full CPU clock range for the J713 (#66): P5-P20 (2088-4464 MHz) and E6-E7
+ * (2496, 2808 MHz), the ADT voltage-states5-sram and voltage-states1-sram
+ * entries, one-based, as in j713-cpufreq.dtso. E8 (2892 MHz) is left out: the
+ * hardware runs it as E7.
+ *
+ * They are ordinary OPPs, not turbo-mode ones: the kernel takes each
+ * cluster's capacity reference and schedutil's frequency scale from the
+ * policy's maximum when the policy is created, so turbo states would leave
+ * schedutil asking for at most 1.25 x 1800 MHz.
+ *
+ * The hardware applies its own sub-millisecond limit by the number of busy P
+ * cores (P17 with one, P16 with two, P15 with four) but never lowers a clock
+ * for heat, and the die gains up to about 58 C within two seconds of a higher
+ * P state. So P stays behind a boost gate: a passive trip at 20 C, below any
+ * CPU die reading, that pins the P cooling device to state 16 (16 states
+ * below P20 is P4, 1800 MHz, the old maximum). Only the j713_pguard module
+ * opens it, after its own predictive cap is in place (docs/j713-cpu-boost.md).
+ * Without the module, P never runs faster than before this change. The 95 C
+ * passive trip stays as the sustained limit for both clusters.
+ *
+ * The gate's cooling map names cpu@10100 (Linux CPU 0, the P policy CPU) by
+ * its phandle 0x07, as j713-ecluster-thermal.dtso does; that base has no
+ * __symbols__, and tools/build-j713-pboost-dtb.py checks it.
+ *
+ * capacity-dmips-mhz stays as measured (P 1024, E 663), so the kernel now
+ * reports E cores at 417 against P at 1024 (663 x 2808 / (1024 x 4464)).
+ */
+/ {
+	fragment@0 {
+		target-path = "/opp-table-1";
+		__overlay__ {
+			opp05 { opp-hz = /bits/ 64 <2088000000>; opp-level = <5>; };
+			opp06 { opp-hz = /bits/ 64 <2352000000>; opp-level = <6>; };
+			opp07 { opp-hz = /bits/ 64 <2616000000>; opp-level = <7>; };
+			opp08 { opp-hz = /bits/ 64 <2868000000>; opp-level = <8>; };
+			opp09 { opp-hz = /bits/ 64 <3096000000>; opp-level = <9>; };
+			opp10 { opp-hz = /bits/ 64 <3300000000>; opp-level = <10>; };
+			opp11 { opp-hz = /bits/ 64 <3468000000>; opp-level = <11>; };
+			opp12 { opp-hz = /bits/ 64 <3624000000>; opp-level = <12>; };
+			opp13 { opp-hz = /bits/ 64 <3756000000>; opp-level = <13>; };
+			opp14 { opp-hz = /bits/ 64 <3876000000>; opp-level = <14>; };
+			opp15 { opp-hz = /bits/ 64 <3936000000>; opp-level = <15>; };
+			opp16 { opp-hz = /bits/ 64 <3984000000>; opp-level = <16>; };
+			opp17 { opp-hz = /bits/ 64 <4044000000>; opp-level = <17>; };
+			opp18 { opp-hz = /bits/ 64 <4104000000>; opp-level = <18>; };
+			opp19 { opp-hz = /bits/ 64 <4416000000>; opp-level = <19>; };
+			opp20 { opp-hz = /bits/ 64 <4464000000>; opp-level = <20>; };
+		};
+	};
+
+	fragment@1 {
+		target-path = "/opp-table-0";
+		__overlay__ {
+			opp06 { opp-hz = /bits/ 64 <2496000000>; opp-level = <6>; };
+			opp07 { opp-hz = /bits/ 64 <2808000000>; opp-level = <7>; };
+		};
+	};
+
+	fragment@2 {
+		target-path = "/thermal-zones/cpu-die-thermal/trips";
+		__overlay__ {
+			boost_gate: boost-gate {
+				temperature = <20000>;
+				hysteresis = <0>;
+				type = "passive";
+			};
+		};
+	};
+
+	fragment@3 {
+		target-path = "/thermal-zones/cpu-die-thermal/cooling-maps";
+		__overlay__ {
+			map-p-boost-gate {
+				trip = <&boost_gate>;
+				cooling-device = <0x07 16 16>;
+			};
+		};
+	};
+};

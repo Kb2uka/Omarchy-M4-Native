@@ -29,6 +29,7 @@ REALTIME = 'usr/lib/systemd/system/speakersafetyd-j713.service.d/50-realtime.con
 SPEAKER_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/20-m4-speaker-module.conf'
 GPU_DROP_IN = 'usr/lib/systemd/system/m4-gpu.service.d/20-m4-gpu-module.conf'
 HEADPHONES_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/30-m4-headphones.conf'
+CPU_IDLE_UNIT = 'usr/lib/systemd/system/m4-cpu-idle.service'
 # Installed paths of the headphone UCM and WirePlumber files, relative to their
 # source tree audio/j713/headphones/policy/.
 HEADPHONES_POLICY = ('usr/share/alsa/ucm2/conf.d/J713Headphones/J713Headphones.conf',
@@ -153,6 +154,7 @@ def check_package(channel, package, info, files, root):
         # makes its first omarchy-m4-update run install it with the new boot package.
         require('omarchy-m4-gpu' in names, 'Boot package must require the GPU module package')
         require('omarchy-m4-headphones' in names, 'Boot package must require the headphone jack package')
+        require('omarchy-m4-cpu' in names, 'Boot package must require the CPU idle package')
     elif name == 'omarchy-m4-speaker':
         for path, digest in channel['speaker_module'].items():
             require(files.get(path, (0, ''))[1] == digest, 'Staged speaker module differs from the pin: ' + path)
@@ -177,6 +179,20 @@ def check_package(channel, package, info, files, root):
         for path in HEADPHONES_POLICY:
             source = (ROOT / 'audio/j713/headphones/policy' / path).read_bytes()
             require(files.get(path) == (0o644, sha(source)), 'Packaged headphone policy differs: ' + path)
+    elif name == 'omarchy-m4-cpu':
+        for path, digest in channel['cpu_idle_module'].items():
+            require(files.get(path, (0, ''))[1] == digest, 'Staged CPU idle module differs from the pin: ' + path)
+        for path, digest in channel['cpu_guard_module'].items():
+            require(files.get(path, (0, ''))[1] == digest, 'Staged boost guard differs from the pin: ' + path)
+        tool = (ROOT / 'tools/m4-cpu-idle.py').read_bytes()
+        require(files.get('usr/bin/m4-cpu-idle') == (0o755, sha(tool)), 'Packaged CPU idle tool differs')
+        unit = (ROOT / 'packaging/omarchy-m4/omarchy-m4-cpu/m4-cpu-idle.service').read_bytes()
+        require(files.get(CPU_IDLE_UNIT) == (0o644, sha(unit)), 'CPU idle unit differs')
+        # The helper's own pin must be the channel's, or every boot would refuse the staged module.
+        helper = runpy.run_path(str(root / 'usr/bin/m4-cpu-idle'))
+        require(helper['PIN']['sha256'] == channel['cpu_idle_module'][helper['STAGED']] and
+                helper['GUARD_PIN']['sha256'] == channel['cpu_guard_module'][helper['GUARD_STAGED']] and
+                helper['RELEASE'] == kernel['release'], 'CPU idle tool pins a different module or kernel')
     elif name == 'omarchy-m4-gst-audio':
         for path, digest in channel['gst_audio'].items():
             require(files.get(path, (0, ''))[1] == digest, 'GStreamer sink differs from the pin: ' + path)
