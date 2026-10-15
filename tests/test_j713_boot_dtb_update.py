@@ -21,6 +21,8 @@ OLD = fdt(b'old poweroff tree')
 NEW = fdt(b'new poweroff tree with cells')
 CPUFREQ = fdt(b'poweroff tree with cpufreq clusters')
 CPUTEMP = fdt(b'cpufreq tree with CPU temperature channels')
+ECLUSTER = fdt(b'cputemp tree with E-cluster states and a CPU thermal zone')
+PBOOST = fdt(b'ecluster tree with boost states behind a boost gate')
 INITRAMFS = b'm1n1_initramfs' + struct.pack('<I', 6) + b'070701'
 
 
@@ -36,10 +38,13 @@ class UpdateBootDtb(unittest.TestCase):
         self.boot = self.root / 'boot.bin'
         self.dtb = self.root / 'new.dtb'
         self.dtb.write_bytes(NEW)
-        old, new, cpufreq, cputemp = (hashlib.sha256(d).hexdigest() for d in (OLD, NEW, CPUFREQ, CPUTEMP))
+        old, new, cpufreq, cputemp, ecluster, pboost = (hashlib.sha256(d).hexdigest()
+                                                        for d in (OLD, NEW, CPUFREQ, CPUTEMP, ECLUSTER, PBOOST))
         patcher = patch.dict(MODULE.UPDATES, {new: ((old,), '.pre-shutdown-flag'),
                                               cpufreq: ((old, new), '.pre-cpufreq'),
-                                              cputemp: ((cpufreq,), '.pre-cputemp')}, clear=True)
+                                              cputemp: ((cpufreq,), '.pre-cputemp'),
+                                              ecluster: ((cputemp,), '.pre-ecluster'),
+                                              pboost: ((ecluster,), '.pre-pboost')}, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -150,8 +155,56 @@ class UpdateBootDtb(unittest.TestCase):
             self.run_update(image(CPUTEMP))
         self.assertEqual(self.boot.read_bytes(), image(CPUTEMP))
 
+    def test_ecluster_update_follows_cputemp_with_its_own_backup(self):
+        self.dtb.write_bytes(ECLUSTER)
+        receipt = self.run_update(image(CPUTEMP))
+        self.assertTrue(receipt['applied'])
+        self.assertEqual(self.boot.read_bytes(), image(ECLUSTER))
+        self.assertEqual((self.root / 'boot.bin.pre-ecluster').read_bytes(), image(CPUTEMP))
+        self.assertIn('boot.bin.pre-ecluster', receipt['rollback'])
+
+    def test_ecluster_update_refused_without_cputemp(self):
+        for start in (OLD, NEW, CPUFREQ):
+            with self.subTest(start=start):
+                self.dtb.write_bytes(ECLUSTER)
+                with self.assertRaisesRegex(RuntimeError, 'exactly one'):
+                    self.run_update(image(start))
+                self.assertEqual(self.boot.read_bytes(), image(start))
+                self.assertFalse((self.root / 'boot.bin.pre-ecluster').exists())
+
+    def test_cputemp_update_does_not_downgrade_ecluster(self):
+        self.dtb.write_bytes(CPUTEMP)
+        with self.assertRaisesRegex(RuntimeError, 'exactly one'):
+            self.run_update(image(ECLUSTER))
+        self.assertEqual(self.boot.read_bytes(), image(ECLUSTER))
+
+    def test_pboost_update_follows_ecluster_with_its_own_backup(self):
+        self.dtb.write_bytes(PBOOST)
+        receipt = self.run_update(image(ECLUSTER))
+        self.assertTrue(receipt['applied'])
+        self.assertEqual(self.boot.read_bytes(), image(PBOOST))
+        self.assertEqual((self.root / 'boot.bin.pre-pboost').read_bytes(), image(ECLUSTER))
+        self.assertIn('boot.bin.pre-pboost', receipt['rollback'])
+
+    def test_pboost_update_refused_without_ecluster(self):
+        for start in (OLD, NEW, CPUFREQ, CPUTEMP):
+            with self.subTest(start=start):
+                self.dtb.write_bytes(PBOOST)
+                with self.assertRaisesRegex(RuntimeError, 'exactly one'):
+                    self.run_update(image(start))
+                self.assertEqual(self.boot.read_bytes(), image(start))
+                self.assertFalse((self.root / 'boot.bin.pre-pboost').exists())
+
+    def test_ecluster_update_does_not_downgrade_pboost(self):
+        self.dtb.write_bytes(ECLUSTER)
+        with self.assertRaisesRegex(RuntimeError, 'exactly one'):
+            self.run_update(image(PBOOST))
+        self.assertEqual(self.boot.read_bytes(), image(PBOOST))
+
     def test_shipped_updates_chain_from_alpha_1(self):
         updates = SOURCE.read_text()
+        self.assertIn("PBOOST_DTB: ((ECLUSTER_DTB,), '.pre-pboost')", updates)
+        self.assertIn("ECLUSTER_DTB: ((CPUTEMP_DTB,), '.pre-ecluster')", updates)
         self.assertIn("CPUTEMP_DTB: ((CPUFREQ_DTB,), '.pre-cputemp')", updates)
         self.assertIn("CPUFREQ_DTB: ((ALPHA1_DTB, POWEROFF_DTB), '.pre-cpufreq')", updates)
         self.assertIn("POWEROFF_DTB: ((ALPHA1_DTB,), '.pre-shutdown-flag')", updates)

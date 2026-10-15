@@ -1,0 +1,160 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
+// Copyright (c) 2026 KB2UKA
+/dts-v1/;
+/plugin/;
+
+/*
+ * E-cluster states above the iBoot handoff, and a CPU die thermal zone (#66).
+ *
+ * E2-E5 (1080, 1476, 1860, 2172 MHz) are the ADT voltage-states1-sram entries
+ * with one-based state numbers, as in j713-cpufreq.dtso. Six E cores at E5 held
+ * about 73 C in the #60 bench; the long combined soak is in
+ * docs/j713-cpu-idle.md. capacity-dmips-mhz stays 663: in the #60 six-core
+ * bench, throughput at E5 rose 2.420x for a 2.413x clock, so the per-MHz work
+ * is unchanged and the kernel now reports E cores at 800 against P at 1024.
+ * The P table is unchanged.
+ *
+ * The thermal zone reads TCMz (CPU Die Max), temperature channel 6 of the SMC
+ * hwmon node in this devicetree's child order, and steps both clusters down
+ * past 95 C. The SMC refreshes TCMz about once a second, so both polling
+ * delays are one second. It is a safety net for sustained load: there is no
+ * critical trip, because a short P-core burst can read above 95 C for a
+ * second and must never shut the machine down.
+ *
+ * The cooling maps name the CPU nodes by their phandles in the
+ * j713-cpu-temperature devicetree: 0x07 is cpu@10100 (Linux CPU 0, the P
+ * policy CPU) and 0x01 is cpu@0 (Linux CPU 1, the E policy CPU). That base has
+ * no __symbols__, and tools/build-j713-ecluster-dtb.py checks both.
+ */
+/ {
+	fragment@0 {
+		target-path = "/opp-table-0";
+		__overlay__ {
+			opp02 {
+				opp-hz = /bits/ 64 <1080000000>;
+				opp-level = <2>;
+			};
+			opp03 {
+				opp-hz = /bits/ 64 <1476000000>;
+				opp-level = <3>;
+			};
+			opp04 {
+				opp-hz = /bits/ 64 <1860000000>;
+				opp-level = <4>;
+			};
+			opp05 {
+				opp-hz = /bits/ 64 <2172000000>;
+				opp-level = <5>;
+			};
+		};
+	};
+
+	fragment@1 {
+		target-path = "/soc/smc@38c600000/hwmon";
+		smc_hwmon: __overlay__ {
+			#thermal-sensor-cells = <1>;
+		};
+	};
+
+	fragment@2 {
+		target-path = "/cpus/cpu@0";
+		__overlay__ {
+			#cooling-cells = <2>;
+		};
+	};
+
+	fragment@3 {
+		target-path = "/cpus/cpu@1";
+		__overlay__ {
+			#cooling-cells = <2>;
+		};
+	};
+
+	fragment@4 {
+		target-path = "/cpus/cpu@2";
+		__overlay__ {
+			#cooling-cells = <2>;
+		};
+	};
+
+	fragment@5 {
+		target-path = "/cpus/cpu@3";
+		__overlay__ {
+			#cooling-cells = <2>;
+		};
+	};
+
+	fragment@6 {
+		target-path = "/cpus/cpu@4";
+		__overlay__ {
+			#cooling-cells = <2>;
+		};
+	};
+
+	fragment@7 {
+		target-path = "/cpus/cpu@5";
+		__overlay__ {
+			#cooling-cells = <2>;
+		};
+	};
+
+	fragment@8 {
+		target-path = "/cpus/cpu@10100";
+		__overlay__ {
+			#cooling-cells = <2>;
+		};
+	};
+
+	fragment@9 {
+		target-path = "/cpus/cpu@10101";
+		__overlay__ {
+			#cooling-cells = <2>;
+		};
+	};
+
+	fragment@10 {
+		target-path = "/cpus/cpu@10102";
+		__overlay__ {
+			#cooling-cells = <2>;
+		};
+	};
+
+	fragment@11 {
+		target-path = "/cpus/cpu@10103";
+		__overlay__ {
+			#cooling-cells = <2>;
+		};
+	};
+
+	fragment@12 {
+		target-path = "/";
+		__overlay__ {
+			thermal-zones {
+				cpu-die-thermal {
+					polling-delay-passive = <1000>;
+					polling-delay = <1000>;
+					thermal-sensors = <&smc_hwmon 6>;
+
+					trips {
+						cpu_die_passive: cpu-die-passive {
+							temperature = <95000>;
+							hysteresis = <5000>;
+							type = "passive";
+						};
+					};
+
+					cooling-maps {
+						map-p-cluster {
+							trip = <&cpu_die_passive>;
+							cooling-device = <0x07 0xffffffff 0xffffffff>;
+						};
+						map-e-cluster {
+							trip = <&cpu_die_passive>;
+							cooling-device = <0x01 0xffffffff 0xffffffff>;
+						};
+					};
+				};
+			};
+		};
+	};
+};

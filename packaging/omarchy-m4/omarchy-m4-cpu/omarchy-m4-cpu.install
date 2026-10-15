@@ -1,0 +1,13 @@
+post_install() {
+  systemctl enable m4-cpu-idle.service >/dev/null 2>&1 || true
+  echo '==> Restart once to let idle CPU cores power down and the P cores boost (m4-cpu-idle).'
+}
+
+post_upgrade() {
+  post_install
+}
+
+pre_remove() {
+  systemctl disable m4-cpu-idle.service >/dev/null 2>&1 || true
+  echo '==> A loaded CPU idle driver stays until the next restart.'
+}

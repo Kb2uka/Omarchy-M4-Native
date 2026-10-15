@@ -146,6 +146,10 @@ once applies them:
 | Sound in Zeus Link and other WebKitGTK and GStreamer apps ([#54](https://github.com/Kb2uka/Omarchy-M4-Native/pull/54), [#63](https://github.com/Kb2uka/Omarchy-M4-Native/pull/63)) | `omarchy-m4-gst-audio` 1.28.7-1 |
 | GPU and desktop on Airs whose GPU power limit is below 24800 mW ([#57](https://github.com/Kb2uka/Omarchy-M4-Native/issues/57)); applied at the next boot | `omarchy-m4-gpu` 1-1 |
 | Headphone jack playback ([#88](https://github.com/Kb2uka/Omarchy-M4-Native/pull/88)); starts at the next boot ([details](docs/j713-headphones.md#existing-installs)) | `omarchy-m4-headphones` 1-1 |
+| CPU idle: idle cores power down, so the idle Air runs cooler and draws less ([#65](https://github.com/Kb2uka/Omarchy-M4-Native/issues/65)); starts at the next boot ([details](docs/j713-cpu-idle.md#existing-installs)) | `omarchy-m4-cpu` 1-1 |
+| E cores up to 2172 MHz and a CPU die thermal safety net ([#66](https://github.com/Kb2uka/Omarchy-M4-Native/issues/66)) | `omarchy-m4-boot` 1-10 |
+| P cores boost up to 4464 MHz and E cores up to 2808 MHz under a predictive heat guard ([#66](https://github.com/Kb2uka/Omarchy-M4-Native/issues/66)); starts at the next boot, off switch `sudo m4-cpu-idle --boost off` ([details](docs/j713-cpu-boost.md#existing-installs)) | `omarchy-m4-boot` 1-11, `omarchy-m4-cpu` 1-2 |
+| The boost guard's limits match macOS on the fanless Air (105 C bursts, 100 C sustained), so one busy core runs at its top boost (4.04 GHz, bursts to 4.46 GHz) for most of a 45 s job, and it estimates the die's temperature from heat measured on the Air ([#66](https://github.com/Kb2uka/Omarchy-M4-Native/issues/66), [details](docs/j713-cpu-boost.md#settled-heat-the-base-estimate)) | `omarchy-m4-cpu` 1-3 |
 | Headset microphone on the headphone jack ([#105](https://github.com/Kb2uka/Omarchy-M4-Native/pull/105)); starts at the next boot ([details](docs/j713-headphones.md#headset-microphone)) | `omarchy-m4-headphones` 1-2 |
 
 A devicetree you applied by hand from the guides is kept; the update never

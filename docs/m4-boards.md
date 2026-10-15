@@ -38,9 +38,12 @@ a mini.
 - a live-system board gate lets a real sibling M4 identity through, refuses it
   with a different message, or writes anything before refusing. The gates are
   `m4-boot-compose`, `m4-channel-setup`, `m4-headphones`, `m4-lid-lock`,
-  `m4-session-placement`, `m4-j713-audio-ready` and `m4-j713-audio-register`.
-  Each sibling is fed the `compatible` list m1n1 hands Linux on that Mac
-  (`apple,<board>`, `apple,t8132`, `apple,arm-platform`);
+  `m4-session-placement`, `m4-j713-audio-ready`, `m4-j713-audio-register`,
+  `m4-j713-owner-assets` (its fixed paths redirected into the fixture) and the
+  board and SoC lines of `m4-video-start` (run with its own `fail()`). Each
+  sibling is fed the `compatible` list m1n1 hands Linux on that Mac
+  (`apple,<board>`, `apple,t8132`, `apple,arm-platform`). The gates that also
+  check the SoC must refuse the J713 name on an M2 SoC;
 - a gate that reads a devicetree file lets a sibling M4 identity, or the J713
   name on an M2 SoC, through: the J713 devicetree builders
   (`build-j713-cpufreq-dtb.py`, `build-j713-cputemp-dtb.py`,
@@ -55,9 +58,10 @@ and identities.
 Passing these tests shows that the gates refuse other M4 Macs. It does not
 show that anything works on them. Only a report from the real machine can.
 
-Not covered yet: the gates with fixed absolute paths (`m4-video-start`,
-`m4-j713-owner-assets.py`), and the kernel C audio gates, which hosted CI does
-not compile.
+Not covered yet: the kernel C audio gates, which hosted CI does not compile.
+`m4-video-start` takes its lock and clears its runtime state under `/run`
+before its board check, so on another Mac those runtime writes would happen
+before the refusal; the test runs only its board and SoC lines.
 
 ## Adding a board
 
