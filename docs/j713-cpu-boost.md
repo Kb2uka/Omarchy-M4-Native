@@ -52,7 +52,8 @@ E-cluster devicetree (`fdedc09f…`), adds:
 - **A boost gate:** a passive trip at 20 C on `cpu-die-thermal`, below any
   reading, that pins the P cooling device to state 16, which is P4. Until
   something raises that trip, P runs no faster than before. The 95 C trip for
-  both clusters stays.
+  both clusters stays in the devicetree; the guard raises it to 100 C while it
+  runs (below).
 
 DTC 1.8.1 produced 50,708 bytes, SHA-256
 `c4f036b819ce757ce790b01779a3f7532eacd5cb1c1097fa20286d1a9c9ec6ca`. The builder
@@ -64,7 +65,7 @@ committed overlay with the real `dtc`.
 
 [`cpu/j713/j713_pguard.c`](../cpu/j713/j713_pguard.c) holds a frequency-QoS
 maximum on the P policy. It allows the highest P state whose predicted peak
-stays at or below 100 C:
+stays at or below 105 C:
 
 > peak = base + step[busy P cores][state] + E-cluster heat
 
@@ -93,8 +94,16 @@ stays at or below 100 C:
   heat that stays after the drop and is rightly part of the base. The fast
   heat leaves with a time constant of about 0.25 s, so looking back 750 ms is
   enough.
+- **Limits at parity with macOS:** macOS lets the fanless Airs' CPU die burst
+  past 105 C (an M3 Air was measured at 114 C) and run near 100 C under
+  sustained load. The guard's defaults follow it: a predicted peak of 105 C, a
+  hard pin to P4 from 108 C until the die is below 100 C, and, when it opens
+  the gate, the zone's sustained trip raised from 95 C to 100 C for both
+  clusters. Without the guard, or after `--boost off`, the zone keeps 95 C.
+  The firmware itself never lowers a clock for heat (#60 saw 114.8 C), so the
+  guard is the only limit; the pin stays below 110 C.
 - **Fails closed:** the cap starts at P4, returns there on any SMC read error,
-  and pins P4 from 103 C until the die is below 95 C. The guard refuses to
+  and pins P4 from 108 C until the die is below 100 C. The guard refuses to
   load without the J713 idle driver (idle P cores would spin at the boosted
   clock), on any other CPU layout or table, or without the closed gate. It
   opens the gate itself, raising the trip to 150 C, only after its own cap is
@@ -108,7 +117,7 @@ core count and E-cluster load.
 ### Loading it: `omarchy-m4-cpu` 1-3
 
 `m4-cpu-idle --boot` loads the idle driver and then the pinned guard
-(`9ab0f52a…`) inside the same one-strike window: a boot that dies while either
+(`91fe247e…`) inside the same one-strike window: a boot that dies while either
 loads or settles makes the next boot load neither. A guard that is missing,
 differs from its pin or fails to load leaves the gate closed and P at
 1800 MHz, while CPU idle still loads. Without the boost devicetree, the guard

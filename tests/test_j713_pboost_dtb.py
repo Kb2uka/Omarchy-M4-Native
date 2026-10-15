@@ -194,6 +194,8 @@ class Lineage(unittest.TestCase):
         policy = (ROOT / 'cpu/j713/j713_pguard_policy.h').read_text()
         self.assertIn(f'#define GATE_CLOSED_MC {MODULE.GATE_MILLI_C}\n', source)
         self.assertIn('#define GATE_ZONE "cpu-die-thermal"', source)
+        self.assertIn(f'#define SUSTAIN_MC {ECLUSTER_TESTS.MODULE.TRIP_MILLI_C}\t', source,
+                      'the guard raises the 95 C trip the E-cluster devicetree sets')
         self.assertIn(f'level_khz[PG_BASE_LEVEL] != {MODULE.P_BASE[4] * 1000}', source)
         self.assertIn(f'level_khz[PG_TOP_LEVEL] != {MODULE.P_STATES[20] * 1000}', source)
         self.assertIn('#define PG_BASE_LEVEL 4\t', policy)

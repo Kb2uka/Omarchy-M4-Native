@@ -38,6 +38,12 @@
  * after its own cap is in place, so the gate is never open without the guard.
  * Writing 20000 back to the trip closes it again (m4-cpu-idle --boost off).
  *
+ * Its limits follow macOS on the fanless Airs, which lets the CPU die burst
+ * past 105 C and run near 100 C under sustained load: a predicted peak of
+ * 105 C, a hard pin to 1800 MHz from 108 C until the die is below 100 C, and,
+ * when it opens the gate, the zone's sustained trip raised from 95 C to 100 C
+ * (docs/j713-cpu-boost.md). Without the guard the zone keeps its 95 C.
+ *
  * It fails closed: the cap starts at 1800 MHz (P4), returns there on an SMC
  * read error, and from hot_c until the die is below release_c. It refuses to
  * load unless the J713 idle driver is in charge (without idle the idle P
@@ -71,16 +77,18 @@
 #define GATE_ZONE "cpu-die-thermal"
 #define GATE_CLOSED_MC 20000
 #define GATE_OPEN_MC 150000
+#define SUSTAIN_MC 95000		/* the zone's sustained passive trip, as the devicetree sets it */
+#define SUSTAIN_BOOST_MC 100000		/* ... and while the guard runs */
 
-static uint limit_c = 100;
+static uint limit_c = 105;
 module_param(limit_c, uint, 0444);
 MODULE_PARM_DESC(limit_c, "Predicted CPU die peak the guard allows, in C");
 
-static uint hot_c = 103;
+static uint hot_c = 108;
 module_param(hot_c, uint, 0444);
 MODULE_PARM_DESC(hot_c, "CPU die reading that pins the P cluster to 1800 MHz, in C");
 
-static uint release_c = 95;
+static uint release_c = 100;
 module_param(release_c, uint, 0444);
 MODULE_PARM_DESC(release_c, "CPU die reading below which the hot pin is released, in C");
 
@@ -97,7 +105,7 @@ static unsigned int p_cpus[PG_P_CPUS], e_cpus[PG_E_CPUS];
 static DEFINE_PER_CPU(struct timer_list, fast_timer);
 static DEFINE_PER_CPU(bool, fast_timer_on);
 static struct thermal_zone_device *zone;
-static struct thermal_trip *gate;
+static struct thermal_trip *gate, *sustain;
 
 /* Fast-path state, under fast_lock (taken from timer softirqs). */
 static DEFINE_SPINLOCK(fast_lock);
@@ -349,14 +357,22 @@ static int guard_show(struct seq_file *m, void *v)
 	return 0;
 }
 
-/* Under the zone lock: the gate is the one passive trip at 20 C. */
-static int find_gate(struct thermal_trip *trip, void *data)
+/*
+ * Under the zone lock: the gate is the one passive trip at 20 C, the sustained
+ * trip the one at 95 C. found[0] and found[1] count them.
+ */
+static int find_trips(struct thermal_trip *trip, void *data)
 {
 	unsigned int *found = data;
 
-	if (trip->type == THERMAL_TRIP_PASSIVE && trip->temperature == GATE_CLOSED_MC) {
+	if (trip->type != THERMAL_TRIP_PASSIVE)
+		return 0;
+	if (trip->temperature == GATE_CLOSED_MC) {
 		gate = trip;
-		(*found)++;
+		found[0]++;
+	} else if (trip->temperature == SUSTAIN_MC) {
+		sustain = trip;
+		found[1]++;
 	}
 	return 0;
 }
@@ -366,6 +382,8 @@ static int open_gate(struct thermal_trip *trip, void *data)
 {
 	if (trip == gate)
 		thermal_zone_set_trip_temp(zone, trip, GATE_OPEN_MC);
+	else if (trip == sustain)
+		thermal_zone_set_trip_temp(zone, trip, SUSTAIN_BOOST_MC);
 	return 0;
 }
 
@@ -379,11 +397,11 @@ static int __init guard_init(void)
 	struct cpufreq_frequency_table *pos;
 	struct cpuidle_driver *idle;
 	struct device_node *np;
-	unsigned int cpu, n = 0, i;
+	unsigned int cpu, n = 0, i, found[2] = { 0, 0 };
 	int ret;
 
 	if (!of_machine_is_compatible("apple,t8132") || limit_c < 60 || limit_c > 105 ||
-	    release_c >= hot_c || hot_c > 110 || period_ms < 50 || period_ms > 1000)
+	    limit_c >= hot_c || release_c >= hot_c || hot_c > 110 || period_ms < 50 || period_ms > 1000)
 		return -EINVAL;
 
 	idle = cpuidle_get_driver();
@@ -393,11 +411,9 @@ static int __init guard_init(void)
 	zone = thermal_zone_get_zone_by_name(GATE_ZONE);
 	if (IS_ERR(zone))
 		return PTR_ERR(zone);
-	n = 0;
-	thermal_zone_for_each_trip(zone, find_gate, &n);
-	if (n != 1)
+	thermal_zone_for_each_trip(zone, find_trips, found);
+	if (found[0] != 1 || found[1] != 1)
 		return -ENODEV;
-	n = 0;
 
 	np = of_find_matching_node(NULL, smc_ids);
 	if (!np)
@@ -460,11 +476,11 @@ static int __init guard_init(void)
 	if (ret < 0)
 		goto remove_proc;
 	queue_delayed_work(system_unbound_wq, &slow, 0);
-	/* The cap is in place, so the gate can open. */
+	/* The cap is in place, so the gate can open and the sustained trip move to 100 C. */
 	thermal_zone_for_each_trip(zone, open_gate, NULL);
 	thermal_zone_device_update(zone, THERMAL_TRIP_CHANGED);
-	pr_info("j713_pguard: boost gate open; P cluster capped at %u kHz until the die allows more (limit %u C, hot %u C)\n",
-		level_khz[PG_BASE_LEVEL], limit_c, hot_c);
+	pr_info("j713_pguard: boost gate open, sustained trip %u C; P cluster capped at %u kHz until the die allows more (limit %u C, hot %u C)\n",
+		SUSTAIN_BOOST_MC / 1000, level_khz[PG_BASE_LEVEL], limit_c, hot_c);
 	/* The policy reference, the SMC device, the timers and the hotplug state stay: the guard is permanent. */
 	return 0;
 

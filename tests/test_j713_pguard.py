@@ -122,7 +122,7 @@ class Policy(unittest.TestCase):
         self.assertEqual(self.allowed(70, 9), self.allowed(70, 4))
 
     def test_predicted_peak_never_over_the_limit(self):
-        for limit in (90, 100):
+        for limit in (90, 100, 105):
             for busy in range(0, 5):
                 for e_busy in range(0, 7):
                     for e_khz in (900000, 2172000, 2496000, 2808000):
@@ -279,9 +279,20 @@ class ModuleSource(unittest.TestCase):
         self.assertIn('of_machine_is_compatible("apple,t8132")', self.init)
         self.assertIn('strcmp(idle->name, "j713_idle")', self.init)
         self.assertIn('thermal_zone_get_zone_by_name(GATE_ZONE)', self.init)
-        self.assertIn('if (n != 1)\n\t\treturn -ENODEV;', self.init)
+        self.assertIn('if (found[0] != 1 || found[1] != 1)\n\t\treturn -ENODEV;', self.init)
         self.assertIn('#define GATE_ZONE "cpu-die-thermal"', self.source)
         self.assertIn('#define GATE_CLOSED_MC 20000', self.source)
+        self.assertIn('#define SUSTAIN_MC 95000', self.source)
+        self.assertIn('#define SUSTAIN_BOOST_MC 100000', self.source)
+
+    def test_limits_follow_macos_on_the_fanless_air(self):
+        for name, value in (('limit_c', 105), ('hot_c', 108), ('release_c', 100)):
+            self.assertIn(f'static uint {name} = {value};', self.source)
+        self.assertIn('limit_c >= hot_c || release_c >= hot_c || hot_c > 110', self.init)
+        opened = self.source[self.source.index('static int open_gate(struct thermal_trip *trip, void *data)\n{'):]
+        opened = opened[:opened.index('\n}\n')]
+        self.assertIn('thermal_zone_set_trip_temp(zone, trip, GATE_OPEN_MC);', opened)
+        self.assertIn('else if (trip == sustain)\n\t\tthermal_zone_set_trip_temp(zone, trip, SUSTAIN_BOOST_MC);', opened)
 
     def test_refuses_any_other_cluster_layout_or_table(self):
         for check in ('n != PG_P_CPUS', 'i != PG_E_CPUS', 'level_khz[PG_BASE_LEVEL] != 1800000',

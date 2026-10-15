@@ -13,7 +13,8 @@ which caps the P cluster from the CPU die temperature and opens the gate
 itself (docs/j713-cpu-boost.md). A guard that is missing, differs from its pin
 or fails to load leaves the gate closed and P at 1800 MHz; CPU idle still
 loads. With boost on, real-time tasks get the 1800 MHz floor they had before
-instead of the cluster maximum (RT_FLOOR).
+instead of the cluster maximum (RT_FLOOR), and the guard has raised the CPU
+die zone's sustained trip from 95 C to 100 C.
 
 One strike: an attempt marker is written durably before the module loads and
 removed only after the cores have idled through it for a settle period. A
@@ -28,8 +29,8 @@ driver until --enable removes it. A loaded driver stays until the next restart:
 the kernel pins an idle driver's module while it is registered. The package
 stays installed, so omarchy-m4-update keeps it current.
 
-Boost alone: --boost off closes the gate now, holding P at 1800 MHz, and no
-boot loads the guard until --boost on, which reopens the gate at once when the
+Boost alone: --boost off closes the gate now, holding P at 1800 MHz, puts the
+sustained trip back to 95 C, and no boot loads the guard until --boost on, which reopens the gate at once when the
 guard is loaded and otherwise at the next boot. The guard cannot be unloaded.
 """
 import argparse
@@ -54,12 +55,14 @@ NAME, DRIVER = 'j713_cpuidle', 'j713_idle'
 PIN = {'sha256': 'a2a7947a1d2260abcfc6eb10d7d63643ad2e191e73e93fedddf605116cdfd5a9', 'size': 12680}
 GUARD_STAGED = 'usr/lib/omarchy-m4/cpu/j713_pguard.ko'
 GUARD_NAME = 'j713_pguard'
-GUARD_PIN = {'sha256': '9ab0f52a1781adf58bb20a81c88fdd0a47a86a158024ef3bb0bba692c21f243f', 'size': 39304}
+GUARD_PIN = {'sha256': '91fe247e7e83d30f62f35bcf64ddbcb42faa3a1c109881d5aefcb64dc7e5e691', 'size': 39696}
 # The boost gate: the passive trip on the CPU die zone that the boost devicetree
 # sets to 20 C (closed) and j713_pguard raises to 150 C (open).
 THERMAL = 'sys/class/thermal'
 GATE_ZONE = 'cpu-die-thermal'
 GATE = {'20000': 'closed', '150000': 'open'}
+# The zone's sustained passive trip: 95 C from the devicetree, 100 C while the guard runs.
+SUSTAIN = {'95000': 'normal', '100000': 'boost'}
 # schedutil runs a real-time task at its uclamp minimum, by default the policy
 # maximum. Speaker protection is real-time and wakes a P core every few ms, so
 # with boost that held the idle P cluster above 3 GHz half the time (+0.7 W).
@@ -155,16 +158,21 @@ def pinned(path, pin):
     return data is not None and len(data) == pin['size'] and sha(data) == pin['sha256']
 
 
-def gate_trip(root):
-    """The boost gate's trip temperature file and state ('closed' or 'open'), or (None, 'absent')."""
+def zone_trip(root, states):
+    """The CPU die zone's passive trip whose temperature is one of states: (file, state), or (None, 'absent')."""
     for zone in sorted((root / THERMAL).glob('thermal_zone*')):
         if read(zone / 'type') != GATE_ZONE:
             continue
         for kind in sorted(zone.glob('trip_point_*_type')):
             temp = kind.with_name(kind.name[:-len('type')] + 'temp')
-            if read(kind) == 'passive' and read(temp) in GATE:
-                return temp, GATE[read(temp)]
+            if read(kind) == 'passive' and read(temp) in states:
+                return temp, states[read(temp)]
     return None, 'absent'
+
+
+def gate_trip(root):
+    """The boost gate's trip temperature file and state ('closed' or 'open'), or (None, 'absent')."""
+    return zone_trip(root, GATE)
 
 
 def boost_state(report):
@@ -191,6 +199,7 @@ def inspect(root):
         'guard_loaded': (root / 'sys/module' / GUARD_NAME).exists(),
         'boost_held': (root / STATE / 'boost-hold').exists(),
         'gate': gate_trip(root)[1],
+        'sustained_trip': zone_trip(root, SUSTAIN)[1],
         'rt_floor': read(root / RT_FLOOR_KNOB),
         'driver': read(root / CURRENT_DRIVER),
         'power_downs': power_downs(root),
@@ -224,9 +233,10 @@ def load_guard(root, report, run):
         return None
     if report['gate'] == 'absent':
         return 'boost waits for the boost devicetree'
-    if report['gate'] != 'closed':
-        # Opened by hand: close it, so P is held at 1800 MHz until the guard's cap is in place.
-        set_gate(root, 'closed')
+    if report['gate'] != 'closed' or report['sustained_trip'] == 'boost':
+        # Changed by hand: back to the devicetree's trips, so P is held at 1800 MHz until the
+        # guard's cap is in place, and the guard finds the trips it raises itself.
+        set_boost_trips(root, False)
     if not report['guard_staged']:
         return 'boost left off: staged j713_pguard.ko is missing or differs from the pin'
     if run(['insmod', str(root / GUARD_STAGED)]) != 0:
@@ -299,26 +309,37 @@ def restore_rt_floor(root):
     remove_state(root, 'rt-floor')
 
 
-def set_gate(root, state):
-    """Write the gate's trip; the guard's cap bounds the cluster whenever it is open."""
-    trip, now = gate_trip(root)
+def set_trip(root, states, state):
+    """Write one of the zone's trips to the temperature of state; nothing when absent or already there."""
+    trip, now = zone_trip(root, states)
     if trip is None or now == state:
         return False
-    value = next(temp for temp, name in GATE.items() if name == state)
+    value = next(temp for temp, name in states.items() if name == state)
     trip.write_text(value + '\n')
     return True
+
+
+def set_gate(root, state):
+    """Write the gate's trip; the guard's cap bounds the cluster whenever it is open."""
+    return set_trip(root, GATE, state)
+
+
+def set_boost_trips(root, on):
+    """Boost on: gate open, sustained trip 100 C (only behind a loaded guard). Off: gate closed, 95 C."""
+    set_gate(root, 'open' if on else 'closed')
+    set_trip(root, SUSTAIN, 'boost' if on else 'normal')
 
 
 def boost(root, mode):
     if mode == 'boost-off':
         write_state(root, 'boost-hold', 'the boost guard stays unloaded until sudo m4-cpu-idle --boost on\n')
-        set_gate(root, 'closed')
+        set_boost_trips(root, False)
         restore_rt_floor(root)
     else:
         remove_state(root, 'boost-hold')
         report = inspect(root)
         if report['guard_loaded']:
-            set_gate(root, 'open')
+            set_boost_trips(root, True)
             lower_rt_floor(root)
     report = inspect(root)
     report['status'] = 'boost ' + report['boost']
