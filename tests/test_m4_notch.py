@@ -91,6 +91,7 @@ class Air:
             patcher.start()
             test.addCleanup(patcher.stop)
         self.put(NOTCH.COMPATIBLE, board + b'\0apple,t8132\0apple,arm-platform\0')
+        (self.root / NOTCH.PACMAN_LOCK).parent.mkdir(parents=True, exist_ok=True)
         self.put(NOTCH.BOOT, boot(loader))
         self.put(NOTCH.STAGED, NOTCH_LOADER)
         self.put(NOTCH.DEFAULT_SHELL_JSON, json.dumps(DEFAULTS, indent=2).encode())
@@ -118,7 +119,7 @@ class Air:
         path = self.home / NOTCH.SHELL_JSON
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(value, indent=2) + '\n')
-        os.chmod(path, 0o644)  # as on the owner's Air; the writer's own default is 0600
+        os.chmod(path, 0o640)  # not the writer's own 0600 default, so a lost mode shows
         return path
 
     def desktop(self, scale=2.0):
@@ -180,6 +181,29 @@ class ShowHideTests(unittest.TestCase):
         with self.assertRaisesRegex(NOTCH.Refused, 'package transaction'):
             NOTCH.show(air.root)
         self.assertEqual(air.boot_bytes(), boot())
+        self.assertTrue((air.root / NOTCH.PACMAN_LOCK).exists())  # pacman's lock is not ours to remove
+
+    def test_pacman_lock_is_held_while_boot_bin_is_written_and_released_after(self):
+        air = Air(self)
+        held = []
+        real = COMPOSE.write
+
+        def write(path, data):
+            held.append((path.name, (air.root / NOTCH.PACMAN_LOCK).exists()))
+            real(path, data)
+        with mock.patch.object(COMPOSE, 'write', side_effect=write):
+            NOTCH.show(air.root)
+            NOTCH.hide(air.root)
+        self.assertEqual(held, [('boot.bin.pre-notch', True), ('boot.bin', True), ('boot.bin', True)])
+        self.assertFalse((air.root / NOTCH.PACMAN_LOCK).exists())
+
+    def test_the_lock_is_released_when_the_write_fails(self):
+        air = Air(self)
+        with mock.patch.object(COMPOSE, 'write', side_effect=OSError('EFI full')):
+            with self.assertRaises(OSError):
+                NOTCH.show(air.root)
+        self.assertFalse((air.root / NOTCH.PACMAN_LOCK).exists())
+        self.assertEqual(air.boot_bytes(), boot())
 
     def test_show_refuses_a_boot_bin_the_composer_does_not_recognise(self):
         air = Air(self)
@@ -207,6 +231,30 @@ class ShowHideTests(unittest.TestCase):
     def test_hide_when_hidden_changes_nothing(self):
         air = Air(self)
         self.assertEqual(NOTCH.hide(air.root)['status'], 'already hidden from the next boot')
+        self.assertEqual(air.boot_bytes(), boot())
+
+    def test_hide_after_a_macos_recovery_removes_the_stale_backup(self):
+        air = Air(self)
+        NOTCH.show(air.root)
+        air.put(NOTCH.BOOT, (air.root / NOTCH.BACKUP).read_bytes())  # the documented macOS copy
+        report = NOTCH.hide(air.root)
+        self.assertEqual(report['status'], 'already hidden from the next boot')
+        self.assertFalse((air.root / NOTCH.BACKUP).exists())
+        self.assertEqual(air.boot_bytes(), boot())
+
+    def test_a_backup_that_cannot_be_removed_does_not_undo_a_finished_hide(self):
+        air = Air(self)
+        NOTCH.show(air.root)
+        real = Path.unlink
+
+        def unlink(path, *args, **kwargs):
+            if path.name == 'boot.bin.pre-notch':
+                raise PermissionError(13, 'Read-only file system')
+            return real(path, *args, **kwargs)
+        with mock.patch.object(Path, 'unlink', unlink):
+            report = NOTCH.hide(air.root)
+        self.assertEqual(report['status'], 'notch hidden from the next boot')
+        self.assertIn('could not remove', report['backup'])
         self.assertEqual(air.boot_bytes(), boot())
 
     def test_hide_refuses_without_the_backup(self):
@@ -323,7 +371,7 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual((report['bar'], report['bar_height']), ('joined', 'cleared'))
         self.assertEqual(json.loads(path.read_text()), json.loads(original))
         self.assertFalse((air.home / NOTCH.SHELL_TOML).exists())
-        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o644)
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o640)
 
     def test_marks_survive_the_shell_rewriting_its_file(self):
         air = Air(self, framebuffer=(2560, 1664))
@@ -370,6 +418,31 @@ class DesktopTests(unittest.TestCase):
         report = air.desktop()
         self.assertTrue(report['bar'].startswith('skipped'))
         self.assertEqual(path.read_bytes(), before)
+        # Without the split, a strip-tall bar would only leave the cutout over the widgets.
+        self.assertEqual(report['bar_height'], 'unchanged')
+        self.assertFalse((air.home / NOTCH.SHELL_TOML).exists())
+
+    def test_a_split_that_is_skipped_later_clears_its_bar_height(self):
+        air = Air(self, framebuffer=(2560, 1664))
+        path = air.shell()
+        air.desktop()
+        config = json.loads(path.read_text())
+        config['bar']['layout'] = 'not a layout'
+        path.write_text(json.dumps(config))
+        report = air.desktop()
+        self.assertEqual(report['bar_height'], 'cleared')
+        self.assertFalse((air.home / NOTCH.SHELL_TOML).exists())
+
+    def test_the_login_command_runs_the_desktop_step(self):
+        air = Air(self, framebuffer=(2560, 1664))
+        path = air.shell()
+        with mock.patch.object(NOTCH.Path, 'home', return_value=air.home), \
+                mock.patch.object(NOTCH.os, 'geteuid', return_value=1000), \
+                mock.patch.object(NOTCH, 'panel_scale', return_value=2.0):
+            code, out, _ = run(['--desktop', '--root', str(air.root)])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)['bar'], 'split around the cutout')
+        self.assertEqual(json.loads(path.read_text())['bar']['centerAnchor'], 'omarchy.spacer')
 
     def test_without_a_shell_file_the_defaults_are_split_and_the_file_removed_again(self):
         air = Air(self, framebuffer=(2560, 1664))
@@ -516,12 +589,22 @@ MUTANTS = {
                           "    require(True,", ShowHideTests, 'test_show_refuses_a_staged_loader_that_is_not_the_pin'),
     'show_no_backup': ("    compose.write(root / BACKUP, data)\n", "", ShowHideTests,
                        'test_show_replaces_only_the_stage2_and_keeps_the_whole_old_file'),
-    'show_ignores_pacman': ("    require(not (root / PACMAN_LOCK).exists(),", "    require(True,", ShowHideTests,
-                            'test_show_refuses_while_pacman_runs'),
+    'show_ignores_pacman': ("os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o000)", "os.O_WRONLY | os.O_CREAT, 0o000)",
+                            ShowHideTests, 'test_show_refuses_while_pacman_runs'),
+    'lock_never_released': ("        (root / PACMAN_LOCK).unlink(missing_ok=True)\n", "        pass\n", ShowHideTests,
+                            'test_pacman_lock_is_held_while_boot_bin_is_written_and_released_after'),
+    'write_outside_the_lock': ("    with guard(root, data):\n        compose.write(root / BACKUP, data)\n        compose.write(root / BOOT, desired)\n",
+                               "    compose.write(root / BACKUP, data)\n    compose.write(root / BOOT, desired)\n",
+                               ShowHideTests, 'test_pacman_lock_is_held_while_boot_bin_is_written_and_released_after'),
+    'stale_backup_kept': ("        return drop_backup(root, {'status': 'already hidden", "        return ({'status': 'already hidden",
+                          ShowHideTests, 'test_hide_after_a_macos_recovery_removes_the_stale_backup'),
+    'unlink_failure_refuses': ("    except OSError as error:\n        report['backup'] = 'could not remove '",
+                               "    except KeyError as error:\n        report['backup'] = 'could not remove '",
+                               ShowHideTests, 'test_a_backup_that_cannot_be_removed_does_not_undo_a_finished_hide'),
     'hide_restores_the_old_file': ("    desired = splice(compose, data, layout, saved['loader'])",
                                    "    desired = (root / BACKUP).read_bytes()", ShowHideTests,
                                    'test_hide_restores_the_old_stage2_and_keeps_a_later_kernel_and_devicetree'),
-    'hide_keeps_backup': ("    (root / BACKUP).unlink()\n", "", ShowHideTests,
+    'hide_keeps_backup': ("        (root / BACKUP).unlink(missing_ok=True)\n", "        pass\n", ShowHideTests,
                           'test_hide_restores_the_old_stage2_and_keeps_a_later_kernel_and_devicetree'),
     'spacer_first': ("    at = ids.index(anchor) + 1 if anchor and anchor in ids else (len(center) + 1) // 2",
                      "    at = 0", DesktopTests, 'test_shown_boot_splits_the_center_around_the_cutout'),
@@ -543,6 +626,10 @@ MUTANTS = {
                                      'test_a_marked_header_stays_while_the_owner_added_keys_under_it'),
     'created_file_kept': ("                    write_text(json_path, '')\n", "", DesktopTests,
                           'test_without_a_shell_file_the_defaults_are_split_and_the_file_removed_again'),
+    'height_without_split': ("    if shown and report['bar'] in SPLIT:", "    if shown:", DesktopTests,
+                             'test_a_center_that_already_has_a_spacer_is_left_alone'),
+    'desktop_cli_skipped': ("            report = desktop(args.root, Path.home())", "            report = {}", DesktopTests,
+                            'test_the_login_command_runs_the_desktop_step'),
     'mode_not_kept': ("        mode = path.stat().st_mode & 0o777\n", "        pass\n", DesktopTests,
                       'test_a_cropped_boot_after_a_shown_one_restores_the_owner_files'),
 }

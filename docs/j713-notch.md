@@ -71,8 +71,9 @@ builds gave the same bytes. It is pinned in the `package-inputs` release and in
 
 `sudo m4-notch --show`:
 
-- refuses anywhere but a J713, and while a package transaction runs (the
-  composer's pacman hook rewrites `boot.bin`);
+- refuses anywhere but a J713, and while a package transaction runs. While it
+  writes it holds pacman's own database lock (`/var/lib/pacman/db.lck`), so the
+  composer's pacman hook cannot rewrite `boot.bin` at the same time;
 - parses `boot.bin` with `m4-boot-compose`'s own parser, so a file the composer
   does not recognise is refused;
 - replaces the stage 2 (the first 0x110000 bytes) only when it is alpha.1's
@@ -85,7 +86,8 @@ builds gave the same bytes. It is pinned in the `package-inputs` release and in
 
 `sudo m4-notch --hide` splices the stage 2 from `boot.bin.pre-notch` back in,
 so a kernel or devicetree update installed while the notch was shown is kept,
-then removes the backup. Both directions take effect at the next restart and
+then removes the backup (also when it finds the notch already hidden, for
+example after the macOS recovery copy below). Both directions take effect at the next restart and
 change nothing when already in the requested state.
 
 `m4-boot-compose` carries the stage 2 byte for byte, so package updates keep
@@ -119,8 +121,9 @@ desktop user, which follows what this boot shows:
 Every entry and line it writes carries an `m4-notch` mark, and Omarchy keeps
 those marks when it rewrites `shell.json` itself. It never changes an
 unmarked `size-horizontal`, refuses a center list that already has a spacer
-(that spacer would take the anchor), keeps each file's mode, and changes
-nothing on a cropped boot that has no marks.
+(that spacer would take the anchor) and then leaves the bar height alone too,
+keeps each existing file's mode (new files are 0600), and changes nothing on a
+cropped boot that has no marks.
 
 ![The Omarchy bar split around the cutout on a 2560x1664 output](images/j713-notch-bar.png)
 

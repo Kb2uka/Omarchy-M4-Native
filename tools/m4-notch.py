@@ -26,6 +26,7 @@ tall as the strip. When the framebuffer is the cropped 2560x1600 it removes only
 what it added. It changes nothing on a cropped boot that has none of its marks.
 """
 import argparse
+import contextlib
 import copy
 import functools
 import hashlib
@@ -78,6 +79,8 @@ SPACER = 'omarchy.spacer'
 MARK = 'm4-notch'
 TOML_MARK = '# m4-notch'
 SPACER_NOTE = 'J713 camera cutout; managed by m4-notch'
+# split_bar notes for a bar that ends up split; only such a bar gets the strip height.
+SPLIT = ('split around the cutout', 'spacer resized', 'present')
 
 
 class Refused(Exception):
@@ -170,10 +173,29 @@ def splice(compose, data, layout, loader):
     return desired
 
 
+@contextlib.contextmanager
 def guard(root, data):
-    """Refuse while pacman runs (its hook rewrites boot.bin) or when boot.bin moved meanwhile."""
-    require(not (root / PACMAN_LOCK).exists(), 'a package transaction is running; run this again when it ends')
-    require((root / BOOT).read_bytes() == data, 'boot.bin changed while working; nothing changed, run it again')
+    """Hold pacman's own database lock while boot.bin is written, so m4-boot-compose's
+    hook cannot rewrite it at the same time, and refuse a boot.bin that moved meanwhile."""
+    try:
+        fd = os.open(root / PACMAN_LOCK, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o000)
+    except FileExistsError:
+        raise Refused('a package transaction is running; run this again when it ends') from None
+    os.close(fd)
+    try:
+        require((root / BOOT).read_bytes() == data, 'boot.bin changed while working; nothing changed, run it again')
+        yield
+    finally:
+        (root / PACMAN_LOCK).unlink(missing_ok=True)
+
+
+def drop_backup(root, report):
+    """The backup is only needed while the notch stage 2 is installed; a failed removal is reported."""
+    try:
+        (root / BACKUP).unlink(missing_ok=True)
+    except OSError as error:
+        report['backup'] = 'could not remove ' + str(root / BACKUP) + ': ' + (error.strerror or str(error))
+    return report
 
 
 def space(root, need):
@@ -194,9 +216,9 @@ def show(root):
             'The notch stage 2 does not match its pin; reinstall omarchy-m4-boot')
     desired = splice(compose, data, layout, notch)
     space(root, 2 * len(data))
-    guard(root, data)
-    compose.write(root / BACKUP, data)
-    compose.write(root / BOOT, desired)
+    with guard(root, data):
+        compose.write(root / BACKUP, data)
+        compose.write(root / BOOT, desired)
     return {'status': 'notch shown from the next boot', 'loader': 'notch', 'replaced': KNOWN_LOADERS[current],
             'backup': str(root / BACKUP), 'undo': 'sudo m4-notch --hide'}
 
@@ -206,17 +228,16 @@ def hide(root):
     data, layout = read_boot(root, compose)
     current = sha(layout['loader'])
     if current in KNOWN_LOADERS:
-        return {'status': 'already hidden from the next boot', 'loader': KNOWN_LOADERS[current]}
+        return drop_backup(root, {'status': 'already hidden from the next boot', 'loader': KNOWN_LOADERS[current]})
     require(current == NOTCH['sha256'], 'boot.bin starts with an unknown stage 2 ' + current + '; nothing changed')
     _, saved = read_boot(root, compose, BACKUP, 'The notch backup ' + BACKUP)
     original = sha(saved['loader'])
     require(original in KNOWN_LOADERS, 'The notch backup holds an unknown stage 2 ' + original + '; nothing changed')
     desired = splice(compose, data, layout, saved['loader'])
     space(root, len(data))
-    guard(root, data)
-    compose.write(root / BOOT, desired)
-    (root / BACKUP).unlink()
-    return {'status': 'notch hidden from the next boot', 'loader': KNOWN_LOADERS[original]}
+    with guard(root, data):
+        compose.write(root / BOOT, desired)
+    return drop_backup(root, {'status': 'notch hidden from the next boot', 'loader': KNOWN_LOADERS[original]})
 
 
 def status(root):
@@ -482,13 +503,13 @@ def desktop(root, home, scale=None):
         report['bar'] = 'unchanged'
 
     text = read_text(toml_path)
-    if shown:
+    if shown and report['bar'] in SPLIT:
         new, report['bar_height'] = set_bar_toml(text, bar_size(scale, base_font(home)))
-    else:
+    else:  # a cropped boot, or a bar it did not split: no strip height of its own
         new = clear_bar_toml(text)
         report['bar_height'] = 'cleared' if new is not None else 'unchanged'
     if new is not None:
-        write_text(toml_path, new, 0o644)
+        write_text(toml_path, new)
     return report
 
 
