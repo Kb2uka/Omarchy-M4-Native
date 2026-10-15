@@ -211,7 +211,7 @@ class ModuleSource(unittest.TestCase):
     def test_cap_starts_at_p4_and_the_gate_opens_only_after_it(self):
         order = [self.init.index(call) for call in (
             'freq_qos_add_request(&policy->constraints, &cap_req, FREQ_QOS_MAX,\n\t\t\t\t   level_khz[PG_BASE_LEVEL])',
-            'add_timer_on(t, p_cpus[i]);',
+            'cpuhp_setup_state(CPUHP_AP_ONLINE_DYN',
             'queue_delayed_work(system_unbound_wq, &slow, 0);',
             'thermal_zone_for_each_trip(zone, open_gate, NULL);',
             'thermal_zone_device_update(zone, THERMAL_TRIP_CHANGED);')]
@@ -220,6 +220,7 @@ class ModuleSource(unittest.TestCase):
         # Every refusal returns before the gate opens.
         self.assertLess(self.init.rindex('goto put_e_policy'), self.init.index('open_gate'))
         self.assertLess(self.init.rindex('goto remove_req'), self.init.index('open_gate'))
+        self.assertLess(self.init.rindex('goto remove_proc'), self.init.index('open_gate'))
 
     def test_sensor_failure_or_heat_pins_p4(self):
         wanted = self.source[self.source.index('static u32 wanted_level(void)\n{'):]
