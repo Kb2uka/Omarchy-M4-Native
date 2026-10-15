@@ -283,6 +283,10 @@ class ModuleSource(unittest.TestCase):
         self.assertIn('#define GATE_ZONE "cpu-die-thermal"', self.source)
         self.assertIn('#define GATE_CLOSED_MC 20000', self.source)
         self.assertIn('#define SUSTAIN_MC 95000', self.source)
+        found = self.source[self.source.index('static int find_trips(struct thermal_trip *trip, void *data)\n{'):]
+        found = found[:found.index('\n}\n')]
+        self.assertIn('if (trip->temperature == GATE_CLOSED_MC) {\n\t\tgate = trip;\n\t\tfound[0]++;', found)
+        self.assertIn('} else if (trip->temperature == SUSTAIN_MC) {\n\t\tsustain = trip;\n\t\tfound[1]++;', found)
         self.assertIn('#define SUSTAIN_BOOST_MC 100000', self.source)
 
     def test_limits_follow_macos_on_the_fanless_air(self):

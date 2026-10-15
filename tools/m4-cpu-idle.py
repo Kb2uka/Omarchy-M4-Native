@@ -229,14 +229,16 @@ def settle(root, seconds, sleep):
 
 def load_guard(root, report, run):
     """Load the boost guard; called with the attempt marker written. It opens the gate itself."""
-    if report['guard_loaded'] or report['boost_held']:
+    if report['guard_loaded']:
+        return None
+    if report['gate'] == 'open' or report['sustained_trip'] == 'boost':
+        # Changed by hand, with no guard behind them: back to the devicetree's trips, so P is held
+        # at 1800 MHz and the zone at 95 C, and the guard finds the trips it raises itself.
+        set_boost_trips(root, False)
+    if report['boost_held']:
         return None
     if report['gate'] == 'absent':
         return 'boost waits for the boost devicetree'
-    if report['gate'] != 'closed' or report['sustained_trip'] == 'boost':
-        # Changed by hand: back to the devicetree's trips, so P is held at 1800 MHz until the
-        # guard's cap is in place, and the guard finds the trips it raises itself.
-        set_boost_trips(root, False)
     if not report['guard_staged']:
         return 'boost left off: staged j713_pguard.ko is missing or differs from the pin'
     if run(['insmod', str(root / GUARD_STAGED)]) != 0:

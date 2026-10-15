@@ -406,6 +406,16 @@ class CpuIdleLoad(unittest.TestCase):
         self.assertEqual(self.run_mode('boot', machine)['boost'], 'on')
         self.assertEqual(machine.commands, [self.idle_insmod(), self.guard_insmod()])
 
+    def test_trips_raised_by_hand_are_reset_even_with_boost_off(self):
+        self.boost_ready()
+        self.run_mode('boost-off', Machine(self.root))
+        self.put(GATE_TRIP, b'150000\n')
+        self.put(SUSTAIN_TRIP, b'100000\n')
+        machine = Machine(self.root)
+        self.run_mode('boot', machine)
+        self.assertEqual(machine.commands, [self.idle_insmod()], 'boost is off: no guard')
+        self.assertEqual((self.gate(), self.sustain()), ('20000', '95000'), 'nothing raised without the guard')
+
     def test_boost_on_without_the_guard_leaves_both_trips(self):
         self.boost_ready()
         self.run_mode('boost-on', Machine(self.root))
