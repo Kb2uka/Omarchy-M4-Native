@@ -395,11 +395,35 @@ one. Sign it with the old key, then switch the fingerprint in
 
 ## Corresponding source
 
-The kernel package's source is the kernel tree and configuration published with
-[v0.1.0-alpha.1](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1)
-(see [release-source.md](release-source.md)), plus the J713 input patches in
-`patches-kernel/j713-input/`. The devicetree's source is the alpha.1 portable
-devicetree plus [j713-smc-poweroff.dtso](../patches/j713-smc-poweroff.dtso).
+Every compiled binary downloaded from the `package-inputs` release is joined to
+its pinned corresponding source and verified rebuild correspondence in
+[`packaging/channel-source-joins.json`](../packaging/channel-source-joins.json).
+`tools/check-m4-packages.py` enforces that every channel package's downloaded
+binaries have a `rebuilt-identical` join in CI, with no override:
+
+- **Kernel (`linux-m4-omarchy`):** kernel build 18 and modules from the kernel tree
+  published with
+  [v0.1.0-alpha.1](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1)
+  (`source/kernel-controller.tar.gz`), plus `patches-kernel/j713-input/` in this repository.
+- **Devicetrees (`omarchy-m4-boot`):** devicetrees in the composer lineage built
+  with DTC 1.8.1 from their respective overlays (`patches/j713-cpu-temperature.dtso`,
+  `patches/j713-pboost.dtso`) and builder tools (`tools/build-j713-cputemp-dtb.py`,
+  `tools/build-j713-pboost-dtb.py`).
+- **Speaker protection module (`omarchy-m4-speaker`):** `snd-soc-j713-group.ko`
+  (`aaad802e…`), rebuilt byte for byte from `audio/j713/kernel/` on the alpha.1
+  kernel-controller tree with `reference-sound-exports.symvers`.
+- **Air GPU module (`omarchy-m4-gpu`):** `asahi_m4.ko` (`3cf47fa7…`), rebuilt byte
+  for byte from `gpu/j713/asahi/g16.rs` on the alpha.1 kernel tree with
+  `gpu/j713/build-test-module.sh`.
+- **Headphone jack modules (`omarchy-m4-headphones`):** `j713_hp_dt.ko` and
+  `snd-soc-j713-headphones.ko`, built from `audio/j713/headphones/kernel/` on
+  the alpha.1 kernel-controller tree with `tools/build-j713-headphones.sh`.
+- **CPU idle and boost guard (`omarchy-m4-cpu`):** `j713_cpuidle.ko` (`a2a7947a…`)
+  and `j713_pguard.ko` (`91fe247e…`), built from `cpu/j713/` on the alpha.1
+  kernel tree with `cpu/j713/build-module.sh`.
+- **GStreamer audio sinks (`omarchy-m4-gst-audio`):** `libgstautodetect.so` and
+  `libgstpulseaudio.so`, built by `tools/m4-webkit-audio-plugins.py` from
+  `gst-plugins-good-1.28.7.tar.xz` (mirrored in `package-inputs`).
 
 ## Limits
 

@@ -451,6 +451,15 @@ class PolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'unlisted path'):
             CHECK.check_package(CHANNEL, *self.package('linux-m4-omarchy', files, version='7.2.0-1'))
 
+    def test_package_inputs_must_have_rebuilt_identical_source_joins(self):
+        joins = CHECK.source_joins()
+        for name in CHANNEL['packages']:
+            inputs = CHECK.package_inputs(name)
+            for filename, digest in inputs.items():
+                self.assertIn(filename, joins['binaries'])
+                self.assertEqual(joins['binaries'][filename]['sha256'], digest)
+                self.assertEqual(joins['binaries'][filename]['correspondence'], 'rebuilt-identical')
+
 
 if __name__ == '__main__':
     unittest.main()

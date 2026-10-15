@@ -36,11 +36,93 @@ HEADPHONES_POLICY = ('usr/share/alsa/ucm2/conf.d/J713Headphones/J713Headphones.c
                      'usr/share/alsa/ucm2/conf.d/J713Headphones/HiFi.conf',
                      'usr/share/wireplumber/wireplumber.conf.d/83-j713-headphones.conf',
                      'usr/share/wireplumber/scripts/default-nodes/j713-headphones.lua')
+SOURCE_JOINS = ROOT / 'packaging/channel-source-joins.json'
+CORRESPONDENCE = ('rebuilt-identical', 'unverified')
 
 
 def require(condition, message):
     if not condition:
         raise ValueError(message)
+
+
+def source_joins(path=None):
+    """Load the channel binary-to-source joins and reject malformed entries."""
+    target = path or (ROOT / 'packaging/channel-source-joins.json')
+    if not target.is_file():
+        target = SOURCE_JOINS
+    joins = json.loads(target.read_bytes())
+    require(joins.get('schema') == 1 and isinstance(joins.get('binaries'), dict),
+            'Unknown channel source joins schema')
+    for name, entry in joins['binaries'].items():
+        require(re.fullmatch(r'[0-9a-f]{64}', entry.get('sha256', '')) and
+                entry.get('correspondence') in CORRESPONDENCE and entry.get('sources'),
+                'Incomplete channel source join: ' + name)
+        for source in entry['sources']:
+            require(set(source) in ({'tree'}, {'tree', 'commit'}, {'archive'}, {'archive', 'sha256'}),
+                    'Unknown source reference for ' + name)
+            require('commit' not in source or re.fullmatch(r'[0-9a-f]{40}', source['commit']),
+                    'A joined tree commit is a full commit ID: ' + name)
+            require('tree' in source or (source['archive'].startswith(('source/', 'package-inputs/')) and
+                                         '/' not in source['archive'].split('/', 1)[1]),
+                    'Source archives live directly in source/ or package-inputs/: ' + name)
+    return joins
+
+
+def package_inputs(name):
+    """Return {filename: sha256} for all package-inputs binaries downloaded by this package."""
+    recipe = ROOT / 'packaging/omarchy-m4' / name / 'PKGBUILD'
+    if not recipe.is_file():
+        return {}
+    text = recipe.read_text()
+    vars = {}
+    for line in text.splitlines():
+        m = re.match(r'^([a-zA-Z_0-9]+)=(.*)$', line.strip())
+        if m:
+            vars[m.group(1)] = m.group(2).strip('\'"')
+    changed = True
+    while changed:
+        changed = False
+        for k, v in list(vars.items()):
+            for sub_k, sub_v in vars.items():
+                if f'${{{sub_k}}}' in v:
+                    vars[k] = v.replace(f'${{{sub_k}}}', sub_v)
+                    changed = True
+                elif f'${sub_k}' in v:
+                    vars[k] = v.replace(f'${sub_k}', sub_v)
+                    changed = True
+    sources_m = re.search(r'^source=\((.*?)\)', text, re.M | re.S)
+    sums_m = re.search(r'^sha256sums=\((.*?)\)', text, re.M | re.S)
+    if not sources_m or not sums_m:
+        return {}
+    entries = re.findall(r"""['"]([^'"]+)['"]""", sources_m.group(1))
+    sums = re.findall(r"'([0-9a-f]{64})'", sums_m.group(1))
+    require(len(entries) == len(sums), f'{name}: source and sha256sums counts differ')
+    inputs = {}
+    for entry, digest in zip(entries, sums):
+        for _ in range(3):
+            for k, v in vars.items():
+                entry = entry.replace(f'${{{k}}}', v).replace(f'${k}', v)
+        if 'package-inputs/' in entry:
+            filename = entry.split('package-inputs/')[-1].split('::')[-1].strip()
+            inputs[filename] = digest
+    return inputs
+
+
+def check_channel_joins(name, joins):
+    """Every binary downloaded from package-inputs must have a rebuilt-identical source join."""
+    inputs = package_inputs(name)
+    for filename, digest in sorted(inputs.items()):
+        require(filename in joins['binaries'],
+                f'{name} downloads binary without a source join: {filename}')
+        entry = joins['binaries'][filename]
+        require(entry['sha256'] == digest,
+                f'Source join names a different build of {filename}')
+        require(entry['correspondence'] == 'rebuilt-identical',
+                f'Source correspondence for {filename} is not verified by an identical rebuild: {entry.get("correspondence")}')
+        for source in entry['sources']:
+            if 'tree' in source:
+                require((ROOT / source['tree']).exists(),
+                        f'Joined source tree missing for {filename}: {source["tree"]}')
 
 
 def sha(data):
@@ -109,7 +191,7 @@ def allowed(name, prefixes):
     return any(name == p or (p.endswith('/') and name.startswith(p)) for p in prefixes)
 
 
-def check_package(channel, package, info, files, root):
+def check_package(channel, package, info, files, root, joins=None):
     name = info['pkgname'][0]
     require(name in channel['packages'], 'Unexpected package ' + name)
     expected = f"{name}-{info['pkgver'][0]}-{info['arch'][0]}.pkg.tar.zst"
@@ -120,6 +202,7 @@ def check_package(channel, package, info, files, root):
         require(not allowed(path, channel['protected_paths']) or path in channel.get('protected_exceptions', {}),
                 f'{name} installs a protected path: {path}')
         require(files[path][0] & 0o7022 == 0, f'{name} installs a writable or setuid file: {path}')
+    check_channel_joins(name, joins or source_joins())
     kernel = channel['kernel']
     if name == 'linux-m4-omarchy':
         image = files.get('usr/lib/omarchy-m4/Image.gz')
@@ -227,6 +310,7 @@ def published(channel, filename, scratch):
 
 def check(directory, compare_published=True):
     channel = json.loads(CHANNEL.read_text())
+    joins = source_joins()
     packages = sorted(directory.glob('*.pkg.tar.zst'))
     require(sorted(p.name for p in directory.iterdir()) == [p.name for p in packages],
             'Only package archives may be in the build output')
@@ -237,7 +321,7 @@ def check(directory, compare_published=True):
             root = scratch / package.name
             root.mkdir()
             info, files = extract(package, root)
-            name = check_package(channel, package, info, files, root)
+            name = check_package(channel, package, info, files, root, joins=joins)
             require(name not in seen, 'Duplicate package ' + name)
             seen.add(name)
             if compare_published:
