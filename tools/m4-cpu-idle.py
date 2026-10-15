@@ -283,8 +283,10 @@ def lower_rt_floor(root):
     if int(now) > RT_FLOOR:
         write_state(root, 'rt-floor', now + '\n')
         knob.write_text(f'{RT_FLOOR}\n')
-    else:
+    elif int(now) < RT_FLOOR:
+        # The owner's own floor is lower: nothing was replaced, so nothing to restore.
         remove_state(root, 'rt-floor')
+    # At RT_FLOOR already (boost on again): keep the value saved when it was lowered.
 
 
 def restore_rt_floor(root):

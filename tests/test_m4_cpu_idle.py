@@ -290,6 +290,18 @@ class CpuIdleLoad(unittest.TestCase):
         self.assertEqual(knob.read_text(), '700\n', 'the replaced floor comes back')
         self.assertFalse((self.root / MODULE.STATE / 'rt-floor').exists())
 
+    def test_boost_on_twice_still_restores_the_replaced_floor(self):
+        self.boost_ready()
+        knob = self.root / MODULE.RT_FLOOR_KNOB
+        self.run_mode('boot', Machine(self.root))
+        self.assertEqual(knob.read_text(), '412\n')
+        self.run_mode('boost-on', Machine(self.root))
+        self.put(GATE_TRIP, b'20000\n')
+        self.run_mode('boost-on', Machine(self.root))
+        self.assertEqual(knob.read_text(), '412\n')
+        self.run_mode('boost-off', Machine(self.root))
+        self.assertEqual(knob.read_text(), '1024\n', 'repeated boost on keeps the saved floor')
+
     def test_no_rt_floor_without_the_guard(self):
         self.boost_ready()
         self.run_mode('boot', Machine(self.root, guard_fails=True))

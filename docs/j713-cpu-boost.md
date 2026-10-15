@@ -112,9 +112,9 @@ the 1800 MHz they had before.
 
 - `m4-cpu-idle` reports `boost`, `gate`, `guard_loaded` and `rt_floor`.
 - `sudo m4-cpu-idle --boost off` closes the gate at once (P back to 1800 MHz),
-  restores the kernel's real-time floor, and keeps the guard unloaded at every
-  boot. `--boost on` reopens the gate at once if the guard is loaded, or at the
-  next boot.
+  restores the real-time floor that boost replaced (the kernel default unless
+  you set your own), and keeps the guard unloaded at every boot. `--boost on`
+  reopens the gate at once if the guard is loaded, or at the next boot.
 
 `omarchy-m4-boot` 1-11 carries the devicetree; the updater and composer accept
 it only after the E-cluster devicetree, with backup `boot.bin.pre-pboost`.
