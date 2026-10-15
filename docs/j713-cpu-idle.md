@@ -5,8 +5,8 @@ macOS-like CPU behaviour on the fanless Air: short bursts at high clocks, cool
 the rest of the time. Its first step is CPU idle
 ([#65](https://github.com/Kb2uka/Omarchy-M4-Native/issues/65)). This change
 delivers that step, raises the E-cluster clocks, and adds a CPU die thermal zone
-as a safety net. P-core boost above 1800 MHz is the next step and is not in this
-change.
+as a safety net. P-core boost above 1800 MHz is the next step:
+[J713 P-core boost](j713-cpu-boost.md).
 
 ## Symptoms
 
@@ -191,7 +191,8 @@ recomposes it.
 
 ## Limits
 
-- P cores still stop at 1800 MHz. A guarded P boost is the next step of #66.
+- P cores still stop at 1800 MHz here. The guarded P boost is
+  [J713 P-core boost](j713-cpu-boost.md).
 - No energy model, so energy-aware scheduling stays off.
 - Power was measured on AC with the SMC's `PSTR`; battery life was not measured.
 - The thermal zone reacts at the SMC's one-second refresh. It protects against

@@ -20,6 +20,7 @@ POWEROFF_DTB = 'e54c77a760a5b696486f9d80c7c83ca4295d641113bb9e54d13e259863bf9b07
 CPUFREQ_DTB = '033025bbdda3ce72b5eefe39d1d6d68209256fd43e4fd587c96ae1cf38978555'
 CPUTEMP_DTB = '08e8e719381f88a1e50d821c145dad5b2d97fd772609e13d7778e19795e9cad1'
 ECLUSTER_DTB = 'fdedc09f2fe8ed681a61208589024e01fb5efa77beebbd0eb4ad267c08e77f7c'
+PBOOST_DTB = 'c4f036b819ce757ce790b01779a3f7532eacd5cb1c1097fa20286d1a9c9ec6ca'
 # Replacement devicetree -> (devicetrees it may replace, backup suffix).
 UPDATES = {
     POWEROFF_DTB: ((ALPHA1_DTB,), '.pre-shutdown-flag'),
@@ -30,6 +31,9 @@ UPDATES = {
     # Adds E-cluster states and the CPU die thermal zone, which reads the CPU
     # temperature channels, so it replaces only the CPU temperature devicetree.
     ECLUSTER_DTB: ((CPUTEMP_DTB,), '.pre-ecluster'),
+    # Adds P and E states, with P held at 1800 MHz by a boost gate on the CPU die
+    # thermal zone, so it replaces only the E-cluster devicetree.
+    PBOOST_DTB: ((ECLUSTER_DTB,), '.pre-pboost'),
 }
 FDT_MAGIC = b'\xd0\x0d\xfe\xed'
 NEXT_PAYLOAD = b'm1n1_initramfs'

@@ -235,6 +235,17 @@ class SetupTests(unittest.TestCase):
         (self.root / 'sys/module/j713_cpuidle').mkdir()
         self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'already loaded')
 
+    def test_restart_reported_when_the_boost_guard_is_new(self):
+        (self.root / 'sys/module/j713_cpuidle').mkdir(parents=True)
+        self.put(MODULE.CPU_IDLE_STAGED, 'staged idle module')
+        self.put(MODULE.CPU_GUARD_STAGED, 'staged boost guard')
+        self.assertTrue(self.setup_with(FakeSystem(self.root))['restart_needed'], 'idle loaded, guard not yet')
+        self.put(MODULE.CPU_IDLE_STATE + '/boost-hold', '')
+        self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'boost switched off')
+        (self.root / MODULE.CPU_IDLE_STATE / 'boost-hold').unlink()
+        (self.root / 'sys/module/j713_pguard').mkdir()
+        self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'already loaded')
+
     def test_boot_not_current_is_a_failure(self):
         with self.assertRaisesRegex(MODULE.Refused, 'boot.bin is not in step'):
             self.setup_with(FakeSystem(self.root, boot_status='refused'))
