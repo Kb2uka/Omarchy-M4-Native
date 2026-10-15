@@ -64,6 +64,25 @@ class GpuModule(unittest.TestCase):
         self.assertEqual((code, report['status']), (0, 'staged; applies at the next boot'))
         self.assertEqual(self.state(), before)
 
+    def test_reports_the_values_the_air_gate_checks(self):
+        # A refused GPU has no desktop and alpha.1's module logs nothing, so the
+        # report the unit journals on every boot carries the gate's inputs.
+        self.assertEqual(self.run_tool()[1]['gpu'],
+                         {'core_mask': None, 'max_power_mw': None, 'firmware_build': None})
+        node = MODULE.GPU_NODE + '/'
+        self.put(node + 'apple,m4-core-mask', (0xff).to_bytes(4, 'big'))
+        self.put(node + 'apple,m4-max-power-mw', (24304).to_bytes(4, 'big'))
+        self.put(node + 'apple,firmware-build', b'mBoot-18000.120.36\0')
+        before = self.state()
+        self.assertEqual(self.run_tool()[1]['gpu'], {'core_mask': '0xff', 'max_power_mw': 24304,
+                                                     'firmware_build': 'mBoot-18000.120.36'})
+        self.assertEqual(self.run_tool('--boot')[1]['gpu']['core_mask'], '0xff')
+        self.assertNotEqual(self.state(), before, 'reporting must not stop the swap')
+        self.put(node + 'apple,m4-core-mask', b'\0\0\x03')
+        self.put(node + 'apple,firmware-build', b'\xff\0')
+        self.assertEqual(self.run_tool()[1]['gpu'], {'core_mask': None, 'max_power_mw': 24304,
+                                                     'firmware_build': None})
+
     def test_boot_applies_module_and_only_its_pin(self):
         code, report = self.run_tool('--boot')
         self.assertEqual(code, 0)
