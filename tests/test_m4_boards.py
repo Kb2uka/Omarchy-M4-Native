@@ -23,7 +23,7 @@ import tempfile
 import unittest
 import unittest.mock
 
-from m4_board_identities import (BOARDS, FOREIGN_SOC, NEAR_MISS, QUALIFIED, REFUSED, ROOT, SOC, TABLE,
+from m4_board_identities import (BOARDS, FOREIGN_SOC, NEAR_MISS_BOARD, NEAR_MISS_SOC, QUALIFIED, REFUSED, ROOT, SOC, TABLE,
                                  TABLE_PATH, identity, refused_identities)
 from test_j713_gpu_air_gate import SOURCE as G16, item
 
@@ -345,13 +345,15 @@ class LiveBoardGates(unittest.TestCase):
                     self.assertEqual(attempts, [], 'a refused board reached a filesystem write')
 
     def test_near_miss_names_are_refused(self):
-        """Every gate matches whole names, so apple,j713x on apple,t8132x is refused."""
-        for name, call, kind, message, _ in GATES:
-            with self.subTest(gate=name):
-                error, attempts = self.outcome(call, NEAR_MISS[1])
-                self.assertIsInstance(error, kind)
-                self.assertIn(message, str(error))
-                self.assertEqual(attempts, [], 'a refused board reached a filesystem write')
+        """Gates match whole names: apple,j713x is not the J713, and apple,t8132x is not the T8132."""
+        for name, call, kind, board_message, soc_message in GATES:
+            cases = [(NEAR_MISS_BOARD, board_message)] + ([(NEAR_MISS_SOC, soc_message)] if soc_message else [])
+            for (label, compatible), message in cases:
+                with self.subTest(gate=name, case=label):
+                    error, attempts = self.outcome(call, compatible)
+                    self.assertIsInstance(error, kind)
+                    self.assertIn(message, str(error))
+                    self.assertEqual(attempts, [], 'a refused board reached a filesystem write')
 
     def test_gates_that_check_the_soc_refuse_the_j713_name_on_another_soc(self):
         for name, call, kind, _, message in GATES:
