@@ -40,14 +40,22 @@ a mini.
   `m4-boot-compose`, `m4-channel-setup`, `m4-headphones`, `m4-lid-lock`,
   `m4-session-placement`, `m4-j713-audio-ready` and `m4-j713-audio-register`.
   Each sibling is fed the `compatible` list m1n1 hands Linux on that Mac
-  (`apple,<board>`, `apple,t8132`, `apple,arm-platform`).
+  (`apple,<board>`, `apple,t8132`, `apple,arm-platform`);
+- a gate that reads a devicetree file lets a sibling M4 identity, or the J713
+  name on an M2 SoC, through: the J713 devicetree builders
+  (`build-j713-cpufreq-dtb.py`, `build-j713-cputemp-dtb.py`,
+  `build-j713-poweroff-dtb.py`, with their base hash pinned to the sibling so
+  the board check itself must refuse, before compiling or writing), the audio
+  package's base-DTB check (`tests/test_j713_audio_installer.py`) and the video
+  package's boot-DTB check (`tests/test_j713_candidate.py`).
+
+`tests/m4_board_identities.py` gives every one of these tests the same table
+and identities.
 
 Passing these tests shows that the gates refuse other M4 Macs. It does not
 show that anything works on them. Only a report from the real machine can.
 
-Not covered yet: the gates that read a devicetree blob instead of the live
-system (`build-j713-*-dtb.py`, `configure-m4-audio.py`, `m4_video_package.py`),
-the gates with fixed absolute paths (`m4-video-start`,
+Not covered yet: the gates with fixed absolute paths (`m4-video-start`,
 `m4-j713-owner-assets.py`), and the kernel C audio gates, which hosted CI does
 not compile.
 
