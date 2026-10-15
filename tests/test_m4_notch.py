@@ -249,6 +249,12 @@ class ShowHideTests(unittest.TestCase):
         self.assertEqual(NOTCH.hide(air.root)['status'], 'already hidden from the next boot')
         self.assertEqual(air.boot_bytes(), boot())
 
+    def test_hide_when_hidden_with_no_backup_does_not_wait_for_pacman(self):
+        air = Air(self)
+        air.put(NOTCH.PACMAN_LOCK, b'')  # a package transaction is running
+        self.assertEqual(NOTCH.hide(air.root)['status'], 'already hidden from the next boot')
+        self.assertEqual(air.boot_bytes(), boot())
+
     def test_hide_after_a_macos_recovery_removes_the_stale_backup(self):
         air = Air(self)
         NOTCH.show(air.root)
@@ -617,6 +623,8 @@ MUTANTS = {
                                ShowHideTests, 'test_pacman_lock_is_held_while_boot_bin_is_written_and_released_after'),
     'stale_backup_kept': ("                drop_backup(root, report)\n        return report", "                pass\n        return report",
                           ShowHideTests, 'test_hide_after_a_macos_recovery_removes_the_stale_backup'),
+    'lock_without_a_backup': ("        if os.path.lexists(root / BACKUP):\n", "        if True:\n", ShowHideTests,
+                              'test_hide_when_hidden_with_no_backup_does_not_wait_for_pacman'),
     'unlink_failure_refuses': ("    except OSError as error:\n        report['backup'] = 'could not remove '",
                                "    except KeyError as error:\n        report['backup'] = 'could not remove '",
                                ShowHideTests, 'test_a_backup_that_cannot_be_removed_does_not_undo_a_finished_hide'),
