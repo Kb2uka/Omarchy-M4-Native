@@ -54,7 +54,7 @@ NAME, DRIVER = 'j713_cpuidle', 'j713_idle'
 PIN = {'sha256': 'a2a7947a1d2260abcfc6eb10d7d63643ad2e191e73e93fedddf605116cdfd5a9', 'size': 12680}
 GUARD_STAGED = 'usr/lib/omarchy-m4/cpu/j713_pguard.ko'
 GUARD_NAME = 'j713_pguard'
-GUARD_PIN = {'sha256': '82800cef5112ad8194bf5fc0a7f8b94547025ff271aa2aa08173ddeb8c4177ce', 'size': 33464}
+GUARD_PIN = {'sha256': '725c12d26679c958d8585c4681be49177070dda4cac2f0b6d13362a54fb2969a', 'size': 36160}
 # The boost gate: the passive trip on the CPU die zone that the boost devicetree
 # sets to 20 C (closed) and j713_pguard raises to 150 C (open).
 THERMAL = 'sys/class/thermal'
@@ -64,9 +64,12 @@ GATE = {'20000': 'closed', '150000': 'open'}
 # maximum. Speaker protection is real-time and wakes a P core every few ms, so
 # with boost that held the idle P cluster above 3 GHz half the time (+0.7 W).
 # This floor maps to 4464000 * 412 / 1024 = 1796062 kHz, which resolves to P4,
-# 1800 MHz, the real-time clock before boost; the kernel default is 1024.
+# 1800 MHz, the real-time clock before boost. On an E core (capacity 417) it
+# resolves to E7, the E maximum, as the kernel default (1024) does. A floor
+# already at or below 412 is left alone; a higher one is saved and restored
+# when boost is switched off.
 RT_FLOOR_KNOB = 'proc/sys/kernel/sched_util_clamp_min_rt_default'
-RT_FLOOR, RT_DEFAULT = 412, 1024
+RT_FLOOR = 412
 # The power-down state is state1 on every CPU the driver serves.
 POWER_DOWN = 'cpuidle/state1'
 SETTLE_SECONDS = 120
@@ -222,12 +225,13 @@ def load_guard(root, report, run):
     if report['gate'] == 'absent':
         return 'boost waits for the boost devicetree'
     if report['gate'] != 'closed':
-        return 'boost left off: the gate is open without the guard'
+        # Opened by hand: close it, so P is held at 1800 MHz until the guard's cap is in place.
+        set_gate(root, 'closed')
     if not report['guard_staged']:
         return 'boost left off: staged j713_pguard.ko is missing or differs from the pin'
     if run(['insmod', str(root / GUARD_STAGED)]) != 0:
         return 'boost left off: loading j713_pguard.ko failed; see journalctl -k -b'
-    set_rt_floor(root, RT_FLOOR)
+    lower_rt_floor(root)
     return 'boost guard loaded'
 
 
@@ -258,7 +262,7 @@ def load(root, report, run, settle_seconds, sleep):
 
 def start_guard(root, report, run, settle_seconds, sleep):
     """In a running session with the idle driver loaded, load the guard under the attempt marker."""
-    if report['guard_loaded'] or report['boost_held'] or report['gate'] != 'closed':
+    if report['guard_loaded'] or report['boost_held'] or report['gate'] == 'absent':
         return None
     write_state(root, 'attempt', 'loading the P-cluster boost guard\n')
     try:
@@ -270,11 +274,26 @@ def start_guard(root, report, run, settle_seconds, sleep):
     return boost
 
 
-def set_rt_floor(root, value):
-    """Set the real-time uclamp floor; a kernel without uclamp has no knob, and that is fine."""
+def lower_rt_floor(root):
+    """With boost on, cap the real-time uclamp floor at RT_FLOOR, saving a higher value to restore."""
     knob = root / RT_FLOOR_KNOB
-    if knob.is_file():
-        knob.write_text(f'{value}\n')
+    now = read(knob)
+    if now is None or not now.isdigit():
+        return  # a kernel without uclamp has no knob, and that is fine
+    if int(now) > RT_FLOOR:
+        write_state(root, 'rt-floor', now + '\n')
+        knob.write_text(f'{RT_FLOOR}\n')
+    else:
+        remove_state(root, 'rt-floor')
+
+
+def restore_rt_floor(root):
+    """Put back the floor lower_rt_floor replaced, unless something else changed it since."""
+    saved = read(root / STATE / 'rt-floor')
+    knob = root / RT_FLOOR_KNOB
+    if saved is not None and saved.isdigit() and read(knob) == str(RT_FLOOR):
+        knob.write_text(saved + '\n')
+    remove_state(root, 'rt-floor')
 
 
 def set_gate(root, state):
@@ -291,13 +310,13 @@ def boost(root, mode):
     if mode == 'boost-off':
         write_state(root, 'boost-hold', 'the boost guard stays unloaded until sudo m4-cpu-idle --boost on\n')
         set_gate(root, 'closed')
-        set_rt_floor(root, RT_DEFAULT)
+        restore_rt_floor(root)
     else:
         remove_state(root, 'boost-hold')
         report = inspect(root)
         if report['guard_loaded']:
             set_gate(root, 'open')
-            set_rt_floor(root, RT_FLOOR)
+            lower_rt_floor(root)
     report = inspect(root)
     report['status'] = 'boost ' + report['boost']
     return report

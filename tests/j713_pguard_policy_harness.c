@@ -39,6 +39,11 @@ bool window_busy(const u64 *d_idle, const u64 *d_wall, unsigned int n)
 	return pg_window_busy(d_idle, d_wall, n);
 }
 
+bool hold(unsigned int *busy, unsigned int *e_busy, unsigned int held, unsigned int e_held, bool expired)
+{
+	return pg_hold(busy, e_busy, held, e_held, expired);
+}
+
 unsigned int busy_count(const u64 *d_idle, const u64 *d_wall, unsigned int n)
 {
 	return pg_busy_count(d_idle, d_wall, n);

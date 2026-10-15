@@ -41,6 +41,9 @@ class Policy(unittest.TestCase):
         lib.step.restype = ctypes.c_uint32
         lib.base.argtypes = [ctypes.c_int, ctypes.c_bool, ctypes.c_uint, ctypes.c_uint32]
         lib.window_busy.restype = ctypes.c_bool
+        lib.hold.restype = ctypes.c_bool
+        lib.hold.argtypes = [ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint), ctypes.c_uint,
+                             ctypes.c_uint, ctypes.c_bool]
         lib.e_heat.argtypes = [ctypes.c_uint, ctypes.c_uint32]
         lib.float_to_mc.argtypes = [ctypes.c_uint32, ctypes.POINTER(ctypes.c_int)]
         lib.allowed.restype = ctypes.c_uint32
@@ -150,6 +153,19 @@ class Policy(unittest.TestCase):
         self.assertFalse(self.lib.window_busy(U64S(1000, 1000, 101, 1000), wall, 4))
         self.assertFalse(self.lib.window_busy(U64S(0, 0, 0, 0), U64S(0, 0, 0, 0), 4), 'no time, no evidence')
 
+    def hold(self, busy, e_busy, held, e_held, expired):
+        b, e = ctypes.c_uint(busy), ctypes.c_uint(e_busy)
+        restart = self.lib.hold(ctypes.byref(b), ctypes.byref(e), held, e_held, expired)
+        return b.value, e.value, restart
+
+    def test_more_busy_cores_count_at_once_and_fewer_wait_for_the_hold(self):
+        self.assertEqual(self.hold(3, 1, 1, 1, False), (3, 1, True), 'a rise counts at once and restarts the hold')
+        self.assertEqual(self.hold(3, 1, 1, 1, True), (3, 1, True))
+        self.assertEqual(self.hold(1, 0, 3, 2, False), (3, 2, False), 'a fall waits while the hold runs')
+        self.assertEqual(self.hold(1, 0, 3, 2, True), (1, 0, False), 'and counts once it has expired')
+        self.assertEqual(self.hold(4, 0, 2, 3, False), (4, 3, True), 'P rose, E fell: P counts, E is held')
+        self.assertEqual(self.hold(2, 3, 2, 3, False), (2, 3, True), 'unchanged keeps the hold running')
+
     def test_busy_count_is_more_than_half_busy(self):
         wall = U64S(*[1000] * 6)
         self.assertEqual(self.lib.busy_count(U64S(0, 499, 500, 1000, 0, 0), wall, 4), 2)
@@ -215,6 +231,40 @@ class ModuleSource(unittest.TestCase):
         self.assertIn('smc_ok = false;', slow)
         self.assertIn('if (mc >= (int)hot_c * 1000)\n\t\t\thot = true;', slow)
         self.assertIn('static int base_mc = 1000 * 100;', self.source, 'no state above P4 before a reading')
+
+    def test_the_cap_is_applied_to_the_p_policy(self):
+        update = self.source[self.source.index('static void update_cap(bool may_raise)\n{'):]
+        update = update[:update.index('\n}\n')]
+        change = update[update.index('if (want != applied_level) {'):]
+        self.assertIn('freq_qos_update_request(&cap_req, level_khz[want]);', change)
+        self.assertLess(change.index('freq_qos_update_request'), change.index('applied_level = want;'))
+        self.assertIn('freq_qos_add_request(&policy->constraints, &cap_req, FREQ_QOS_MAX,', self.init)
+
+    def test_fast_timers_stay_on_their_cores_across_hotplug(self):
+        self.assertIn('cpuhp_setup_state(CPUHP_AP_ONLINE_DYN, "j713_pguard:online", fast_timer_online, '
+                      'fast_timer_offline);', self.init)
+        self.assertLess(self.init.index('cpuhp_setup_state('), self.init.index('open_gate'))
+        online = self.source[self.source.index('static int fast_timer_online(unsigned int cpu)\n{'):]
+        online = online[:online.index('\n}\n')]
+        self.assertIn('TIMER_DEFERRABLE | TIMER_PINNED', online)
+        self.assertIn('add_timer_on(t, cpu);', online)
+        offline = self.source[self.source.index('static int fast_timer_offline(unsigned int cpu)\n{'):]
+        offline = offline[:offline.index('\n}\n')]
+        order = [offline.index(s) for s in ('WRITE_ONCE(per_cpu(fast_timer_on, cpu), false);',
+                                            'timer_delete_sync(per_cpu_ptr(&fast_timer, cpu));')]
+        self.assertEqual(order, sorted(order), 'stop the re-arm before deleting the timer')
+        fast = self.source[self.source.index('static void fast_timer_fn(struct timer_list *t)\n{'):]
+        fast = fast[:fast.index('\n}\n')]
+        self.assertIn('if (READ_ONCE(*this_cpu_ptr(&fast_timer_on)))\n\t\tmod_timer(', fast)
+        self.assertNotIn('add_timer_on', self.init, 'only the hotplug callback arms timers')
+
+    def test_the_slow_path_also_counts_busy_cores(self):
+        slow = self.source[self.source.index('static void slow_work(struct work_struct *w)\n{'):]
+        slow = slow[:slow.index('\n}\n')]
+        self.assertIn('sample_busy();', slow)
+        self.assertLess(slow.index('sample_busy();'), slow.index('update_cap(true);'))
+        self.assertIn('pg_hold(&busy, &e_busy, busy_held, e_busy_held, time_after(jiffies, held_until))',
+                      self.source)
 
     def test_only_the_slow_path_raises(self):
         self.assertIn('static void apply_work(struct work_struct *w)\n{\n\tupdate_cap(false);\n}', self.source)

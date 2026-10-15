@@ -266,12 +266,29 @@ class CpuIdleLoad(unittest.TestCase):
         self.assertEqual(report['rt_floor'], str(MODULE.RT_FLOOR), 'real-time tasks keep 1800 MHz, not the boost')
 
     def test_rt_floor_resolves_to_the_pre_boost_clock(self):
-        # schedutil: frequency = policy maximum * floor / 1024, rounded up to the next table state.
+        # schedutil: frequency = policy maximum * floor / CPU capacity, rounded up to the next table state.
         p_table = [912000, 1260000, 1512000, 1800000, 2088000]
         target = 4464000 * MODULE.RT_FLOOR // 1024
         self.assertEqual(min(f for f in p_table if f >= target), 1800000)
         self.assertGreater(4464000 * (MODULE.RT_FLOOR + 1) // 1024, 1800000, 'the highest floor that gives 1800 MHz')
-        self.assertEqual(MODULE.RT_DEFAULT, 1024)
+        e_table = [900000, 1080000, 1476000, 1860000, 2172000, 2496000, 2808000]
+        self.assertEqual(min(f for f in e_table if f >= 2808000 * MODULE.RT_FLOOR // 417), 2808000,
+                         'E cores (capacity 417) still run real-time tasks at their maximum')
+
+    def test_a_lower_rt_floor_is_kept_and_a_higher_one_restored(self):
+        self.boost_ready()
+        knob = self.root / MODULE.RT_FLOOR_KNOB
+        self.put(MODULE.RT_FLOOR_KNOB, b'0\n')
+        self.run_mode('boot', Machine(self.root))
+        self.assertEqual(knob.read_text(), '0\n', 'an owner floor below 412 is left alone')
+        self.run_mode('boost-off', Machine(self.root))
+        self.assertEqual(knob.read_text(), '0\n')
+        self.put(MODULE.RT_FLOOR_KNOB, b'700\n')
+        self.run_mode('boost-on', Machine(self.root))
+        self.assertEqual(knob.read_text(), '412\n')
+        self.run_mode('boost-off', Machine(self.root))
+        self.assertEqual(knob.read_text(), '700\n', 'the replaced floor comes back')
+        self.assertFalse((self.root / MODULE.STATE / 'rt-floor').exists())
 
     def test_no_rt_floor_without_the_guard(self):
         self.boost_ready()
@@ -308,19 +325,23 @@ class CpuIdleLoad(unittest.TestCase):
         self.assertIn('loading j713_pguard.ko failed', report['status'])
         self.assertFalse(self.marker().exists())
 
-    def test_a_gate_open_without_the_guard_is_left_alone(self):
+    def test_a_gate_open_without_the_guard_is_closed_before_the_guard_loads(self):
         self.boost_ready(gate='150000')
-        machine = Machine(self.root)
+        machine = Machine(self.root, guard_fails=True)
         report = self.run_mode('boot', machine)
-        self.assertEqual(machine.commands, [self.idle_insmod()])
-        self.assertIn('the gate is open without the guard', report['status'])
+        self.assertEqual(machine.commands, [self.idle_insmod(), self.guard_insmod()])
+        self.assertEqual((self.gate(), report['boost']), ('20000', 'starts with the CPU idle driver at the next boot'),
+                         'never open without the guard')
+        self.restart()
+        self.put(GATE_TRIP, b'150000\n')
+        self.assertEqual(self.run_mode('boot', Machine(self.root))['boost'], 'on')
 
     def test_boost_off_closes_the_gate_now_and_at_every_boot_until_on(self):
         self.boost_ready()
         self.run_mode('boot', Machine(self.root))
         report = self.run_mode('boost-off', Machine(self.root))
         self.assertEqual(self.gate(), '20000', 'closed at once, holding P at 1800 MHz')
-        self.assertEqual(report['rt_floor'], '1024', 'the kernel default again')
+        self.assertEqual(report['rt_floor'], '1024', 'the floor it replaced, the kernel default here')
         self.assertTrue(report['boost'].startswith('off; P stays at 1800 MHz'))
         self.restart()
         machine = Machine(self.root)

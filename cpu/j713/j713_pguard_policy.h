@@ -103,6 +103,25 @@ static inline bool pg_window_busy(const u64 *d_idle, const u64 *d_wall, unsigned
 	return false;
 }
 
+/*
+ * The busy counts to hold after a new sample. A count that rose takes effect at
+ * once; a lower one waits until the hold has expired. Returns true when the
+ * hold restarts.
+ */
+static inline bool pg_hold(unsigned int *busy, unsigned int *e_busy, unsigned int held, unsigned int e_held,
+			   bool expired)
+{
+	if (*busy >= held && *e_busy >= e_held)
+		return true;
+	if (expired)
+		return false;
+	if (*busy < held)
+		*busy = held;
+	if (*e_busy < e_held)
+		*e_busy = e_held;
+	return *busy > held || *e_busy > e_held;
+}
+
 /* Busy P cores: more than half of the interval not idle. */
 static inline unsigned int pg_busy_count(const u64 *d_idle, const u64 *d_wall, unsigned int n)
 {

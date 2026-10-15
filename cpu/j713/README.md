@@ -14,7 +14,7 @@ which `tests/test_j713_pguard.py` compiles on the host. See
 The shipped builds are `j713_cpuidle.ko`
 `a2a7947a1d2260abcfc6eb10d7d63643ad2e191e73e93fedddf605116cdfd5a9` (12,680
 bytes) and `j713_pguard.ko`
-`82800cef5112ad8194bf5fc0a7f8b94547025ff271aa2aa08173ddeb8c4177ce` (33,464
+`725c12d26679c958d8585c4681be49177070dda4cac2f0b6d13362a54fb2969a` (36,160
 bytes), pinned in `packaging/omarchy-m4/channel.json` and staged by the
 `omarchy-m4-cpu` package.
 

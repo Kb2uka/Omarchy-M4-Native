@@ -97,7 +97,7 @@ core count and E-cluster load.
 ### Loading it: `omarchy-m4-cpu` 1-2
 
 `m4-cpu-idle --boot` loads the idle driver and then the pinned guard
-(`82800cef…`) inside the same one-strike window: a boot that dies while either
+(`725c12d2…`) inside the same one-strike window: a boot that dies while either
 loads or settles makes the next boot load neither. A guard that is missing,
 differs from its pin or fails to load leaves the gate closed and P at
 1800 MHz, while CPU idle still loads. Without the boost devicetree, the guard

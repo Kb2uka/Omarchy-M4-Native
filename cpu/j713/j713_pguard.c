@@ -19,7 +19,9 @@
  * - Fast path, a deferrable timer every 16 ms pinned to each P core: count
  *   the busy P cores from their idle time. A deferrable timer fires only on
  *   an awake core, so an idle cluster costs nothing, and a busy one is
- *   checked by its own timer. A higher count is held for 300 ms. When it
+ *   checked by its own timer. CPU hotplug callbacks keep each timer on its
+ *   own core across offline and online. The slow path samples too, as a
+ *   backstop. A higher count is held for 300 ms (pg_hold). When it
  *   lowers the allowed state, the cap drops within about 20 ms, long before
  *   the extra heat builds up. It also records the fewest busy P cores and
  *   the lowest P state it sees.
@@ -43,6 +45,7 @@
  * the P cluster. Nothing here writes a hardware register.
  */
 #include <linux/cpufreq.h>
+#include <linux/cpuhotplug.h>
 #include <linux/cpuidle.h>
 #include <linux/jiffies.h>
 #include <linux/mfd/macsmc.h>
@@ -91,6 +94,7 @@ static struct freq_qos_request cap_req;
 static u32 level_khz[PG_TOP_LEVEL + 1];
 static unsigned int p_cpus[PG_P_CPUS], e_cpus[PG_E_CPUS];
 static DEFINE_PER_CPU(struct timer_list, fast_timer);
+static DEFINE_PER_CPU(bool, fast_timer_on);
 static struct thermal_zone_device *zone;
 static struct thermal_trip *gate;
 
@@ -160,14 +164,8 @@ static void sample_busy(void)
 	busy = pg_busy_count(d_idle, d_wall, PG_P_CPUS);
 	e_busy = pg_busy_count(d_idle + PG_P_CPUS, d_wall + PG_P_CPUS, PG_E_CPUS);
 	window_min_busy = min(window_min_busy, busy);
-	if (busy >= busy_held && e_busy >= e_busy_held) {
+	if (pg_hold(&busy, &e_busy, busy_held, e_busy_held, time_after(jiffies, held_until)))
 		held_until = jiffies + msecs_to_jiffies(HOLD_MS);
-	} else if (!time_after(jiffies, held_until)) {
-		busy = max(busy, busy_held);
-		e_busy = max(e_busy, e_busy_held);
-		if (busy > busy_held || e_busy > e_busy_held)
-			held_until = jiffies + msecs_to_jiffies(HOLD_MS);
-	}
 	busy_held = busy;
 	e_busy_held = e_busy;
 }
@@ -193,7 +191,38 @@ static void fast_timer_fn(struct timer_list *t)
 	spin_unlock_irqrestore(&fast_lock, flags);
 	if (drop)
 		queue_work(system_highpri_wq, &apply);
-	mod_timer(t, jiffies + msecs_to_jiffies(FAST_MS));
+	/* Pinned, so this keeps it on its core; the offline callback stops it first. */
+	if (READ_ONCE(*this_cpu_ptr(&fast_timer_on)))
+		mod_timer(t, jiffies + msecs_to_jiffies(FAST_MS));
+}
+
+static bool p_cpu(unsigned int cpu)
+{
+	return cpumask_test_cpu(cpu, policy->related_cpus);
+}
+
+/* CPU hotplug: arm a P core's timer on that core when it comes online. */
+static int fast_timer_online(unsigned int cpu)
+{
+	struct timer_list *t = per_cpu_ptr(&fast_timer, cpu);
+
+	if (!p_cpu(cpu))
+		return 0;
+	timer_setup(t, fast_timer_fn, TIMER_DEFERRABLE | TIMER_PINNED);
+	t->expires = jiffies + msecs_to_jiffies(FAST_MS);
+	WRITE_ONCE(per_cpu(fast_timer_on, cpu), true);
+	add_timer_on(t, cpu);
+	return 0;
+}
+
+/* ... and stop it before the core goes, so it never migrates to another core. */
+static int fast_timer_offline(unsigned int cpu)
+{
+	if (!p_cpu(cpu))
+		return 0;
+	WRITE_ONCE(per_cpu(fast_timer_on, cpu), false);
+	timer_delete_sync(per_cpu_ptr(&fast_timer, cpu));
+	return 0;
 }
 
 /* Apply the wanted level now if it is lower, or, from the slow path, whatever it is. */
@@ -268,6 +297,8 @@ static void slow_work(struct work_struct *w)
 		busy = p_window_busy();
 
 	spin_lock_irqsave(&fast_lock, flags);
+	/* The fast timers' backstop: a busy core that its own timer missed still counts. */
+	sample_busy();
 	window_min = min(window_min, policy_level());
 	if (ret) {
 		errors++;
@@ -410,22 +441,21 @@ static int __init guard_init(void)
 		last_idle[i] = get_cpu_idle_time_us(cpu_at(i), &last_wall[i]);
 	for (i = 0; i < PG_P_CPUS; i++)
 		win_idle[i] = get_cpu_idle_time_us(p_cpus[i], &win_wall[i]);
-	for (i = 0; i < PG_P_CPUS; i++) {
-		struct timer_list *t = per_cpu_ptr(&fast_timer, p_cpus[i]);
-
-		timer_setup(t, fast_timer_fn, TIMER_DEFERRABLE | TIMER_PINNED);
-		t->expires = jiffies + msecs_to_jiffies(FAST_MS);
-		add_timer_on(t, p_cpus[i]);
-	}
+	/* Arms the timer on every online P core now, and on any that comes online later. */
+	ret = cpuhp_setup_state(CPUHP_AP_ONLINE_DYN, "j713_pguard:online", fast_timer_online, fast_timer_offline);
+	if (ret < 0)
+		goto remove_proc;
 	queue_delayed_work(system_unbound_wq, &slow, 0);
 	/* The cap is in place, so the gate can open. */
 	thermal_zone_for_each_trip(zone, open_gate, NULL);
 	thermal_zone_device_update(zone, THERMAL_TRIP_CHANGED);
 	pr_info("j713_pguard: boost gate open; P cluster capped at %u kHz until the die allows more (limit %u C, hot %u C)\n",
 		level_khz[PG_BASE_LEVEL], limit_c, hot_c);
-	/* The policy reference, the SMC device and the timers stay: the guard is permanent. */
+	/* The policy reference, the SMC device, the timers and the hotplug state stay: the guard is permanent. */
 	return 0;
 
+remove_proc:
+	remove_proc_entry("j713_pguard", NULL);
 remove_req:
 	freq_qos_remove_request(&cap_req);
 put_e_policy:
