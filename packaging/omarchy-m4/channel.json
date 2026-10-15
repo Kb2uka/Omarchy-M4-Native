@@ -131,6 +131,6 @@
     "usr/lib/omarchy-m4/cpu/j713_cpuidle.ko": "a2a7947a1d2260abcfc6eb10d7d63643ad2e191e73e93fedddf605116cdfd5a9"
   },
   "cpu_guard_module": {
-    "usr/lib/omarchy-m4/cpu/j713_pguard.ko": "725c12d26679c958d8585c4681be49177070dda4cac2f0b6d13362a54fb2969a"
+    "usr/lib/omarchy-m4/cpu/j713_pguard.ko": "07adfa6588d55ae26f6d6ee9d74463a6453f2996fe43d4a02403131c980a56ae"
   }
 }

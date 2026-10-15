@@ -34,6 +34,21 @@ int base(int reading_mc, bool window_busy, unsigned int min_busy, u32 window_min
 	return pg_base(reading_mc, window_busy, min_busy, window_min_level);
 }
 
+u32 lowest(const u32 *recent, unsigned int n, u32 now)
+{
+	return pg_lowest(recent, n, now);
+}
+
+int recent_ms(void)
+{
+	return PG_RECENT_MS;
+}
+
+int recent_max(void)
+{
+	return PG_RECENT_MAX;
+}
+
 bool window_busy(const u64 *d_idle, const u64 *d_wall, unsigned int n)
 {
 	return pg_window_busy(d_idle, d_wall, n);

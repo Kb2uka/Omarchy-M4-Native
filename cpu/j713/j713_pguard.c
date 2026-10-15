@@ -13,9 +13,10 @@
  *
  * - Slow path, every period_ms on an unbound workqueue: read TCMz and, on
  *   each new reading, estimate the base, the temperature with the cluster
- *   back at 1800 MHz (pg_base), from the P cores' idle time over the reading
- *   window and the fewest busy P cores and lowest P state seen in it. It is
- *   the only path that raises the cap.
+ *   back at 1800 MHz (pg_base): the reading less the measured fast heat
+ *   (pg_fast) of the fewest busy P cores and lowest P state seen in the last
+ *   750 ms, when a P core was busy through the reading window. It is the
+ *   only path that raises the cap.
  * - Fast path, a deferrable timer every 16 ms pinned to each P core: count
  *   the busy P cores from their idle time. A deferrable timer fires only on
  *   an awake core, so an idle cluster costs nothing, and a busy one is
@@ -107,9 +108,14 @@ static unsigned long held_until;
 static int base_mc = 1000 * 100;		/* until the first reading: allows only P4 */
 static bool hot, smc_ok;
 static u32 applied_level = PG_BASE_LEVEL;
-/* Since the last new reading: the lowest P state and the fewest busy P cores. */
-static u32 window_min = PG_TOP_LEVEL;
-static unsigned int window_min_busy = PG_P_CPUS;
+/*
+ * The lowest P state and the fewest busy P cores in the current slow tick,
+ * and in the recent ticks before it (pg_lowest). Until they are measured,
+ * the kept ticks read P4 and all cores busy, which subtracts nothing.
+ */
+static u32 tick_min = PG_TOP_LEVEL, tick_min_busy = PG_P_CPUS;
+static u32 recent_min[PG_RECENT_MAX], recent_min_busy[PG_RECENT_MAX];
+static unsigned int recent_ticks, recent_pos;
 
 /* Slow-path state, under lock. */
 static DEFINE_MUTEX(lock);
@@ -163,7 +169,7 @@ static void sample_busy(void)
 	}
 	busy = pg_busy_count(d_idle, d_wall, PG_P_CPUS);
 	e_busy = pg_busy_count(d_idle + PG_P_CPUS, d_wall + PG_P_CPUS, PG_E_CPUS);
-	window_min_busy = min(window_min_busy, busy);
+	tick_min_busy = min(tick_min_busy, busy);
 	if (pg_hold(&busy, &e_busy, busy_held, e_busy_held, time_after(jiffies, held_until)))
 		held_until = jiffies + msecs_to_jiffies(HOLD_MS);
 	busy_held = busy;
@@ -186,7 +192,7 @@ static void fast_timer_fn(struct timer_list *t)
 
 	spin_lock_irqsave(&fast_lock, flags);
 	sample_busy();
-	window_min = min(window_min, policy_level());
+	tick_min = min(tick_min, policy_level());
 	drop = wanted_level() < applied_level;
 	spin_unlock_irqrestore(&fast_lock, flags);
 	if (drop)
@@ -299,7 +305,7 @@ static void slow_work(struct work_struct *w)
 	spin_lock_irqsave(&fast_lock, flags);
 	/* The fast timers' backstop: a busy core that its own timer missed still counts. */
 	sample_busy();
-	window_min = min(window_min, policy_level());
+	tick_min = min(tick_min, policy_level());
 	if (ret) {
 		errors++;
 		smc_ok = false;
@@ -308,9 +314,8 @@ static void slow_work(struct work_struct *w)
 			/* A new reading covers the window that just ended. */
 			last_bits = bits;
 			last_mc = mc;
-			base_mc = pg_base(mc, busy, window_min_busy, window_min);
-			window_min = PG_TOP_LEVEL;
-			window_min_busy = PG_P_CPUS;
+			base_mc = pg_base(mc, busy, pg_lowest(recent_min_busy, recent_ticks, tick_min_busy),
+					  pg_lowest(recent_min, recent_ticks, tick_min));
 		}
 		if (mc >= (int)hot_c * 1000)
 			hot = true;
@@ -318,6 +323,12 @@ static void slow_work(struct work_struct *w)
 			hot = false;
 		smc_ok = true;
 	}
+	/* This tick joins the recent ones; the next starts from the current state. */
+	recent_min[recent_pos] = tick_min;
+	recent_min_busy[recent_pos] = tick_min_busy;
+	recent_pos = (recent_pos + 1) % recent_ticks;
+	tick_min = policy_level();
+	tick_min_busy = PG_P_CPUS;
 	spin_unlock_irqrestore(&fast_lock, flags);
 	mutex_unlock(&lock);
 	update_cap(true);
@@ -439,6 +450,11 @@ static int __init guard_init(void)
 	}
 	for (i = 0; i < PG_P_CPUS + PG_E_CPUS; i++)
 		last_idle[i] = get_cpu_idle_time_us(cpu_at(i), &last_wall[i]);
+	recent_ticks = DIV_ROUND_UP(PG_RECENT_MS, period_ms);
+	for (i = 0; i < recent_ticks; i++) {
+		recent_min[i] = PG_BASE_LEVEL;
+		recent_min_busy[i] = PG_P_CPUS;
+	}
 	for (i = 0; i < PG_P_CPUS; i++)
 		win_idle[i] = get_cpu_idle_time_us(p_cpus[i], &win_wall[i]);
 	/* Arms the timer on every online P core now, and on any that comes online later. */

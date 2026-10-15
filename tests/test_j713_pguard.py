@@ -29,17 +29,17 @@ MEASURED = {
 # the step table must cover, and the fast heat gone 2 s after the drop back to P4, which pg_fast
 # must not exceed. One busy core asking for P20 runs P16/P17.
 SETTLED_RISE = {
-    1: {8: 8.4, 10: 14.0, 12: 20.5, 14: 28.5, 15: 27.1, 17: 28.9, 20: 28.5},
-    2: {8: 11.7, 9: 14.2, 10: 19.2, 11: 25.0, 12: 26.8},
-    3: {6: 6.2, 7: 8.4, 8: 13.2, 9: 16.4, 10: 23.1},
-    4: {6: 7.3, 7: 9.7, 8: 15.4, 9: 19.2},
+    1: {5: 1.9, 6: 3.8, 7: 5.7, 8: 8.4, 10: 14.0, 12: 20.5, 14: 28.5, 15: 27.1, 17: 28.9, 20: 28.5},
+    2: {5: 3.2, 6: 5.8, 7: 8.3, 8: 11.7, 9: 14.2, 10: 19.2, 11: 25.0, 12: 26.8},
+    3: {5: 3.8, 6: 6.2, 7: 8.4, 8: 13.2, 9: 16.4, 10: 23.1},
+    4: {5: 4.1, 6: 7.3, 7: 9.7, 8: 15.4, 9: 19.2},
 }
 SETTLED_FAST = {
-    1: {8: [7.1], 10: [13.6, 14.0], 12: [20.9, 20.1], 14: [26.9, 28.8], 15: [27.9, 27.4], 17: [28.3, 28.8],
+    1: {5: [1.9, 2.2], 6: [3.6, 3.6], 7: [5.5, 5.5], 8: [7.1], 10: [13.6, 14.0], 12: [20.9, 20.1], 14: [26.9, 28.8], 15: [27.9, 27.4], 17: [28.3, 28.8],
         20: [26.2, 28.8]},
-    2: {8: [10.0, 11.1], 9: [14.0], 10: [18.9, 16.5], 11: [25.0], 12: [27.6, 27.4]},
-    3: {6: [5.9, 5.5], 7: [8.0], 8: [12.3, 10.8], 9: [16.7], 10: [21.4, 21.2]},
-    4: {6: [6.6, 6.1], 7: [8.7, 8.7], 8: [14.6, 11.3], 9: [18.8, 18.6]},
+    2: {5: [3.1, 3.2], 6: [5.2, 5.0], 7: [6.6, 7.8], 8: [10.0, 11.1], 9: [14.0], 10: [18.9, 16.5], 11: [25.0], 12: [27.6, 27.4]},
+    3: {5: [2.6, 3.1], 6: [5.9, 5.5], 7: [8.0], 8: [12.3, 10.8], 9: [16.7], 10: [21.4, 21.2]},
+    4: {5: [3.1, 3.3], 6: [6.6, 6.1], 7: [8.7, 8.7], 8: [14.6, 11.3], 9: [18.8, 18.6]},
 }
 U32S = ctypes.c_uint32 * 21
 U64S = ctypes.c_uint64 * 6
@@ -56,6 +56,8 @@ class Policy(unittest.TestCase):
         lib = ctypes.CDLL(str(library))
         lib.step.restype = ctypes.c_uint32
         lib.fast.restype = ctypes.c_uint32
+        lib.lowest.restype = ctypes.c_uint32
+        lib.lowest.argtypes = [U32S, ctypes.c_uint, ctypes.c_uint32]
         lib.base.argtypes = [ctypes.c_int, ctypes.c_bool, ctypes.c_uint, ctypes.c_uint32]
         lib.window_busy.restype = ctypes.c_bool
         lib.hold.restype = ctypes.c_bool
@@ -153,6 +155,14 @@ class Policy(unittest.TestCase):
             for level in range(5, 21):
                 self.assertEqual(self.lib.base(85000, True, busy, level), 85000 - self.lib.fast(busy, level))
 
+    def test_every_state_up_to_the_hot_ones_was_measured(self):
+        # P5 up to the first state that reached the bench's 95 C abort (two P cores P11, three P10, four P9).
+        for busy, top in ((1, 17), (2, 11), (3, 10), (4, 9)):
+            with self.subTest(busy=busy):
+                missing = [level for level in range(5, top + 1) if level not in SETTLED_FAST[busy]
+                           and not (busy == 1 and level in (9, 11, 13, 16))]
+                self.assertEqual(missing, [], 'one P core at P9/P11/P13/P16 takes the state below')
+
     def test_fast_heat_never_above_a_settle_measurement(self):
         # Every state subtracts no more than the lowest run of any measured state at or above it,
         # so the base can only err high.
@@ -162,6 +172,14 @@ class Policy(unittest.TestCase):
                 if above:
                     with self.subTest(busy=busy, level=level):
                         self.assertLessEqual(self.lib.fast(busy, level), min(above) * 1000)
+
+    def test_base_looks_back_750_ms_for_the_lowest_state(self):
+        ring = U32S(*([17, 9, 14] + [20] * 18))
+        self.assertEqual(self.lib.lowest(ring, 3, 20), 9)
+        self.assertEqual(self.lib.lowest(ring, 3, 6), 6, 'the current tick counts too')
+        self.assertEqual(self.lib.lowest(ring, 0, 12), 12)
+        self.assertEqual(self.lib.recent_ms(), 750)
+        self.assertGreaterEqual(self.lib.recent_max(), -(-self.lib.recent_ms() // 50), 'room at the shortest period')
 
     def test_fast_heat_rows_are_bounded_and_ordered(self):
         for busy in range(1, 5):
@@ -300,6 +318,17 @@ class ModuleSource(unittest.TestCase):
         self.assertLess(slow.index('sample_busy();'), slow.index('update_cap(true);'))
         self.assertIn('pg_hold(&busy, &e_busy, busy_held, e_busy_held, time_after(jiffies, held_until))',
                       self.source)
+
+    def test_the_base_uses_the_recent_ticks_and_starts_subtracting_nothing(self):
+        slow = self.source[self.source.index('static void slow_work(struct work_struct *w)\n{'):]
+        slow = slow[:slow.index('\n}\n')]
+        self.assertIn('base_mc = pg_base(mc, busy, pg_lowest(recent_min_busy, recent_ticks, tick_min_busy),\n'
+                      '\t\t\t\t\t  pg_lowest(recent_min, recent_ticks, tick_min));', slow)
+        self.assertIn('recent_pos = (recent_pos + 1) % recent_ticks;', slow)
+        self.assertIn('recent_ticks = DIV_ROUND_UP(PG_RECENT_MS, period_ms);', self.init)
+        self.assertIn('recent_min[i] = PG_BASE_LEVEL;', self.init, 'until measured, the kept ticks subtract nothing')
+        self.assertLess(self.init.index('recent_ticks = DIV_ROUND_UP'), self.init.index('queue_delayed_work'))
+        self.assertIn('period_ms < 50', self.init)
 
     def test_only_the_slow_path_raises(self):
         self.assertIn('static void apply_work(struct work_struct *w)\n{\n\tupdate_cap(false);\n}', self.source)
