@@ -105,8 +105,8 @@
     "usr/lib/systemd/system/m4-j713-audio-register.service.d/30-m4-headphones.conf": "loads the headphone jack modules after the speaker registration succeeds; a failure never fails it",
     "usr/share/alsa/ucm2/conf.d/J713Headphones/J713Headphones.conf": "UCM for the new J713Headphones card only; no speaker or other card file",
     "usr/share/alsa/ucm2/conf.d/J713Headphones/HiFi.conf": "UCM for the new J713Headphones card only; no speaker or other card file",
-    "usr/share/wireplumber/wireplumber.conf.d/83-j713-headphones.conf": "names the headphone sink and adds its default-output hook as an optional component",
-    "usr/share/wireplumber/scripts/default-nodes/j713-headphones.lua": "the headphone default-output hook; it only selects the headphone sink while it is available"
+    "usr/share/wireplumber/wireplumber.conf.d/83-j713-headphones.conf": "names the headphone sink and the headset mic source and adds their default-node hook as an optional component",
+    "usr/share/wireplumber/scripts/default-nodes/j713-headphones.lua": "the headphone default-node hook; it only selects the headphone sink and the headset mic while they are available"
   },
   "speaker_module": {
     "usr/lib/omarchy-m4/j713-audio/snd-soc-j713-group.ko": "aaad802eb136ff6cb915feaa123001b3eb848bc2f038d0a5b71c8e2ff35d2581"
@@ -115,7 +115,7 @@
     "usr/lib/omarchy-m4/gpu/asahi_m4.ko": "3cf47fa706630ddc5fc55a3bce00ab31e8a4c5ee48e1ba563e26a0406da196f8"
   },
   "headphone_modules": {
-    "usr/lib/omarchy-m4/j713-headphones/j713_hp_dt.ko": "9ba22f0eb586052606eb6e9d98fa9d05663c12e3197c1b41c4bdc833afe41f07",
-    "usr/lib/omarchy-m4/j713-headphones/snd-soc-j713-headphones.ko": "a73ef5655d453c1ebd424922b0b6141a77159c01cbe718d4c972be61ec5be87d"
+    "usr/lib/omarchy-m4/j713-headphones/j713_hp_dt.ko": "3f501c6193aeddc62031395e899909bf352851278f829458998ca1c4dbbe6149",
+    "usr/lib/omarchy-m4/j713-headphones/snd-soc-j713-headphones.ko": "2e743937b4bd8315ec6dba6bef4bbfbf197d4bf6f8688761954579192df48244"
   }
 }
