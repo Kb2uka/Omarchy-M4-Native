@@ -221,7 +221,7 @@ def video_start_guards(root):
     """Run m4-video-start's own fail() and board and SoC lines against the fixture's compatible list."""
     lines = VIDEO_START.read_text().splitlines()
     fail = [line for line in lines if line.startswith('fail() ')]
-    guards = [line for line in lines if line.startswith('grep -zFxq apple,') and LIVE_COMPATIBLE in line]
+    guards = [line for line in lines if line.startswith('grep ') and ' apple,' in line and LIVE_COMPATIBLE in line]
     if len(fail) != 1 or len(guards) != 2:
         raise AssertionError('m4-video-start board guard lines changed; update this harness')
     script = '\n'.join(fail + [line.replace(LIVE_COMPATIBLE, shlex.quote(str(root / COMPATIBLE))) for line in guards])
@@ -345,7 +345,7 @@ class LiveBoardGates(unittest.TestCase):
                     self.assertEqual(attempts, [], 'a refused board reached a filesystem write')
 
     def test_near_miss_names_are_refused(self):
-        """Gates match whole names: apple,j713x is not the J713, and apple,t8132x is not the T8132."""
+        """Gates match whole names: apple,j713-x is not the J713, and apple,t8132-x is not the T8132."""
         for name, call, kind, board_message, soc_message in GATES:
             cases = [(NEAR_MISS_BOARD, board_message)] + ([(NEAR_MISS_SOC, soc_message)] if soc_message else [])
             for (label, compatible), message in cases:
