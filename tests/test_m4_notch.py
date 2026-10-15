@@ -14,6 +14,7 @@ import re
 import stat
 import struct
 import tempfile
+import types
 import unittest
 from unittest import mock
 
@@ -117,7 +118,7 @@ class Air:
         path = self.home / NOTCH.SHELL_JSON
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(value, indent=2) + '\n')
-        os.chmod(path, 0o600)
+        os.chmod(path, 0o644)  # as on the owner's Air; the writer's own default is 0600
         return path
 
     def desktop(self, scale=2.0):
@@ -268,7 +269,8 @@ class ShowHideTests(unittest.TestCase):
 
 class DesktopTests(unittest.TestCase):
     def snapshot(self, air):
-        return {str(p): p.read_bytes() for p in air.home.rglob('*') if p.is_file()}
+        # The inode catches a rewrite with identical bytes.
+        return {str(p): (p.read_bytes(), p.stat().st_ino) for p in air.home.rglob('*') if p.is_file()}
 
     def test_cropped_boot_without_marks_changes_nothing(self):
         air = Air(self)
@@ -321,7 +323,7 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual((report['bar'], report['bar_height']), ('joined', 'cleared'))
         self.assertEqual(json.loads(path.read_text()), json.loads(original))
         self.assertFalse((air.home / NOTCH.SHELL_TOML).exists())
-        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o644)
 
     def test_marks_survive_the_shell_rewriting_its_file(self):
         air = Air(self, framebuffer=(2560, 1664))
@@ -504,3 +506,63 @@ class PackagingTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+# Each mutant undoes one part of the change; the named test must fail against it.
+MUTANTS = {
+    'show_any_loader': ("    require(current in KNOWN_LOADERS, 'boot.bin starts with an unknown stage 2 ' + current + '; nothing changed')\n    notch =",
+                        "    notch =", ShowHideTests, 'test_show_refuses_an_unknown_stage2'),
+    'show_no_pin_check': ("    require(len(notch) == NOTCH['size'] and sha(notch) == NOTCH['sha256'],",
+                          "    require(True,", ShowHideTests, 'test_show_refuses_a_staged_loader_that_is_not_the_pin'),
+    'show_no_backup': ("    compose.write(root / BACKUP, data)\n", "", ShowHideTests,
+                       'test_show_replaces_only_the_stage2_and_keeps_the_whole_old_file'),
+    'show_ignores_pacman': ("    require(not (root / PACMAN_LOCK).exists(),", "    require(True,", ShowHideTests,
+                            'test_show_refuses_while_pacman_runs'),
+    'hide_restores_the_old_file': ("    desired = splice(compose, data, layout, saved['loader'])",
+                                   "    desired = (root / BACKUP).read_bytes()", ShowHideTests,
+                                   'test_hide_restores_the_old_stage2_and_keeps_a_later_kernel_and_devicetree'),
+    'hide_keeps_backup': ("    (root / BACKUP).unlink()\n", "", ShowHideTests,
+                          'test_hide_restores_the_old_stage2_and_keeps_a_later_kernel_and_devicetree'),
+    'spacer_first': ("    at = ids.index(anchor) + 1 if anchor and anchor in ids else (len(center) + 1) // 2",
+                     "    at = 0", DesktopTests, 'test_shown_boot_splits_the_center_around_the_cutout'),
+    'spacer_not_anchor': ("    bar['centerAnchor'] = SPACER\n    return config, 'split", "    return config, 'split",
+                          DesktopTests, 'test_shown_boot_splits_the_center_around_the_cutout'),
+    'anchor_not_restored': ("            bar['centerAnchor'] = anchor\n", "            pass\n", DesktopTests,
+                            'test_a_cropped_boot_after_a_shown_one_restores_the_owner_files'),
+    'cropped_boot_writes': ("        if new is not None:\n            write_text(json_path,",
+                            "        if True:\n            new = new or config\n            write_text(json_path,",
+                            DesktopTests, 'test_cropped_boot_without_marks_changes_nothing'),
+    'no_font_compensation': ("    return max(THEME_BAR_SIZE, math.ceil(strip * BASE_FONT / base))",
+                             "    return max(THEME_BAR_SIZE, strip)", DesktopTests, 'test_sizes_follow_the_scale_and_the_font'),
+    'no_padding': ("    return math.ceil(CUTOUT_WIDTH / scale) + 2 * PAD", "    return math.ceil(CUTOUT_WIDTH / scale)",
+                   DesktopTests, 'test_shown_boot_splits_the_center_around_the_cutout'),
+    'owner_bar_height_replaced': ("    if toml_value(text, 'bar', 'size-horizontal') is not None:",
+                                  "    if False:", DesktopTests, 'test_the_owner_bar_height_is_kept'),
+    'marked_header_always_removed': ("            if any(KEY.match(x) and TOML_MARK not in x for x in following):",
+                                     "            if False:", DesktopTests,
+                                     'test_a_marked_header_stays_while_the_owner_added_keys_under_it'),
+    'created_file_kept': ("                    write_text(json_path, '')\n", "", DesktopTests,
+                          'test_without_a_shell_file_the_defaults_are_split_and_the_file_removed_again'),
+    'mode_not_kept': ("        mode = path.stat().st_mode & 0o777\n", "        pass\n", DesktopTests,
+                      'test_a_cropped_boot_after_a_shown_one_restores_the_owner_files'),
+}
+
+
+class MutantTests(unittest.TestCase):
+    def test_each_mutant_fails_its_test(self):
+        global NOTCH
+        text = SOURCE.read_text()
+        for name, (old, new, case, test) in MUTANTS.items():
+            with self.subTest(name):
+                self.assertEqual(text.count(old), 1, name)
+                module = types.ModuleType('m4_notch_' + name)
+                module.__file__ = str(SOURCE)
+                exec(compile(text.replace(old, new), str(SOURCE), 'exec'), module.__dict__)
+                module.composer = lambda: COMPOSE
+                saved, NOTCH = NOTCH, module
+                try:
+                    result = unittest.TestResult()
+                    case(test).run(result)
+                finally:
+                    NOTCH = saved
+                self.assertFalse(result.wasSuccessful(), name + ' survived ' + test)
