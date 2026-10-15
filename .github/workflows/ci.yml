@@ -52,6 +52,10 @@ jobs:
           python-version: '3.13'
       - name: Install test tools
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends lua5.4 device-tree-compiler
+      - name: Fetch pinned Asahi devicetree sources
+        run: |
+          bash tools/ci/fetch-asahi-dts.sh "$RUNNER_TEMP/asahi-linux"
+          echo "M4_ASAHI_TREE=$RUNNER_TEMP/asahi-linux" >> "$GITHUB_ENV"
       - name: Check whitespace in proposed change
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}

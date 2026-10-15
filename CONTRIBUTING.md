@@ -51,6 +51,8 @@ policy does not authorize removing or replacing another author's credit.
 Fresh installation, repeat boot and hardware behavior must be verified on the
 supported target before they are described as working. A passing offline check
 does not establish support for another board, codec or power state.
+Supported boards are listed in [M4 boards](docs/m4-boards.md); a change that
+adds one updates that table and its gates together.
 
 ## M4 packages
 
