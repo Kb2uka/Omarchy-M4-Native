@@ -25,6 +25,22 @@ MEASURED = {
     3: {8: 15.3, 10: 26.9, 12: 35.3},
     4: {6: 8.7, 8: 17.7, 10: 30.3},
 }
+# The settle runs (cpu/j713/bench/settle.py, 15 s holds, twice): rise 1.5 s into the hold, which
+# the step table must cover, and the fast heat gone 2 s after the drop back to P4, which pg_fast
+# must not exceed. One busy core asking for P20 runs P16/P17.
+SETTLED_RISE = {
+    1: {8: 8.4, 10: 14.0, 12: 20.5, 14: 28.5, 15: 27.1, 17: 28.9, 20: 28.5},
+    2: {8: 11.7, 9: 14.2, 10: 19.2, 11: 25.0, 12: 26.8},
+    3: {6: 6.2, 7: 8.4, 8: 13.2, 9: 16.4, 10: 23.1},
+    4: {6: 7.3, 7: 9.7, 8: 15.4, 9: 19.2},
+}
+SETTLED_FAST = {
+    1: {8: [7.1], 10: [13.6, 14.0], 12: [20.9, 20.1], 14: [26.9, 28.8], 15: [27.9, 27.4], 17: [28.3, 28.8],
+        20: [26.2, 28.8]},
+    2: {8: [10.0, 11.1], 9: [14.0], 10: [18.9, 16.5], 11: [25.0], 12: [27.6, 27.4]},
+    3: {6: [5.9, 5.5], 7: [8.0], 8: [12.3, 10.8], 9: [16.7], 10: [21.4, 21.2]},
+    4: {6: [6.6, 6.1], 7: [8.7, 8.7], 8: [14.6, 11.3], 9: [18.8, 18.6]},
+}
 U32S = ctypes.c_uint32 * 21
 U64S = ctypes.c_uint64 * 6
 
@@ -39,6 +55,7 @@ class Policy(unittest.TestCase):
                         '-o', str(library), str(HARNESS)], check=True)
         lib = ctypes.CDLL(str(library))
         lib.step.restype = ctypes.c_uint32
+        lib.fast.restype = ctypes.c_uint32
         lib.base.argtypes = [ctypes.c_int, ctypes.c_bool, ctypes.c_uint, ctypes.c_uint32]
         lib.window_busy.restype = ctypes.c_bool
         lib.hold.restype = ctypes.c_bool
@@ -60,7 +77,7 @@ class Policy(unittest.TestCase):
                                 levels if levels is not None else self.levels)
 
     def test_steps_never_below_a_measurement(self):
-        for busy, points in MEASURED.items():
+        for busy, points in list(MEASURED.items()) + list(SETTLED_RISE.items()):
             for level, rise in points.items():
                 with self.subTest(busy=busy, level=level):
                     self.assertGreaterEqual(self.lib.step(busy, level), rise * 1000)
@@ -131,14 +148,31 @@ class Policy(unittest.TestCase):
         self.assertEqual(self.lib.e_heat(9, 2808000), 12000, 'at most six E cores')
         self.assertLess(self.allowed(70, 4, self.lib.e_heat(6, 2808000)), self.allowed(70, 4))
 
-    def test_base_subtracts_only_a_share_of_a_busy_window(self):
-        share = self.lib.share()
-        self.assertTrue(0 < share < 100)
+    def test_base_subtracts_the_fast_heat_of_a_busy_window(self):
         for busy in range(1, 5):
             for level in range(5, 21):
-                expected = 85000 - self.lib.step(busy, level) * share // 100
-                self.assertEqual(self.lib.base(85000, True, busy, level), expected)
-                self.assertGreater(self.lib.base(85000, True, busy, level), 85000 - self.lib.step(busy, level))
+                self.assertEqual(self.lib.base(85000, True, busy, level), 85000 - self.lib.fast(busy, level))
+
+    def test_fast_heat_never_above_a_settle_measurement(self):
+        # Every state subtracts no more than the lowest run of any measured state at or above it,
+        # so the base can only err high.
+        for busy, points in SETTLED_FAST.items():
+            for level in range(5, 21):
+                above = [min(runs) for measured, runs in points.items() if measured >= level]
+                if above:
+                    with self.subTest(busy=busy, level=level):
+                        self.assertLessEqual(self.lib.fast(busy, level), min(above) * 1000)
+
+    def test_fast_heat_rows_are_bounded_and_ordered(self):
+        for busy in range(1, 5):
+            row = [self.lib.fast(busy, level) for level in range(21)]
+            self.assertEqual(row[:5], [0] * 5, 'no fast heat at or below P4')
+            self.assertEqual(row, sorted(row), f'{busy} busy cores: never more heat subtracted at a lower state')
+            for level in range(21):
+                self.assertLess(row[level], self.lib.step(busy, level) or 1,
+                                'the subtracted heat stays under the predicted step')
+        for level in range(21):
+            self.assertEqual(self.lib.fast(0, level), 0, 'row 0 is unused: no busy core is planned as one')
 
     def test_base_subtracts_nothing_unless_a_core_ran_above_p4_throughout(self):
         self.assertEqual(self.lib.base(85000, False, 4, 20), 85000)

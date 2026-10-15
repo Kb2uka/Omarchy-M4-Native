@@ -14,9 +14,9 @@ u32 step(unsigned int busy, unsigned int level)
 	return pg_step[busy][level];
 }
 
-int share(void)
+u32 fast(unsigned int busy, unsigned int level)
 {
-	return PG_BASE_SHARE;
+	return pg_fast[busy][level];
 }
 
 int e_heat(unsigned int e_busy, u32 e_khz)
