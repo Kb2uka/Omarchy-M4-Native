@@ -22,8 +22,8 @@ import tempfile
 import unittest
 import unittest.mock
 
-from m4_board_identities import (BOARDS, QUALIFIED, REFUSED, ROOT, SOC, TABLE, TABLE_PATH, identity,
-                                 refused_identities)
+from m4_board_identities import (BOARDS, FOREIGN_SOC, QUALIFIED, REFUSED, ROOT, SOC, TABLE, TABLE_PATH,
+                                 identity, refused_identities)
 from test_j713_gpu_air_gate import SOURCE as G16, item
 
 DOC = ROOT / 'docs/m4-boards.md'
@@ -200,20 +200,57 @@ def lid_lock(root):
     return report
 
 
-# (name, call(root), exception the gate raises, message of the board refusal)
+OWNER_ASSETS = load('m4_j713_owner_assets', 'tools/m4-j713-owner-assets.py')
+VIDEO_START = ROOT / 'packaging/j713-startup/m4-video-start'
+LIVE_COMPATIBLE = '/' + COMPATIBLE
+
+
+def owner_assets_install(root):
+    """install() reads fixed paths as root; run it with every absolute path moved under the fixture."""
+    def rooted(*parts):
+        path = Path(*parts)
+        return root / str(path).lstrip('/') if path.is_absolute() else path
+    with unittest.mock.patch.object(OWNER_ASSETS, 'Path', rooted), \
+         unittest.mock.patch.object(OWNER_ASSETS.os, 'getuid', return_value=0), \
+         unittest.mock.patch.object(OWNER_ASSETS.os, 'geteuid', return_value=0):
+        return OWNER_ASSETS.install()
+
+
+def video_start_guards(root):
+    """Run m4-video-start's own fail() and board and SoC lines against the fixture's compatible list."""
+    lines = VIDEO_START.read_text().splitlines()
+    fail = [line for line in lines if line.startswith('fail() ')]
+    guards = [line for line in lines if line.startswith('grep -zFxq apple,') and LIVE_COMPATIBLE in line]
+    if len(fail) != 1 or len(guards) != 2:
+        raise AssertionError('m4-video-start board guard lines changed; update this harness')
+    script = '\n'.join(fail + [line.replace(LIVE_COMPATIBLE, str(root / COMPATIBLE)) for line in guards])
+    result = subprocess.run(['bash', '-c', script], capture_output=True, text=True,
+                            env={'PATH': '/usr/bin:/bin'})
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip())
+
+
+# (name, call(root), exception the gate raises, board refusal message,
+#  SoC refusal message or None for a gate that checks only the board name)
 GATES = (
-    ('m4-boot-compose plan', COMPOSE.plan, COMPOSE.Refused, 'This is not a J713 MacBook Air'),
+    ('m4-boot-compose plan', COMPOSE.plan, COMPOSE.Refused, 'This is not a J713 MacBook Air', None),
     ('m4-boot-compose rollback', lambda root: COMPOSE.rollback(root, apply=True),
-     COMPOSE.Refused, 'This is not a J713 MacBook Air'),
+     COMPOSE.Refused, 'This is not a J713 MacBook Air', None),
     ('m4-channel-setup preflight', lambda root: CHANNEL.preflight(root, None),
-     CHANNEL.Refused, 'This is not a J713 MacBook Air'),
+     CHANNEL.Refused, 'This is not a J713 MacBook Air', None),
     ('m4-headphones boot', lambda root: HEADPHONES.run(root, 'boot', runner=never),
-     HEADPHONES.Refused, 'This is not a J713 MacBook Air'),
-    ('m4-lid-lock run', lid_lock, LookupError, 'not a J713; nothing to do'),
-    ('m4-session-placement layout', placement_layout, ValueError, 'qualified only for J713/T8132'),
+     HEADPHONES.Refused, 'This is not a J713 MacBook Air', None),
+    ('m4-lid-lock run', lid_lock, LookupError, 'not a J713; nothing to do', None),
+    ('m4-session-placement layout', placement_layout, ValueError, 'qualified only for J713/T8132',
+     'qualified only for J713/T8132'),
     ('m4-j713-audio-ready payload', lambda root: READY.payload(root, dict(schema=1, service=READY.SERVICE)),
-     ValueError, 'Expected J713/T8132'),
-    ('m4-j713-audio-register preflight', register_preflight, RuntimeError, 'Unsupported live board'),
+     ValueError, 'Expected J713/T8132', 'Expected J713/T8132'),
+    ('m4-j713-audio-register preflight', register_preflight, RuntimeError, 'Unsupported live board',
+     'Unsupported live board'),
+    ('m4-video-start board and SoC lines', video_start_guards, RuntimeError, 'unsupported board',
+     'unsupported SoC'),
+    ('m4-j713-owner-assets install', owner_assets_install, ValueError, 'This service requires J713/T8132',
+     'This service requires J713/T8132'),
 )
 
 
@@ -298,7 +335,7 @@ class LiveBoardGates(unittest.TestCase):
             return error, attempts
 
     def test_refused_boards_stop_at_the_board_gate(self):
-        for name, call, kind, message in GATES:
+        for name, call, kind, message, _ in GATES:
             for board in REFUSED:
                 with self.subTest(gate=name, board=board['target']):
                     error, attempts = self.outcome(call, identity(board))
@@ -306,13 +343,25 @@ class LiveBoardGates(unittest.TestCase):
                     self.assertIn(message, str(error))
                     self.assertEqual(attempts, [], 'a refused board reached a filesystem write')
 
+    def test_gates_that_check_the_soc_refuse_the_j713_name_on_another_soc(self):
+        for name, call, kind, _, message in GATES:
+            if message is None:
+                continue
+            with self.subTest(gate=name):
+                error, attempts = self.outcome(call, FOREIGN_SOC[1])
+                self.assertIsInstance(error, kind)
+                self.assertIn(message, str(error))
+                self.assertEqual(attempts, [], 'a refused board reached a filesystem write')
+
     def test_qualified_boards_pass_the_board_gate(self):
         """Control: the same fixture with a qualified board gets past the board check."""
-        for name, call, _, message in GATES:
+        for name, call, _, message, soc_message in GATES:
             for board in QUALIFIED:
                 with self.subTest(gate=name, board=board['target']):
                     error, _ = self.outcome(call, identity(board))
                     self.assertNotIn(message, str(error))
+                    if soc_message:
+                        self.assertNotIn(soc_message, str(error))
 
 
 
