@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -223,7 +224,7 @@ def video_start_guards(root):
     guards = [line for line in lines if line.startswith('grep -zFxq apple,') and LIVE_COMPATIBLE in line]
     if len(fail) != 1 or len(guards) != 2:
         raise AssertionError('m4-video-start board guard lines changed; update this harness')
-    script = '\n'.join(fail + [line.replace(LIVE_COMPATIBLE, str(root / COMPATIBLE)) for line in guards])
+    script = '\n'.join(fail + [line.replace(LIVE_COMPATIBLE, shlex.quote(str(root / COMPATIBLE))) for line in guards])
     result = subprocess.run(['bash', '-c', script], capture_output=True, text=True,
                             env={'PATH': '/usr/bin:/bin'})
     if result.returncode:
@@ -352,6 +353,14 @@ class LiveBoardGates(unittest.TestCase):
                 self.assertIsInstance(error, kind)
                 self.assertIn(message, str(error))
                 self.assertEqual(attempts, [], 'a refused board reached a filesystem write')
+
+    def test_qualified_boards_pass_the_video_start_lines(self):
+        """The extracted lines are the whole check, so a qualified board must pass them outright."""
+        for board in QUALIFIED:
+            with self.subTest(board=board['target']):
+                error, attempts = self.outcome(video_start_guards, identity(board))
+                self.assertIsNone(error)
+                self.assertEqual(attempts, [])
 
     def test_qualified_boards_pass_the_board_gate(self):
         """Control: the same fixture with a qualified board gets past the board check."""
