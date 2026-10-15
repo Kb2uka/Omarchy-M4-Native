@@ -73,7 +73,10 @@ builds gave the same bytes. It is pinned in the `package-inputs` release and in
 
 - refuses anywhere but a J713, and while a package transaction runs. While it
   writes it holds pacman's own database lock (`/var/lib/pacman/db.lck`), so the
-  composer's pacman hook cannot rewrite `boot.bin` at the same time;
+  composer's pacman hook cannot rewrite `boot.bin` at the same time. If
+  `m4-notch` is killed while writing, that lock file can be left behind; pacman
+  and `m4-notch` then both refuse, and removing `/var/lib/pacman/db.lck`
+  (with no pacman running) clears it, as pacman's own message says;
 - parses `boot.bin` with `m4-boot-compose`'s own parser, so a file the composer
   does not recognise is refused;
 - replaces the stage 2 (the first 0x110000 bytes) only when it is alpha.1's
@@ -86,9 +89,9 @@ builds gave the same bytes. It is pinned in the `package-inputs` release and in
 
 `sudo m4-notch --hide` splices the stage 2 from `boot.bin.pre-notch` back in,
 so a kernel or devicetree update installed while the notch was shown is kept,
-then removes the backup (also when it finds the notch already hidden, for
-example after the macOS recovery copy below). Both directions take effect at the next restart and
-change nothing when already in the requested state.
+then removes the backup. When the notch is already hidden it only removes a
+leftover backup, for example after the macOS recovery copy below. Both directions take effect at the next restart and
+leave `boot.bin` unchanged when it is already in the requested state.
 
 `m4-boot-compose` carries the stage 2 byte for byte, so package updates keep
 the owner's choice. Its own `--rollback` refuses a `boot.bin.previous` made

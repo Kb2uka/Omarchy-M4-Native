@@ -180,7 +180,8 @@ def guard(root, data):
     try:
         fd = os.open(root / PACMAN_LOCK, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o000)
     except FileExistsError:
-        raise Refused('a package transaction is running; run this again when it ends') from None
+        raise Refused('a package transaction is running; run this again when it ends (if none is, '
+                      + str(root / PACMAN_LOCK) + ' was left behind and can be removed)') from None
     os.close(fd)
     try:
         require((root / BOOT).read_bytes() == data, 'boot.bin changed while working; nothing changed, run it again')
@@ -228,16 +229,22 @@ def hide(root):
     data, layout = read_boot(root, compose)
     current = sha(layout['loader'])
     if current in KNOWN_LOADERS:
-        return drop_backup(root, {'status': 'already hidden from the next boot', 'loader': KNOWN_LOADERS[current]})
+        report = {'status': 'already hidden from the next boot', 'loader': KNOWN_LOADERS[current]}
+        if os.path.lexists(root / BACKUP):
+            with guard(root, data):
+                drop_backup(root, report)
+        return report
     require(current == NOTCH['sha256'], 'boot.bin starts with an unknown stage 2 ' + current + '; nothing changed')
     _, saved = read_boot(root, compose, BACKUP, 'The notch backup ' + BACKUP)
     original = sha(saved['loader'])
     require(original in KNOWN_LOADERS, 'The notch backup holds an unknown stage 2 ' + original + '; nothing changed')
     desired = splice(compose, data, layout, saved['loader'])
     space(root, len(data))
-    with guard(root, data):
+    report = {'status': 'notch hidden from the next boot', 'loader': KNOWN_LOADERS[original]}
+    with guard(root, data):  # the backup goes under the lock too, so a --show cannot slip in between
         compose.write(root / BOOT, desired)
-    return drop_backup(root, {'status': 'notch hidden from the next boot', 'loader': KNOWN_LOADERS[original]})
+        drop_backup(root, report)
+    return report
 
 
 def status(root):

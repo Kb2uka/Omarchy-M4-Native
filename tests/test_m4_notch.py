@@ -119,7 +119,7 @@ class Air:
         path = self.home / NOTCH.SHELL_JSON
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(value, indent=2) + '\n')
-        os.chmod(path, 0o640)  # not the writer's own 0600 default, so a lost mode shows
+        os.chmod(path, 0o700)  # not the writer's own 0600 default, so a lost mode shows
         return path
 
     def desktop(self, scale=2.0):
@@ -195,6 +195,22 @@ class ShowHideTests(unittest.TestCase):
             NOTCH.show(air.root)
             NOTCH.hide(air.root)
         self.assertEqual(held, [('boot.bin.pre-notch', True), ('boot.bin', True), ('boot.bin', True)])
+
+    def test_hide_drops_the_backup_while_it_still_holds_the_lock(self):
+        air = Air(self)
+        NOTCH.show(air.root)
+        seen = []
+        real = NOTCH.drop_backup
+
+        def drop(root, report):
+            seen.append((air.root / NOTCH.PACMAN_LOCK).exists())
+            return real(root, report)
+        with mock.patch.object(NOTCH, 'drop_backup', side_effect=drop):
+            NOTCH.hide(air.root)
+            air.put(NOTCH.BACKUP, air.boot_bytes())  # a stale copy on an Air already hidden
+            NOTCH.hide(air.root)
+        self.assertEqual(seen, [True, True])
+        self.assertFalse((air.root / NOTCH.BACKUP).exists())
         self.assertFalse((air.root / NOTCH.PACMAN_LOCK).exists())
 
     def test_the_lock_is_released_when_the_write_fails(self):
@@ -371,7 +387,7 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual((report['bar'], report['bar_height']), ('joined', 'cleared'))
         self.assertEqual(json.loads(path.read_text()), json.loads(original))
         self.assertFalse((air.home / NOTCH.SHELL_TOML).exists())
-        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o640)
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700)
 
     def test_marks_survive_the_shell_rewriting_its_file(self):
         air = Air(self, framebuffer=(2560, 1664))
@@ -591,12 +607,15 @@ MUTANTS = {
                        'test_show_replaces_only_the_stage2_and_keeps_the_whole_old_file'),
     'show_ignores_pacman': ("os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o000)", "os.O_WRONLY | os.O_CREAT, 0o000)",
                             ShowHideTests, 'test_show_refuses_while_pacman_runs'),
+    'backup_dropped_after_unlock': ("        compose.write(root / BOOT, desired)\n        drop_backup(root, report)\n    return report",
+                                    "        compose.write(root / BOOT, desired)\n    drop_backup(root, report)\n    return report",
+                                    ShowHideTests, 'test_hide_drops_the_backup_while_it_still_holds_the_lock'),
     'lock_never_released': ("        (root / PACMAN_LOCK).unlink(missing_ok=True)\n", "        pass\n", ShowHideTests,
                             'test_pacman_lock_is_held_while_boot_bin_is_written_and_released_after'),
     'write_outside_the_lock': ("    with guard(root, data):\n        compose.write(root / BACKUP, data)\n        compose.write(root / BOOT, desired)\n",
                                "    compose.write(root / BACKUP, data)\n    compose.write(root / BOOT, desired)\n",
                                ShowHideTests, 'test_pacman_lock_is_held_while_boot_bin_is_written_and_released_after'),
-    'stale_backup_kept': ("        return drop_backup(root, {'status': 'already hidden", "        return ({'status': 'already hidden",
+    'stale_backup_kept': ("                drop_backup(root, report)\n        return report", "                pass\n        return report",
                           ShowHideTests, 'test_hide_after_a_macos_recovery_removes_the_stale_backup'),
     'unlink_failure_refuses': ("    except OSError as error:\n        report['backup'] = 'could not remove '",
                                "    except KeyError as error:\n        report['backup'] = 'could not remove '",
