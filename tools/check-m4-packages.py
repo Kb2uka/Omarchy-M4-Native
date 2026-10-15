@@ -45,6 +45,13 @@ def require(condition, message):
         raise ValueError(message)
 
 
+def git_tree_id(tree, revision, path):
+    """The git tree object of path at revision, or None when it does not exist there."""
+    result = subprocess.run(['git', '-C', str(tree), 'rev-parse', '--verify', '--quiet', revision + ':' + path],
+                            capture_output=True, text=True)
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
 def source_joins(path=None):
     """Load the channel binary-to-source joins and reject malformed entries."""
     target = path or (ROOT / 'packaging/channel-source-joins.json')
@@ -58,10 +65,12 @@ def source_joins(path=None):
                 entry.get('correspondence') in CORRESPONDENCE and entry.get('sources'),
                 'Incomplete channel source join: ' + name)
         for source in entry['sources']:
-            require(set(source) in ({'tree'}, {'tree', 'commit'}, {'archive'}, {'archive', 'sha256'}),
+            require(set(source) in ({'tree'}, {'tree', 'commit'}, {'archive', 'sha256'}),
                     'Unknown source reference for ' + name)
             require('commit' not in source or re.fullmatch(r'[0-9a-f]{40}', source['commit']),
                     'A joined tree commit is a full commit ID: ' + name)
+            require('sha256' not in source or re.fullmatch(r'[0-9a-f]{64}', source['sha256']),
+                    'A joined archive sha256 is a 64-char hex string: ' + name)
             require('tree' in source or (source['archive'].startswith(('source/', 'package-inputs/')) and
                                          '/' not in source['archive'].split('/', 1)[1]),
                     'Source archives live directly in source/ or package-inputs/: ' + name)
@@ -71,40 +80,50 @@ def source_joins(path=None):
 def package_inputs(name):
     """Return {filename: sha256} for all package-inputs binaries downloaded by this package."""
     recipe = ROOT / 'packaging/omarchy-m4' / name / 'PKGBUILD'
-    if not recipe.is_file():
-        return {}
+    require(recipe.is_file(), f'Missing PKGBUILD for package: {name}')
     text = recipe.read_text()
+    require(not re.search(r'^\s*source_[a-zA-Z0-9_]+\s*=', text, re.M),
+            f'{name}: arch-suffixed source_* array is not allowed')
+    require(not re.search(r'^\s*sha256sums_[a-zA-Z0-9_]+\s*=', text, re.M),
+            f'{name}: arch-suffixed sha256sums_* array is not allowed')
     vars = {}
     for line in text.splitlines():
         m = re.match(r'^([a-zA-Z_0-9]+)=(.*)$', line.strip())
         if m:
             vars[m.group(1)] = m.group(2).strip('\'"')
-    changed = True
-    while changed:
+    for _ in range(10):
         changed = False
         for k, v in list(vars.items()):
             for sub_k, sub_v in vars.items():
+                if sub_k == k:
+                    continue
                 if f'${{{sub_k}}}' in v:
                     vars[k] = v.replace(f'${{{sub_k}}}', sub_v)
                     changed = True
                 elif f'${sub_k}' in v:
                     vars[k] = v.replace(f'${sub_k}', sub_v)
                     changed = True
-    sources_m = re.search(r'^source=\((.*?)\)', text, re.M | re.S)
-    sums_m = re.search(r'^sha256sums=\((.*?)\)', text, re.M | re.S)
+        if not changed:
+            break
+    sources_m = re.search(r'^\s*source=\((.*?)\)', text, re.M | re.S)
+    sums_m = re.search(r'^\s*sha256sums=\((.*?)\)', text, re.M | re.S)
     if not sources_m or not sums_m:
+        require('package-inputs/' not in text,
+                f'{name}: PKGBUILD mentions package-inputs/ but no inputs were parsed')
         return {}
     entries = re.findall(r"""['"]([^'"]+)['"]""", sources_m.group(1))
     sums = re.findall(r"'([0-9a-f]{64})'", sums_m.group(1))
     require(len(entries) == len(sums), f'{name}: source and sha256sums counts differ')
     inputs = {}
     for entry, digest in zip(entries, sums):
-        for _ in range(3):
+        for _ in range(10):
             for k, v in vars.items():
                 entry = entry.replace(f'${{{k}}}', v).replace(f'${k}', v)
         if 'package-inputs/' in entry:
             filename = entry.split('package-inputs/')[-1].split('::')[-1].strip()
             inputs[filename] = digest
+    if 'package-inputs/' in text:
+        require(bool(inputs), f'{name}: PKGBUILD mentions package-inputs/ but no inputs were parsed')
     return inputs
 
 
@@ -123,6 +142,23 @@ def check_channel_joins(name, joins):
             if 'tree' in source:
                 require((ROOT / source['tree']).exists(),
                         f'Joined source tree missing for {filename}: {source["tree"]}')
+                if 'commit' in source:
+                    pinned = git_tree_id(ROOT, source['commit'], source['tree'])
+                    require(pinned is not None,
+                            f'Joined commit {source["commit"][:12]} does not exist or does not contain {source["tree"]} for {filename}')
+                    head_tree = git_tree_id(ROOT, 'HEAD', source['tree'])
+                    require(pinned == head_tree,
+                            f'Joined source tree {source["tree"]} differs from {source["commit"][:12]} for {filename}')
+
+
+def check_stale_joins(channel, joins):
+    """Refuse joins for binaries the channel no longer ships."""
+    all_downloaded = set()
+    for pkg in channel['packages']:
+        all_downloaded.update(package_inputs(pkg))
+    stale = set(joins['binaries']) - all_downloaded
+    require(not stale,
+            'Source joins for binaries the channel no longer ships: ' + ', '.join(sorted(stale)))
 
 
 def sha(data):
@@ -202,7 +238,8 @@ def check_package(channel, package, info, files, root, joins=None):
         require(not allowed(path, channel['protected_paths']) or path in channel.get('protected_exceptions', {}),
                 f'{name} installs a protected path: {path}')
         require(files[path][0] & 0o7022 == 0, f'{name} installs a writable or setuid file: {path}')
-    check_channel_joins(name, joins or source_joins())
+    if joins is not None:
+        check_channel_joins(name, joins)
     kernel = channel['kernel']
     if name == 'linux-m4-omarchy':
         image = files.get('usr/lib/omarchy-m4/Image.gz')
@@ -311,6 +348,7 @@ def published(channel, filename, scratch):
 def check(directory, compare_published=True):
     channel = json.loads(CHANNEL.read_text())
     joins = source_joins()
+    check_stale_joins(channel, joins)
     packages = sorted(directory.glob('*.pkg.tar.zst'))
     require(sorted(p.name for p in directory.iterdir()) == [p.name for p in packages],
             'Only package archives may be in the build output')
