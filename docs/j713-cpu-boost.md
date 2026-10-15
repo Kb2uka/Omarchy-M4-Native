@@ -80,7 +80,7 @@ stays at or below 100 C:
 - **Slow path:** every 250 ms it reads `TCMz`. On each new reading it
   estimates the base, the temperature at P4: it subtracts the measured **fast
   heat** (below) of the fewest busy P cores and the lowest P state seen in the
-  last 750 ms, and only when a P core was at least 90% busy through the
+  last 750-1000 ms (the current 250 ms tick and the three before it), and only when a P core was at least 90% busy through the
   reading's window. Otherwise it subtracts nothing. Only this path raises the
   cap.
 - **Fast heat table:** the part of a state's rise that leaves the die within
@@ -88,9 +88,11 @@ stays at or below 100 C:
   up to the first that reached 95 C, on one to four busy P cores, twice
   ([Settled heat](#settled-heat-the-base-estimate)). It takes the lower run,
   rounded down, and is non-decreasing in state, so the base can only err
-  high. The rest of a rise, 0-12 C of slow creep, is package heat that stays
-  after the drop and is rightly part of the base. The fast heat leaves with a
-  time constant of about 0.25 s, so looking back 750 ms is enough.
+  high, and no busy-core count subtracts more than a measured higher count
+  at the same state. The rest of a rise, 0-12 C of slow creep, is package
+  heat that stays after the drop and is rightly part of the base. The fast
+  heat leaves with a time constant of about 0.25 s, so looking back 750 ms is
+  enough.
 - **Fails closed:** the cap starts at P4, returns there on any SMC read error,
   and pins P4 from 103 C until the die is below 95 C. The guard refuses to
   load without the J713 idle driver (idle P cores would spin at the boosted
@@ -106,7 +108,7 @@ core count and E-cluster load.
 ### Loading it: `omarchy-m4-cpu` 1-3
 
 `m4-cpu-idle --boot` loads the idle driver and then the pinned guard
-(`07adfa65…`) inside the same one-strike window: a boot that dies while either
+(`aa0ef339…`) inside the same one-strike window: a boot that dies while either
 loads or settles makes the next boot load neither. A guard that is missing,
 differs from its pin or fails to load leaves the gate closed and P at
 1800 MHz, while CPU idle still loads. Without the boost devicetree, the guard

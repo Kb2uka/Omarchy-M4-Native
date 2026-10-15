@@ -78,13 +78,16 @@ static inline int pg_float_to_mc(u32 bits, int *mc)
  * the two runs, rounded down; a state not measured takes the next measured
  * state below it; then each row is made non-decreasing from the top down by
  * a running minimum, because one busy core asking for P20 runs P17 and measured less.
- * The base subtracts these, so it can only err high.
+ * Where a state was measured for more busy cores, no entry for fewer is higher
+ * (two cores at P5 take three cores' 2.6 C), because the base uses the fewest
+ * busy cores of the look-back while more may have joined. The base subtracts
+ * these, so it can only err high.
  */
 static const u32 pg_fast[PG_P_CPUS + 1][PG_TOP_LEVEL + 1] = {
 	[1] = { [5] = 1000, [6] = 3000, [7] = 5000, [8] = 7000, [9] = 7000, [10] = 13000, [11] = 13000, [12] = 20000, [13] = 20000,
 		[14] = 26000, [15] = 26000, [16] = 26000, [17] = 26000, [18] = 26000, [19] = 26000,
 		[20] = 26000 },
-	[2] = { [5] = 3000, [6] = 5000, [7] = 6000, [8] = 10000, [9] = 14000, [10] = 16000, [11] = 25000, [12] = 27000, [13] = 27000,
+	[2] = { [5] = 2000, [6] = 5000, [7] = 6000, [8] = 10000, [9] = 14000, [10] = 16000, [11] = 25000, [12] = 27000, [13] = 27000,
 		[14] = 27000, [15] = 27000, [16] = 27000, [17] = 27000, [18] = 27000, [19] = 27000,
 		[20] = 27000 },
 	[3] = { [5] = 2000, [6] = 5000, [7] = 8000, [8] = 10000, [9] = 16000, [10] = 21000, [11] = 21000,
@@ -97,9 +100,10 @@ static const u32 pg_fast[PG_P_CPUS + 1][PG_TOP_LEVEL + 1] = {
 
 /*
  * How far back the base looks for the lowest P state and the fewest busy P
- * cores. The fast heat comes and goes with a time constant of about 0.25 s,
- * so after 750 ms less than 5% of an earlier state's fast heat is left; a
- * dip longer ago no longer holds the base up.
+ * cores: PG_RECENT_MS of whole slow ticks kept, plus the current tick, so
+ * 750-1000 ms at the default 250 ms period. The fast heat comes and goes with
+ * a time constant of about 0.25 s, so after 750 ms less than 5% of an earlier
+ * state's fast heat is left; a dip longer ago no longer holds the base up.
  */
 #define PG_RECENT_MS 750
 #define PG_RECENT_MAX 16	/* ticks kept: 750 ms at the shortest period, 50 ms */

@@ -15,7 +15,7 @@
  *   each new reading, estimate the base, the temperature with the cluster
  *   back at 1800 MHz (pg_base): the reading less the measured fast heat
  *   (pg_fast) of the fewest busy P cores and lowest P state seen in the last
- *   750 ms, when a P core was busy through the reading window. It is the
+ *   750-1000 ms, when a P core was busy through the reading window. It is the
  *   only path that raises the cap.
  * - Fast path, a deferrable timer every 16 ms pinned to each P core: count
  *   the busy P cores from their idle time. A deferrable timer fires only on
@@ -450,7 +450,7 @@ static int __init guard_init(void)
 	}
 	for (i = 0; i < PG_P_CPUS + PG_E_CPUS; i++)
 		last_idle[i] = get_cpu_idle_time_us(cpu_at(i), &last_wall[i]);
-	recent_ticks = DIV_ROUND_UP(PG_RECENT_MS, period_ms);
+	recent_ticks = min_t(unsigned int, DIV_ROUND_UP(PG_RECENT_MS, period_ms), PG_RECENT_MAX);
 	for (i = 0; i < recent_ticks; i++) {
 		recent_min[i] = PG_BASE_LEVEL;
 		recent_min_busy[i] = PG_P_CPUS;

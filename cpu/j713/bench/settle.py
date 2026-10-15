@@ -49,7 +49,11 @@ try:
             rec['error'] = r.stderr.strip()
         else:
             rec['t_hold'] = round(time.monotonic() - t0, 2)
+            give_up = time.monotonic() + hold_ms / 1000 + 10  # the module stops itself at hold_ms
             while 'state stopped' not in open('/proc/j713_pstate_bench').read().splitlines()[1]:
+                if time.monotonic() > give_up:
+                    rec['error'] = 'bench did not report a stop'
+                    break
                 time.sleep(0.25)
             rec['bench'] = open('/proc/j713_pstate_bench').read()
             subprocess.run(['rmmod', 'j713_pstate_bench'], check=True)

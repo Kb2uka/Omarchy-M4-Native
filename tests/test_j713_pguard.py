@@ -181,6 +181,15 @@ class Policy(unittest.TestCase):
         self.assertEqual(self.lib.recent_ms(), 750)
         self.assertGreaterEqual(self.lib.recent_max(), -(-self.lib.recent_ms() // 50), 'room at the shortest period')
 
+    def test_fewer_busy_cores_never_subtract_more_than_a_measured_higher_count(self):
+        # The base uses the fewest busy cores of the look-back while more may have joined.
+        for level in range(5, 21):
+            for fewer in range(1, 4):
+                for more in range(fewer + 1, 5):
+                    if level in SETTLED_FAST[more]:
+                        with self.subTest(level=level, fewer=fewer, more=more):
+                            self.assertLessEqual(self.lib.fast(fewer, level), min(SETTLED_FAST[more][level]) * 1000)
+
     def test_fast_heat_rows_are_bounded_and_ordered(self):
         for busy in range(1, 5):
             row = [self.lib.fast(busy, level) for level in range(21)]
@@ -324,8 +333,14 @@ class ModuleSource(unittest.TestCase):
         slow = slow[:slow.index('\n}\n')]
         self.assertIn('base_mc = pg_base(mc, busy, pg_lowest(recent_min_busy, recent_ticks, tick_min_busy),\n'
                       '\t\t\t\t\t  pg_lowest(recent_min, recent_ticks, tick_min));', slow)
-        self.assertIn('recent_pos = (recent_pos + 1) % recent_ticks;', slow)
-        self.assertIn('recent_ticks = DIV_ROUND_UP(PG_RECENT_MS, period_ms);', self.init)
+        ring = slow[slow.index('/* This tick joins the recent ones'):]
+        order = [ring.index(s) for s in ('recent_min[recent_pos] = tick_min;',
+                                          'recent_min_busy[recent_pos] = tick_min_busy;',
+                                          'recent_pos = (recent_pos + 1) % recent_ticks;',
+                                          'tick_min = policy_level();', 'tick_min_busy = PG_P_CPUS;')]
+        self.assertEqual(order, sorted(order), 'each tick is kept, then the next starts from the current state')
+        self.assertIn('recent_ticks = min_t(unsigned int, DIV_ROUND_UP(PG_RECENT_MS, period_ms), PG_RECENT_MAX);',
+                      self.init)
         self.assertIn('recent_min[i] = PG_BASE_LEVEL;', self.init, 'until measured, the kept ticks subtract nothing')
         self.assertLess(self.init.index('recent_ticks = DIV_ROUND_UP'), self.init.index('queue_delayed_work'))
         self.assertIn('period_ms < 50', self.init)

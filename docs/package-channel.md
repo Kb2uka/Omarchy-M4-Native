@@ -184,7 +184,7 @@ file.
 - **P-core boost** ([J713 P-core boost](j713-cpu-boost.md), #66): P cores run
   up to 4464 MHz and E cores up to 2808 MHz, with P capped by a predictive guard
   that keeps the CPU die's predicted peak at or below 100 C.
-- **Module:** `j713_pguard.ko` (`07adfa65…`), built with the idle module by
+- **Module:** `j713_pguard.ko` (`aa0ef339…`), built with the idle module by
   `cpu/j713/build-module.sh` and pinned in `package-inputs` and
   `cpu_guard_module`. `m4-cpu-idle` loads it inside the idle driver's
   one-strike window, and with boost on sets the real-time uclamp floor to
@@ -199,8 +199,8 @@ file.
 
 - **Measured heat model** ([Settled heat](j713-cpu-boost.md#settled-heat-the-base-estimate),
   #66): the guard's base estimate subtracts the measured fast heat of each P
-  state instead of 70% of its predicted step, and looks back 750 ms for the
-  lowest state. Guard `j713_pguard.ko` `07adfa65…`, pinned in
+  state instead of 70% of its predicted step, and looks back 750-1000 ms for the
+  lowest state. Guard `j713_pguard.ko` `aa0ef339…`, pinned in
   `package-inputs` and `cpu_guard_module`.
 
 ## Connecting new installs
