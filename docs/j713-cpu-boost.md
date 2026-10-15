@@ -183,38 +183,41 @@ so the base read about 1 C low. One core held at P17 rose from about 61 C to
 
 ### Guarded runs
 
-Clocks are the P cluster's after the first 5 s; loop rate is the bench's
-per-core work (millions of loop iterations a second) against the earlier
-70%-share build. Each run started at 53-62 C; loads ran 45 s (the join run
-40 s, all ten cores 60 s, the long run 120 s).
+With the parity limits (105 C predicted peak, 108 C pin, 100 C sustained
+trip). Clocks are the P cluster's after the first 5 s (requested; the
+hardware runs one busy core's P18-P20 as P17, 4044 MHz). Loop rate is the
+bench's per-core work, millions of loop iterations a second; in brackets, the
+same guard at 100/103/95 C. Each run started at 48-62 C; loads ran 45 s (the
+join run 40 s, all ten cores 60 s, the long runs 120 s and 600 s). The bench
+killed a load at 110 C; none was killed.
 
-| Load | Peak `TCMz` | P clock while loaded | Loop rate (earlier build) | Over 100 C, hot pin, SMC errors |
+| Load | Peak `TCMz` | P clock while loaded | Loop rate (at 100 C) | Hot pin, SMC errors |
 | --- | --- | --- | --- | --- |
-| One P core | 95.9 C | 2.6-4.1 GHz, median 3.1 GHz | 49.4 (48.2) | none |
-| One P core, 120 s | 95.9 C | ends at 2.9 GHz | 43.0 | none |
-| Two P cores | 96.8 C | 2.4-3.3 GHz, median 3.1 GHz | 44.0 (41.8) | none |
-| Four P cores | 97.6 C | 2.1-2.6 GHz, median 2.4 GHz | 36.8 (34.4) | none |
-| One P core for 15 s, then three more at once | 96.1 C | 2.1-3.8 GHz, median 2.6 GHz | 26.6 (29.8) | none |
-| Four P cores, 200 ms on / 200 ms off | 88.5 C | median 2.4 GHz | 23.7 (21.6) | none |
-| All ten cores | 97.1 C | P 1.8-2.1 GHz, E 2808 MHz | 25.3 (26.8) | none |
+| One P core | 94.7 C | 3.3-4.5 GHz, median **4.46 GHz** | 55.5 (49.4) | none |
+| One P core, 120 s | 103.2 C | median 3.5 GHz for the first minute, 3.3 GHz after | 45.3 (43.0) | none |
+| Two P cores | 99.7 C | median 3.1 GHz | 40.9 (44.0) | none |
+| Four P cores | 93.8 C | median 2.4 GHz | 35.3 (36.8) | none |
+| One P core for 15 s, then three more at once | 105.7 C | median 2.6 GHz | 26.3 (26.6) | none |
+| Four P cores, 200 ms on / 200 ms off | 92.7 C | median 2.4 GHz | 23.0 (23.7) | none |
+| All ten cores | 97.8 C | P 1.8 GHz, E 2808 MHz | 26.4 (25.3) | none |
+| All ten cores, 10 minutes | 101.0 C | P 1.8 GHz, E **2808 MHz throughout** | 22.3 (19.2 at the 95 C trip) | none |
 
-The prediction holds where it is tightest: in an earlier build's four-core
-run, four cores woke at once from a 60.9 C die into a cap of P11, predicted to
-peak at 98.9 C, and peaked at 97.1 C.
-
+- **Where parity helps:** one core holds the top clock through a 45 s job
+  (12% more work), and a ten-minute all-core load keeps the E cluster at
+  2808 MHz instead of riding the 95 C trip (16% more work, about 18.8 W,
+  settling at 95-101 C). Two- and four-core 45 s runs were within run-to-run
+  variation of the 100 C limits.
+- **The join run peaked at 105.7 C**, 0.7 C over the 105 C prediction, when
+  three more cores joined a hot single core; the 108 C pin did not engage.
 - **The clocks are real.** A 100 ms log of requested against actual clock
   (`cpuinfo_cur_freq`, the cluster's `DVFS_STATUS`) over these runs matched in
-  99.5% of 5,174 samples; the earlier build's log reached 4464 MHz.
-- **Settled single-thread clock:** one core settles near 3.1 GHz. With the
-  base now measured, what holds it there is heat: a P core held at 4 GHz takes
-  the die past 94 C within 15 s and keeps creeping, and the guard keeps the
-  predicted peak at or below 100 C (Limits).
+  98.4% of 23,950 samples.
+- **Sustained single-thread:** after a minute one core settles near 3.3 GHz at
+  about 99 C; the package itself has warmed by then, and the guard keeps the
+  predicted peak at or below 105 C.
 - **Single-thread speed:** a fixed Python loop pinned to CPU 0 took 3.99 and
-  4.19 s with the gate closed (1800 MHz) and 2.49 and 2.13 s with it open:
-  1.7-2.0x faster.
-- **Ten-minute all-core soak** (all ten cores, E to 2808): peak 95.4 C, settled
-  at 91-93 C, 14-18.6 W. The guard held P at 1800 MHz for the E cluster's heat,
-  and the 95 C trip held the die by stepping E between 2172 and 2808 MHz.
+  4.19 s with the gate closed (1800 MHz) and 2.49 and 2.13 s with it open
+  (100 C limits): 1.7-2.0x faster.
 
 ### Idle
 
@@ -248,13 +251,13 @@ recomposes it.
 
 ## Limits
 
-- Sustained single-thread work settles near 3.1 GHz, not 4464 MHz, and the
-  limit is now heat rather than the estimate: with the measured base, one P
-  core near 4 GHz reaches the 100 C prediction within seconds. More sustained
-  speed would need a higher limit.
-- The guard limit is 100 C predicted, with the 95 C trip for sustained load and
-  103 C as the hard pin. These are the guard's defaults; it has module
+- The limits follow macOS on the fanless Airs as reported by third-party
+  reviews, not an Apple specification: 105 C predicted, 108 C hard pin, 100 C
+  sustained trip. The firmware does not throttle for heat on its own, so the
+  guard is the only limit. They are the guard's defaults; it has module
   parameters within fixed bounds, but nothing sets them.
+- Sustained single-thread work settles near 3.3 GHz after a minute: heat, not
+  the estimate, is the limit.
 - The fast-heat table comes from one Air at 53-68 C starting temperatures, two
   runs per state.
 - No energy model, so energy-aware scheduling stays off.

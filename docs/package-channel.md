@@ -198,6 +198,8 @@ file.
 
 ### omarchy-m4-cpu 1-3
 
+- **Limits at macOS parity:** a 105 C predicted peak, a 108 C hard pin, and
+  the zone's sustained trip raised to 100 C while the guard runs.
 - **Measured heat model** ([Settled heat](j713-cpu-boost.md#settled-heat-the-base-estimate),
   #66): the guard's base estimate subtracts the measured fast heat of each P
   state instead of 70% of its predicted step, and looks back 750-1000 ms for the
