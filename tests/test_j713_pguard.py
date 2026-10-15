@@ -353,10 +353,14 @@ class ModuleSource(unittest.TestCase):
         slow = slow[:slow.index('\n}\n')]
         self.assertIn('base_mc = pg_base(mc, busy, pg_lowest(recent_min_busy, recent_ticks, tick_min_busy),\n'
                       '\t\t\t\t\t  pg_lowest(recent_min, recent_ticks, tick_min));', slow)
-        self.assertIn('\t/* This tick joins the recent ones; the next starts from the current state. */\n'
+        # The whole sequence, between the end of the reading's if/else and the unlock, so no condition can
+        # wrap it: every slow tick is kept, then the next starts from the current state.
+        self.assertIn('\t\tsmc_ok = true;\n\t}\n'
+                      '\t/* This tick joins the recent ones; the next starts from the current state. */\n'
                       '\trecent_pos = pg_keep(recent_min, recent_min_busy, recent_pos, recent_ticks, tick_min, '
-                      'tick_min_busy);\n\ttick_min = policy_level();\n\ttick_min_busy = PG_P_CPUS;\n', slow,
-                      'every slow tick is kept, unconditionally, then the next starts from the current state')
+                      'tick_min_busy);\n\ttick_min = policy_level();\n\ttick_min_busy = PG_P_CPUS;\n'
+                      '\tspin_unlock_irqrestore(&fast_lock, flags);\n\tmutex_unlock(&lock);\n', slow)
+        self.assertEqual(slow.count('pg_keep('), 1)
         self.assertIn('recent_ticks = min_t(unsigned int, DIV_ROUND_UP(PG_RECENT_MS, period_ms), PG_RECENT_MAX);',
                       self.init)
         self.assertIn('recent_min[i] = PG_BASE_LEVEL;', self.init, 'until measured, the kept ticks subtract nothing')
