@@ -79,7 +79,7 @@ static inline int pg_float_to_mc(u32 bits, int *mc)
  * state below it; then each row is made non-decreasing from the top down by
  * a running minimum, because one busy core asking for P20 runs P17 and measured less.
  * Where a state was measured for more busy cores, no entry for fewer is higher
- * (two cores at P5 take three cores' 2.6 C), because the base uses the fewest
+ * (two cores at P5 take 2 C, three cores' 2.6 C rounded down), because the base uses the fewest
  * busy cores of the look-back while more may have joined. The base subtracts
  * these, so it can only err high.
  */
@@ -107,6 +107,15 @@ static const u32 pg_fast[PG_P_CPUS + 1][PG_TOP_LEVEL + 1] = {
  */
 #define PG_RECENT_MS 750
 #define PG_RECENT_MAX 16	/* ticks kept: 750 ms at the shortest period, 50 ms */
+
+/* Keep a finished tick's lowest state and busy count in the ring of n; returns the next position. */
+static inline unsigned int pg_keep(u32 *recent, u32 *recent_busy, unsigned int pos, unsigned int n,
+				   u32 tick, u32 tick_busy)
+{
+	recent[pos] = tick;
+	recent_busy[pos] = tick_busy;
+	return (pos + 1) % n;
+}
 
 /* The lowest of the n values kept for recent ticks and the current tick's. */
 static inline u32 pg_lowest(const u32 *recent, unsigned int n, u32 now)

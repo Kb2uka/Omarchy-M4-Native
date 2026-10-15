@@ -57,6 +57,7 @@ class Policy(unittest.TestCase):
         lib.step.restype = ctypes.c_uint32
         lib.fast.restype = ctypes.c_uint32
         lib.lowest.restype = ctypes.c_uint32
+        lib.keep.argtypes = [U32S, U32S, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint32, ctypes.c_uint32]
         lib.lowest.argtypes = [U32S, ctypes.c_uint, ctypes.c_uint32]
         lib.base.argtypes = [ctypes.c_int, ctypes.c_bool, ctypes.c_uint, ctypes.c_uint32]
         lib.window_busy.restype = ctypes.c_bool
@@ -189,6 +190,25 @@ class Policy(unittest.TestCase):
                     if level in SETTLED_FAST[more]:
                         with self.subTest(level=level, fewer=fewer, more=more):
                             self.assertLessEqual(self.lib.fast(fewer, level), min(SETTLED_FAST[more][level]) * 1000)
+
+    def test_the_ring_keeps_three_ticks_and_forgets_older_ones(self):
+        # As the guard runs it: kept ticks start at P4 / all busy, each slow tick is kept, and the
+        # base takes the lowest of the ring and the current tick.
+        ring, busy = U32S(*([4] * 21)), U32S(*([4] * 21))
+        pos = 0
+        for tick, tick_busy in ((12, 1), (15, 2), (17, 1)):
+            pos = self.lib.keep(ring, busy, pos, 3, tick, tick_busy)
+        self.assertEqual(pos, 0)
+        self.assertEqual((self.lib.lowest(ring, 3, 20), self.lib.lowest(busy, 3, 4)), (12, 1))
+        pos = self.lib.keep(ring, busy, pos, 3, 18, 2)
+        self.assertEqual(list(ring)[:3], [18, 15, 17])
+        self.assertEqual(self.lib.lowest(ring, 3, 20), 15, 'the oldest tick has left the look-back')
+        self.assertEqual(self.lib.lowest(busy, 3, 4), 1)
+
+    def test_fast_heat_is_whole_degrees_rounded_down(self):
+        for busy in range(1, 5):
+            for level in range(21):
+                self.assertEqual(self.lib.fast(busy, level) % 1000, 0, f'{busy} cores P{level}')
 
     def test_fast_heat_rows_are_bounded_and_ordered(self):
         for busy in range(1, 5):
@@ -333,12 +353,10 @@ class ModuleSource(unittest.TestCase):
         slow = slow[:slow.index('\n}\n')]
         self.assertIn('base_mc = pg_base(mc, busy, pg_lowest(recent_min_busy, recent_ticks, tick_min_busy),\n'
                       '\t\t\t\t\t  pg_lowest(recent_min, recent_ticks, tick_min));', slow)
-        ring = slow[slow.index('/* This tick joins the recent ones'):]
-        order = [ring.index(s) for s in ('recent_min[recent_pos] = tick_min;',
-                                          'recent_min_busy[recent_pos] = tick_min_busy;',
-                                          'recent_pos = (recent_pos + 1) % recent_ticks;',
-                                          'tick_min = policy_level();', 'tick_min_busy = PG_P_CPUS;')]
-        self.assertEqual(order, sorted(order), 'each tick is kept, then the next starts from the current state')
+        self.assertIn('\t/* This tick joins the recent ones; the next starts from the current state. */\n'
+                      '\trecent_pos = pg_keep(recent_min, recent_min_busy, recent_pos, recent_ticks, tick_min, '
+                      'tick_min_busy);\n\ttick_min = policy_level();\n\ttick_min_busy = PG_P_CPUS;\n', slow,
+                      'every slow tick is kept, unconditionally, then the next starts from the current state')
         self.assertIn('recent_ticks = min_t(unsigned int, DIV_ROUND_UP(PG_RECENT_MS, period_ms), PG_RECENT_MAX);',
                       self.init)
         self.assertIn('recent_min[i] = PG_BASE_LEVEL;', self.init, 'until measured, the kept ticks subtract nothing')

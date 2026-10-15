@@ -324,9 +324,7 @@ static void slow_work(struct work_struct *w)
 		smc_ok = true;
 	}
 	/* This tick joins the recent ones; the next starts from the current state. */
-	recent_min[recent_pos] = tick_min;
-	recent_min_busy[recent_pos] = tick_min_busy;
-	recent_pos = (recent_pos + 1) % recent_ticks;
+	recent_pos = pg_keep(recent_min, recent_min_busy, recent_pos, recent_ticks, tick_min, tick_min_busy);
 	tick_min = policy_level();
 	tick_min_busy = PG_P_CPUS;
 	spin_unlock_irqrestore(&fast_lock, flags);
