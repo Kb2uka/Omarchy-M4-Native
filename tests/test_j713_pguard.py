@@ -342,7 +342,7 @@ class ModuleSource(unittest.TestCase):
         self.assertIn('recent_ticks = min_t(unsigned int, DIV_ROUND_UP(PG_RECENT_MS, period_ms), PG_RECENT_MAX);',
                       self.init)
         self.assertIn('recent_min[i] = PG_BASE_LEVEL;', self.init, 'until measured, the kept ticks subtract nothing')
-        self.assertLess(self.init.index('recent_ticks = DIV_ROUND_UP'), self.init.index('queue_delayed_work'))
+        self.assertLess(self.init.index('recent_ticks = min_t('), self.init.index('queue_delayed_work'))
         self.assertIn('period_ms < 50', self.init)
 
     def test_only_the_slow_path_raises(self):
