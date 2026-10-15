@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
 from m4_audio_package import digest
 import m4_video_package as video
+from m4_board_identities import refused_identities
 
 
 def load(name, filename):
@@ -42,8 +43,7 @@ def entry(data, mode=0o644):
     return dict(sha256=digest(data), size=len(data), mode=mode)
 
 
-def dtb():
-    compatible = b'apple,j713\0apple,t8132\0'
+def dtb(compatible=b'apple,j713\0apple,t8132\0'):
     strings = b'compatible\0'
     body = struct.pack('>I', 1) + bytes(4) + struct.pack('>III', 3, len(compatible), 0)
     body += compatible + bytes((-len(compatible)) % 4) + struct.pack('>II', 2, 9)
@@ -188,6 +188,16 @@ class CandidateTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE((root / 'usr/local/bin/chromium').stat().st_mode), 0o755)
         self.assertEqual(stat.S_IMODE((root / 'etc/skel/.config/omarchy/pending/widevine-Chromium.json').stat().st_mode), 0o600)
         self.assertEqual(json.loads((root / video.MANIFEST).read_text())['boot_kernel_sha256'], digest(b'new kernel'))
+
+    def test_sibling_m4_boot_dtb_refuses_before_any_write(self):
+        root, args = self.video_image()
+        for label, compatible in refused_identities():
+            with self.subTest(board=label):
+                args['boot_dtb'].write_bytes(dtb(compatible))
+                with self.assertRaisesRegex(ValueError, 'Unsupported boot DTB board'):
+                    video.configure(**args, apply=True)
+                self.assertFalse((root / 'usr/local/bin/chromium').exists())
+                self.assertEqual((root / video.MANIFEST).read_bytes(), self.old_video_raw)
 
     def test_customized_old_runtime_refuses_before_any_write(self):
         root, args = self.video_image()

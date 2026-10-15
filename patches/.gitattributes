@@ -1,2 +1,4 @@
 # Unified patch context has a marker before the original DTS indentation.
 0015-fix-dts-t8132-ans-receive-irq-roles.patch whitespace=-space-before-tab
+# Unified patch context, blank context lines and the format-patch signature.
+0017-fix-dts-t8132-keep-board-wired-parts-disabled-outside-j713.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab

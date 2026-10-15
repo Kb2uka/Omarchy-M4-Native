@@ -15,7 +15,7 @@ Existing file-level notices using KB2UKA remain valid and are preserved.
 | --- | --- |
 | Original prose in `README.md`, `SPEC.md`, `docs/*.md`, `recon/README.md`, and the original explanatory text in this file and `THIRD_PARTY_NOTICES.md` | MIT |
 | Original `tools/` and `tests/` files with MIT headers, plus `.gitignore`; upstream test fixtures retain their own notices | MIT |
-| `patches/0001-*.patch` through `patches/0016-*.patch`: changes to Apple `.dts` / `.dtsi` files | GPL-2.0-or-later OR MIT |
+| `patches/0001-*.patch` through `patches/0017-*.patch`: changes to Apple `.dts` / `.dtsi` files | GPL-2.0-or-later OR MIT |
 | `recon/pmgr-j713-generated-from-live-adt.dtsi` | GPL-2.0-or-later OR MIT for the contributed description; upstream notices remain applicable to any incorporated source material |
 | `patches-kernel/m4-boot-hacks-7.1.9.patch`: `arch/arm64/lib/delay.c` hunks | GPL-2.0-only |
 | The same patch: `drivers/irqchip/irq-apple-aic.c` hunks | GPL-2.0-or-later |
