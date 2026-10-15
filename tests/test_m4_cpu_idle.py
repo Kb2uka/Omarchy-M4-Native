@@ -290,6 +290,18 @@ class CpuIdleLoad(unittest.TestCase):
         self.assertEqual(knob.read_text(), '700\n', 'the replaced floor comes back')
         self.assertFalse((self.root / MODULE.STATE / 'rt-floor').exists())
 
+    def test_an_owner_floor_below_412_drops_a_stale_saved_floor(self):
+        self.boost_ready()
+        knob = self.root / MODULE.RT_FLOOR_KNOB
+        self.run_mode('boot', Machine(self.root))
+        self.assertEqual(self.put(MODULE.STATE + '/rt-floor', b'1024\n'), None)
+        self.put(MODULE.RT_FLOOR_KNOB, b'0\n')
+        self.run_mode('boost-on', Machine(self.root))
+        self.assertFalse((self.root / MODULE.STATE / 'rt-floor').exists(), 'nothing of ours to restore')
+        self.put(MODULE.RT_FLOOR_KNOB, b'412\n')
+        self.run_mode('boost-off', Machine(self.root))
+        self.assertEqual(knob.read_text(), '412\n', 'an owner value is never replaced by a stale save')
+
     def test_boost_on_twice_still_restores_the_replaced_floor(self):
         self.boost_ready()
         knob = self.root / MODULE.RT_FLOOR_KNOB

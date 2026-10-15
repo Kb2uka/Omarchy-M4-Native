@@ -286,7 +286,8 @@ def lower_rt_floor(root):
     elif int(now) < RT_FLOOR:
         # The owner's own floor is lower: nothing was replaced, so nothing to restore.
         remove_state(root, 'rt-floor')
-    # At RT_FLOOR already (boost on again): keep the value saved when it was lowered.
+    # At RT_FLOOR already, from an earlier boost on or set so by the owner: keep any value saved
+    # when this lowered it, so --boost off can still restore it.
 
 
 def restore_rt_floor(root):
