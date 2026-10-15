@@ -497,8 +497,9 @@ class PackagingTests(unittest.TestCase):
         script = (PACKAGE / 'omarchy-m4-boot.install').read_text()
         self.assertIn('systemctl --global enable omarchy-m4-notch.service', script)
         self.assertIn('systemctl --global disable omarchy-m4-notch.service', script)
-        # Installing the package never touches boot.bin: only --show does.
-        self.assertNotIn('m4-notch --show', script)
+        # Installing the package never touches boot.bin: only an owner's --show does.
+        commands = [line for line in script.splitlines() if line.strip() and not line.strip().startswith('#')]
+        self.assertFalse([line for line in commands if 'm4-notch' in line and 'omarchy-m4-notch.service' not in line])
 
 
 if __name__ == '__main__':

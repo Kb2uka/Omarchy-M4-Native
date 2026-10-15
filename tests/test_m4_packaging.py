@@ -363,11 +363,33 @@ class PolicyTests(unittest.TestCase):
         self.boot_root = Path(temp.name)
         (self.boot_root / 'usr/bin').mkdir(parents=True)
         (self.boot_root / 'usr/bin/m4-boot-compose').write_bytes(composer)
-        return {'usr/bin/m4-boot-compose': (0o755, hashlib.sha256(composer).hexdigest()),
+        notch = (ROOT / 'tools/m4-notch.py').read_bytes()
+        (self.boot_root / 'usr/bin/m4-notch').write_bytes(notch)
+        return {**{path: (0o644, digest) for path, digest in CHANNEL['notch_loader'].items()},
+                'usr/bin/m4-notch': (0o755, hashlib.sha256(notch).hexdigest()),
+                CHECK.NOTCH_UNIT: (0o644, file_sha('packaging/omarchy-m4/omarchy-m4-boot/omarchy-m4-notch.service')),
+                'usr/bin/m4-boot-compose': (0o755, hashlib.sha256(composer).hexdigest()),
                 'usr/share/libalpm/hooks/90-omarchy-m4-boot.hook': (0o644, hashlib.sha256(hook).hexdigest()),
                 'usr/lib/omarchy-m4/j713.dtb': (0o644, CHANNEL['devicetree']['sha256']),
                 'usr/bin/omarchy-m4-update': (0o755, file_sha('tools/omarchy-m4-update')),
                 'usr/lib/omarchy-m4/m4-channel-setup.py': (0o644, file_sha('tools/m4-channel-setup.py'))}
+
+    def test_boot_package_must_carry_the_pinned_notch_switch(self):
+        realtime = (PACKAGING / 'omarchy-m4-boot/speakersafetyd-j713-realtime.conf').read_bytes()
+        good = {**self.boot_files(), CHECK.REALTIME: (0o644, hashlib.sha256(realtime).hexdigest())}
+        CHECK.check_package(CHANNEL, *self.boot_package(good))
+        staged = next(iter(CHANNEL['notch_loader']))
+        for files, message in (({**good, staged: (0o644, '0' * 64)}, 'notch stage 2 differs'),
+                               ({k: v for k, v in good.items() if k != staged}, 'notch stage 2 differs'),
+                               ({**good, 'usr/bin/m4-notch': (0o755, '0' * 64)}, 'notch tool differs'),
+                               ({**good, CHECK.NOTCH_UNIT: (0o644, '0' * 64)}, 'login unit differs')):
+            with self.subTest(message), self.assertRaisesRegex(ValueError, message):
+                CHECK.check_package(CHANNEL, *self.boot_package(files))
+        channel = json.loads(json.dumps(CHANNEL))
+        channel['notch_loader'] = {staged: '1' * 64}
+        files = {**good, staged: (0o644, '1' * 64)}
+        with self.assertRaisesRegex(ValueError, 'pins a different stage 2'):
+            CHECK.check_package(channel, *self.boot_package(files))
 
     def test_protected_beats_an_allowlist_mistake(self):
         channel = json.loads(json.dumps(CHANNEL))
