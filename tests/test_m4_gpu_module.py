@@ -82,6 +82,8 @@ class GpuModule(unittest.TestCase):
         self.put(node + 'apple,firmware-build', b'\xff\0')
         self.assertEqual(self.run_tool()[1]['gpu'], {'core_mask': None, 'max_power_mw': 24304,
                                                      'firmware_build': None})
+        self.put(node + 'apple,firmware-build', b'\0\0')
+        self.assertIsNone(self.run_tool()[1]['gpu']['firmware_build'])
 
     def test_boot_applies_module_and_only_its_pin(self):
         code, report = self.run_tool('--boot')

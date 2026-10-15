@@ -109,7 +109,7 @@ def gpu_values(root):
     except UnicodeDecodeError:
         build = None
     return {'core_mask': None if mask is None else f'{mask:#x}',
-            'max_power_mw': cell('apple,m4-max-power-mw'), 'firmware_build': build}
+            'max_power_mw': cell('apple,m4-max-power-mw'), 'firmware_build': build or None}
 
 
 def inspect(root):

@@ -15,7 +15,7 @@ install=omarchy-m4-gpu.install
 options=('!strip' '!debug')
 source=('m4-gpu-module.py' '20-m4-gpu-module.conf' 'MIT.txt' 'GPL-2.0-only.txt'
         "asahi_m4.ko::${url}/releases/download/package-inputs/asahi_m4-3cf47fa7.ko")
-sha256sums=('0c83dcf1afdce89f15b4f94518402621a5d50e198b33d9ded6ee78207569be32'
+sha256sums=('85ebf33558a244e1bdf12ce1d746d89cdf131abf7fc81ac413341613c89db543'
             '5df35ba959a63a7581d5020d99db96b1e7d9ebc1ebe857e4aac0a2914502455a'
             'b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5'
             'aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3'
