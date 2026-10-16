@@ -1,20 +1,40 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
-# Build m1n1 stage 1 and stage 2 test loaders with the dockchannel TX bound (#82).
+# Build m1n1 test loaders from alpha.1's bootloader source plus patches (#82).
 #
-#   build-test-loaders.sh COMPANION_SOURCE_DIR PATCH OUT_DIR
+#   build-test-loaders.sh COMPANION_SOURCE_DIR OUT_DIR TAG_SUFFIX STAGES PATCH...
+#
+#   dockchannel TX bound (test 1):
+#     build-test-loaders.sh source out dctx1 "stage1 stage2" dockchannel-tx-bound.patch
+#   #82 fix, stage 1 only:
+#     build-test-loaders.sh source out dctx1-ans1 stage1 dockchannel-tx-bound.patch stage1-ans-no-reset.patch
 #
 # Runs in m4-gravity-builder:20261008 (clang 21.1.8, rustc 1.93.1 with rust-src)
 # with the job directory mounted at /job, where alpha.1's loaders were built.
 # COMPANION_SOURCE_DIR is the source/ directory of the alpha.1 companion. Each
 # stage is first rebuilt unpatched and must match alpha.1's shipped hash, so a
-# test loader differs from alpha.1 only by PATCH and its version tag.
+# test loader differs from alpha.1 only by the patches, applied in order, and
+# its version tag (alpha.1's tag plus -TAG_SUFFIX).
 set -euo pipefail
-if [ $# -ne 3 ]; then
-    echo "usage: $0 COMPANION_SOURCE_DIR PATCH OUT_DIR" >&2
+if [ $# -lt 5 ]; then
+    echo "usage: $0 COMPANION_SOURCE_DIR OUT_DIR TAG_SUFFIX STAGES PATCH..." >&2
     exit 2
 fi
-src=$1 patch=$(realpath "$2") out=$3
+src=$1 out=$2 suffix=$3 stages=$4
+shift 4
+patches=()
+for patch in "$@"; do
+    patches+=("$(realpath "$patch")")
+done
+for stage in $stages; do
+    case $stage in
+    stage1 | stage2) ;;
+    *)
+        echo "unknown stage: $stage" >&2
+        exit 2
+        ;;
+    esac
+done
 declare -A source_sha=(
     [stage1]=6c14369619d19612c68f67ed4467ac27158138c6b4b2ec2bc831075945eef4af
     [stage2]=c394517941a5700b227718bb02e3df3dd43c9ad5a8e53c9447a55d3c36846c44
@@ -45,7 +65,9 @@ build() {
     # The archive keeps the generated headers; alpha.1 was built without them.
     rm -rf "$tree/build"
     if [ "$kind" = test ]; then
-        (cd "$tree" && git apply --verbose "$patch")
+        for patch in "${patches[@]}"; do
+            (cd "$tree" && git apply --verbose "$patch")
+        done
     fi
     (
         cd "$tree"
@@ -61,10 +83,10 @@ build() {
     rm -rf "$tree"
 }
 
-for stage in stage1 stage2; do
+for stage in $stages; do
     test "$(sha256sum < "$src/m1n1-$stage-source.tar.gz" | cut -d' ' -f1)" = "${source_sha[$stage]}"
     build "$stage" stock "air-c9ef56f-gpu-$stage-20261008"
     test "$(sha256sum < "$out/$stage-stock-m1n1.bin" | cut -d' ' -f1)" = "${stock_sha[$stage]}"
-    build "$stage" test "air-c9ef56f-gpu-$stage-20261008-dctx1"
+    build "$stage" test "air-c9ef56f-gpu-$stage-20261008-$suffix"
 done
 (cd "$out" && sha256sum ./*.bin)

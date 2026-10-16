@@ -88,6 +88,11 @@ alpha.1's shipped hash, then builds the patched loader with the version tag
 `/proc/device-tree/chosen/asahi,m1n1-stage{1,2}-version`, which tells you
 which loader booted.
 
+```sh
+patches-m1n1/build-test-loaders.sh source out dctx1 "stage1 stage2" \
+    patches-m1n1/dockchannel-tx-bound.patch
+```
+
 ## Testing on an installed Air
 
 Stage 2 is replaced from Linux with `patches-m1n1/m4-m1n1-test-stage2.py`:

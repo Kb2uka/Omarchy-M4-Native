@@ -1,13 +1,14 @@
 # J713 #82: stage 1 freezes at the ANS reset
 
-[Issue #82](https://github.com/Kb2uka/Omarchy-M4-Native/issues/82) is one
-13-inch M4 Air that stops on the m1n1 logo at every boot. Two other M4 Airs
-(the owner's and the #57 reporter's) boot the same loaders. The first theory,
+[Issue #82](https://github.com/Kb2uka/Omarchy-M4-Native/issues/82): two
+13-inch M4 Airs stop on the m1n1 logo at every boot. Both run system firmware
+`mBoot-18000.161.10`. Two other M4 Airs (the owner's and the #57 reporter's)
+boot the same loaders. The first theory,
 a dockchannel TX FIFO that fills and is never drained, is wrong: the reporter's
 counters show the FIFO never fills, and the bounded TX wait in
 [j713-m1n1-dockchannel-tx.md](j713-m1n1-dockchannel-tx.md) did not stop the
-freeze. This note records what is now known and the loaders that test the
-remaining explanations.
+freeze. The PMGR reset of ANS right after stage 1 stops it is the cause, and
+[the fix](#the-fix) leaves an M4's ANS stopped without that reset.
 
 ## What is observed
 
@@ -130,14 +131,110 @@ variant changes only its own instructions and the two tags, and that the
 script refuses a different loader, a moved instruction, or a call to another
 function.
 
+## Results
+
+A second Air with the same freeze (Mac16,12, `mBoot-18000.161.10`, a stock
+update 2 install) ran the loaders in order on 2026-10-15:
+
+- **`v2` booted** to Linux
+  ([report](https://github.com/Kb2uka/Omarchy-M4-Native/issues/82#issuecomment-6195132271)).
+  The 29-byte print still lands in the window, with no reset after it. A
+  predicted a freeze, B a boot, so B is supported.
+- **`v1` booted** unattended to the desktop
+  ([report](https://github.com/Kb2uka/Omarchy-M4-Native/issues/82#issuecomment-6204117990)).
+  `asahi,m1n1-stage1-version` read `-i82v1`, NVMe came up and root mounted.
+  The kernel log showed only RTKit `PANICLOG not yet written` syslog lines and
+  macsmc-reboot `Missing NVMEM cell` lines.
+- `v3` was not run. It would only show whether the print is needed for the
+  freeze, which no longer changes the fix.
+
+The first reporter has not run the loaders.
+
+## The fix
+
+[`patches-m1n1/stage1-ans-no-reset.patch`](../patches-m1n1/stage1-ans-no-reset.patch)
+changes alpha.1's `src/nvme.c` only. A new `nvme_reset_ans()` does nothing
+on T8132 (the ADT has `nvme-secure-bar`), and resets `ANS` and `ANS2` as
+before on older SoCs. `nvme_shutdown()` and `nvme_init()`'s error path call it
+right after `rtkit_sleep()`, in place of the two direct `pmgr_reset()` calls.
+ANS is still put to sleep and its CPU stopped. `nvme_ensure_shutdown()`,
+which stage 1 never calls, is unchanged.
+
+Only the `nvme_shutdown()` path was run on hardware, as `v1`. The error path
+runs only when ANS fails to boot in stage 1. It stops ANS the same way, so it
+gets the same change rather than keeping a reset that can freeze the machine
+instead of reporting the error.
+
+Linux then finds the ANS CPU stopped. alpha.1's `apple-nvme`
+(`kernel-controller`, `drivers/nvme/host/apple.c`, `apple_nvme_reset_work()`)
+asserts and deasserts the PMGR reset only when the CPU's RUN bit is clear,
+then boots the firmware. The owner's Air logs that sequence on every boot
+(`M4TRACE assert reset` … `deassert reset returned`).
+
+### Hosted test
+
+`tests/test_m1n1_stage1_ans_reset.py` compiles the real `nvme.c`, as shipped
+and patched, into `tests/m1n1_nvme_ans_fixture.c`. That fixture simulates the
+ADT, the controller and RTKit, runs `nvme_init()` then `nvme_shutdown()`, and
+prints the order of ANS boot, sleep, reset and release:
+
+| Case | Shipped | Patched |
+| --- | --- | --- |
+| M4, boots | `boot sleep reset:0.ANS reset:0.ANS2 free` | `boot sleep free` |
+| M4, ANS boot status fails | same | `boot sleep free` |
+| older SoC, either case | same | unchanged |
+
+Five mutants must each change one case. They cover the T8132 check, both call
+sites, and the order of sleep and reset.
+
+### Building it
+
+```sh
+patches-m1n1/build-test-loaders.sh source out ans1 stage1 \
+    patches-m1n1/stage1-ans-no-reset.patch
+```
+
+As with every loader here, this runs as root in `m4-gravity-builder:20261008`,
+with network access for the Rust crates (Rust embeds `/root/.cargo` paths, so
+another user changes the bytes). It first rebuilds alpha.1's stage 1 and
+requires `18cc4cd1…`.
+
+| Stage 1 | Patches | SHA-256 |
+| --- | --- | --- |
+| `ans1` | this fix | `8c5a15736c19d0a3428e64f01292791fb54dd68e09f2f5304a7210d19c42adce` |
+| `dctx1-ans1` | dockchannel bound, then this fix | `77881a4c673c08c58e270b0adfa923701ddc538a072f7b2e3825e5faaa2aaec8` |
+
+Each hash was reproduced by a second, separate build. In both, the
+disassembly of `nvme_shutdown()` loads the byte that `nvme_init()` sets from
+the `nvme-secure-bar` lookup and, when it is set, branches from just after
+`rtkit_sleep()` past both `pmgr_reset()` calls to `rtkit_free()`:
+
+```text
+ans1  0x23ddc  bl   rtkit_sleep
+      0x23de4  ldrb w8, nvme_type
+      0x23de8  tbnz w8, #0, 0x23e10      T8132: skip both resets
+      0x23dfc  bl   pmgr_reset "ANS"
+      0x23e0c  bl   pmgr_reset "ANS2"
+      0x23e10  ...  bl rtkit_free
+```
+
+Neither build is byte-identical to `v1`. `v1` is test 1 with two
+instructions removed, and test 1 was built from an earlier revision of the
+dockchannel bound (`a20df82`), which rebuilds to `54807eb5…` exactly. Any
+rebuild moves code, and on the reporter's Air a moved layout booted even
+without a fix. So a source build cannot show on that Air that the fix works:
+`v1` shows it. What a source build must show on hardware is that it does no
+harm.
+
 ## Not yet known
 
-- Which of A and B is true. That is decided on the reporter's Air.
-- Why only this Air hits the window. The two machines that boot have
-  different system firmware (`mBoot-18000.120.36` and `mBoot-20457.1.29`
-  against `mBoot-18000.161.10`), but one data point per firmware cannot
-  separate firmware from unit-to-unit timing.
-- A source fix. If `v1` boots and `v2` does too, the fix is to leave ANS
-  asleep and stopped in stage 1's `nvme_shutdown()` without the PMGR reset,
-  and let Linux reset it. That changes boot behaviour on every M4 install, so
-  it ships only after the owner's Air and the reporter's Air both boot it.
+- Why only these Airs hit the window. The two that freeze share
+  `mBoot-18000.161.10`; the two that boot have `mBoot-18000.120.36` and
+  `mBoot-20457.1.29`. Two Airs per group cannot separate firmware from
+  unit-to-unit timing.
+- Whether the fixed stage 1 boots on the owner's Air and on the first
+  reporter's Air. It changes boot behaviour on every M4 install, so it ships
+  only after it does. Stage 1 comes from the installer kit's `boot/m1n1.bin`
+  and is installed from macOS, so the fix reaches installed Airs as an
+  installer kit update and a 1TR `kmutil` step, not through
+  `omarchy-m4-update`.

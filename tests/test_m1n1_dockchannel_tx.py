@@ -84,9 +84,10 @@ class M1n1DockchannelTxTests(unittest.TestCase):
         return result.returncode, (result.stdout + result.stderr).strip()
 
     def test_base_is_the_published_alpha1_source(self):
-        self.assertEqual({p.name: sha256(p) for p in BASE.iterdir()}, PUBLISHED)
         sums = dict(line.split()[::-1] for line in (M1N1 / "base/SHA256SUMS").read_text().splitlines())
-        self.assertEqual(sums, {"src/" + k: v for k, v in PUBLISHED.items()})
+        self.assertEqual(sums, {"src/" + p.name: sha256(p) for p in BASE.iterdir()})
+        for name, digest in PUBLISHED.items():
+            self.assertEqual(sums["src/" + name], digest, name)
 
     def test_patch_changes_only_the_dockchannel_driver(self):
         changed = sorted(p.name for p in self.after.iterdir() if sha256(p) != sha256(BASE / p.name))
