@@ -77,8 +77,12 @@ texts contain the warranty and liability terms.
 
 ## J713 runtime assets
 
-The measured FIR responses named by `audio/j713/qualified.json` are not included
-in this source tree. Their redistribution license has not been established.
-Exact-hash local assembly is not a grant of rights to redistribute them. See
-[audio/j713/README.md](audio/j713/README.md) for build provenance and open
-corresponding-source requirements.
+The approved native numerical filters are included under `audio/j713/filters/`
+as static platform data. Their [provenance record](audio/j713/filters/README.md)
+distinguishes those final coefficients from the Apple software and tuning inputs
+used to reproduce them. The source-code licenses above do not grant rights in
+those Apple inputs.
+
+`audio/j713/qualified.json` keeps its historical hold for the earlier reference
+files. Other corresponding-source requirements remain described in
+[audio/j713/README.md](audio/j713/README.md).

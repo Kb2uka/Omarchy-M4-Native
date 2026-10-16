@@ -28,7 +28,7 @@ See [GitHub runner pricing](https://docs.github.com/en/actions/how-tos/write-wor
 | Workflow lint | Actionlint plus security-policy assertions and negative tests for unsafe workflow changes. |
 | Dependency review | On public PRs, block newly introduced moderate-or-higher advisories in supported dependency manifests, including development and unknown scopes. |
 | CodeQL | Python, C/C++, Rust and Actions source with extended security queries; public PRs, branch pushes and weekly scans. No repository build scripts are executed in the scanner job. |
-| Dependabot | Weekly GitHub Actions update PRs into `develop`; updates are reviewed, never automatically merged. The speaker daemon's `Cargo.lock` and the owner-filter numpy wheel are hash-pinned parts of the qualified audio payload, so they get no automatic version-update PRs: changing them means re-pinning and requalifying the audio build. |
+| Dependabot | Weekly GitHub Actions update PRs into `develop`; updates are reviewed, never automatically merged. The speaker daemon's `Cargo.lock` and the filter reproduction tool's NumPy wheel are hash-pinned, so they get no automatic version-update PRs. Changes require re-pinning and checking the resulting audio identities; the installer does not ship the wheel. |
 
 CodeQL does not parse kernel patches as complete kernel translation units or
 qualify hardware. Its build-free C/C++ analysis can miss context supplied by

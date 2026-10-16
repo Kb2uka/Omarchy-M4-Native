@@ -2,7 +2,6 @@
 import copy
 import hashlib
 import importlib.util
-import io
 import json
 from pathlib import Path
 import subprocess
@@ -81,17 +80,11 @@ class KernelReleaseTests(unittest.TestCase):
                         for name in ('run-transfer.py', 'run-memory.py', 'measure-memory.c')}
         for name, data in self.sources.items():
             self.write(self.tree, 'audio/j713/owner-fir/src/' + name, data)
-        self.helpers = {'measure-memory': b'native memory', 'measure-transfer': b'native transfer'}
-        self.wheel = ('numpy-fixture.whl', b'pinned wheel')
-        self.profile = {
-            'outputs': {},
-            'sources': {name: {'size': len(data), 'sha256': digest(data)}
-                        for name, data in self.sources.items()},
-            'helpers': {name: {'size': len(data), 'sha256': digest(data)}
-                        for name, data in self.helpers.items()},
-            'numpy': {'filename': self.wheel[0], 'size': len(self.wheel[1]),
-                      'sha256': digest(self.wheel[1])},
-        }
+        self.profile = {'outputs': {}}
+        for index, name in enumerate(release.FIRS):
+            data = bytes([index]) * 16
+            self.write(self.tree, 'audio/j713/filters/' + name, data)
+            self.profile['outputs'][name] = {'size': len(data), 'sha256': digest(data)}
         self.save_profile()
         self.write(self.tree, 'packaging/release-source-joins.json', b'{"schema": 1, "binaries": {}}')
         self.boot = {'bootargs': 'console=tty0 dockchannel_hid.m4_power_v2=1'}
@@ -111,18 +104,8 @@ class KernelReleaseTests(unittest.TestCase):
             archive.writestr('root.ext4', b'old root')
             for name, data in self.parts.items():
                 archive.writestr(self.boot[name]['file'], data)
-        self.owner = self.base / 'owner.tar'
-        # The pinned helper archive also carries the released, now stale scripts.
-        self.owner_members = {'.gitattributes': b'\n', 'README.md': b'released README',
-                              'manifest.json': b'{"outputs": {}}',
-                              'dependencies/' + self.wheel[0]: self.wheel[1],
-                              **{'bin/' + name: data for name, data in self.helpers.items()},
-                              **{'src/' + name: b'released ' + name.encode()
-                                 for name in self.sources}}
-        self.save_owner()
         self.fixed_inputs = {}
         for name, pin in {
-            'numpy_source': 'df2d5874ff183595a4ba404edd04f6bd9b5505c1d7708573f6a6c17489a67563',
             'cargo_source': 'faf50f21db4b622900bd275441bc321d1a01933afb555e84d1446d38d6027a34',
             'sound_exports': '9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362',
             'reconstruction': '47c144a606c13f218b1bd84d8a1b86d6d9ac281a58a04d0c191e0508221b1e7c',
@@ -130,16 +113,15 @@ class KernelReleaseTests(unittest.TestCase):
             path = self.base / name
             path.write_bytes(name.encode())
             self.fixed_inputs[path] = pin
-        self.fixed_inputs[self.owner] = '4b59c1549e821d79ca4043ade37c02cdbbcc38e5a8eb5202f285b8eb2ff97e07'
         self.fixed_inputs[self.baseline / 'SHA256SUMS'] = release.BASE_SUMS
         self.dtb = self.base / 'poweroff.dtb'
         self.dtb.write_bytes(b'preserved poweroff DTB')
         self.args = SimpleNamespace(source_tree=self.tree, baseline=self.baseline,
-            root_image=self.base / 'retained.ext4', owner_bundle=self.owner,
-            numpy_source=self.base / 'numpy_source', cargo_source=self.base / 'cargo_source',
+            root_image=self.base / 'retained.ext4', cargo_source=self.base / 'cargo_source',
             sound_exports=self.base / 'sound_exports', reconstruction=self.base / 'reconstruction',
             poweroff_dtb=self.dtb, output=self.base / 'output', kernel=self.kernel,
             kernel_receipt=self.receipt_path)
+        self.untracked = set()
         self.prepared = []
         self.allowed = []
 
@@ -155,18 +137,11 @@ class KernelReleaseTests(unittest.TestCase):
     def save_profile(self):
         self.write(self.tree, 'audio/j713/owner-fir/manifest.json', json.dumps(self.profile).encode())
 
-    def save_owner(self):
-        self.owner.unlink(missing_ok=True)
-        with tarfile.open(self.owner, 'w') as archive:
-            for name, data in self.owner_members.items():
-                info = tarfile.TarInfo('owner-fir/' + name)
-                info.size = len(data)
-                archive.addfile(info, io.BytesIO(data))
-
     def git_output(self, command, **kwargs):
         if 'ls-files' in command:
             return b'\0'.join(p.relative_to(self.tree).as_posix().encode()
-                              for p in sorted(self.tree.rglob('*')) if p.is_file()) + b'\0'
+                              for p in sorted(self.tree.rglob('*'))
+                              if p.is_file() and p.relative_to(self.tree).as_posix() not in self.untracked) + b'\0'
         if 'show' in command:
             revision, name = command[-1].split(':', 1)
             self.assertEqual(revision, self.revision)
@@ -201,7 +176,6 @@ class KernelReleaseTests(unittest.TestCase):
              mock.patch.object(release.os, 'geteuid', return_value=0), \
              mock.patch.object(release.sys, 'version_info', (3, 14)), \
              mock.patch.object(release.shutil, 'disk_usage', return_value=SimpleNamespace(free=100 * 1024**3)), \
-             mock.patch.object(release.runpy, 'run_path', return_value={'FIRS': {}}), \
              mock.patch.object(release.subprocess, 'check_output', side_effect=self.git_output):
             release.assemble(self.args)
         return self.args.output / 'delivery'
@@ -227,48 +201,18 @@ class KernelReleaseTests(unittest.TestCase):
         with tarfile.open(delivery / 'source/release-integration.tar.gz') as archive:
             for name in self.patch_names:
                 self.assertEqual(archive.extractfile(name).read(), (self.tree / name).read_bytes())
+            for name in release.FIRS:
+                self.assertEqual(archive.extractfile('audio/j713/filters/' + name).read(),
+                                 (self.tree / 'audio/j713/filters' / name).read_bytes())
         kit = json.loads((delivery / 'KIT.json').read_bytes())
         self.assertEqual(kit['files']['IMAGE.json']['sha256'], digest((delivery / 'IMAGE.json').read_bytes()))
 
-    def test_owner_runtime_bundle_takes_only_native_files_from_helper_archive(self):
-        bundle = self.assemble() / 'owner-audio/bundle'
-        owner_fir = self.tree / 'audio/j713/owner-fir'
-        for name, data in self.sources.items():
-            self.assertEqual((bundle / 'src' / name).read_bytes(), data)
-        for name in ('manifest.json', 'README.md', 'licenses/LICENSE.txt'):
-            self.assertEqual((bundle / name).read_bytes(), (owner_fir / name).read_bytes())
-        for name, data in self.helpers.items():
-            self.assertEqual((bundle / 'bin' / name).read_bytes(), data)
-        self.assertEqual((bundle / 'dependencies' / self.wheel[0]).read_bytes(), self.wheel[1])
-        self.assertFalse((bundle / '.gitattributes').exists())
-        self.assertFalse((self.args.output / 'owner-helpers').exists())
-
-    def test_owner_runtime_bundle_disagreeing_with_manifest_refuses(self):
-        changes = (
-            ('sources', 'run-memory.py', lambda: self.write(
-                self.tree, 'audio/j713/owner-fir/src/run-memory.py', b'edited run-memory.py')),
-            ('helpers', 'measure-transfer', lambda: self.owner_members.update(
-                {'bin/measure-transfer': b'rebuilt transfer'})),
-            ('numpy', self.wheel[0], lambda: self.owner_members.update(
-                {'dependencies/' + self.wheel[0]: b'other wheel'})),
-        )
-        for section, name, change in changes:
-            with self.subTest(section=section):
-                self.setUp()
-                change()
-                self.save_owner()
-                with self.assertRaisesRegex(RuntimeError, 'disagrees with its manifest: ' + name):
-                    self.assemble()
-
-    def test_owner_helper_archive_without_native_files_refuses(self):
-        for directory in ('bin/', 'dependencies/'):
-            with self.subTest(directory=directory):
-                self.setUp()
-                self.owner_members = {name: data for name, data in self.owner_members.items()
-                                      if not name.startswith(directory)}
-                self.save_owner()
-                with self.assertRaisesRegex(RuntimeError, 'Owner helper bundle lacks'):
-                    self.assemble()
+    def test_untracked_static_filter_refuses_before_image_preparation(self):
+        self.untracked.add('audio/j713/filters/' + release.FIRS[-1])
+        with self.assertRaisesRegex(RuntimeError, 'Static FIR assets must be tracked'):
+            self.assemble()
+        self.assertEqual(self.prepared, [])
+        self.assertFalse(self.args.output.exists())
 
     def join(self, archive, pin):
         joins = {'schema': 1, 'binaries': {'opt/m4-gpu/asahi_m4.ko': {
@@ -558,7 +502,7 @@ class KernelReleaseTests(unittest.TestCase):
 
     def test_cli_accepts_optional_pair_and_keeps_it_absent_by_default(self):
         args = ['prepare-j713-release.py']
-        for name in ('source-tree', 'baseline', 'root-image', 'owner-bundle', 'numpy-source',
+        for name in ('source-tree', 'baseline', 'root-image',
                      'cargo-source', 'sound-exports', 'reconstruction', 'poweroff-dtb', 'output'):
             args += ['--' + name, '/fixture/' + name]
         with mock.patch.object(release.sys, 'argv', args), mock.patch.object(release, 'assemble') as assemble:

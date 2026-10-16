@@ -1,22 +1,14 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 studioxradio aka kb2uka
-"""Carry locally generated J713 filters and the owner's choice into first boot."""
+"""Carry the owner's protected-media choice into first boot."""
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
 import stat
 import tempfile
 
-FIRS = {
-    'j713-static-minimal-lane0-48000.wav': (16440, 'cddb9a1c2aa29a8271526ca954ddbcdc15dcd09e6f546b72c45b2643f7d3e484'),
-    'j713-static-minimal-lane1-48000.wav': (16440, 'c398560bb45bc12932b4c9516ed5b9812aeeefb64f9bdb4f28814c0ea2f6a188'),
-    'j713-static-minimal-lane2-48000.wav': (4152, 'c02bbed34a37a496103cb75ede1ccaa872ac6bb2dff0023b8601397cd582d5f6'),
-    'j713-static-minimal-lane3-48000.wav': (4152, 'c02bbed34a37a496103cb75ede1ccaa872ac6bb2dff0023b8601397cd582d5f6'),
-}
-FIRMWARE = 'apple/j713-owner-audio'
 OPTIONS = 'omarchy/j713-owner-options.json'
 PROFILES = ('Brave-Browser', 'Brave-Browser-M4', 'Chromium')
 
@@ -47,33 +39,17 @@ def read_regular(path, limit, root_owned=False):
     return result
 
 
-def filters(directory, root_owned=False):
-    result = {}
-    for name, (size, pin) in FIRS.items():
-        data = read_regular(directory / name, size, root_owned)
-        require(len(data) == size and hashlib.sha256(data).hexdigest() == pin,
-                'Unqualified speaker filter: ' + name)
-        result[name] = data
-    return result
-
-
 def prepare_for_installer():
-    """Read all owner inputs before the installer's first partition operation."""
-    directory = os.environ.get('M4_OWNER_FIRS', '')
+    """Validate the owner's choice before the first partition operation."""
     widevine = os.environ.get('M4_OWNER_WIDEVINE', '')
-    require(directory and widevine in ('yes', 'no'),
-            'Launch this installer through bash Install.command --install to prepare owner inputs')
-    payload = filters(Path(directory))
-    return payload, widevine == 'yes'
+    require(widevine in ('yes', 'no'),
+            'Launch this installer through bash Install.command --install to prepare owner options')
+    return widevine == 'yes'
 
 
-def add_to_firmware(package, prepared):
-    """Called by the Mac installer; no generated filter is in the download."""
+def add_to_firmware(package, widevine):
+    """Carry the explicit protected-media choice in the owner's firmware package."""
     from gravity_firmware.core import FWFile
-    payload, widevine = prepared
-    for name, data in payload.items():
-        destination = FIRMWARE + '/' + name
-        package.add_file(destination, FWFile(destination, data))
     package.add_file(OPTIONS, FWFile(OPTIONS, encoded({'schema': 1, 'widevine': widevine})))
 
 
@@ -120,34 +96,38 @@ def install_file(path, data, mode):
             os.unlink(name)
 
 
-def install():
-    require(os.getuid() == 0 and os.geteuid() == 0, 'Run through the system service')
-    tags = Path('/sys/firmware/devicetree/base/compatible').read_bytes().split(b'\0')
-    require(b'apple,j713' in tags and b'apple,t8132' in tags, 'This service requires J713/T8132')
-    firmware = Path('/usr/lib/firmware')
-    payload = filters(firmware / FIRMWARE, True)
-    raw = read_regular(firmware / OPTIONS, 4096, True)
+def owner_options(raw):
     options = json.loads(raw)
     require(isinstance(options, dict) and set(options) == {'schema', 'widevine'}
             and type(options['schema']) is int and options['schema'] == 1
             and type(options['widevine']) is bool, 'Invalid owner options')
-    destinations = {Path('/usr/share/asahi-audio/j713') / name: (data, 0o644)
-                    for name, data in payload.items()}
-    pending = Path('/etc/skel/.config/omarchy/pending')
+    return options['widevine']
+
+
+def install_options(widevine, pending):
+    """Preflight all browser requests before atomically installing any of them."""
+    destinations = {}
     for profile in PROFILES:
         destination = pending / ('widevine-' + profile + '.json')
-        if options['widevine']:
-            destinations[destination] = (encoded({'schema': 1, 'profile': profile,
-                                                  'consent': 'owner-requested'}), 0o600)
+        if widevine:
+            destinations[destination] = encoded({'schema': 1, 'profile': profile,
+                                                  'consent': 'owner-requested'})
         else:
             require(not destination.exists() and not destination.is_symlink(),
                     'Protected-media request exists without owner consent')
-    # Check every pre-existing payload before writing any new one.
-    for path, (data, _) in destinations.items():
+    for path, data in destinations.items():
         existing(path, data)
-    for path, (data, mode) in destinations.items():
-        install_file(path, data, mode)
-    print('J713 owner assets ready; speaker filter identities preserved.')
+    for path, data in destinations.items():
+        install_file(path, data, 0o600)
+
+
+def install():
+    require(os.getuid() == 0 and os.geteuid() == 0, 'Run through the system service')
+    tags = Path('/sys/firmware/devicetree/base/compatible').read_bytes().split(b'\0')
+    require(b'apple,j713' in tags and b'apple,t8132' in tags, 'This service requires J713/T8132')
+    raw = read_regular(Path('/usr/lib/firmware') / OPTIONS, 4096, True)
+    install_options(owner_options(raw), Path('/etc/skel/.config/omarchy/pending'))
+    print('J713 owner options ready.')
 
 
 def main():

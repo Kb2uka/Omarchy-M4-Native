@@ -96,8 +96,11 @@ upstream commit has not been independently reconstructed; its supplied source
 snapshot is pinned instead. Complete corresponding source and toolchain inputs
 must be addressed before distributing resulting GPL binaries.
 
-The measured FIR responses have no established redistribution license. Their
-hashes identify required local inputs; `--local-only` does not grant redistribution
-rights. No Apple executable, raw hardware capture, sysroot, compiled module,
-daemon executable or FIR WAV is included here. A generally distributable runtime
-package remains blocked by those asset and build-provenance requirements.
+The historical assembly tool retains its local-only distribution hold. The
+release assembler uses the [static native profile](../audio/j713/filters/README.md),
+whose numerical files reproduce the already approved hashes. Its provenance record distinguishes final numerical coefficients from source
+inputs; the source-code license is not a grant of rights in Apple software or
+tuning data. No Apple executable,
+tuning strip, raw hardware capture, sysroot, compiled module or daemon executable
+is included here. Other build-provenance and corresponding-source requirements
+remain independent of the speaker-profile delivery change.
