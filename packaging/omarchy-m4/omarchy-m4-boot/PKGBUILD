@@ -30,7 +30,7 @@ source=('m4-boot-compose.py' '90-omarchy-m4-boot.hook' 'm4-update-check.py'
         'm1n1-LICENSE' 'm1n1-README.md' 'm1n1-LICENSE.BSD-2.libfdt' 'm1n1-LICENSE.BSD-3.arm'
         'm1n1-LICENSE.BSD-3.dwc3' 'm1n1-LICENSE.CC0' 'm1n1-LICENSE.GPL-2' 'm1n1-LICENSE.minlzma'
         'm1n1-LICENSE.OFL-1.1' 'm1n1-LICENSE.tinf')
-sha256sums=('f1aabd31099ea5abc5db99b3dfb2c3c42b605d7eba7163d73786df3b1c2312f7'
+sha256sums=('933602a1177318f3be0fea9406218c21410419962e10cd14307789e8b816a11d'
             '22514358734721ffcb4478f9c3c2c91f55b858bbd40aba6278c395e7a35de810'
             'bf06541caba3709e81b261c60563886e95fff902d811b74f2b49c03e70ee1685'
             '8ecdbfc8303276d8db5922f6a06aa945f58ebca27b83520f76e9155561b9c5b0'
