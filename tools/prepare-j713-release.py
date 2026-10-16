@@ -60,6 +60,15 @@ POWEROFF_DTB = 'e54c77a760a5b696486f9d80c7c83ca4295d641113bb9e54d13e259863bf9b07
 FIRS = ('j713-static-minimal-lane0-48000.wav', 'j713-static-minimal-lane1-48000.wav',
         'j713-static-minimal-lane2-48000.wav', 'j713-static-minimal-lane3-48000.wav')
 PROFILES = ('Brave-Browser', 'Brave-Browser-M4', 'Chromium')
+# Every binary the root carries outside pacman must name the source that built it (issue 77).
+SOURCE_JOINS = 'packaging/release-source-joins.json'
+CORRESPONDENCE = ('rebuilt-identical', 'unverified')
+KERNEL_MODULES = ('.ko', '.ko.gz', '.ko.xz', '.ko.zst')
+VIRTUAL_TREES = ('dev', 'proc', 'run', 'sys', 'tmp')
+# source/ files the assembler writes itself rather than copying in.
+GENERATED_SOURCES = ('source/integration-inputs.tar.gz', 'source/installer-source.tar.gz',
+                     'source/release-integration.tar.gz', 'source/README.md', 'source/j713-poweroff.md',
+                     'source/j713-kernel-receipt.json')
 
 
 def require(condition, message):
@@ -72,9 +81,115 @@ def sha(path):
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
-def pinned(path, record):
-    require(path.is_file() and not path.is_symlink() and path.stat().st_size == record['size'] and
-            sha(path) == record['sha256'], 'Owner runtime bundle disagrees with its manifest: ' + path.name)
+def source_joins(tree):
+    """Load the binary-to-source joins and reject malformed entries."""
+    joins = json.loads((tree / SOURCE_JOINS).read_bytes())
+    require(joins.get('schema') == 1 and isinstance(joins.get('binaries'), dict), 'Unknown source joins')
+    for name, entry in joins['binaries'].items():
+        require(re.fullmatch(r'[0-9a-f]{64}', entry.get('sha256', '')) and
+                entry.get('correspondence') in CORRESPONDENCE and entry.get('sources'),
+                'Incomplete source join: ' + name)
+        for source in entry['sources']:
+            require(set(source) in ({'tree'}, {'tree', 'commit'}, {'archive'}, {'archive', 'sha256'}),
+                    'Unknown source reference for ' + name)
+            require('commit' not in source or re.fullmatch(r'[0-9a-f]{40}', source['commit']),
+                    'A joined tree commit is a full commit ID: ' + name)
+            require('tree' in source or (source['archive'].startswith('source/') and
+                                         '/' not in source['archive'][7:]),
+                    'Source archives live directly in source/: ' + name)
+    return joins
+
+
+def packaged_files(root):
+    """Paths the image's pacman database says a package owns."""
+    owned = set()
+    for files in sorted((root / 'var/lib/pacman/local').glob('*/files')):
+        listing = False
+        for line in files.read_text(errors='replace').splitlines():
+            if line.startswith('%'):
+                listing = line == '%FILES%'
+            elif listing and line and not line.endswith('/'):
+                owned.add(line)
+    return owned
+
+
+def unpackaged_binaries(root):
+    """Every ELF object or kernel module in the image that no package owns, by SHA-256."""
+    owned = packaged_files(root)
+    found = {}
+    for directory, children, files in os.walk(root):
+        if Path(directory) == root:
+            children[:] = [child for child in children if child not in VIRTUAL_TREES]
+        for name in files:
+            path = Path(directory) / name
+            relative = path.relative_to(root).as_posix()
+            if relative in owned or path.is_symlink() or not path.is_file():
+                continue
+            with path.open('rb') as stream:
+                elf = stream.read(4) == b'\x7fELF'
+            if elf or name.endswith(KERNEL_MODULES):
+                found[relative] = sha(path)
+    return found
+
+
+def check_binary_joins(found, joins, allow_unverified=False):
+    """Each unpackaged binary must match its join, and every join must still ship."""
+    listed = joins['binaries']
+    require(not set(found) - set(listed),
+            'Binaries without a source join: ' + ', '.join(sorted(set(found) - set(listed))))
+    require(not set(listed) - set(found),
+            'Source joins for binaries the image no longer carries: ' + ', '.join(sorted(set(listed) - set(found))))
+    for name, digest in sorted(found.items()):
+        require(listed[name]['sha256'] == digest, 'Source join names a different build of ' + name)
+    unverified = sorted(name for name, entry in listed.items() if entry['correspondence'] != 'rebuilt-identical')
+    require(allow_unverified or not unverified,
+            'Source correspondence not verified by an identical rebuild: ' + ', '.join(unverified))
+    return unverified
+
+
+def git_tree_id(tree, revision, path):
+    """The git tree object of path at revision, or None when it does not exist there."""
+    result = subprocess.run(['git', '-C', str(tree), 'rev-parse', '--verify', '--quiet', revision + ':' + path],
+                            capture_output=True, text=True)
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def check_planned_sources(tree, joins, planned):
+    """Before any output exists: every joined archive will be in the kit at its pin, and every
+    commit-pinned tree is unchanged in the revision whose sources the kit carries."""
+    for name, entry in sorted(joins['binaries'].items()):
+        for source in entry['sources']:
+            if 'commit' in source:
+                pinned = git_tree_id(tree, source['commit'], source['tree'])
+                require(pinned is not None and pinned == git_tree_id(tree, 'HEAD', source['tree']),
+                        'Joined source tree ' + source['tree'] + ' differs from ' + source['commit'][:12] +
+                        ' for ' + name + '; assemble from that commit or join the source that built it')
+            elif 'archive' in source:
+                require(source['archive'] in planned,
+                        'Joined source archive will not be in the kit for ' + name + ': ' + source['archive'])
+                path = planned[source['archive']]
+                # The assembler writes generated archives afresh each time, so they can't carry a pin.
+                require('sha256' not in source or path is not None,
+                        'Joined source archive is generated by the assembler and cannot be pinned for ' +
+                        name + ': ' + source['archive'])
+                require('sha256' not in source or sha(path) == source['sha256'],
+                        'Joined source archive changed for ' + name + ': ' + source['archive'])
+
+
+def check_join_sources(output, tracked, joins):
+    """Every source a join names is in the kit, at its pinned identity."""
+    for name, entry in sorted(joins['binaries'].items()):
+        for source in entry['sources']:
+            if 'tree' in source:
+                prefix = source['tree'].rstrip('/') + '/'
+                require(any(path == source['tree'] or path.startswith(prefix) for path in tracked),
+                        'Joined source tree is not in the release integration: ' + source['tree'])
+                continue
+            path = output / source['archive']
+            require(path.is_file() and not path.is_symlink(),
+                    'Joined source archive missing for ' + name + ': ' + source['archive'])
+            require('sha256' not in source or sha(path) == source['sha256'],
+                    'Joined source archive changed for ' + name + ': ' + source['archive'])
 
 
 def document(path, value):
@@ -249,7 +364,7 @@ def fill_free_space(root):
 
 
 def owner_audio_manifest(raw, previous_pin, profile):
-    """Replace only the four measured FIR identities in the retained manifest."""
+    """Bind the static FIR identities and record their provenance."""
     require(hashlib.sha256(raw).hexdigest() == previous_pin,
             'Unexpected retained audio manifest')
     require(set(profile['outputs']) == set(FIRS) == set(profile['reference_outputs']),
@@ -270,6 +385,11 @@ def owner_audio_manifest(raw, previous_pin, profile):
                 'Invalid native filter identity: ' + name)
         manifest['files']['/' + key] = native['sha256']
         manifest['file_metadata'][key]['sha256'] = native['sha256']
+    manifest.pop('distribution_hold')
+    manifest.pop('redistributable')
+    manifest['filter_provenance'] = (
+        'Derived from Apple J713 tuning through the retained pipeline; see audio/j713/filters/README.md.'
+    )
     return (json.dumps(manifest, indent=2, sort_keys=True) + '\n').encode()
 
 
@@ -335,7 +455,23 @@ def prepare_decoder(root, tree, kernel=None):
     return sha(metadata)
 
 
-def prepare_root(source, image, root, tree, identity, kernel=None):
+def static_filters(tree):
+    """Verify the complete approved platform profile before changing an image."""
+    profile = json.loads((tree / 'audio/j713/owner-fir/manifest.json').read_bytes())
+    require(set(profile['outputs']) == set(FIRS), 'Unexpected static FIR set')
+    payload = {}
+    for name, record in profile['outputs'].items():
+        path = tree / 'audio/j713/filters' / name
+        require(path.is_file() and not path.is_symlink(), 'Missing static FIR: ' + name)
+        data = path.read_bytes()
+        require(len(data) == record['size'] and hashlib.sha256(data).hexdigest() == record['sha256'],
+                'Static FIR identity mismatch: ' + name)
+        payload[name] = data
+    return profile, payload
+
+
+def prepare_root(source, image, root, tree, identity, kernel=None, allow_unverified=False):
+    manifest, filters = static_filters(tree)
     require(sha(source) == BASE_ROOT, 'Retained root image changed')
     command('cp', '--reflink=auto', '--sparse=always', source, image)
     root.mkdir()
@@ -346,7 +482,6 @@ def prepare_root(source, image, root, tree, identity, kernel=None):
         completion = root / 'etc/m4-install-complete'
         require(not completion.exists() and not completion.is_symlink(),
                 'Retained root must not have completed first boot')
-        manifest = json.loads((tree / 'audio/j713/owner-fir/manifest.json').read_text())
         audio_manifest = root / 'etc/omarchy/j713-audio-manifest.json'
         native_audio = owner_audio_manifest(audio_manifest.read_bytes(), BASE_AUDIO, manifest)
         native_audio = prepare_startup(root, tree, native_audio)
@@ -356,9 +491,8 @@ def prepare_root(source, image, root, tree, identity, kernel=None):
             path = root / 'usr/share/asahi-audio/j713' / name
             require(path.is_file() and not path.is_symlink() and
                     sha(path) == manifest['reference_outputs'][name]['sha256'], 'Unexpected original FIR')
-            with path.open('r+b') as stream:
-                stream.write(bytes(path.stat().st_size)); stream.flush(); os.fsync(stream.fileno())
-            path.unlink()
+            path.write_bytes(filters[name])
+            path.chmod(0o644)
         audio_manifest.write_bytes(native_audio)
         for profile in PROFILES:
             path = root / ('etc/skel/.config/omarchy/pending/widevine-' + profile + '.json')
@@ -370,12 +504,10 @@ def prepare_root(source, image, root, tree, identity, kernel=None):
         additions = {
             'usr/lib/omarchy/m4-j713-owner-assets.py': 'tools/m4-j713-owner-assets.py',
             'usr/lib/systemd/system/j713-owner-assets.service': 'packaging/j713-owner-assets.service',
-            'usr/lib/systemd/system/m4-j713-audio-register.service.d/10-owner-assets.conf':
-                'packaging/j713-owner-assets-audio.conf',
             'usr/lib/systemd/system/systemd-user-sessions.service.d/10-owner-assets.conf':
                 'packaging/j713-owner-assets-session.conf',
             'usr/lib/systemd/system/omarchy-provision-owner.service.d/10-owner-assets.conf':
-                'packaging/j713-owner-assets-audio.conf',
+                'packaging/j713-owner-assets-provision.conf',
             # Connect to the signed M4 update channel once the owner is online.
             'usr/lib/omarchy/m4-channel-connect.py': 'tools/m4-channel-setup.py',  # not the package's copy path
             'usr/lib/systemd/system/m4-channel-connect.service': 'packaging/j713-first-boot/m4-channel-connect.service',
@@ -395,6 +527,7 @@ def prepare_root(source, image, root, tree, identity, kernel=None):
         timer.parent.mkdir(parents=True, exist_ok=True)
         timer.symlink_to('/usr/lib/systemd/system/m4-channel-connect.timer')
         (root / 'etc/m4-root-id').write_text(identity + '\n')
+        unverified = check_binary_joins(unpackaged_binaries(root), source_joins(tree), allow_unverified)
         fill_free_space(root)
         command('umount', root)
         mounted = False
@@ -404,7 +537,7 @@ def prepare_root(source, image, root, tree, identity, kernel=None):
     command('tune2fs', '-U', identity, image)
     # The installer requires a clean ext4 image checked after its last write mount.
     command('e2fsck', '-f', '-p', image)
-    return {'audio': hashlib.sha256(native_audio).hexdigest(), 'video': video_pin}
+    return {'audio': hashlib.sha256(native_audio).hexdigest(), 'video': video_pin, 'unverified': unverified}
 
 
 def assemble(args):
@@ -412,6 +545,10 @@ def assemble(args):
     require(os.geteuid() == 0, 'Build on a Linux host through its scoped root job')
     tree, baseline = args.source_tree.resolve(), args.baseline.resolve()
     revision = source_revision(tree)
+    tracked = [raw.decode() for raw in subprocess.check_output(
+        ['git', '-C', str(tree), 'ls-files', '-z']).split(b'\0') if raw]
+    require(all('audio/j713/filters/' + name in tracked for name in FIRS),
+            'Static FIR assets must be tracked in the release source')
     kernel = kernel_input(getattr(args, 'kernel', None), getattr(args, 'kernel_receipt', None),
                           tree, revision)
     require(args.output.is_absolute() and not args.output.exists() and
@@ -422,10 +559,6 @@ def assemble(args):
     for line in (baseline / 'SHA256SUMS').read_text().splitlines():
         pin, name = line.split('  ', 1)
         require(sha(baseline / name) == pin, 'Retained delivery mismatch: ' + name)
-    require(sha(args.owner_bundle) == '4b59c1549e821d79ca4043ade37c02cdbbcc38e5a8eb5202f285b8eb2ff97e07',
-            'Unknown owner helper bundle')
-    require(sha(args.numpy_source) == 'df2d5874ff183595a4ba404edd04f6bd9b5505c1d7708573f6a6c17489a67563',
-            'Unknown numerical dependency source')
     require(sha(args.cargo_source) == 'faf50f21db4b622900bd275441bc321d1a01933afb555e84d1446d38d6027a34',
             'Unknown locked dependency sources')
     require(sha(args.sound_exports) == '9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362',
@@ -434,25 +567,41 @@ def assemble(args):
             'Unknown source reconstruction guidance')
     require(args.poweroff_dtb.is_file() and not args.poweroff_dtb.is_symlink() and
             sha(args.poweroff_dtb) == POWEROFF_DTB, 'Unknown SMC poweroff device tree')
-    owner_profile = json.loads((tree / 'audio/j713/owner-fir/manifest.json').read_bytes())
-    handoff = runpy.run_path(str(tree / 'tools/m4-j713-owner-assets.py'))['FIRS']
-    require(handoff == {name: (record['size'], record['sha256'])
-                        for name, record in owner_profile['outputs'].items()},
-            'Owner generation and installer handoff identities disagree')
+    static_filters(tree)
     config = json.loads((baseline / 'installer_data.json').read_bytes())
     old_image = json.loads((baseline / 'IMAGE.json').read_bytes())
     require(old_image['audio_manifest_sha256'] == BASE_AUDIO, 'Baseline audio identity changed')
     require(old_image['video_manifest_sha256'] == BASE_VIDEO, 'Baseline video identity changed')
     require(config['os_list'][0]['m4_boot'] == old_image['boot'], 'Baseline boot pins disagree')
     boot = release_boot(old_image['boot'], kernel)
+    joins = source_joins(tree)
+    archives = {source['archive']: source.get('sha256') for entry in joins['binaries'].values()
+                for source in entry['sources'] if 'archive' in source}
+    join_sources = getattr(args, 'join_source', None) or []
+    for path in join_sources:
+        name = 'source/' + path.name
+        require(path.is_file() and not path.is_symlink() and archives.get(name) and sha(path) == archives[name],
+                'Join source is not a pinned archive any join names: ' + str(path))
+    # Where each source/ file of the kit comes from (None: written by this assembler).
+    planned = {'source/' + path.name: path for path in sorted((baseline / 'source').glob('*'))
+               if path.is_file()}
+    planned.update({'source/j713-audio-cargo-sources.tar.gz': args.cargo_source,
+                    'source/reference-sound-exports.symvers': args.sound_exports,
+                    'source/j713-audio-reconstruction.tar': args.reconstruction})
+    planned.update({'source/' + path.name: path for path in join_sources})
+    planned.update(dict.fromkeys(GENERATED_SOURCES))
+    check_planned_sources(tree, joins, planned)
+    allow_unverified = getattr(args, 'allow_unverified_source', False)
     args.output.mkdir(mode=0o700)
     output = args.output / 'delivery'
     output.mkdir()
     image = args.output / 'root.ext4'
     identity = str(uuid.uuid4())
     root_args = (args.root_image.resolve(), image, args.output / 'mounted-root', tree, identity)
-    manifest_pins = (prepare_root(*root_args) if kernel is None else
-                     prepare_root(*root_args, kernel=kernel))
+    root_options = {'kernel': kernel} if kernel is not None else {}
+    if allow_unverified:
+        root_options['allow_unverified'] = True
+    manifest_pins = prepare_root(*root_args, **root_options)
     old_package = config['os_list'][0]['package']
     new_package = 'omarchy-j713-' + VERSION + '.zip'
     skipped = {'SHA256SUMS', 'KIT.json', 'IMAGE.json', 'installer_data.json', 'Install.command',
@@ -492,43 +641,13 @@ def assemble(args):
     repack_installer(baseline / 'source/installer-source.tar.gz',
                      output / 'source/installer-source.tar.gz', module, True)
     clean_integration(baseline / 'source/integration-inputs.tar.gz', output / 'source/integration-inputs.tar.gz')
-    tracked = [raw.decode() for raw in subprocess.check_output(
-        ['git', '-C', str(tree), 'ls-files', '-z']).split(b'\0') if raw]
-    owner = output / 'owner-audio'
-    bundle = owner / 'bundle'
-    owner.mkdir()
-    helpers = args.output / 'owner-helpers'
-    with tarfile.open(args.owner_bundle) as archive:
-        archive.extractall(helpers, filter='data')
-    attributes = helpers / 'owner-fir/.gitattributes'
-    require(attributes.is_file() and not attributes.is_symlink(), 'Owner bundle metadata changed')
-    # The pinned archive supplies only the natively built helpers and the wheel.
-    # This revision owns every other runtime file, so scripts and their pins move together.
-    for name in ('bin', 'dependencies'):
-        native = helpers / 'owner-fir' / name
-        require(native.is_dir() and not native.is_symlink(), 'Owner helper bundle lacks ' + name)
-        shutil.copytree(native, bundle / name, symlinks=True)
-    shutil.rmtree(helpers)
-    for name in tracked:
-        relative = name.removeprefix('audio/j713/owner-fir/')
-        # Checkout formatting metadata stays in the source archive, not the runtime bundle.
-        if relative == name or relative == '.gitattributes':
-            continue
-        require(relative.split('/')[0] not in ('bin', 'dependencies'),
-                'Native owner files are tracked in the source: ' + name)
-        target = bundle / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(tree / name, target)
-    require(owner_profile['sources'] and owner_profile['helpers'], 'Incomplete owner filter manifest')
-    for directory, records in (('src', owner_profile['sources']), ('bin', owner_profile['helpers'])):
-        for name, record in records.items():
-            pinned(bundle / directory / name, record)
-    pinned(bundle / 'dependencies' / owner_profile['numpy']['filename'], owner_profile['numpy'])
-    shutil.copyfile(tree / 'tools/m4-j713-fir-owner.py', owner / 'm4-j713-fir-owner.py')
-    shutil.copyfile(args.numpy_source, output / 'source/numpy-2.5.3.tar.gz')
     shutil.copyfile(args.cargo_source, output / 'source/j713-audio-cargo-sources.tar.gz')
     shutil.copyfile(args.sound_exports, output / 'source/reference-sound-exports.symvers')
     shutil.copyfile(args.reconstruction, output / 'source/j713-audio-reconstruction.tar')
+    for path in join_sources:
+        target = output / 'source' / path.name
+        require(not target.exists(), 'Join source would replace a retained archive: ' + path.name)
+        shutil.copyfile(path, target)
     for source_name, destination in (
             ('packaging/Install.command', 'Install.command'),
             ('docs/install.md', 'START-HERE.md'),
@@ -539,11 +658,11 @@ def assemble(args):
         shutil.copyfile(tree / source_name, output / destination)
     # The current repository sources are a separate exact archive; private build
     # logs, machine credentials and workflow instructions never enter this archive.
+    integration = [name for name in tracked if Path(name).name not in ('AGENTS.md', 'CLAUDE.md')]
     with tarfile.open(output / 'source/release-integration.tar.gz', 'x:gz') as archive:
-        for name in tracked:
-            if Path(name).name in ('AGENTS.md', 'CLAUDE.md'):
-                continue
+        for name in integration:
             archive.add(tree / name, arcname=name, recursive=False)
+    check_join_sources(output, integration, joins)
     if kernel is not None:
         (output / 'source/j713-kernel-receipt.json').write_bytes(kernel['receipt_bytes'])
     config['os_list'][0]['package'] = new_package
@@ -563,8 +682,10 @@ def assemble(args):
         'video_manifest_sha256': manifest_pins['video'],
         'fresh_install_qualified': False,
         'qualification': 'The preceding owner-input candidate failed fresh startup. This image includes startup and recovery corrections; a successful owner installation is still required before publication.',
-        'owner_inputs': 'Speaker filters generated from installed macOS and hash checked before partitioning; Widevine requires each owner choice.',
+        'owner_inputs': 'The root image contains the exact approved J713 FIR profile; Widevine requires each owner choice.',
         'baseline_root_sha256': BASE_ROOT,
+        'source_joins_sha256': sha(tree / SOURCE_JOINS),
+        'source_correspondence_unverified': manifest_pins['unverified'],
         'poweroff': {'change': 'Enable existing SMC handler with its Abbey shutdown-state PMU cells',
                     'hardware_verified': False, 'issue': 24},
     }
@@ -596,11 +717,16 @@ def assemble(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ('source-tree', 'baseline', 'root-image', 'owner-bundle', 'numpy-source', 'cargo-source',
+    for name in ('source-tree', 'baseline', 'root-image', 'cargo-source',
                  'sound-exports', 'reconstruction', 'poweroff-dtb', 'output'):
         parser.add_argument('--' + name, required=True, type=Path)
     parser.add_argument('--kernel', type=Path, help='Exact startup-qualified J713 AFE action Image.gz')
     parser.add_argument('--kernel-receipt', type=Path, help='Matching build and native startup receipt')
+    parser.add_argument('--join-source', type=Path, action='append', default=[],
+                        help='A source archive that ' + SOURCE_JOINS + ' names and pins; copied into source/')
+    parser.add_argument('--allow-unverified-source', action='store_true',
+                        help='Reassemble alpha.1 with joins not yet proven by an identical rebuild; '
+                             'IMAGE.json lists them')
     assemble(parser.parse_args())
 
 

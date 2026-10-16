@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 KB2UKA
-"""Generate exact J713 FIR files from the owner's installed macOS inputs."""
+"""Reproduce exact J713 FIR files in the pinned macOS development environment."""
 
 import argparse
 import hashlib
@@ -84,7 +84,7 @@ def unpack_wheel(data_path, destination):
 
 
 def run_script(source, work, dependencies, name):
-    # Isolated Python uses only the shipped source and wheel in addition to its
+    # Isolated Python uses only the retained source and wheel in addition to its
     # own standard library. The retained programs keep their original math.
     bootstrap = (
         'import runpy,sys; '
@@ -99,10 +99,10 @@ def run_script(source, work, dependencies, name):
     versions = [parent for parent in Path(sys.executable).resolve().parents
                 if parent.name == '3.13' and parent.parent.name == 'Versions'
                 and parent.parent.parent.name == 'Python.framework']
-    require(len(versions) == 1, 'Run with the bundled framework Python.')
+    require(len(versions) == 1, "Run with the reproduction environment's Python.framework.")
     version = versions[0]
     require((version / 'Python').is_file() and (version / 'lib').is_dir(),
-            'Incomplete bundled Python framework.')
+            'Incomplete reproduction Python framework.')
     environment.update(DYLD_FRAMEWORK_PATH=str(version.parent.parent.parent),
                        DYLD_LIBRARY_PATH=str(version / 'lib'))
     result = subprocess.run(
@@ -111,14 +111,14 @@ def run_script(source, work, dependencies, name):
         capture_output=True, text=True, timeout=240,
     )
     require(result.returncode == 0,
-            'Owner filter generation stopped at ' + name + ': ' + result.stderr[-2000:].strip())
+            'Filter reproduction stopped at ' + name + ': ' + result.stderr[-2000:].strip())
 
 
 def generate(bundle, output):
     require(platform.system() == 'Darwin' and platform.machine() == 'arm64',
-            'Owner filter generation requires native arm64 macOS.')
+            'Filter reproduction requires native arm64 macOS.')
     require(sys.version_info[:3] == (3, 13, 9) and not sys.flags.optimize,
-            'Use the installer\'s bundled Python 3.13.9 without optimization.')
+            "Use the reproduction environment's CPython 3.13.9 without optimization.")
     require(output.is_absolute() and output.name not in ('', '.', '..'),
             '--output must name a new absolute directory.')
     require(not output.exists() and not output.is_symlink(),
@@ -128,9 +128,9 @@ def generate(bundle, output):
     manifest_bytes = (bundle / 'manifest.json').read_bytes()
     manifest = json.loads(manifest_bytes)
     require(manifest['schema'] == 2 and manifest['board'] == 'apple,j713',
-            'Unsupported owner filter bundle.')
+            'Unsupported filter reproduction bundle.')
     require(set(manifest['sources']) == SOURCE_NAMES and set(manifest['helpers']) == HELPER_NAMES,
-            'Incomplete owner filter bundle.')
+            'Incomplete filter reproduction bundle.')
     require(manifest['numpy']['filename'] == WHEEL, 'Unsupported numerical dependency.')
     for name, record in manifest['sources'].items():
         checked_bytes(bundle / 'src' / name, record)
@@ -162,7 +162,7 @@ def generate(bundle, output):
         run_script(source, work, dependencies, 'inspect_strip.py')
         for name, record in manifest['presets'].items():
             checked_bytes(work / 'decoded' / name, record)
-        print('Generating the owner\'s J713 audio filters...', flush=True)
+        print('Reproducing J713 audio filters...', flush=True)
         (work / 'output').mkdir()
         run_script(source, work, dependencies, 'run-transfer.py')
         (work / 'output').rename(work / 'native-transfer')
@@ -177,8 +177,7 @@ def generate(bundle, output):
         }, 'Unexpected filter output set.')
         for name, record in manifest['outputs'].items():
             files[name] = checked_bytes(work / 'output' / name, record)
-        # Recheck the installed inputs after generation. No unrecognized input
-        # or partially generated output becomes an installation payload.
+        # Recheck the installed inputs before writing the reproduction outputs.
         for name, record in manifest['owner_inputs'].items():
             require(qualified_input(record)[1] == matched[name],
                     'Owner input changed during generation: ' + record['path'])
@@ -207,22 +206,20 @@ def generate(bundle, output):
         except BaseException:
             shutil.rmtree(output)
             raise
-    print('Owner audio filters ready: ' + str(output), flush=True)
+    print('J713 filter reproduction ready: ' + str(output), flush=True)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True, type=Path, help='new absolute output directory')
     parser.add_argument('--bundle', type=Path, default=DEFAULT_BUNDLE,
-                        help='owner-fir bundle directory supplied with the installer')
+                        help='retained owner-fir reproduction bundle directory')
     args = parser.parse_args()
     try:
         generate(args.bundle, args.output)
     except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError,
             zipfile.BadZipFile) as error:
-        print('Cannot prepare J713 audio filters: ' + str(error), file=sys.stderr)
-        print('No installation changes were made. This macOS input or generator output '
-              'is not supported by this installer.', file=sys.stderr)
+        print('J713 filter reproduction did not complete: ' + str(error), file=sys.stderr)
         return 1
     return 0
 

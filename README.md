@@ -146,6 +146,11 @@ once applies them:
 | Sound in Zeus Link and other WebKitGTK and GStreamer apps ([#54](https://github.com/Kb2uka/Omarchy-M4-Native/pull/54), [#63](https://github.com/Kb2uka/Omarchy-M4-Native/pull/63)) | `omarchy-m4-gst-audio` 1.28.7-1 |
 | GPU and desktop on Airs whose GPU power limit is below 24800 mW ([#57](https://github.com/Kb2uka/Omarchy-M4-Native/issues/57)); applied at the next boot | `omarchy-m4-gpu` 1-1 |
 | Headphone jack playback ([#88](https://github.com/Kb2uka/Omarchy-M4-Native/pull/88)); starts at the next boot ([details](docs/j713-headphones.md#existing-installs)) | `omarchy-m4-headphones` 1-1 |
+| CPU idle: idle cores power down, so the idle Air runs cooler and draws less ([#65](https://github.com/Kb2uka/Omarchy-M4-Native/issues/65)); starts at the next boot ([details](docs/j713-cpu-idle.md#existing-installs)) | `omarchy-m4-cpu` 1-1 |
+| E cores up to 2172 MHz and a CPU die thermal safety net ([#66](https://github.com/Kb2uka/Omarchy-M4-Native/issues/66)) | `omarchy-m4-boot` 1-10 |
+| P cores boost up to 4464 MHz and E cores up to 2808 MHz under a predictive heat guard ([#66](https://github.com/Kb2uka/Omarchy-M4-Native/issues/66)); starts at the next boot, off switch `sudo m4-cpu-idle --boost off` ([details](docs/j713-cpu-boost.md#existing-installs)) | `omarchy-m4-boot` 1-11, `omarchy-m4-cpu` 1-2 |
+| The boost guard's limits match macOS on the fanless Air (105 C bursts, 100 C sustained), so one busy core runs at its top boost (4.04 GHz, bursts to 4.46 GHz) for most of a 45 s job, and it estimates the die's temperature from heat measured on the Air ([#66](https://github.com/Kb2uka/Omarchy-M4-Native/issues/66), [details](docs/j713-cpu-boost.md#settled-heat-the-base-estimate)) | `omarchy-m4-cpu` 1-3 |
+| Headset microphone on the headphone jack ([#105](https://github.com/Kb2uka/Omarchy-M4-Native/pull/105)); starts at the next boot ([details](docs/j713-headphones.md#headset-microphone)) | `omarchy-m4-headphones` 1-2 |
 
 A devicetree you applied by hand from the guides is kept; the update never
 moves an Air back to an older one. An Air connected before
@@ -175,7 +180,7 @@ As of October 11, 2026, with the pinned experimental runtime:
 | Shut Down | With update 1, Shut Down turns the Air off and it stays off; the next power-on boots normally (October 12). |
 | Graphics | Experimental Apple M4 GPU rendering is active. Scanout still uses simpledrm; this is not complete display-controller support or proof of physical panel timing. |
 | Speakers | Protected internal-speaker playback and automatic startup have worked on the test Air. Broad acoustic calibration, all failure conditions and suspend/resume remain unqualified. |
-| Headphone jack | With `omarchy-m4-headphones` from `omarchy-m4-update` (October 14-15, 2026): clean stereo playback beside the protected speakers, and the output follows plug and unplug. The headset microphone and suspend/resume are not supported. |
+| Headphone jack | With `omarchy-m4-headphones` from `omarchy-m4-update` (October 14-15, 2026): clean stereo playback beside the protected speakers, and the output follows plug and unplug. Headset microphone with `omarchy-m4-headphones` 1-2 (October 15): clean mono capture, alone and during playback, a clean two-way video call, and input that follows plug and unplug. Suspend/resume is not supported. |
 | Browser video | H264 8-bit and VP9 Profile 0 hardware decoding have been observed with the qualified decoder/graphics stack. Ordinary 1080p30 playback works in the tested cases. This is not hardware support for every codec or protected video. |
 | Normal media-player launch | A 10-second normal mpv file-open check used `vaapi-copy` with zero reported frame/decoder drops; an AV1 control reached EOF in software with one startup frame drop. `vaapi-copy` still uses the hardware decoder, with a copy into CPU-accessible memory afterward. |
 | Protected movies | A tested Widevine movie used CPU decoding and played. Hardware decoding is not promised for protected content, and no license or DRM restrictions are bypassed. |
@@ -192,10 +197,11 @@ unrestricted. Do not substitute the older broad session-placement experiment.
 ## Release scope
 
 The download includes the installer, image, checksums, source archives and
-upstream notices. It excludes Apple components, generated speaker-filter WAVs,
-Widevine binaries and preset personal consent. Speaker filters are prepared
-from the owner's installed macOS components and must match the expected hashes
-before partitioning begins. Unrecognized inputs are refused.
+upstream notices. The published update 2 kit excludes generated speaker-filter
+WAVs and prepares them from the owner's installed macOS before partitioning.
+The release assembler includes the exact approved
+[static J713 profile](audio/j713/filters/README.md) in the root image. Apple components, Widevine binaries and preset
+personal consent remain excluded.
 
 The front USB port, camera, suspend/resume, broad hardware coverage
 and coordinated updates remain open work. This alpha is not a daily-driver,

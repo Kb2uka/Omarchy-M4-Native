@@ -204,7 +204,8 @@ then restart. From macOS, copy the same file on the `EFI - OMARC` partition.
   peaks at 1800 MHz, as before. Higher states need a CPU thermal policy first.
   [CPU die temperature](j713-cpu-temperature.md) now makes the temperature
   visible and records bounded measurements above the handoff clocks (#60).
-- CPU idle states are still absent (`cpuidle: none`, `idle=nop`).
+- CPU idle states come from a separate module; see [CPU idle](j713-cpu-idle.md),
+  which also raises the E cluster to 2172 MHz.
 - No energy model is provided, so energy-aware scheduling stays off.
   Placement uses capacity only.
 - Battery life was not measured.

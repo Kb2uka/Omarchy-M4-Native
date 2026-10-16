@@ -1,0 +1,2 @@
+obj-m += j713_smc_read.o
+obj-m += j713_pstate_bench.o

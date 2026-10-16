@@ -1,0 +1,191 @@
+{
+  "schema": 1,
+  "channel": "omarchy-m4",
+  "note": "Every binary downloaded from the package-inputs release for the channel packages, the source that built it, and how that was established. rebuilt-identical means a rebuild from the named sources reproduced the exact bytes; unverified names the likeliest published source by file name only. tools/check-m4-packages.py refuses any package whose downloaded binary lacks a rebuilt-identical join, with no override in CI.",
+  "binaries": {
+    "asahi_m4-3cf47fa7.ko": {
+      "sha256": "3cf47fa706630ddc5fc55a3bce00ab31e8a4c5ee48e1ba563e26a0406da196f8",
+      "license": "GPL-2.0-only",
+      "correspondence": "unverified",
+      "sources": [
+        {
+          "tree": "gpu/j713",
+          "commit": "45b0b64a8c40301ff83c25a18eb804d0ba8e45f2"
+        },
+        {
+          "archive": "source/kernel-controller.tar.gz",
+          "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/omarchy-j713-v0.1.0-alpha.1-gpu-air-source.tar.gz",
+          "sha256": "c19a7c97184b3f954795c50dfeff857e8baf685f901524845710da839cbd2562"
+        }
+      ],
+      "evidence": "Issue #57: accept each M4 Air's own GPU power limit up to 24800 mW. Built by gpu/j713/build-test-module.sh from alpha.1 kernel-controller and source packet with gpu/j713/asahi/g16.rs."
+    },
+    "gst-plugins-good-1.28.7-libgstautodetect-aarch64.so": {
+      "sha256": "ffb41a1812d1ea398b567692b730df0ea6bea5620511390d8731704eae7515b7",
+      "license": "LGPL-2.1-or-later",
+      "correspondence": "unverified",
+      "sources": [
+        {
+          "archive": "package-inputs/gst-plugins-good-1.28.7.tar.xz",
+          "sha256": "87256969c82cf3bc8574301f3e7044a90de0ac500a5a27d8ba38c4dde894dd8b"
+        },
+        {
+          "tree": "tools/m4-webkit-audio-plugins.py",
+          "commit": "948b07683502dea4b6b290929789b942b36ae4f3"
+        }
+      ],
+      "evidence": "Built by tools/m4-webkit-audio-plugins.py from gst-plugins-good-1.28.7.tar.xz (meson options -Dauto_features=disabled -Dautodetect=enabled -Dpulse=enabled)."
+    },
+    "gst-plugins-good-1.28.7-libgstpulseaudio-aarch64.so": {
+      "sha256": "3a303612b701477a5588c1f0f1d55ae2fe7c96100e0a5c8545659eb598be953a",
+      "license": "LGPL-2.1-or-later",
+      "correspondence": "unverified",
+      "sources": [
+        {
+          "archive": "package-inputs/gst-plugins-good-1.28.7.tar.xz",
+          "sha256": "87256969c82cf3bc8574301f3e7044a90de0ac500a5a27d8ba38c4dde894dd8b"
+        },
+        {
+          "tree": "tools/m4-webkit-audio-plugins.py",
+          "commit": "948b07683502dea4b6b290929789b942b36ae4f3"
+        }
+      ],
+      "evidence": "Built by tools/m4-webkit-audio-plugins.py from gst-plugins-good-1.28.7.tar.xz (meson options -Dauto_features=disabled -Dautodetect=enabled -Dpulse=enabled)."
+    },
+    "j713-pboost.dtb": {
+      "sha256": "c4f036b819ce757ce790b01779a3f7532eacd5cb1c1097fa20286d1a9c9ec6ca",
+      "license": "GPL-2.0-only",
+      "correspondence": "unverified",
+      "sources": [
+        {
+          "tree": "patches/j713-pboost.dtso",
+          "commit": "09998c5268e86e0b5304a071d956949f824b3ba6"
+        },
+        {
+          "tree": "tools/build-j713-pboost-dtb.py",
+          "commit": "09998c5268e86e0b5304a071d956949f824b3ba6"
+        }
+      ],
+      "evidence": "J713 P-core boost devicetree with closed boost gate. Built with tools/build-j713-pboost-dtb.py on the E-cluster devicetree (fdedc09f...)."
+    },
+    "j713_cpuidle-a2a7947a.ko": {
+      "sha256": "a2a7947a1d2260abcfc6eb10d7d63643ad2e191e73e93fedddf605116cdfd5a9",
+      "license": "GPL-2.0-only",
+      "correspondence": "unverified",
+      "sources": [
+        {
+          "tree": "cpu/j713",
+          "commit": "48a0aa9e4e258200996788f3b3a7428352239038"
+        },
+        {
+          "archive": "source/kernel-controller.tar.gz",
+          "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        }
+      ],
+      "evidence": "J713 CPU idle driver. Built with cpu/j713/build-module.sh from cpu/j713/ on the alpha.1 kernel-controller tree (clang 21.1.8)."
+    },
+    "j713_hp_dt-3f501c61.ko": {
+      "sha256": "3f501c6193aeddc62031395e899909bf352851278f829458998ca1c4dbbe6149",
+      "license": "GPL-2.0-only",
+      "correspondence": "unverified",
+      "sources": [
+        {
+          "tree": "audio/j713/headphones/kernel",
+          "commit": "4bec7516526678ba248de66fa2bc1a0563463e16"
+        },
+        {
+          "tree": "tools/build-j713-headphones.sh",
+          "commit": "4bec7516526678ba248de66fa2bc1a0563463e16"
+        },
+        {
+          "archive": "source/kernel-controller.tar.gz",
+          "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/reference-sound-exports.symvers",
+          "sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362"
+        }
+      ],
+      "evidence": "J713 headphone jack device tree module (omarchy-m4-headphones 1-2). Built with tools/build-j713-headphones.sh from audio/j713/headphones/kernel/ on the alpha.1 kernel-controller tree (clang 21.1.8)."
+    },
+    "j713_pguard-91fe247e.ko": {
+      "sha256": "91fe247e7e83d30f62f35bcf64ddbcb42faa3a1c109881d5aefcb64dc7e5e691",
+      "license": "GPL-2.0-only",
+      "correspondence": "unverified",
+      "sources": [
+        {
+          "tree": "cpu/j713",
+          "commit": "48a0aa9e4e258200996788f3b3a7428352239038"
+        },
+        {
+          "archive": "source/kernel-controller.tar.gz",
+          "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        }
+      ],
+      "evidence": "J713 P-cluster boost guard with measured chassis heat model. Built with cpu/j713/build-module.sh from cpu/j713/ on the alpha.1 kernel-controller tree (clang 21.1.8)."
+    },
+    "linux-m4-omarchy-7.1.9.m4.20261008-payload.tar.zst": {
+      "sha256": "b160686fa06c437343f85aab10be41a669f2a23106b7e4e83e0911c921e6388f",
+      "license": "GPL-2.0-only",
+      "correspondence": "unverified",
+      "sources": [
+        {
+          "archive": "source/kernel-controller.tar.gz",
+          "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "tree": "patches-kernel/j713-input",
+          "commit": "75643cf0c8303fb1552f3a26ff333ed66704fe48"
+        }
+      ],
+      "evidence": "Kernel build 18 (c3704cfd...) and modules from v0.1.0-alpha.1 release source archives and patches-kernel/j713-input/ in this repository; byte-identical rebuild is not claimed."
+    },
+    "snd-soc-j713-group-aaad802e.ko": {
+      "sha256": "aaad802eb136ff6cb915feaa123001b3eb848bc2f038d0a5b71c8e2ff35d2581",
+      "license": "GPL-2.0-only",
+      "correspondence": "unverified",
+      "sources": [
+        {
+          "tree": "audio/j713/kernel",
+          "commit": "1114297c752c1c1e5245ce7a4f85507f4c53fcf7"
+        },
+        {
+          "archive": "source/kernel-controller.tar.gz",
+          "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/reference-sound-exports.symvers",
+          "sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362"
+        }
+      ],
+      "evidence": "J713 speaker group driver. Built from audio/j713/kernel/ on the alpha.1 kernel-controller tree with reference-sound-exports.symvers (clang 21.1.8)."
+    },
+    "snd-soc-j713-headphones-2e743937.ko": {
+      "sha256": "2e743937b4bd8315ec6dba6bef4bbfbf197d4bf6f8688761954579192df48244",
+      "license": "GPL-2.0-only",
+      "correspondence": "unverified",
+      "sources": [
+        {
+          "tree": "audio/j713/headphones/kernel",
+          "commit": "4bec7516526678ba248de66fa2bc1a0563463e16"
+        },
+        {
+          "tree": "tools/build-j713-headphones.sh",
+          "commit": "4bec7516526678ba248de66fa2bc1a0563463e16"
+        },
+        {
+          "archive": "source/kernel-controller.tar.gz",
+          "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/reference-sound-exports.symvers",
+          "sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362"
+        }
+      ],
+      "evidence": "J713 headphone codec driver (omarchy-m4-headphones 1-2). Built with tools/build-j713-headphones.sh from audio/j713/headphones/kernel/ on the alpha.1 kernel-controller tree (clang 21.1.8)."
+    }
+  }
+}

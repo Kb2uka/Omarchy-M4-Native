@@ -1,0 +1,32 @@
+# Maintainer: KB2UKA
+# Built and signed by .github/workflows/packages.yml; see docs/package-channel.md.
+# m4-cpu-idle.py, MIT.txt and GPL-2.0-only.txt are staged from tools/ and LICENSES/ by
+# tools/build-m4-packages.py. The module sources are cpu/j713/ in the repository, built on the
+# v0.1.0-alpha.1 kernel tree by cpu/j713/build-module.sh.
+pkgname=omarchy-m4-cpu
+pkgver=1
+pkgrel=3
+pkgdesc='J713 CPU idle (#65) and the P-cluster boost guard (#66)'
+arch=('aarch64')
+url='https://github.com/Kb2uka/Omarchy-M4-Native'
+license=('GPL-2.0-only OR MIT' 'MIT')
+depends=('python' 'kmod')
+install=omarchy-m4-cpu.install
+options=('!strip' '!debug')
+source=('m4-cpu-idle.py' 'm4-cpu-idle.service' 'MIT.txt' 'GPL-2.0-only.txt'
+        "j713_cpuidle.ko::${url}/releases/download/package-inputs/j713_cpuidle-a2a7947a.ko"
+        "j713_pguard.ko::${url}/releases/download/package-inputs/j713_pguard-91fe247e.ko")
+sha256sums=('39bf6bd6fe0b070320aacddf4059e5de7d3b88521ab17311d94c12f1db50de14'
+            'b95a3e45ff9ea7ea00c687ff91f9e7aa5056216b104bbc458b026f38ab96ca14'
+            'b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5'
+            'aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3'
+            'a2a7947a1d2260abcfc6eb10d7d63643ad2e191e73e93fedddf605116cdfd5a9'
+            '91fe247e7e83d30f62f35bcf64ddbcb42faa3a1c109881d5aefcb64dc7e5e691')
+
+package() {
+  install -Dm755 m4-cpu-idle.py "$pkgdir/usr/bin/m4-cpu-idle"
+  install -Dm644 j713_cpuidle.ko "$pkgdir/usr/lib/omarchy-m4/cpu/j713_cpuidle.ko"
+  install -Dm644 j713_pguard.ko "$pkgdir/usr/lib/omarchy-m4/cpu/j713_pguard.ko"
+  install -Dm644 m4-cpu-idle.service "$pkgdir/usr/lib/systemd/system/m4-cpu-idle.service"
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" MIT.txt GPL-2.0-only.txt
+}

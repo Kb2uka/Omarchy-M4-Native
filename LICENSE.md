@@ -15,7 +15,7 @@ Existing file-level notices using KB2UKA remain valid and are preserved.
 | --- | --- |
 | Original prose in `README.md`, `SPEC.md`, `docs/*.md`, `recon/README.md`, and the original explanatory text in this file and `THIRD_PARTY_NOTICES.md` | MIT |
 | Original `tools/` and `tests/` files with MIT headers, plus `.gitignore`; upstream test fixtures retain their own notices | MIT |
-| `patches/0001-*.patch` through `patches/0016-*.patch`: changes to Apple `.dts` / `.dtsi` files | GPL-2.0-or-later OR MIT |
+| `patches/0001-*.patch` through `patches/0017-*.patch`: changes to Apple `.dts` / `.dtsi` files | GPL-2.0-or-later OR MIT |
 | `recon/pmgr-j713-generated-from-live-adt.dtsi` | GPL-2.0-or-later OR MIT for the contributed description; upstream notices remain applicable to any incorporated source material |
 | `patches-kernel/m4-boot-hacks-7.1.9.patch`: `arch/arm64/lib/delay.c` hunks | GPL-2.0-only |
 | The same patch: `drivers/irqchip/irq-apple-aic.c` hunks | GPL-2.0-or-later |
@@ -77,8 +77,12 @@ texts contain the warranty and liability terms.
 
 ## J713 runtime assets
 
-The measured FIR responses named by `audio/j713/qualified.json` are not included
-in this source tree. Their redistribution license has not been established.
-Exact-hash local assembly is not a grant of rights to redistribute them. See
-[audio/j713/README.md](audio/j713/README.md) for build provenance and open
-corresponding-source requirements.
+The approved native numerical filters are included under `audio/j713/filters/`
+as static platform data. Their [provenance record](audio/j713/filters/README.md)
+distinguishes those final coefficients from the Apple software and tuning inputs
+used to reproduce them. The source-code licenses above do not grant rights in
+those Apple inputs.
+
+`audio/j713/qualified.json` keeps its historical hold for the earlier reference
+files. Other corresponding-source requirements remain described in
+[audio/j713/README.md](audio/j713/README.md).

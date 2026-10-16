@@ -1,5 +1,9 @@
 post_install() {
-  echo '==> Restart once to start the headphone jack (J713Headphones).'
+  echo '==> Restart once to start the headphone jack and headset microphone (J713Headphones).'
+}
+
+post_upgrade() {
+  post_install
 }
 
 post_remove() {

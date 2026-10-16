@@ -29,17 +29,135 @@ REALTIME = 'usr/lib/systemd/system/speakersafetyd-j713.service.d/50-realtime.con
 SPEAKER_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/20-m4-speaker-module.conf'
 GPU_DROP_IN = 'usr/lib/systemd/system/m4-gpu.service.d/20-m4-gpu-module.conf'
 HEADPHONES_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/30-m4-headphones.conf'
+CPU_IDLE_UNIT = 'usr/lib/systemd/system/m4-cpu-idle.service'
 # Installed paths of the headphone UCM and WirePlumber files, relative to their
 # source tree audio/j713/headphones/policy/.
 HEADPHONES_POLICY = ('usr/share/alsa/ucm2/conf.d/J713Headphones/J713Headphones.conf',
                      'usr/share/alsa/ucm2/conf.d/J713Headphones/HiFi.conf',
                      'usr/share/wireplumber/wireplumber.conf.d/83-j713-headphones.conf',
                      'usr/share/wireplumber/scripts/default-nodes/j713-headphones.lua')
+SOURCE_JOINS = ROOT / 'packaging/channel-source-joins.json'
+CORRESPONDENCE = ('rebuilt-identical', 'unverified')
 
 
 def require(condition, message):
     if not condition:
         raise ValueError(message)
+
+
+def git_tree_id(tree, revision, path):
+    """The git tree object of path at revision, or None when it does not exist there."""
+    result = subprocess.run(['git', '-C', str(tree), 'rev-parse', '--verify', '--quiet', revision + ':' + path],
+                            capture_output=True, text=True)
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def source_joins(path=None):
+    """Load the channel binary-to-source joins and reject malformed entries."""
+    target = path or SOURCE_JOINS
+    require(target.is_file() and not target.is_symlink(), 'Missing channel source joins: ' + str(target))
+    joins = json.loads(target.read_bytes())
+    require(joins.get('schema') == 1 and isinstance(joins.get('binaries'), dict),
+            'Unknown channel source joins schema')
+    for name, entry in joins['binaries'].items():
+        require(re.fullmatch(r'[0-9a-f]{64}', entry.get('sha256', '')) and
+                entry.get('correspondence') in CORRESPONDENCE and entry.get('sources'),
+                'Incomplete channel source join: ' + name)
+        for source in entry['sources']:
+            require(set(source) in ({'tree', 'commit'}, {'archive', 'sha256'}),
+                    'Unknown source reference for ' + name)
+            require('commit' not in source or re.fullmatch(r'[0-9a-f]{40}', source['commit']),
+                    'A joined tree commit is a full commit ID: ' + name)
+            require('sha256' not in source or re.fullmatch(r'[0-9a-f]{64}', source['sha256']),
+                    'A joined archive sha256 is a 64-char hex string: ' + name)
+            require('tree' in source or (source['archive'].startswith(('source/', 'package-inputs/')) and
+                                         '/' not in source['archive'].split('/', 1)[1]),
+                    'Source archives live directly in source/ or package-inputs/: ' + name)
+    return joins
+
+
+def package_inputs(name):
+    """Return {filename: sha256} for all package-inputs binaries downloaded by this package."""
+    recipe = ROOT / 'packaging/omarchy-m4' / name / 'PKGBUILD'
+    require(recipe.is_file(), f'Missing PKGBUILD for package: {name}')
+    text = recipe.read_text()
+    require(not re.search(r'^\s*source_[a-zA-Z0-9_]+\s*=', text, re.M),
+            f'{name}: arch-suffixed source_* array is not allowed')
+    require(not re.search(r'^\s*sha256sums_[a-zA-Z0-9_]+\s*=', text, re.M),
+            f'{name}: arch-suffixed sha256sums_* array is not allowed')
+    vars = {}
+    for line in text.splitlines():
+        m = re.match(r'^([a-zA-Z_0-9]+)=(.*)$', line.strip())
+        if m:
+            vars[m.group(1)] = m.group(2).strip('\'"')
+    for _ in range(10):
+        changed = False
+        for k, v in list(vars.items()):
+            for sub_k, sub_v in vars.items():
+                if sub_k == k:
+                    continue
+                if f'${{{sub_k}}}' in v:
+                    vars[k] = v.replace(f'${{{sub_k}}}', sub_v)
+                    changed = True
+                elif f'${sub_k}' in v:
+                    vars[k] = v.replace(f'${sub_k}', sub_v)
+                    changed = True
+        if not changed:
+            break
+    sources_m = re.search(r'^\s*source=\((.*?)\)', text, re.M | re.S)
+    sums_m = re.search(r'^\s*sha256sums=\((.*?)\)', text, re.M | re.S)
+    if not sources_m or not sums_m:
+        require('package-inputs/' not in text,
+                f'{name}: PKGBUILD mentions package-inputs/ but no inputs were parsed')
+        return {}
+    entries = re.findall(r"""['"]([^'"]+)['"]""", sources_m.group(1))
+    sums = re.findall(r"'([0-9a-f]{64})'", sums_m.group(1))
+    require(len(entries) == len(sums), f'{name}: source and sha256sums counts differ')
+    inputs = {}
+    for entry, digest in zip(entries, sums):
+        for _ in range(10):
+            for k, v in vars.items():
+                entry = entry.replace(f'${{{k}}}', v).replace(f'${k}', v)
+        if 'package-inputs/' in entry:
+            filename = entry.split('package-inputs/')[-1].split('::')[-1].strip()
+            inputs[filename] = digest
+    if 'package-inputs/' in text:
+        require(bool(inputs), f'{name}: PKGBUILD mentions package-inputs/ but no inputs were parsed')
+    return inputs
+
+
+def check_channel_joins(name, joins):
+    """Every binary downloaded from package-inputs must have a rebuilt-identical source join."""
+    inputs = package_inputs(name)
+    for filename, digest in sorted(inputs.items()):
+        require(filename in joins['binaries'],
+                f'{name} downloads binary without a source join: {filename}')
+        entry = joins['binaries'][filename]
+        require(entry['sha256'] == digest,
+                f'Source join names a different build of {filename}')
+        require(entry['correspondence'] == 'rebuilt-identical',
+                f'Source correspondence for {filename} is not verified by an identical rebuild: {entry.get("correspondence")}')
+        for source in entry['sources']:
+            if 'tree' in source:
+                require((ROOT / source['tree']).exists(),
+                        f'Joined source tree missing for {filename}: {source["tree"]}')
+                if 'commit' in source:
+                    pinned = git_tree_id(ROOT, source['commit'], source['tree'])
+                    require(pinned is not None,
+                            f'Joined commit {source["commit"][:12]} does not exist or does not contain {source["tree"]} for {filename}')
+                    head_tree = git_tree_id(ROOT, 'HEAD', source['tree'])
+                    require(pinned == head_tree,
+                            f'Joined source tree {source["tree"]} differs from {source["commit"][:12]} for {filename}')
+
+
+def check_stale_joins(channel, joins):
+    """Refuse joins for binaries the channel no longer ships."""
+    all_downloaded = set()
+    for pkg in channel['packages']:
+        all_downloaded.update(package_inputs(pkg))
+    stale = set(joins['binaries']) - all_downloaded
+    require(not stale,
+            'Source joins for binaries the channel no longer ships: ' + ', '.join(sorted(stale)))
 
 
 def sha(data):
@@ -108,7 +226,7 @@ def allowed(name, prefixes):
     return any(name == p or (p.endswith('/') and name.startswith(p)) for p in prefixes)
 
 
-def check_package(channel, package, info, files, root):
+def check_package(channel, package, info, files, root, joins=None):
     name = info['pkgname'][0]
     require(name in channel['packages'], 'Unexpected package ' + name)
     expected = f"{name}-{info['pkgver'][0]}-{info['arch'][0]}.pkg.tar.zst"
@@ -119,6 +237,8 @@ def check_package(channel, package, info, files, root):
         require(not allowed(path, channel['protected_paths']) or path in channel.get('protected_exceptions', {}),
                 f'{name} installs a protected path: {path}')
         require(files[path][0] & 0o7022 == 0, f'{name} installs a writable or setuid file: {path}')
+    if joins is not None:
+        check_channel_joins(name, joins)
     kernel = channel['kernel']
     if name == 'linux-m4-omarchy':
         image = files.get('usr/lib/omarchy-m4/Image.gz')
@@ -153,6 +273,7 @@ def check_package(channel, package, info, files, root):
         # makes its first omarchy-m4-update run install it with the new boot package.
         require('omarchy-m4-gpu' in names, 'Boot package must require the GPU module package')
         require('omarchy-m4-headphones' in names, 'Boot package must require the headphone jack package')
+        require('omarchy-m4-cpu' in names, 'Boot package must require the CPU idle package')
     elif name == 'omarchy-m4-speaker':
         for path, digest in channel['speaker_module'].items():
             require(files.get(path, (0, ''))[1] == digest, 'Staged speaker module differs from the pin: ' + path)
@@ -177,6 +298,20 @@ def check_package(channel, package, info, files, root):
         for path in HEADPHONES_POLICY:
             source = (ROOT / 'audio/j713/headphones/policy' / path).read_bytes()
             require(files.get(path) == (0o644, sha(source)), 'Packaged headphone policy differs: ' + path)
+    elif name == 'omarchy-m4-cpu':
+        for path, digest in channel['cpu_idle_module'].items():
+            require(files.get(path, (0, ''))[1] == digest, 'Staged CPU idle module differs from the pin: ' + path)
+        for path, digest in channel['cpu_guard_module'].items():
+            require(files.get(path, (0, ''))[1] == digest, 'Staged boost guard differs from the pin: ' + path)
+        tool = (ROOT / 'tools/m4-cpu-idle.py').read_bytes()
+        require(files.get('usr/bin/m4-cpu-idle') == (0o755, sha(tool)), 'Packaged CPU idle tool differs')
+        unit = (ROOT / 'packaging/omarchy-m4/omarchy-m4-cpu/m4-cpu-idle.service').read_bytes()
+        require(files.get(CPU_IDLE_UNIT) == (0o644, sha(unit)), 'CPU idle unit differs')
+        # The helper's own pin must be the channel's, or every boot would refuse the staged module.
+        helper = runpy.run_path(str(root / 'usr/bin/m4-cpu-idle'))
+        require(helper['PIN']['sha256'] == channel['cpu_idle_module'][helper['STAGED']] and
+                helper['GUARD_PIN']['sha256'] == channel['cpu_guard_module'][helper['GUARD_STAGED']] and
+                helper['RELEASE'] == kernel['release'], 'CPU idle tool pins a different module or kernel')
     elif name == 'omarchy-m4-gst-audio':
         for path, digest in channel['gst_audio'].items():
             require(files.get(path, (0, ''))[1] == digest, 'GStreamer sink differs from the pin: ' + path)
@@ -211,6 +346,8 @@ def published(channel, filename, scratch):
 
 def check(directory, compare_published=True):
     channel = json.loads(CHANNEL.read_text())
+    joins = source_joins()
+    check_stale_joins(channel, joins)
     packages = sorted(directory.glob('*.pkg.tar.zst'))
     require(sorted(p.name for p in directory.iterdir()) == [p.name for p in packages],
             'Only package archives may be in the build output')
@@ -221,7 +358,7 @@ def check(directory, compare_published=True):
             root = scratch / package.name
             root.mkdir()
             info, files = extract(package, root)
-            name = check_package(channel, package, info, files, root)
+            name = check_package(channel, package, info, files, root, joins=joins)
             require(name not in seen, 'Duplicate package ' + name)
             seen.add(name)
             if compare_published:
