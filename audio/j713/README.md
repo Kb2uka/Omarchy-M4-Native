@@ -88,12 +88,16 @@ python3 tools/package-j713-audio.py --inputs QUALIFIED_INPUTS \
   --readiness-source . --output NEW_PACKAGE --local-only
 ```
 
-**Redistribution remains blocked:** the measured FIR impulse responses have no
-established redistribution license. They are not tracked here. `--local-only`
-permits assembly from already held exact assets; it is not a license grant.
-No Apple executable, raw device tree capture, private user path or native log is
-part of the shipped source tree. The routing, UCM and WirePlumber text in `policy/` is original MIT-licensed
-configuration; it contains no Apple executable code or FIR coefficients.
+The historical assembler above retains its `--local-only` distribution hold.
+The release assembler verifies the approved native files tracked in
+[`filters/`](filters/README.md) and installs them directly in the root image.
+Their provenance record distinguishes the final numerical profile from its
+source inputs. The historical `qualified.json` remains unchanged evidence for
+the earlier profile.
+
+No Apple executable, tuning strip, extracted preset, raw render capture, private
+user path or native log is included. The routing, UCM and WirePlumber text in
+`policy/` remains original MIT-licensed configuration.
 
 ## Pending image apply/check
 

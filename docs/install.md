@@ -38,10 +38,13 @@ Linux image leaves the front port disabled. macOS may recognize both ports.
 1. Connect power and the internet. Boot macOS normally and open Terminal locally.
    An administrator account is required; run from native ARM64 macOS, not Rosetta.
    The installer firmware profile requires macOS **26.5.1 or newer**. Audio input
-   compatibility is narrower: this release recognizes exact Apple AudioDSP and
-   AID37 tuning files recorded in `owner-audio/bundle/manifest.json`: macOS
-   26.5.1, 26.5.2 and 26.6.2 (25G83) are qualified. Different macOS builds may be
-   refused before any partition changes.
+   compatibility in the published update 2 kit is narrower: it recognizes exact
+   Apple AudioDSP and AID37 tuning files recorded in
+   `owner-audio/bundle/manifest.json`. macOS 26.5.1, 26.5.2 and 26.6.2 (25G83)
+   are qualified; other builds may be refused before any partition changes.
+   If your kit has no `owner-audio/` folder, it already includes the approved
+   speaker filters and does not read macOS AudioDSP. Its firmware, recovery and
+   other installer dependencies still need qualification on a newer macOS build.
 2. Change into the kit directory. For the default download location:
 
    ```sh
@@ -58,9 +61,11 @@ Linux image leaves the front port disabled. macOS may recognize both ports.
 4. Confirm that you have read these instructions. Choose whether to enable Google
    Widevine for protected movies. **No is the default.** No Widevine binary is in
    the download; consenting enables acquisition from Google after Linux starts.
-5. Speaker filters are generated from the Mac's installed components, in memory,
-   and must match the release's exact expected hashes. If preparation fails,
-   stop: no partitioning has begun. Do not bypass the checks or substitute filters.
+5. The published update 2 kit generates speaker filters from the Mac's installed
+   components and requires exact output hashes. If that preparation fails, stop:
+   no partitioning has begun. Do not bypass its checks or substitute filters.
+   If your kit has no `owner-audio/` folder, those filters are already included:
+   it proceeds directly to administrator authentication.
 6. Enter your **macOS** password when requested. Terminal displays no characters
    while you type it. Sleep prevention stays active during the installer.
 

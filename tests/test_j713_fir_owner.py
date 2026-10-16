@@ -25,7 +25,6 @@ def module(name, filename):
 
 
 owner = module('fir_owner', 'm4-j713-fir-owner.py')
-handoff = module('fir_owner_handoff', 'm4-j713-owner-assets.py')
 
 
 def sha(data):
@@ -97,9 +96,14 @@ class BundleConsistencyTests(unittest.TestCase):
             self.assertIn('owner-inputs.json', assertion, name)
             self.assertIsNone(re.search('[0-9a-f]{64}', assertion), name)
 
-    def test_outputs_stay_single_pinned_and_match_the_installer_handoff(self):
-        self.assertEqual(handoff.FIRS, {name: (record['size'], record['sha256'])
-                                        for name, record in self.manifest['outputs'].items()})
+    def test_manifest_with_static_profile_keeps_qualified_output_identities(self):
+        directory = ROOT / 'audio/j713/filters'
+        self.assertEqual({path.name for path in directory.glob('*.wav')},
+                         set(self.manifest['outputs']))
+        for name, record in self.manifest['outputs'].items():
+            with self.subTest(name=name):
+                data = (directory / name).read_bytes()
+                self.assertEqual((len(data), sha(data)), (record['size'], record['sha256']))
 
 
 class GenerateTests(unittest.TestCase):
@@ -218,7 +222,7 @@ class GenerateTests(unittest.TestCase):
     def test_schema_1_bundle_is_refused(self):
         self.manifest['schema'] = 1
         self.write_manifest()
-        with self.assertRaisesRegex(RuntimeError, 'Unsupported owner filter bundle'):
+        with self.assertRaisesRegex(RuntimeError, 'Unsupported filter reproduction bundle'):
             self.generate()
 
 

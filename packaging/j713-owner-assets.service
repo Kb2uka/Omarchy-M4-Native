@@ -1,6 +1,6 @@
 [Unit]
-Description=Install locally prepared M4 Air speaker filters and owner options
-Before=m4-j713-audio-register.service systemd-user-sessions.service omarchy-provision-owner.service getty.target
+Description=Install M4 Air owner options
+Before=systemd-user-sessions.service omarchy-provision-owner.service getty.target
 
 [Service]
 Type=oneshot
