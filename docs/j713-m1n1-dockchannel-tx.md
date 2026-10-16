@@ -88,6 +88,11 @@ alpha.1's shipped hash, then builds the patched loader with the version tag
 `/proc/device-tree/chosen/asahi,m1n1-stage{1,2}-version`, which tells you
 which loader booted.
 
+```sh
+patches-m1n1/build-test-loaders.sh source out dctx1 "stage1 stage2" \
+    patches-m1n1/dockchannel-tx-bound.patch
+```
+
 ## Testing on an installed Air
 
 Stage 2 is replaced from Linux with `patches-m1n1/m4-m1n1-test-stage2.py`:
@@ -107,10 +112,14 @@ still the installed test build. It also finishes an interrupted install or
 rollback.
 
 Stage 1 is installed from macOS recoveryOS (1TR) with the command installer
-step 2 uses, run against the test stage 1 instead of the kit's `boot/m1n1.bin`:
+step 2 uses, run against the test stage 1 instead of the kit's `boot/m1n1.bin`.
+The file must be a boot object: the loader with the installer's m1n1 variables
+appended, as prepared in
+[j713-m1n1-issue82-ans-reset.md](j713-m1n1-issue82-ans-reset.md#testing-on-an-air)
+(`cat m1n1-stage1-issue82-test1.bin vars.bin > boot.bin.test1`):
 
 ```sh
-kmutil configure-boot -c m1n1-stage1-issue82-test1.bin --raw --entry-point 2048 \
+kmutil configure-boot -c boot.bin.test1 --raw --entry-point 2048 \
   --lowest-virtual-address 0 -v <Omarchy stub system volume>
 ```
 
