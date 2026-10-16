@@ -254,6 +254,13 @@ kmutil configure-boot -c boot.bin.ans1 --raw --entry-point 2048 \
   --lowest-virtual-address 0 -v "<stub system volume>"
 ```
 
+On the owner's Air (2026-10-16) the `head -c … | cmp -` line printed a
+mismatch in recoveryOS although the stub's first 0x120000 bytes are alpha.1's
+`18cc4cd1…` (checked afterwards in Linux). If it does, nothing has changed:
+copy `boot.bin.alpha1` to a disk Linux can read (the `EFI - OMARC` partition
+works), check and assemble `boot.bin.ans1` there with `sha256sum`, `head` and
+`tail`, and run only the `kmutil` line in recoveryOS.
+
 A run passes when the desktop comes up and
 `/proc/device-tree/chosen/asahi,m1n1-stage1-version` reads the build's tag:
 `air-c9ef56f-gpu-stage1-20261008-ans1` or
