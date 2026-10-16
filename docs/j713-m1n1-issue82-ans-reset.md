@@ -233,7 +233,10 @@ ans1  0x23ddc  bl   rtkit_sleep
 four NUL bytes, padded with zeros to a multiple of 64 KiB. alpha.1's stage 1
 (`18cc4cd1…`) and both fixed builds are `0x120000` bytes, already a multiple
 of 64 KiB. So after alpha.1's loader, the rest of the boot object the
-installer left on the Omarchy stub is exactly the variables block,
+installer left on the Omarchy stub is exactly the variables block. The `cmp`
+line checks that the stub starts with alpha.1's loader, using the
+`stage1-stock-m1n1.bin` (`18cc4cd1…`) the build script writes, so no
+checksum tool is needed in 1TR. The stub's file is
 `<stub system volume>/Finish Installation.app/Contents/Resources/boot.bin`
 (the file installer step 2 passes to `kmutil`). In 1TR, work in a folder on
 a disk that survives a restart, such as the macOS user's Downloads; 1TR's
@@ -242,9 +245,9 @@ freeze:
 
 ```sh
 res="<stub system volume>/Finish Installation.app/Contents/Resources"
-cd "<persistent folder holding m1n1-stage1-ans1.bin>"
+cd "<persistent folder holding m1n1-stage1-ans1.bin and stage1-stock-m1n1.bin>"
 cp "$res/boot.bin" boot.bin.alpha1                      # keep for rollback
-head -c 1179648 boot.bin.alpha1 | shasum -a 256         # must start 18cc4cd1
+head -c 1179648 boot.bin.alpha1 | cmp - stage1-stock-m1n1.bin   # must print nothing
 tail -c +1179649 boot.bin.alpha1 > vars.bin
 cat m1n1-stage1-ans1.bin vars.bin > boot.bin.ans1
 kmutil configure-boot -c boot.bin.ans1 --raw --entry-point 2048 \
@@ -258,8 +261,8 @@ A run passes when the desktop comes up and
 
 **Rollback.** If the Air freezes on the logo, hold the power button to reach
 1TR, which does not run stage 1, and run the same `kmutil` command on
-`boot.bin.alpha1` in that folder, the stub's original boot object. Never pass a bare
-loader to `kmutil`.
+`boot.bin.alpha1` in that folder, the stub's original boot object. Never pass
+a bare loader to `kmutil`.
 
 Neither build is byte-identical to `v1`. `v1` is test 1 with two
 instructions removed, and test 1 was built from an earlier revision of the
