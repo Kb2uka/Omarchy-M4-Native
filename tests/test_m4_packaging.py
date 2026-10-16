@@ -260,6 +260,17 @@ class PolicyTests(unittest.TestCase):
         text = (PACKAGING / 'omarchy-m4-gpu/20-m4-gpu-module.conf').read_text()
         self.assertIn('ExecStartPre=-/usr/bin/m4-gpu-module --boot\n', text)
 
+    def test_gpu_start_output_reaches_the_journal(self):
+        # The failure notice points at journalctl -u m4-gpu.service; /tmp is gone after a restart.
+        for path in (PACKAGING / 'omarchy-m4-gpu/20-m4-gpu-module.conf',
+                     ROOT / 'packaging/j713-startup/m4-gpu.service'):
+            with self.subTest(path.name):
+                text = path.read_text()
+                self.assertIn('[Service]\n', text)
+                self.assertIn('StandardOutput=journal\n', text)
+                self.assertIn('StandardError=journal\n', text)
+                self.assertNotIn('append:', text)
+
     def test_speaker_drop_in_cannot_block_registration(self):
         text = (PACKAGING / 'omarchy-m4-speaker/20-m4-speaker-module.conf').read_text()
         self.assertIn('ExecStartPre=-/usr/bin/m4-speaker-module --boot\n', text)

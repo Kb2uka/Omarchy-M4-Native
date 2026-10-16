@@ -261,6 +261,11 @@ class BootStatusTests(unittest.TestCase):
         self.assertIn('Ctrl+Alt (Option)+F2', self.status.NOTICE)
         self.assertIn('sudo journalctl', self.status.NOTICE)
         self.assertNotIn('root shell', self.status.NOTICE)
+        self.status.NOTICE.encode('ascii')
+        connect = next(line for line in (ROOT / 'docs/install.md').read_text().splitlines()
+                       if line.startswith('curl ') and line.endswith('m4-connect.sh | bash'))
+        self.assertIn('  ' + connect + '\n', self.status.NOTICE, 'the notice must give the documented connect line')
+        self.assertIn("sudo journalctl -b -k --grep 'G16|asahi' --no-pager", self.status.NOTICE)
 
     def test_healthy_or_starting_desktop_never_opens_console(self):
         for active in ('active', 'activating', 'reloading', 'unknown'):

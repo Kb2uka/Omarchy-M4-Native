@@ -109,8 +109,22 @@ records a short status file at `/var/log/omarchy-m4-boot-status.json`. Inspect:
 
 ```sh
 sudo journalctl -b -u m4-gpu -u m4-video -u m4-j713-audio-register --no-pager
+sudo journalctl -b -k --grep 'G16|asahi' --no-pager
+sudo cat /tmp/m4-gpu-start.log
 sudo cat /var/log/omarchy-provision-owner.log
 ```
+
+On the v0.1.0-alpha.1 installers, including update 2, `m4-gpu-start`'s own
+messages are only in `/tmp/m4-gpu-start.log` until the Air is connected to M4
+updates, and a restart clears that file.
+
+A fresh installation has alpha.1's GPU module. It starts the GPU only on an
+Air whose GPU power limit is exactly 24800 mW. Two of the three Airs measured so
+far are lower, and reach this login instead of the desktop
+([#57](https://github.com/Kb2uka/Omarchy-M4-Native/issues/57)).
+From the recovery login, do the [last step](#last-step-connect-to-m4-updates-required)
+now: `nmtui` works here, and so does the connect line. Then restart. The update
+brings the fixed module, which also logs why it refuses a GPU.
 
 A stationary bar does not prove disk writes have stopped. Do not erase the
 installation or repeatedly force power off to diagnose a stalled handoff.

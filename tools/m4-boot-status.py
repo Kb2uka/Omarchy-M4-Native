@@ -26,8 +26,13 @@ NOTICE = '''The desktop could not start.
 Press Ctrl+Alt (Option)+F2 for the recovery login.
 Use the account and password you created during setup.
 
+If this Air is not connected to M4 updates yet, connect it now: GPU fixes
+arrive that way. Join Wi-Fi with nmtui, run this line, then restart:
+  curl -fsSL --retry 5 --retry-all-errors https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages/m4-connect.sh | bash
+
 To inspect the graphics failure:
   sudo journalctl -b -u m4-gpu.service -u sddm.service --no-pager
+  sudo journalctl -b -k --grep 'G16|asahi' --no-pager
 
 Service status is saved in /var/log/omarchy-m4-boot-status.json
 '''
