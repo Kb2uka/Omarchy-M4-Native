@@ -22,11 +22,14 @@
   Startup dependency changes do not establish a fix for that hardware condition.
   Keep a USB or paired Bluetooth pointing device available for qualification.
   Code review and checksums do not prove successful installation on another Mac.
-- **macOS audio inputs are pinned.** The local generator refuses unknown Apple
-  AudioDSP/tuning hashes or unequal filter output before disk changes. Minimum
-  macOS version alone does not guarantee those files match. The ARM64 filter
-  generation pipeline passed end to end on macOS 26.5.1, 26.5.2 and 26.6.2 with
-  identical output hashes. The rebuilt installer's physical audio check remains pending.
+- **Speaker-filter preparation depends on the kit.** The published update 2 kit
+  has an `owner-audio/` folder. Its generator refuses unknown Apple AudioDSP or
+  tuning hashes and unequal filter output before disk changes; macOS 26.5.1,
+  26.5.2 and 26.6.2 produced identical approved outputs. Minimum macOS version
+  alone does not guarantee a match. If your kit has no `owner-audio/` folder,
+  those same approved filters are already included and it does not read the host
+  AudioDSP. Other installer dependencies still need qualification on newer macOS.
+  Fresh installation and physical playback of the rebuilt kit remain unverified.
 - **Video acceleration is selective.** Brave and mpv have used hardware H264
   8-bit / VP9 Profile 0 decoding with the pinned stack. The shipped Chromium build
   and some protected movies use CPU decoding while the desktop uses GPU rendering.

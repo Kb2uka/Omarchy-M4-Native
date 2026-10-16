@@ -6,8 +6,8 @@
 # tools/build-m4-packages.py. The module source is audio/j713/headphones/kernel/.
 pkgname=omarchy-m4-headphones
 pkgver=1
-pkgrel=1
-pkgdesc='J713 headphone jack playback: the J713Headphones card beside the protected speakers'
+pkgrel=2
+pkgdesc='J713 headphone jack playback and headset microphone: the J713Headphones card beside the protected speakers'
 arch=('aarch64')
 url='https://github.com/Kb2uka/Omarchy-M4-Native'
 license=('GPL-2.0-only' 'MIT')
@@ -16,18 +16,18 @@ install=omarchy-m4-headphones.install
 options=('!strip' '!debug')
 source=('m4-headphones.py' '30-m4-headphones.conf' 'J713Headphones.conf' 'HiFi.conf'
         '83-j713-headphones.conf' 'j713-headphones.lua' 'MIT.txt' 'GPL-2.0-only.txt'
-        "j713_hp_dt.ko::${url}/releases/download/package-inputs/j713_hp_dt-9ba22f0e.ko"
-        "snd-soc-j713-headphones.ko::${url}/releases/download/package-inputs/snd-soc-j713-headphones-a73ef565.ko")
-sha256sums=('3bab5bc4c97c2be8bbe74cc0bf40a704107150e1fe48d4ce648d6e6eb9c10e44'
+        "j713_hp_dt.ko::${url}/releases/download/package-inputs/j713_hp_dt-3f501c61.ko"
+        "snd-soc-j713-headphones.ko::${url}/releases/download/package-inputs/snd-soc-j713-headphones-2e743937.ko")
+sha256sums=('844ea75400cbec77a61876e359e9effca316f8efc57f634fdd531a0970832ec0'
             '2db802990b7514f3cd1f54168ce3c8adef9ec2dd061743d341490ee3985a9de2'
-            '847dfe9dfe8f69877bfcb56ccd1f9c6425d9e28ba0ea826d96096152f7ce66b2'
-            'b976cd08240b51065d8034dfd90ba79ae5ffc23c65ed83096ade1019a018bdb6'
-            'f368ba0655235a6bf696332325ab2e9b5f9f3494b002a3c889e09e2553aa51c1'
-            'af0653c5edcf2ef192925eb0d94b462065440d654812aa84a3b3198d671eb75d'
+            '440e7740fde500e145cb6349ac982300a26ce20f2c0300899c18c94cd6382077'
+            'fc5b6917b65b85c60ec85c72bd61b126f42dde2828570e0d60d81f87d0b57b37'
+            '864ca348be69d149325c3b9220da78e86663711682c0f905beb1f4fa7358a381'
+            '36879853bfc52709312bbddef95575bebf9953269c6db5a6a850e1ea4de1969d'
             'b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5'
             'aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3'
-            '9ba22f0eb586052606eb6e9d98fa9d05663c12e3197c1b41c4bdc833afe41f07'
-            'a73ef5655d453c1ebd424922b0b6141a77159c01cbe718d4c972be61ec5be87d')
+            '3f501c6193aeddc62031395e899909bf352851278f829458998ca1c4dbbe6149'
+            '2e743937b4bd8315ec6dba6bef4bbfbf197d4bf6f8688761954579192df48244')
 
 package() {
   install -Dm755 m4-headphones.py "$pkgdir/usr/bin/m4-headphones"

@@ -60,8 +60,9 @@
 			headphones {
 				compatible = "omarchy,j713-headphones";
 				power-domains = <0xfeed0001>, <0xfeed0002>, <&audio_mca2>;
-				dmas = <0xfeed0003 4>;
-				dma-names = "tx";
+				/* ADMAC channel 4 (playback) and 5 (headset mic) */
+				dmas = <0xfeed0003 4>, <0xfeed0003 5>;
+				dma-names = "tx", "rx";
 				omarchy,codec = <&jack_codec>;
 				#sound-dai-cells = <0>;
 			};

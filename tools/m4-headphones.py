@@ -7,8 +7,9 @@ The drop-in on m4-j713-audio-register.service runs this with --boot once the
 speaker registration has succeeded: the overlay points at nodes that the
 registration creates. It loads j713_hp_dt (the CS42L84 codec, the cluster 2
 power domain and the card node), then snd_soc_j713_headphones (the
-J713Headphones card). The stock snd-soc-cs42l84 codec driver autoloads from the
-new node. Only the pinned modules, only on the pinned kernel and board.
+J713Headphones card: headphone playback and the headset microphone). The stock
+snd-soc-cs42l84 codec driver autoloads from the new node. Only the pinned
+modules, only on the pinned kernel and board.
 
 One strike: an attempt marker is written durably before the first module loads
 and removed once both have loaded. If a boot dies while loading, the next boot
@@ -17,8 +18,9 @@ from. --start loads the modules in the running session instead (and clears a
 marker left by such a boot). Inspection is the default.
 
 Off switch: --disable writes a hold file, and no boot or --start loads the
-modules until --enable removes it. Modules already loaded stay until the next
-restart. The package stays installed, so omarchy-m4-update keeps it current.
+modules (headphones and headset mic alike) until --enable removes it. Modules
+already loaded stay until the next restart. The package stays installed, so
+omarchy-m4-update keeps it current.
 """
 import argparse
 import hashlib
@@ -37,9 +39,9 @@ STATE = 'var/lib/omarchy-m4/headphones'
 # Load order matters: the card driver binds to the node the overlay adds.
 MODULES = (
     ('j713_hp_dt', 'j713_hp_dt.ko',
-     {'sha256': '9ba22f0eb586052606eb6e9d98fa9d05663c12e3197c1b41c4bdc833afe41f07', 'size': 10656}),
+     {'sha256': '3f501c6193aeddc62031395e899909bf352851278f829458998ca1c4dbbe6149', 'size': 10656}),
     ('snd_soc_j713_headphones', 'snd-soc-j713-headphones.ko',
-     {'sha256': 'a73ef5655d453c1ebd424922b0b6141a77159c01cbe718d4c972be61ec5be87d', 'size': 37016}),
+     {'sha256': '2e743937b4bd8315ec6dba6bef4bbfbf197d4bf6f8688761954579192df48244', 'size': 48160}),
 )
 # modinfo depends of snd-soc-j713-headphones.ko; insmod does not resolve them.
 DEPENDS = ('snd-soc-core', 'snd-pcm', 'snd-pcm-dmaengine')

@@ -1,0 +1,2 @@
+obj-m += j713_cpuidle.o
+obj-m += j713_pguard.o

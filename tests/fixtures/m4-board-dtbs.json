@@ -1,0 +1,253 @@
+{
+ "asahi_commit": "77cb8f24c2381a8abb7272d7bbdec548d6426a8a",
+ "boards": {
+  "j604": {
+   "changed_by_patches": [
+    "/aliases atcphy0",
+    "/aliases atcphy1"
+   ],
+   "compatible": [
+    "apple,j604",
+    "apple,t8132",
+    "apple,arm-platform"
+   ],
+   "dangling_added": [],
+   "dangling_upstream": [],
+   "disabled_by_patches": [],
+   "enabled_by_patches": [
+    "/soc/pinctrl@39a000000/pcie-pins"
+   ],
+   "enabled_digest": "16608c47cfa6fd7820522bc7740c2b1d3c93782d07fae89d6b6c1ce60f4ab9b7",
+   "model": "Apple MacBook Pro (14-inch, M4, 2024)",
+   "warnings": [
+    "Warning (simple_bus_reg): /soc/interrupt-controller@381180000: simple-bus unit address format error, expected \"381000000\""
+   ]
+  },
+  "j623": {
+   "changed_by_patches": [
+    "/aliases atcphy0",
+    "/aliases atcphy1"
+   ],
+   "compatible": [
+    "apple,j623",
+    "apple,t8132",
+    "apple,arm-platform"
+   ],
+   "dangling_added": [],
+   "dangling_upstream": [],
+   "disabled_by_patches": [],
+   "enabled_by_patches": [
+    "/soc/pinctrl@39a000000/pcie-pins"
+   ],
+   "enabled_digest": "aa408567fa9496194ed0a630c1d3e817a5082dcb4dde54159e395859e0de93fd",
+   "model": "Apple iMac (24-inch, 2x USB-C, M4, 2024)",
+   "warnings": [
+    "Warning (simple_bus_reg): /soc/interrupt-controller@381180000: simple-bus unit address format error, expected \"381000000\""
+   ]
+  },
+  "j624": {
+   "changed_by_patches": [
+    "/aliases atcphy0",
+    "/aliases atcphy1"
+   ],
+   "compatible": [
+    "apple,j624",
+    "apple,t8132",
+    "apple,arm-platform"
+   ],
+   "dangling_added": [],
+   "dangling_upstream": [],
+   "disabled_by_patches": [],
+   "enabled_by_patches": [
+    "/soc/pinctrl@39a000000/pcie-pins"
+   ],
+   "enabled_digest": "69403618d023399b55ed29d0c1ba49ce4fae3179d939ef7184bef098651f99a9",
+   "model": "Apple iMac (24-inch, 4x USB-C, M4, 2024)",
+   "warnings": [
+    "Warning (simple_bus_reg): /soc/interrupt-controller@381180000: simple-bus unit address format error, expected \"381000000\""
+   ]
+  },
+  "j713": {
+   "changed_by_patches": [
+    "/ model",
+    "/aliases atcphy0",
+    "/aliases atcphy1",
+    "/aliases keyboard"
+   ],
+   "compatible": [
+    "apple,j713",
+    "apple,t8132",
+    "apple,arm-platform"
+   ],
+   "dangling_added": [],
+   "dangling_upstream": [],
+   "disabled_by_patches": [
+    "/soc/power-management@380700000/power-controller@450",
+    "/soc/power-management@380700000/power-controller@458",
+    "/soc/power-management@380700000/power-controller@460",
+    "/soc/power-management@380700000/power-controller@468",
+    "/soc/power-management@380700000/power-controller@478",
+    "/soc/power-management@380700000/power-controller@480",
+    "/soc/power-management@380700000/power-controller@498",
+    "/soc/power-management@380700000/power-controller@4a0",
+    "/soc/power-management@380700000/power-controller@4b0",
+    "/soc/power-management@380700000/power-controller@4b8",
+    "/soc/power-management@388280000/power-controller@d0",
+    "/soc/power-management@388280000/power-controller@d8",
+    "/soc/power-management@388280000/power-controller@e0",
+    "/soc/power-management@388280000/power-controller@e8"
+   ],
+   "enabled_by_patches": [
+    "/soc/fifo@394b14000 apple,t8132-dockchannel",
+    "/soc/fifo@394b14000/input@8000 apple,dockchannel-hid",
+    "/soc/fifo@394b14000/input@8000/actuator",
+    "/soc/fifo@394b14000/input@8000/keyboard",
+    "/soc/fifo@394b14000/input@8000/multi-touch",
+    "/soc/fifo@394b14000/input@8000/stm",
+    "/soc/fifo@394b14000/input@8000/tp_accel",
+    "/soc/iommu@394800000 apple,t8132-dart",
+    "/soc/iommu@3a8c80000 apple,t8132-dart",
+    "/soc/iommu@402f00000 apple,t8132-dart",
+    "/soc/iommu@402f80000 apple,t8132-dart",
+    "/soc/iommu@40af00000 apple,t8132-dart",
+    "/soc/iommu@40af80000 apple,t8132-dart",
+    "/soc/mbox@38c608000 apple,t8132-asc-mailbox",
+    "/soc/mbox@394608000 apple,t8132-asc-mailbox",
+    "/soc/mbox@3aa608000 apple,t8132-asc-mailbox",
+    "/soc/mbox@481608000 apple,t8132-asc-mailbox",
+    "/soc/mtp@394600000 apple,t8132-mtp",
+    "/soc/mux@40304c000 apple,t8132-display-crossbar",
+    "/soc/mux@40b04c000 apple,t8132-display-crossbar",
+    "/soc/nvme@4c5cc0000 apple,t8132-nvme-ans2",
+    "/soc/phy@403000000 apple,t8132-atcphy",
+    "/soc/phy@403000000/ports",
+    "/soc/phy@403000000/ports/port@0",
+    "/soc/phy@403000000/ports/port@0/endpoint",
+    "/soc/phy@403000000/ports/port@1",
+    "/soc/phy@403000000/ports/port@1/endpoint",
+    "/soc/phy@40b000000 apple,t8132-atcphy",
+    "/soc/phy@40b000000/ports",
+    "/soc/phy@40b000000/ports/port@0",
+    "/soc/phy@40b000000/ports/port@0/endpoint",
+    "/soc/phy@40b000000/ports/port@1",
+    "/soc/phy@40b000000/ports/port@1/endpoint",
+    "/soc/pinctrl@39a000000/pcie-pins",
+    "/soc/sart@485c50000 apple,t8132-sart",
+    "/soc/smc@38c600000 apple,t8132-smc",
+    "/soc/smc@38c600000/gpio apple,smc-gpio",
+    "/soc/smc@38c600000/hwmon apple,smc-hwmon",
+    "/soc/smc@38c600000/hwmon/power-PHPC",
+    "/soc/smc@38c600000/hwmon/temperature-TB0T",
+    "/soc/smc@38c600000/hwmon/temperature-TCHP",
+    "/soc/smc@38c600000/hwmon/temperature-TW0P",
+    "/soc/smc@38c600000/hwmon/voltage-SBAV",
+    "/soc/smc@38c600000/hwmon/voltage-VD0R",
+    "/soc/smc@38c600000/rtc apple,smc-rtc",
+    "/soc/spmi@388714000 apple,t8132-spmi",
+    "/soc/spmi@388714000/pmic@e apple,abbey-pmic",
+    "/soc/spmi@388714000/pmic@e/nvmem-layout fixed-layout",
+    "/soc/spmi@388714000/pmic@e/nvmem-layout/fault-shadow@867b",
+    "/soc/spmi@388714000/pmic@e/nvmem-layout/pm-setting@2001",
+    "/soc/spmi@388714000/pmic@e/nvmem-layout/rtc-offset@2100",
+    "/soc/spmi@388714000/pmic@e/nvmem-layout/socd@8b00",
+    "/soc/spmi@388908000 apple,t8132-spmi",
+    "/soc/spmi@388908000/usb-pd@8 apple,sn201202x",
+    "/soc/spmi@388908000/usb-pd@a apple,sn201202x",
+    "/soc/spmi@388908000/usb-pd@a/connector usb-c-connector",
+    "/soc/spmi@388908000/usb-pd@a/connector/ports",
+    "/soc/spmi@388908000/usb-pd@a/connector/ports/port@0",
+    "/soc/spmi@388908000/usb-pd@a/connector/ports/port@0/endpoint",
+    "/soc/spmi@388908000/usb-pd@a/connector/ports/port@1",
+    "/soc/spmi@388908000/usb-pd@a/connector/ports/port@1/endpoint",
+    "/soc/spmi@388908000/usb-pd@c apple,sn201202x",
+    "/soc/spmi@388908000/usb-pd@c/connector usb-c-connector",
+    "/soc/spmi@388908000/usb-pd@c/connector/ports",
+    "/soc/spmi@388908000/usb-pd@c/connector/ports/port@0",
+    "/soc/spmi@388908000/usb-pd@c/connector/ports/port@0/endpoint",
+    "/soc/spmi@388908000/usb-pd@c/connector/ports/port@1",
+    "/soc/spmi@388908000/usb-pd@c/connector/ports/port@1/endpoint",
+    "/soc/usb@402280000 apple,t8132-dwc3",
+    "/soc/usb@402280000/ports",
+    "/soc/usb@402280000/ports/port@0",
+    "/soc/usb@402280000/ports/port@0/endpoint",
+    "/soc/usb@402280000/ports/port@1",
+    "/soc/usb@402280000/ports/port@1/endpoint",
+    "/soc/usb@40a280000 apple,t8132-dwc3",
+    "/soc/usb@40a280000/ports",
+    "/soc/usb@40a280000/ports/port@0",
+    "/soc/usb@40a280000/ports/port@0/endpoint",
+    "/soc/usb@40a280000/ports/port@1",
+    "/soc/usb@40a280000/ports/port@1/endpoint"
+   ],
+   "enabled_digest": "0abfac1e14dbcd90d35a06ebcd58eda6bf10b74a38b8ab7dfeb1874ff6cb6693",
+   "model": "Apple MacBook Air (13-inch, M4, 2025)",
+   "warnings": [
+    "Warning (simple_bus_reg): /soc/interrupt-controller@381180000: simple-bus unit address format error, expected \"381000000\""
+   ]
+  },
+  "j715": {
+   "changed_by_patches": [
+    "/aliases atcphy0",
+    "/aliases atcphy1"
+   ],
+   "compatible": [
+    "apple,j715",
+    "apple,t8132",
+    "apple,arm-platform"
+   ],
+   "dangling_added": [],
+   "dangling_upstream": [],
+   "disabled_by_patches": [],
+   "enabled_by_patches": [
+    "/soc/pinctrl@39a000000/pcie-pins"
+   ],
+   "enabled_digest": "9323e25226d27b0783584e50cf56a9a9dc48d2784b5ee17c2ea7b80fd548edeb",
+   "model": "Apple MacBook Air (15-inch, M4, 2025)",
+   "warnings": [
+    "Warning (simple_bus_reg): /soc/interrupt-controller@381180000: simple-bus unit address format error, expected \"381000000\""
+   ]
+  },
+  "j773g": {
+   "changed_by_patches": [
+    "/aliases atcphy0",
+    "/aliases atcphy1"
+   ],
+   "compatible": [
+    "apple,j773g",
+    "apple,t8132",
+    "apple,arm-platform"
+   ],
+   "dangling_added": [],
+   "dangling_upstream": [],
+   "disabled_by_patches": [],
+   "enabled_by_patches": [
+    "/soc/pinctrl@39a000000/pcie-pins"
+   ],
+   "enabled_digest": "9311e493219ab8208d21dd8aea2af7a70b16916b58402db2e72e7d03692f6ba7",
+   "model": "Apple Mac mini (M4, 2024)",
+   "warnings": [
+    "Warning (simple_bus_reg): /soc/interrupt-controller@381180000: simple-bus unit address format error, expected \"381000000\""
+   ]
+  }
+ },
+ "dtc": "Version: DTC 1.7.0",
+ "patches": [
+  "0001-arm64-dts-apple-t8132-add-storage-smc.patch",
+  "0002-arm64-dts-apple-t8132-add-spi.patch",
+  "0003-arm64-dts-apple-t8132-add-usb-atc.patch",
+  "0004-arm64-dts-apple-t8132-add-sep.patch",
+  "0005-arm64-dts-apple-t8132-add-spmi-pmu.patch",
+  "0006-arm64-dts-apple-t8132-add-typec.patch",
+  "0007-arm64-dts-apple-t8132-add-pcie.patch",
+  "0008-arm64-dts-apple-t8132-add-mtp.patch",
+  "0009-arm64-dts-apple-t8132-add-sio.patch",
+  "0010-arm64-dts-apple-t8132-add-aop.patch",
+  "0011-fix-dts-t8132-j713-delete-depopulated-atc2-atc3-pmgr.patch",
+  "0012-fix-dts-t8132-use-ADT-proven-USB-DART-stream-IDs-1-1.patch",
+  "0013-fix-dts-t8132-split-M4-NVMe-and-NVMMU-windows.patch",
+  "0014-fix-dts-j713-use-adt-mtp-reset-gpios.patch",
+  "0015-fix-dts-t8132-ans-receive-irq-roles.patch",
+  "0016-fix-dts-j713-attach-nvme-storage-system-domain.patch",
+  "0017-fix-dts-t8132-keep-board-wired-parts-disabled-outside-j713.patch"
+ ]
+}

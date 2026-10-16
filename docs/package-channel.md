@@ -15,7 +15,8 @@ reviewers.
 | `omarchy-m4-boot` | `m4-boot-compose`, its pacman hook, the J713 devicetree, the daily update notifier and, from 1-4, the real-time speaker protection drop-in | `1-1`; `1-4` adds CPU frequency scaling and CPU temperature |
 | `linux-m4-omarchy` | The J713 kernel image and its modules | `7.1.9.m4.20261008-2` |
 | `omarchy-m4-gst-audio` | GStreamer's `autodetect` and `pulse` sinks in `/usr/lib/gstreamer-1.0`, for WebKitGTK and GStreamer apps | `1.28.7-1` |
-| `omarchy-m4-headphones` | The headphone jack card: two pinned modules, `m4-headphones`, its registration drop-in, UCM and WirePlumber files | `1-1` |
+| `omarchy-m4-headphones` | The headphone jack card: two pinned modules, `m4-headphones`, its registration drop-in, UCM and WirePlumber files | `1-1`; `1-2` adds the headset microphone |
+| `omarchy-m4-cpu` | The CPU idle driver: one pinned module, `m4-cpu-idle` and its boot unit | `1-1` |
 
 ### omarchy-m4-boot 1-4 and omarchy-m4-gst-audio 1.28.7-1
 
@@ -158,6 +159,90 @@ file.
   [J713 desktop image](j713-desktop-image.md#lid-close-and-the-lock-screen).
 - The binds take effect at the next login. A refusal never fails the update.
 
+### omarchy-m4-cpu 1-1 and omarchy-m4-boot 1-10
+
+- **CPU idle** ([J713 CPU idle](j713-cpu-idle.md), #65): idle cores power down
+  instead of spinning under `idle=nop`. Idle system power on the owner's Air
+  fell from 9.65 W to 5.47 W.
+- **Module:** `j713_cpuidle.ko` (`a2a7947a…`), built from `cpu/j713/` with
+  `cpu/j713/build-module.sh` and pinned in `package-inputs` and
+  `cpu_idle_module`. It is staged under `/usr/lib/omarchy-m4/cpu/`; the kernel
+  package does not change.
+- **Loading:** `m4-cpu-idle.service` (the package's one `protected_exceptions`
+  file, enabled by its install scriptlet) runs `m4-cpu-idle --boot`. A boot that
+  dies while loading or in the 120 s settle period stops the next boot from
+  trying again; `sudo m4-cpu-idle --disable` is the off switch (hold file
+  `/var/lib/omarchy-m4/cpu-idle/hold`).
+- **`omarchy-m4-boot` 1-10** depends on `omarchy-m4-cpu`, as 1-6 and 1-7 do for
+  the GPU and headphone packages, and carries devicetree `fdedc09f…`
+  (`j713-ecluster-thermal`): E-cluster states up to 2172 MHz and a CPU die
+  thermal zone with a 95 C passive trip. The composer and updater accept it only
+  after the CPU temperature devicetree.
+
+### omarchy-m4-cpu 1-2 and omarchy-m4-boot 1-11
+
+- **P-core boost** ([J713 P-core boost](j713-cpu-boost.md), #66): P cores run
+  up to 4464 MHz and E cores up to 2808 MHz, with P capped by a predictive guard
+  that keeps the CPU die's predicted peak at or below 105 C, and raises the
+  zone's sustained trip from 95 C to 100 C while it runs.
+- **Module:** `j713_pguard.ko` (`91fe247e…`), built with the idle module by
+  `cpu/j713/build-module.sh` and pinned in `package-inputs` and
+  `cpu_guard_module`. `m4-cpu-idle` loads it inside the idle driver's
+  one-strike window, and with boost on sets the real-time uclamp floor to
+  1800 MHz. `sudo m4-cpu-idle --boost off` closes the boost gate at once
+  (hold file `/var/lib/omarchy-m4/cpu-idle/boost-hold`).
+- **`omarchy-m4-boot` 1-11** carries devicetree `c4f036b8…` (`j713-pboost`):
+  the boost states with P held at 1800 MHz by a boost gate on the CPU die zone
+  until the guard opens it. The composer and updater accept it only after the
+  E-cluster devicetree.
+
+### omarchy-m4-cpu 1-3
+
+- **Limits at macOS parity:** a 105 C predicted peak, a 108 C hard pin, and
+  the zone's sustained trip raised to 100 C while the guard runs.
+- **Measured heat model** ([Settled heat](j713-cpu-boost.md#settled-heat-the-base-estimate),
+  #66): the guard's base estimate subtracts the measured fast heat of each P
+  state instead of 70% of its predicted step, and looks back 750-1000 ms for the
+  lowest state. Guard `j713_pguard.ko` `91fe247e…`, pinned in
+  `package-inputs` and `cpu_guard_module`.
+
+### omarchy-m4-headphones 1-2
+
+- **The headset microphone on the headphone jack**
+  ([J713 headphone jack](j713-headphones.md#headset-microphone)). It is part of
+  the same package, so `omarchy-m4-update` brings it as an ordinary upgrade:
+  no new package, no setup-script or boot-package change (`omarchy-m4-boot`
+  1-7 already depends on `omarchy-m4-headphones`).
+- **Restart notice on upgrade.** The install script gains `post_upgrade`, so
+  the upgrade prints "Restart once to start the headphone jack and headset
+  microphone". `omarchy-m4-update` reports a needed restart only while the card
+  module is not loaded, so on an Air running 1-1 this line is the notice.
+- **Off switch:** unchanged. `sudo m4-headphones --disable` switches the mic
+  off together with the headphones.
+- **Modules:** `j713_hp_dt.ko` (`3f501c61…`; its card node now also names ADMAC
+  channel 5, `rx`) and `snd-soc-j713-headphones.ko` (`2e743937…`), built with
+  `tools/build-j713-headphones.sh` and pinned in `package-inputs` and
+  `headphone_modules`, as for 1-1. `apple-admac` and every other speaker
+  module stay as qualified.
+- **Protected exceptions:** the same five paths. The reasons for the
+  WirePlumber fragment and its hook now name the headset mic source too.
+
+### omarchy-m4-gpu 1-2
+
+- **A failed GPU start can be read from the journal**
+  ([#82](https://github.com/Kb2uka/Omarchy-M4-Native/issues/82)). alpha.1's
+  `m4-gpu.service` appends `m4-gpu-start`'s output to `/tmp/m4-gpu-start.log`,
+  which a restart clears, so the "desktop could not start" notice's
+  `journalctl -u m4-gpu.service` showed nothing from the script. The drop-in now
+  also sets `StandardOutput=journal` and `StandardError=journal`.
+- **The report names the GPU values the module's Air gate checks:** core mask,
+  power limit and firmware build, read from the GPU's devicetree node. Each
+  boot's `m4-gpu-module --boot` report, and `m4-gpu-module` run by hand, carries
+  them under `gpu`. A missing or malformed value is `null`. Nothing else in the
+  tool changed: the same states, swaps and refusals.
+- The module is unchanged (`3cf47fa7…`). Like every channel package, 1-2 arrives
+  with `omarchy-m4-update` and takes effect at the next boot.
+
 ## Connecting new installs
 
 The release root builder (`tools/prepare-j713-release.py`) adds
@@ -189,8 +274,9 @@ redistributed and must never be regenerated by a package.
    whole file, and decoy text inside the loader is rejected.
 2. It requires the current kernel and devicetree to be in the known alpha.1
    lineage (kernel `c3704cfd…`; devicetree `67dc6145…` alpha.1, `e54c77a7…`
-   update 1, `033025bb…` with [CPU frequency scaling](j713-cpufreq.md), or
-   `08e8e719…`, which adds [CPU die temperature](j713-cpu-temperature.md)).
+   update 1, `033025bb…` with [CPU frequency scaling](j713-cpufreq.md),
+   `08e8e719…`, which adds [CPU die temperature](j713-cpu-temperature.md), or
+   `fdedc09f…`, which adds [E-cluster states and a CPU thermal zone](j713-cpu-idle.md)).
    Anything else, such as a development boot object, is refused and left
    untouched. A current devicetree later in that lineage than the packaged one
    is kept, so an owner-applied devicetree update is never reverted.
@@ -325,11 +411,43 @@ one. Sign it with the old key, then switch the fingerprint in
 
 ## Corresponding source
 
-The kernel package's source is the kernel tree and configuration published with
-[v0.1.0-alpha.1](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1)
-(see [release-source.md](release-source.md)), plus the J713 input patches in
-`patches-kernel/j713-input/`. The devicetree's source is the alpha.1 portable
-devicetree plus [j713-smc-poweroff.dtso](../patches/j713-smc-poweroff.dtso).
+Every compiled binary downloaded from the `package-inputs` release is joined to
+its pinned corresponding source and its rebuild correspondence in
+[`packaging/channel-source-joins.json`](../packaging/channel-source-joins.json).
+`tools/check-m4-packages.py` enforces that every channel package's downloaded
+binaries have a `rebuilt-identical` join in CI, with no override. Every join is
+`unverified` until a byte-identical rebuild is recorded, so the Package channel
+check refuses those packages until then:
+
+- **Kernel (`linux-m4-omarchy`):** The kernel package's build identity is recorded
+  from the kernel tree and configuration published with
+  [v0.1.0-alpha.1](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1)
+  (`source/kernel-controller.tar.gz`), plus the J713 input patches in
+  `patches-kernel/j713-input/` in this repository; as with the release kernel, a
+  byte-identical rebuild is not claimed.
+- **Devicetrees (`omarchy-m4-boot`):** The devicetree's base source is the alpha.1
+  portable devicetree plus [`j713-smc-poweroff.dtso`](../patches/j713-smc-poweroff.dtso),
+  followed in order by the cpu-temperature (`patches/j713-cpu-temperature.dtso`),
+  ecluster (`patches/j713-ecluster-thermal.dtso`), and pboost
+  (`patches/j713-pboost.dtso`) overlays built with DTC 1.8.1 and their respective
+  builder tools (`tools/build-j713-cputemp-dtb.py`, `tools/build-j713-ecluster-dtb.py`,
+  `tools/build-j713-pboost-dtb.py`).
+- **Speaker protection module (`omarchy-m4-speaker`):** `snd-soc-j713-group.ko`
+  (`aaad802e…`), built from `audio/j713/kernel/` on the alpha.1
+  kernel-controller tree with `reference-sound-exports.symvers`; an identical
+  rebuild is not yet recorded.
+- **Air GPU module (`omarchy-m4-gpu`):** `asahi_m4.ko` (`3cf47fa7…`), built from
+  `gpu/j713/asahi/g16.rs` on the alpha.1 kernel tree with
+  `gpu/j713/build-test-module.sh`; an identical rebuild is not yet recorded.
+- **Headphone jack modules (`omarchy-m4-headphones`):** `j713_hp_dt.ko` and
+  `snd-soc-j713-headphones.ko`, built from `audio/j713/headphones/kernel/` on
+  the alpha.1 kernel-controller tree with `tools/build-j713-headphones.sh`.
+- **CPU idle and boost guard (`omarchy-m4-cpu`):** `j713_cpuidle.ko` (`a2a7947a…`)
+  and `j713_pguard.ko` (`91fe247e…`), built from `cpu/j713/` on the alpha.1
+  kernel tree with `cpu/j713/build-module.sh`.
+- **GStreamer audio sinks (`omarchy-m4-gst-audio`):** `libgstautodetect.so` and
+  `libgstpulseaudio.so`, built by `tools/m4-webkit-audio-plugins.py` from
+  `gst-plugins-good-1.28.7.tar.xz` (mirrored in `package-inputs`).
 
 ## Limits
 
