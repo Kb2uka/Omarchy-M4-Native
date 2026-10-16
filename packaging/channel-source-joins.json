@@ -186,6 +186,22 @@
         }
       ],
       "evidence": "J713 headphone codec driver (omarchy-m4-headphones 1-2). Built with tools/build-j713-headphones.sh from audio/j713/headphones/kernel/ on the alpha.1 kernel-controller tree (clang 21.1.8)."
+    },
+    "j713-m1n1-stage2-notch1.bin": {
+      "sha256": "f2417a74d13838004847a6fbdf946b524005301b88b5a403b1e79cb36d0ec7ca",
+      "license": "MIT",
+      "correspondence": "rebuilt-identical",
+      "sources": [
+        {
+          "tree": "display/j713",
+          "commit": "962940db22754266008856b1ae48238146489e5a"
+        },
+        {
+          "archive": "source/m1n1-stage2-source.tar.gz",
+          "sha256": "c394517941a5700b227718bb02e3df3dd43c9ad5a8e53c9447a55d3c36846c44"
+        }
+      ],
+      "evidence": "Opt-in J713 notch stage 2 (omarchy-m4-boot 1-12, issue #89). display/j713/build-notch-loader.sh in m4-gravity-builder:20261008 (clang 21.1.8, rustc 1.93.1), run as root, first rebuilt alpha.1's stage 2 byte for byte (3a3f7a64) from the alpha.1 companion's source/m1n1-stage2-source.tar.gz, then applied display/j713/m1n1-show-notch.patch and reproduced f2417a74 exactly (2026-10-16). m1n1 is MIT; its embedded third-party licenses are in display/j713/m1n1-base/3rdparty_licenses/."
     }
   }
 }

@@ -463,6 +463,10 @@ check refuses those packages until then:
 - **CPU idle and boost guard (`omarchy-m4-cpu`):** `j713_cpuidle.ko` (`a2a7947a…`)
   and `j713_pguard.ko` (`91fe247e…`), built from `cpu/j713/` on the alpha.1
   kernel tree with `cpu/j713/build-module.sh`.
+- **Notch stage 2 (`omarchy-m4-boot`):** `m1n1-stage2-notch.bin` (`f2417a74…`),
+  alpha.1's `source/m1n1-stage2-source.tar.gz` plus `display/j713/m1n1-show-notch.patch`,
+  built by `display/j713/build-notch-loader.sh`. Rebuilt byte for byte
+  (`rebuilt-identical`).
 - **GStreamer audio sinks (`omarchy-m4-gst-audio`):** `libgstautodetect.so` and
   `libgstpulseaudio.so`, built by `tools/m4-webkit-audio-plugins.py` from
   `gst-plugins-good-1.28.7.tar.xz` (mirrored in `package-inputs`).
