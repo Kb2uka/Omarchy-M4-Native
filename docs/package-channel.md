@@ -227,6 +227,22 @@ file.
 - **Protected exceptions:** the same five paths. The reasons for the
   WirePlumber fragment and its hook now name the headset mic source too.
 
+### omarchy-m4-gpu 1-2
+
+- **A failed GPU start can be read from the journal**
+  ([#82](https://github.com/Kb2uka/Omarchy-M4-Native/issues/82)). alpha.1's
+  `m4-gpu.service` appends `m4-gpu-start`'s output to `/tmp/m4-gpu-start.log`,
+  which a restart clears, so the "desktop could not start" notice's
+  `journalctl -u m4-gpu.service` showed nothing from the script. The drop-in now
+  also sets `StandardOutput=journal` and `StandardError=journal`.
+- **The report names the GPU values the module's Air gate checks:** core mask,
+  power limit and firmware build, read from the GPU's devicetree node. Each
+  boot's `m4-gpu-module --boot` report, and `m4-gpu-module` run by hand, carries
+  them under `gpu`. A missing or malformed value is `null`. Nothing else in the
+  tool changed: the same states, swaps and refusals.
+- The module is unchanged (`3cf47fa7…`). Like every channel package, 1-2 arrives
+  with `omarchy-m4-update` and takes effect at the next boot.
+
 ## Connecting new installs
 
 The release root builder (`tools/prepare-j713-release.py`) adds
