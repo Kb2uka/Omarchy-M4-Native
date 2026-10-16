@@ -230,9 +230,10 @@ ans1  0x23ddc  bl   rtkit_sleep
 
 `kmutil` takes a boot object, not a bare loader. The installer builds it in
 `src/m1n1.py`: the loader, then the m1n1 variables as `key=value` lines and
-four NUL bytes, padded with zeros to a multiple of 64 KiB. Both builds are
-`0x120000` bytes, already a multiple of 64 KiB, so the variables are exactly
-the last 64 KiB of the boot object the installer left on the Omarchy stub,
+four NUL bytes, padded with zeros to a multiple of 64 KiB. alpha.1's stage 1
+(`18cc4cd1…`) and both fixed builds are `0x120000` bytes, already a multiple
+of 64 KiB. So after alpha.1's loader, the rest of the boot object the
+installer left on the Omarchy stub is exactly the variables block,
 `<stub system volume>/Finish Installation.app/Contents/Resources/boot.bin`
 (the file installer step 2 passes to `kmutil`). In 1TR, work in a folder on
 a disk that survives a restart, such as the macOS user's Downloads; 1TR's
@@ -243,7 +244,8 @@ freeze:
 res="<stub system volume>/Finish Installation.app/Contents/Resources"
 cd "<persistent folder holding m1n1-stage1-ans1.bin>"
 cp "$res/boot.bin" boot.bin.alpha1                      # keep for rollback
-tail -c 65536 boot.bin.alpha1 > vars.bin
+head -c 1179648 boot.bin.alpha1 | shasum -a 256         # must start 18cc4cd1
+tail -c +1179649 boot.bin.alpha1 > vars.bin
 cat m1n1-stage1-ans1.bin vars.bin > boot.bin.ans1
 kmutil configure-boot -c boot.bin.ans1 --raw --entry-point 2048 \
   --lowest-virtual-address 0 -v "<stub system volume>"
