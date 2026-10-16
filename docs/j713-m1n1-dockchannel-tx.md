@@ -112,7 +112,10 @@ still the installed test build. It also finishes an interrupted install or
 rollback.
 
 Stage 1 is installed from macOS recoveryOS (1TR) with the command installer
-step 2 uses, run against the test stage 1 instead of the kit's `boot/m1n1.bin`:
+step 2 uses, run against the test stage 1 instead of the kit's `boot/m1n1.bin`.
+The file must be a boot object: the loader with the installer's m1n1 variables
+appended, as prepared in
+[j713-m1n1-issue82-ans-reset.md](j713-m1n1-issue82-ans-reset.md#testing-on-an-air):
 
 ```sh
 kmutil configure-boot -c m1n1-stage1-issue82-test1.bin --raw --entry-point 2048 \

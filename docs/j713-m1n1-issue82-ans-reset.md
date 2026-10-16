@@ -228,21 +228,36 @@ ans1  0x23ddc  bl   rtkit_sleep
 
 ### Testing on an Air
 
-Install the build from 1TR exactly as test 1 was installed (see
-[j713-m1n1-dockchannel-tx.md](j713-m1n1-dockchannel-tx.md#testing-on-an-installed-air)):
-the bare loader with the installer's 64 KiB vars block appended, then
-`kmutil configure-boot -c <file> --raw --entry-point 2048 --lowest-virtual-address 0 -v <Omarchy stub system volume>`.
+`kmutil` takes a boot object, not a bare loader. The installer builds it in
+`src/m1n1.py`: the loader, then the m1n1 variables as `key=value` lines and
+four NUL bytes, padded with zeros to a multiple of 64 KiB. Both builds are
+`0x120000` bytes, already a multiple of 64 KiB, so the variables are exactly
+the last 64 KiB of the boot object the installer left on the Omarchy stub,
+`<stub system volume>/Finish Installation.app/Contents/Resources/boot.bin`
+(the file installer step 2 passes to `kmutil`). In 1TR, work in a folder on
+a disk that survives a restart, such as the macOS user's Downloads; 1TR's
+home folder does not, and the rollback copy must still be there after a
+freeze:
+
+```sh
+res="<stub system volume>/Finish Installation.app/Contents/Resources"
+cd "<persistent folder holding m1n1-stage1-ans1.bin>"
+cp "$res/boot.bin" boot.bin.alpha1                      # keep for rollback
+tail -c 65536 boot.bin.alpha1 > vars.bin
+cat m1n1-stage1-ans1.bin vars.bin > boot.bin.ans1
+kmutil configure-boot -c boot.bin.ans1 --raw --entry-point 2048 \
+  --lowest-virtual-address 0 -v "<stub system volume>"
+```
+
 A run passes when the desktop comes up and
 `/proc/device-tree/chosen/asahi,m1n1-stage1-version` reads the build's tag:
 `air-c9ef56f-gpu-stage1-20261008-ans1` or
 `air-c9ef56f-gpu-stage1-20261008-dctx1-ans1`.
 
-**Rollback.** Before installing, prepare alpha.1's stage 1 the same way: the
-build script writes the bare alpha.1 loader as `stage1-stock-m1n1.bin`
-(`18cc4cd1…`); append the same 64 KiB vars block to it. Never pass a bare
-loader to `kmutil`. If the Air freezes on the logo, hold the power button to
-reach 1TR, which does not run stage 1, and run the same `kmutil` command on
-that prepared file.
+**Rollback.** If the Air freezes on the logo, hold the power button to reach
+1TR, which does not run stage 1, and run the same `kmutil` command on
+`boot.bin.alpha1` in that folder, the stub's original boot object. Never pass a bare
+loader to `kmutil`.
 
 Neither build is byte-identical to `v1`. `v1` is test 1 with two
 instructions removed, and test 1 was built from an earlier revision of the
