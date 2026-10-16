@@ -157,8 +157,16 @@ changes alpha.1's `src/nvme.c` only. A new `nvme_reset_ans()` does nothing
 on T8132 (the ADT has `nvme-secure-bar`), and resets `ANS` and `ANS2` as
 before on older SoCs. `nvme_shutdown()` and `nvme_init()`'s error path call it
 right after `rtkit_sleep()`, in place of the two direct `pmgr_reset()` calls.
-ANS is still put to sleep and its CPU stopped. `nvme_ensure_shutdown()`,
-which stage 1 never calls, is unchanged.
+ANS is still put to sleep and its CPU stopped.
+
+- `nvme_ensure_shutdown()` still resets ANS unconditionally. Nothing calls it
+  (its one call in `nvme_shutdown()` is commented out), and it runs without
+  `nvme_init()`, so `nvme_type` would not be set there and the new check could
+  not guard it. A build that starts calling it needs its own T8132 check.
+- Stage 2 needs no change. It is built without `CHAINLOADING`, so the only
+  `nvme_init()` it can reach is the proxy's `P_NVME_INIT` command from a debug
+  host. On a normal boot its `nvme_shutdown()` returns at once, because NVMe
+  was never initialized there.
 
 Only the `nvme_shutdown()` path was run on hardware, as `v1`. The error path
 runs only when ANS fails to boot in stage 1. It stops ANS the same way, so it
@@ -217,6 +225,22 @@ ans1  0x23ddc  bl   rtkit_sleep
       0x23e0c  bl   pmgr_reset "ANS2"
       0x23e10  ...  bl rtkit_free
 ```
+
+### Testing on an Air
+
+Install the build from 1TR exactly as test 1 was installed (see
+[j713-m1n1-dockchannel-tx.md](j713-m1n1-dockchannel-tx.md#testing-on-an-installed-air)):
+the bare loader with the installer's 64 KiB vars block appended, then
+`kmutil configure-boot -c <file> --raw --entry-point 2048 --lowest-virtual-address 0 -v <Omarchy stub system volume>`.
+A run passes when the desktop comes up and
+`/proc/device-tree/chosen/asahi,m1n1-stage1-version` reads
+`air-c9ef56f-gpu-stage1-20261008-ans1`.
+
+**Rollback.** Keep alpha.1's stage 1 with the same vars block before
+installing. The build script writes the bare alpha.1 loader as
+`stage1-stock-m1n1.bin` (`18cc4cd1…`). If the Air freezes on the logo, hold
+the power button to reach 1TR, which does not run stage 1, and run the same
+`kmutil` command on that file.
 
 Neither build is byte-identical to `v1`. `v1` is test 1 with two
 instructions removed, and test 1 was built from an earlier revision of the
