@@ -68,3 +68,10 @@ before the refusal; the test runs only its board and SoC lines.
 A new board starts as `refused`. Moving it to `qualified` means changing the
 table, `Install.command`, the installer profile and every gate the tests list
 in the same pull request, with hardware evidence from that board.
+
+Speaker support also selects a versioned profile for that board, including its
+filter assets, routing, gains and protection settings. The static J713 files
+replace a generator that was already specific to J713; they are not a default
+for other M4 machines. Sharing a profile between boards requires evidence for
+that reuse. The owner's current macOS AudioDSP need not become another platform
+qualification dimension.
