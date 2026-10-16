@@ -97,10 +97,10 @@ snapshot is pinned instead. Complete corresponding source and toolchain inputs
 must be addressed before distributing resulting GPL binaries.
 
 The historical assembly tool retains its local-only distribution hold. The
-release assembler now uses the [static native profile](../audio/j713/filters/README.md),
-whose numerical files reproduce the already approved hashes. That record makes
-the proposed distribution-policy change explicit; this source-code license is
-not a grant of rights in Apple software or tuning data. No Apple executable,
+release assembler uses the [static native profile](../audio/j713/filters/README.md),
+whose numerical files reproduce the already approved hashes. Its provenance record distinguishes final numerical coefficients from source
+inputs; the source-code license is not a grant of rights in Apple software or
+tuning data. No Apple executable,
 tuning strip, raw hardware capture, sysroot, compiled module or daemon executable
 is included here. Other build-provenance and corresponding-source requirements
 remain independent of the speaker-profile delivery change.

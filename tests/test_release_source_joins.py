@@ -253,7 +253,7 @@ class RootGateTests(unittest.TestCase):
             self.write(self.tree, 'audio/j713/filters/' + name, data)
         self.write(self.tree, 'audio/j713/owner-fir/manifest.json', json.dumps(manifest).encode())
         for source in ('tools/m4-j713-owner-assets.py', 'packaging/j713-owner-assets.service',
-                       'packaging/j713-owner-assets-audio.conf', 'packaging/j713-owner-assets-session.conf',
+                       'packaging/j713-owner-assets-provision.conf', 'packaging/j713-owner-assets-session.conf',
                        'tools/m4-channel-setup.py', 'packaging/j713-first-boot/m4-channel-connect.service',
                        'packaging/j713-first-boot/m4-channel-connect.timer'):
             self.write(self.tree, source, source.encode())

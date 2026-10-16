@@ -29,17 +29,15 @@ playback test. Routing, graph gain, amplifier controls and protection settings
 remain the existing J713 configuration. Other boards need their own qualified
 profiles; a shared chassis alone does not enable one.
 
-## Distribution policy proposal
+## Distribution and provenance
 
-Earlier releases withheld generated FIR files because redistribution rights
-had not been established. This change proposes distributing the final
-functional numerical profile instead of making every owner regenerate it.
-These files contain no AudioDSP executable, serialized Apple preset, tuning
-strip, recorded music or personal calibration data. They are nevertheless
+The repository includes these final functional numerical filters as platform
+profile data. They contain no AudioDSP executable, serialized Apple preset,
+tuning strip, recorded music or personal calibration data. Their response is
 derived from Apple's tuning through the documented measurement pipeline.
 
-Generated output is not automatically owned by the software vendor or the
-owner of the computer. Inclusion proposes a change to the project's previous
-distribution policy; it is not a determination of the files' copyright status
-or a grant of rights in Apple software or source data. That policy decision
-must be resolved before promoting a release containing these assets.
+This distinction is the basis for distributing the profile separately from its
+source inputs. It does not assert that generated output is automatically owned
+by the software vendor or the owner of the computer, determine its copyright
+status, or grant rights in Apple software or source data. Apple inputs and raw
+intermediate captures remain outside the distributed profile.

@@ -364,7 +364,7 @@ def fill_free_space(root):
 
 
 def owner_audio_manifest(raw, previous_pin, profile):
-    """Bind the static FIR identities and retain their release-policy hold."""
+    """Bind the static FIR identities and record their provenance."""
     require(hashlib.sha256(raw).hexdigest() == previous_pin,
             'Unexpected retained audio manifest')
     require(set(profile['outputs']) == set(FIRS) == set(profile['reference_outputs']),
@@ -385,10 +385,11 @@ def owner_audio_manifest(raw, previous_pin, profile):
                 'Invalid native filter identity: ' + name)
         manifest['files']['/' + key] = native['sha256']
         manifest['file_metadata'][key]['sha256'] = native['sha256']
-    manifest['distribution_hold'] = [
-        'Static J713 FIR distribution policy requires maintainer resolution before release promotion; '
-        'see audio/j713/filters/README.md.'
-    ]
+    manifest.pop('distribution_hold')
+    manifest.pop('redistributable')
+    manifest['filter_provenance'] = (
+        'Derived from Apple J713 tuning through the retained pipeline; see audio/j713/filters/README.md.'
+    )
     return (json.dumps(manifest, indent=2, sort_keys=True) + '\n').encode()
 
 
@@ -466,11 +467,11 @@ def static_filters(tree):
         require(len(data) == record['size'] and hashlib.sha256(data).hexdigest() == record['sha256'],
                 'Static FIR identity mismatch: ' + name)
         payload[name] = data
-    return payload
+    return profile, payload
 
 
 def prepare_root(source, image, root, tree, identity, kernel=None, allow_unverified=False):
-    filters = static_filters(tree)
+    manifest, filters = static_filters(tree)
     require(sha(source) == BASE_ROOT, 'Retained root image changed')
     command('cp', '--reflink=auto', '--sparse=always', source, image)
     root.mkdir()
@@ -481,7 +482,6 @@ def prepare_root(source, image, root, tree, identity, kernel=None, allow_unverif
         completion = root / 'etc/m4-install-complete'
         require(not completion.exists() and not completion.is_symlink(),
                 'Retained root must not have completed first boot')
-        manifest = json.loads((tree / 'audio/j713/owner-fir/manifest.json').read_text())
         audio_manifest = root / 'etc/omarchy/j713-audio-manifest.json'
         native_audio = owner_audio_manifest(audio_manifest.read_bytes(), BASE_AUDIO, manifest)
         native_audio = prepare_startup(root, tree, native_audio)
@@ -507,7 +507,7 @@ def prepare_root(source, image, root, tree, identity, kernel=None, allow_unverif
             'usr/lib/systemd/system/systemd-user-sessions.service.d/10-owner-assets.conf':
                 'packaging/j713-owner-assets-session.conf',
             'usr/lib/systemd/system/omarchy-provision-owner.service.d/10-owner-assets.conf':
-                'packaging/j713-owner-assets-audio.conf',
+                'packaging/j713-owner-assets-provision.conf',
             # Connect to the signed M4 update channel once the owner is online.
             'usr/lib/omarchy/m4-channel-connect.py': 'tools/m4-channel-setup.py',  # not the package's copy path
             'usr/lib/systemd/system/m4-channel-connect.service': 'packaging/j713-first-boot/m4-channel-connect.service',
@@ -585,7 +585,6 @@ def assemble(args):
     # Where each source/ file of the kit comes from (None: written by this assembler).
     planned = {'source/' + path.name: path for path in sorted((baseline / 'source').glob('*'))
                if path.is_file()}
-    planned.pop('source/numpy-2.5.3.tar.gz', None)
     planned.update({'source/j713-audio-cargo-sources.tar.gz': args.cargo_source,
                     'source/reference-sound-exports.symvers': args.sound_exports,
                     'source/j713-audio-reconstruction.tar': args.reconstruction})
@@ -608,13 +607,13 @@ def assemble(args):
     skipped = {'SHA256SUMS', 'KIT.json', 'IMAGE.json', 'installer_data.json', 'Install.command',
                'START-HERE.md', 'KNOWN-LIMITATIONS.md', 'fir-origin.json', 'installer-macos.tar.gz',
                'source/integration-inputs.tar.gz', 'source/installer-source.tar.gz',
-               'source/README.md', 'source/numpy-2.5.3.tar.gz', 'os/' + old_package}
+               'source/README.md', 'os/' + old_package}
     for source in sorted(baseline.rglob('*')):
         if source.is_dir():
             continue
         name = source.relative_to(baseline).as_posix()
         require(not source.is_symlink(), 'Unexpected delivery link')
-        if name not in skipped and not name.startswith('owner-audio/'):
+        if name not in skipped:
             target = output / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, target)

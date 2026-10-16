@@ -12,7 +12,7 @@ raw render captures.
 ```
 
 The output directory must not exist. Its parent must exist. The command accepts
-`--bundle /absolute/owner-fir` when the installer uses a different layout. With
+`--bundle /absolute/owner-fir` for a different reproduction-bundle layout. With
 no override, the bundle is `audio/j713/owner-fir` relative to the repository root
 containing `tools/m4-j713-fir-owner.py`.
 
@@ -20,10 +20,10 @@ The command reads installed system files, creates temporary private files, and
 renders AudioUnit responses into memory. It does not start an audio output unit,
 access speaker hardware, change a volume setting, mount a disk, or invoke an
 installer. It uses no network connection and does not require Xcode on the
-owner's Mac. The native helpers are built in advance.
+reproduction host. The native helpers are built in advance.
 
 All input, extracted-preset, helper, dependency and output hashes are pinned in
-`manifest.json`. Generation requires native arm64 macOS and the installer's
+`manifest.json`. Generation requires native arm64 macOS and the reproduction environment's
 CPython 3.13.9 without optimization. Each installed system input lists its
 qualified builds under `qualified`; the input must match exactly one entry by
 size and hash. AudioDSP is qualified for macOS 26.5.1 (25F80) and 26.5.2 (25F84),
@@ -74,7 +74,7 @@ Place the exact wheel named in `manifest.json` in `dependencies/`:
 - The wheel is unpacked privately without pip; its bundled license files stay
   intact. A copy of every license entry is retained in `licenses/` as well.
 
-No C compilation or dependency download happens on the owner's Mac.
+No C compilation or dependency download happens on the reproduction host.
 
 ## Validation status and limits
 
@@ -100,10 +100,9 @@ See `docs/j713-owner-fir-native.md` in the repository or the included
 `source/release-integration.tar.gz` archive.
 
 This verifies local generation and its byte identities. Physical playback of
-the rebuilt installer remains part of the maintainer's final installation.
+a rebuilt installer remains part of its attended installation check.
 
-The static-profile change revisits the earlier decision to withhold generated
-WAVs. Its [provenance record](../filters/README.md) distinguishes the final
-numerical filters from the Apple inputs and raw intermediate captures. It does
+The static profile's [provenance record](../filters/README.md) distinguishes its
+final numerical filters from the Apple inputs and raw intermediate captures. It does
 not grant rights in Apple's software or tuning data. Existing runtime protection
 and corresponding-source obligations remain in place.

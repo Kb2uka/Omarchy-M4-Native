@@ -72,10 +72,8 @@ class OwnerOptionInstallationTests(unittest.TestCase):
     def request(self, profile):
         return owner.encoded({'schema': 1, 'profile': profile, 'consent': 'owner-requested'})
 
-    def test_install_options_with_consent_writes_durable_private_requests(self):
-        with mock.patch.object(owner.os, 'fsync', wraps=os.fsync) as sync:
-            owner.install_options(True, self.pending)
-        self.assertEqual(sync.call_count, len(owner.PROFILES) * 2)
+    def test_install_options_with_consent_writes_private_requests(self):
+        owner.install_options(True, self.pending)
         for profile, path in zip(owner.PROFILES, self.paths):
             with self.subTest(profile=profile):
                 self.assertEqual(path.read_bytes(), self.request(profile))

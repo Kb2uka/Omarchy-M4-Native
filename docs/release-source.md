@@ -218,14 +218,15 @@ Rust/Cargo 1.93.1, LLVM/Clang 21.1.8 and GCC 15.2.0. Reconstruct those external
 toolchain/sysroot inputs using the retained recipes and package versions; local
 Docker image hashes alone are not public download locations. This source packet
 does not claim a fully self-contained or byte-identical clean rebuild. The
-owner-input pipeline passed on native ARM64 macOS 26.5.1 and 26.5.2 with matching
-output hashes. Reconstructed kernel and userspace build environments have not
+historical filter-generation pipeline passed on native ARM64 macOS 26.5.1
+and 26.5.2 with matching output hashes. The static profile was reproduced on
+macOS 26.6.2 as recorded in its provenance. Reconstructed kernel and userspace build environments have not
 been qualified as a complete clean rebuild.
 
 The assembler `tools/prepare-j713-release.py` records how the retained private
 root was copied, historical filters replaced by the approved static profile,
-preset consent removed, freed blocks overwritten, the owner-options service installed and the existing SMC poweroff handler enabled through the
-device-tree child described in [j713-poweroff.md](j713-poweroff.md).
+preset consent removed, freed blocks overwritten, the owner-options service
+installed and the existing SMC poweroff handler enabled through the device-tree child described in [j713-poweroff.md](j713-poweroff.md).
 The four native filter identities replace the historical x86_64 calculation's
 identities in the installed audio manifest. The audio registration helper drops
 unrelated global device waits, and both integrity maps record its new identity.

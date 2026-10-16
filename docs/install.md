@@ -11,10 +11,6 @@ development computer or USB drive afterward.
 
 ## Download
 
-The static speaker profile described here applies to installers built from this
-revision. The published update 2 kit still generates filters on macOS and has
-its original AudioDSP restrictions.
-
 Get `download-j713.command` from the **v0.1.0-alpha.1-update.2** GitHub release.
 It installs the same alpha.1 system as the original v0.1.0-alpha.1 kit; its
 speaker-filter step also accepts macOS 26.6.2. In macOS Terminal, run the
@@ -41,9 +37,14 @@ Linux image leaves the front port disabled. macOS may recognize both ports.
 
 1. Connect power and the internet. Boot macOS normally and open Terminal locally.
    An administrator account is required; run from native ARM64 macOS, not Rosetta.
-   The installer firmware profile requires macOS **26.5.1 or newer**. The image
-   includes the approved J713 speaker filters, so speaker setup does not depend
-   on the AudioDSP or tuning files in the Mac's current macOS installation.
+   The installer firmware profile requires macOS **26.5.1 or newer**. Audio input
+   compatibility in the published update 2 kit is narrower: it recognizes exact
+   Apple AudioDSP and AID37 tuning files recorded in
+   `owner-audio/bundle/manifest.json`. macOS 26.5.1, 26.5.2 and 26.6.2 (25G83)
+   are qualified; other builds may be refused before any partition changes.
+   Kits assembled from this source tree include the approved speaker filters
+   and do not read macOS AudioDSP. Their remaining firmware, recovery and
+   installer dependencies still need qualification on a newer macOS build.
 2. Change into the kit directory. For the default download location:
 
    ```sh
@@ -60,7 +61,12 @@ Linux image leaves the front port disabled. macOS may recognize both ports.
 4. Confirm that you have read these instructions. Choose whether to enable Google
    Widevine for protected movies. **No is the default.** No Widevine binary is in
    the download; consenting enables acquisition from Google after Linux starts.
-5. Enter your **macOS** password when requested. Terminal displays no characters
+5. The published update 2 kit generates speaker filters from the Mac's installed
+   components and requires exact output hashes. If that preparation fails, stop:
+   no partitioning has begun. Do not bypass its checks or substitute filters.
+   Kits assembled from this source tree include those same approved filters,
+   so they proceed directly to administrator authentication.
+6. Enter your **macOS** password when requested. Terminal displays no characters
    while you type it. Sleep prevention stays active during the installer.
 
 The launcher can also use an existing complete recovery download:

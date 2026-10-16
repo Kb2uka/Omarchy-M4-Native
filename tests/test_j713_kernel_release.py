@@ -202,6 +202,9 @@ class KernelReleaseTests(unittest.TestCase):
         with tarfile.open(delivery / 'source/release-integration.tar.gz') as archive:
             for name in self.patch_names:
                 self.assertEqual(archive.extractfile(name).read(), (self.tree / name).read_bytes())
+            for name in release.FIRS:
+                self.assertEqual(archive.extractfile('audio/j713/filters/' + name).read(),
+                                 (self.tree / 'audio/j713/filters' / name).read_bytes())
         kit = json.loads((delivery / 'KIT.json').read_bytes())
         self.assertEqual(kit['files']['IMAGE.json']['sha256'], digest((delivery / 'IMAGE.json').read_bytes()))
 
@@ -211,17 +214,6 @@ class KernelReleaseTests(unittest.TestCase):
             self.assemble()
         self.assertEqual(self.prepared, [])
         self.assertFalse(self.args.output.exists())
-
-    def test_static_audio_delivery_omits_host_generation_runtime(self):
-        self.write(self.baseline, 'owner-audio/bundle/bin/measure-memory', b'obsolete native helper')
-        self.write(self.baseline, 'source/numpy-2.5.3.tar.gz', b'obsolete numerical source')
-        delivery = self.assemble()
-        self.assertFalse((delivery / 'owner-audio').exists())
-        self.assertFalse((delivery / 'source/numpy-2.5.3.tar.gz').exists())
-        with tarfile.open(delivery / 'source/release-integration.tar.gz') as archive:
-            for name in release.FIRS:
-                self.assertEqual(archive.extractfile('audio/j713/filters/' + name).read(),
-                                 (self.tree / 'audio/j713/filters' / name).read_bytes())
 
     def join(self, archive, pin):
         joins = {'schema': 1, 'binaries': {'opt/m4-gpu/asahi_m4.ko': {

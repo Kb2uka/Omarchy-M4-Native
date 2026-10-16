@@ -89,11 +89,11 @@ python3 tools/package-j713-audio.py --inputs QUALIFIED_INPUTS \
 ```
 
 The historical assembler above retains its `--local-only` distribution hold.
-The current release path instead verifies the approved native files tracked in
+The release assembler verifies the approved native files tracked in
 [`filters/`](filters/README.md) and installs them directly in the root image.
-Their provenance record proposes a change to the earlier withholding policy;
-release publication still requires that distribution decision. The historical
-`qualified.json` remains unchanged evidence for the earlier profile.
+Their provenance record distinguishes the final numerical profile from its
+source inputs. The historical `qualified.json` remains unchanged evidence for
+the earlier profile.
 
 No Apple executable, tuning strip, extracted preset, raw render capture, private
 user path or native log is included. The routing, UCM and WirePlumber text in

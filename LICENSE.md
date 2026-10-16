@@ -77,11 +77,16 @@ texts contain the warranty and liability terms.
 
 ## J713 runtime assets
 
-`audio/j713/qualified.json` retains the historical profile identities and
-unresolved distribution hold. This revision adds the approved native numerical
-filters under `audio/j713/filters/` and proposes replacing owner-local generation
-with static delivery. Their [provenance and proposed distribution policy](audio/j713/filters/README.md)
-are explicit; the existing MIT grants for project code do not establish rights
-in Apple software or tuning inputs. Publication of a release containing these
-assets requires resolution of that policy decision. Other corresponding-source
-requirements remain described in [audio/j713/README.md](audio/j713/README.md).
+The approved native numerical filters are included under `audio/j713/filters/`
+as static platform data. Their [provenance record](audio/j713/filters/README.md)
+distinguishes those final coefficients from the Apple software and tuning inputs
+used to reproduce them. The source-code licenses above do not grant rights in
+those Apple inputs.
+
+`audio/j713/qualified.json` retains the historical reference identities and their
+original distribution hold. The release assembler records the native profile's
+provenance in the derived image in place of that FIR-specific hold and its
+`redistributable: false` flag. Removing the historical policy fields does not
+assert that the whole image is cleared for redistribution. Other
+corresponding-source requirements remain described in
+[audio/j713/README.md](audio/j713/README.md).

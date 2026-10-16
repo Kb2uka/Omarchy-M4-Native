@@ -50,7 +50,6 @@ def prepare_for_installer():
 def add_to_firmware(package, widevine):
     """Carry the explicit protected-media choice in the owner's firmware package."""
     from gravity_firmware.core import FWFile
-    require(type(widevine) is bool, 'Invalid owner choice')
     package.add_file(OPTIONS, FWFile(OPTIONS, encoded({'schema': 1, 'widevine': widevine})))
 
 
@@ -107,7 +106,6 @@ def owner_options(raw):
 
 def install_options(widevine, pending):
     """Preflight all browser requests before atomically installing any of them."""
-    require(type(widevine) is bool, 'Invalid owner choice')
     destinations = {}
     for profile in PROFILES:
         destination = pending / ('widevine-' + profile + '.json')

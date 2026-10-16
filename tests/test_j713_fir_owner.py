@@ -222,7 +222,7 @@ class GenerateTests(unittest.TestCase):
     def test_schema_1_bundle_is_refused(self):
         self.manifest['schema'] = 1
         self.write_manifest()
-        with self.assertRaisesRegex(RuntimeError, 'Unsupported owner filter bundle'):
+        with self.assertRaisesRegex(RuntimeError, 'Unsupported filter reproduction bundle'):
             self.generate()
 
 

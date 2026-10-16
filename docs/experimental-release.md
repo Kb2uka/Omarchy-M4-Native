@@ -11,9 +11,10 @@ reached login after a setup stall and restart; keyboard, trackpad, audio and vid
 were owner-confirmed. Normal shutdown still failed. Browser/codec identity was
 not captured in that final report, so it does not prove hardware decode.
 
-Final release packaging removes preset personal consent and prepares exact
-speaker filters on each owner's Mac. **This final packaging was not hardware
-retested.** The maintainer initially waived further tests, then reinstated the
+The published installer removes preset personal consent and prepares exact
+speaker filters on each owner's Mac. The release assembler instead includes
+those same approved filters as static data. **These packaging changes do not
+have a fresh-install hardware test.** The maintainer initially waived further tests, then reinstated the
 final attended installation before publication. That installation is pending,
 including the candidate SMC poweroff device-tree correction and stay-off check.
 The private trial is not evidence for unexecuted changes.
@@ -88,14 +89,13 @@ replacement for upstream authorship. When binaries are included, the applicable
 license's corresponding-source and notice requirements still apply. A hash is
 an identity check, not a redistribution license or a complete source bundle.
 
-The static J713 profile is a proposed exception to the previous policy of
-withholding all generated FIR responses. Its [provenance and distribution proposal](../audio/j713/filters/README.md)
-must be reviewed before publishing a release containing those files. They are
-final numerical filters, not permission to distribute Apple source inputs.
+The [static J713 profile](../audio/j713/filters/README.md) contains the approved
+final numerical filters and their reproduction provenance. Including those
+files does not grant rights to distribute the Apple source inputs.
 Apple firmware, macOS components, tuning strips, extracted presets, raw render
 captures and Widevine remain excluded unless a separately established lawful
-distribution path applies. Private assembly alone does not resolve those rights. Keep raw device trees, personal browser state, account
-credentials, machine identities, build-host paths and unredacted native logs out
+distribution path applies. Private assembly alone does not resolve those rights.
+Keep raw device trees, personal browser state, account credentials, machine identities, build-host paths and unredacted native logs out
 of installable artifacts and any public tree.
 
 ## Final packaging evidence boundary

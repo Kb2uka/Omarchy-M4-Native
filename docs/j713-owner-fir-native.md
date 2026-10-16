@@ -33,12 +33,13 @@ replace the final installed-machine check.
 `audio/j713/owner-fir/manifest.json` retains the old identities in
 `reference_outputs` and pins the native results in `outputs`. The helper still
 requires exact input, preset, dependency, executable and all four output hashes.
-It accepts no approximate match. The release assembler now checks the same
+It accepts no approximate match. The release assembler checks the same
 native identities against the committed static filters.
 
 The release builder verifies the retained audio manifest and original filter
 identities, then changes the four filter hashes in its two file maps. It also
-updates the distribution hold to name the static-profile policy decision.
+records the native profile's provenance in place of the obsolete FIR-only
+distribution policy fields. The historical qualification record remains intact.
 It installs that manifest in the root image and records its new digest in
 `IMAGE.json`. The kernel modules, daemon, audio routing, amplifier configuration,
 speaker protection, volume settings and other audio payloads are retained.
@@ -47,7 +48,7 @@ earlier runtime; it is not silently relabeled as a new playback test.
 
 ## Static profile delivery
 
-The four approved native WAVs are now versioned in
+The four approved native WAVs are versioned in
 [`audio/j713/filters`](../audio/j713/filters/README.md). On 2026-10-16 the
 unchanged release pipeline, exact shipped helpers, CPython 3.13.9 and NumPy
 2.5.3 reproduced every approved hash in a macOS 26.6.2 (25G83) VM on an M4 host.

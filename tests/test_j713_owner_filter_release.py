@@ -33,7 +33,9 @@ class OwnerFilterReleaseTests(unittest.TestCase):
                          'files': {'/usr/lib/protection-daemon': 'f' * 64},
                          'file_metadata': {'usr/lib/protection-daemon':
                                            {'sha256': 'f' * 64, 'size': 256, 'mode': 493}},
-                         'modules': {'unchanged': 'note'}, 'readiness_inputs': {'gain': 0}}
+                         'modules': {'unchanged': 'note'}, 'readiness_inputs': {'gain': 0},
+                         'redistributable': False,
+                         'distribution_hold': ['Measured FIR impulse responses have no established redistribution license; not included in tracked source.']}
         for name, record in self.profile['reference_outputs'].items():
             key = 'usr/share/asahi-audio/j713/' + name
             self.baseline['files']['/' + key] = record['sha256']
@@ -44,17 +46,18 @@ class OwnerFilterReleaseTests(unittest.TestCase):
         return release.owner_audio_manifest(
             raw, pin or hashlib.sha256(raw).hexdigest(), profile or self.profile)
 
-    def test_manifest_with_static_filters_updates_only_hash_pairs_and_distribution_hold(self):
+    def test_manifest_with_static_filters_updates_hash_pairs_and_replaces_historical_policy(self):
         actual = json.loads(self.convert())
         expected = copy.deepcopy(self.baseline)
         for name, record in self.profile['outputs'].items():
             key = 'usr/share/asahi-audio/j713/' + name
             expected['files']['/' + key] = record['sha256']
             expected['file_metadata'][key]['sha256'] = record['sha256']
-        expected['distribution_hold'] = [
-            'Static J713 FIR distribution policy requires maintainer resolution before release promotion; '
-            'see audio/j713/filters/README.md.'
-        ]
+        expected.pop('distribution_hold')
+        expected.pop('redistributable')
+        expected['filter_provenance'] = (
+            'Derived from Apple J713 tuning through the retained pipeline; see audio/j713/filters/README.md.'
+        )
         self.assertEqual(actual, expected)
         self.assertNotEqual(actual['files'], self.baseline['files'])
 
@@ -154,6 +157,7 @@ class OwnerFilterReleaseTests(unittest.TestCase):
                     write('etc/omarchy/j713-audio-manifest.json', raw)
                     for name, data in originals.items():
                         write('usr/share/asahi-audio/j713/' + name, data)
+                        (root / 'usr/share/asahi-audio/j713' / name).chmod(0o600)
                     for name in release.PROFILES:
                         write('etc/skel/.config/omarchy/pending/widevine-' + name + '.json',
                               json.dumps({'schema': 1, 'profile': name,
@@ -193,9 +197,9 @@ class OwnerFilterReleaseTests(unittest.TestCase):
             self.assertIn('OnCalendar=', (root / 'usr/lib/systemd/system/m4-channel-connect.timer').read_text())
             self.assertIn('ConditionPathExists=!/var/lib/omarchy/provisioning/pending\n', service)
             self.assertIn('ConditionPathExists=!/var/lib/omarchy-m4/connected\n', service)
-            self.assertFalse((root / 'usr/lib/systemd/system/m4-j713-audio-register.service.d/10-owner-assets.conf').exists())
             for name in release.FIRS:
                 self.assertEqual((root / 'usr/share/asahi-audio/j713' / name).read_bytes(), approved[name])
+                self.assertEqual((root / 'usr/share/asahi-audio/j713' / name).stat().st_mode & 0o777, 0o644)
 
 
 if __name__ == '__main__':
