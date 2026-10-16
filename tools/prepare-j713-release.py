@@ -81,11 +81,6 @@ def sha(path):
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
-def pinned(path, record):
-    require(path.is_file() and not path.is_symlink() and path.stat().st_size == record['size'] and
-            sha(path) == record['sha256'], 'Owner runtime bundle disagrees with its manifest: ' + path.name)
-
-
 def source_joins(tree):
     """Load the binary-to-source joins and reject malformed entries."""
     joins = json.loads((tree / SOURCE_JOINS).read_bytes())
@@ -369,7 +364,7 @@ def fill_free_space(root):
 
 
 def owner_audio_manifest(raw, previous_pin, profile):
-    """Replace only the four measured FIR identities in the retained manifest."""
+    """Bind the static FIR identities and retain their release-policy hold."""
     require(hashlib.sha256(raw).hexdigest() == previous_pin,
             'Unexpected retained audio manifest')
     require(set(profile['outputs']) == set(FIRS) == set(profile['reference_outputs']),
@@ -390,6 +385,10 @@ def owner_audio_manifest(raw, previous_pin, profile):
                 'Invalid native filter identity: ' + name)
         manifest['files']['/' + key] = native['sha256']
         manifest['file_metadata'][key]['sha256'] = native['sha256']
+    manifest['distribution_hold'] = [
+        'Static J713 FIR distribution policy requires maintainer resolution before release promotion; '
+        'see audio/j713/filters/README.md.'
+    ]
     return (json.dumps(manifest, indent=2, sort_keys=True) + '\n').encode()
 
 
@@ -455,7 +454,23 @@ def prepare_decoder(root, tree, kernel=None):
     return sha(metadata)
 
 
+def static_filters(tree):
+    """Verify the complete approved platform profile before changing an image."""
+    profile = json.loads((tree / 'audio/j713/owner-fir/manifest.json').read_bytes())
+    require(set(profile['outputs']) == set(FIRS), 'Unexpected static FIR set')
+    payload = {}
+    for name, record in profile['outputs'].items():
+        path = tree / 'audio/j713/filters' / name
+        require(path.is_file() and not path.is_symlink(), 'Missing static FIR: ' + name)
+        data = path.read_bytes()
+        require(len(data) == record['size'] and hashlib.sha256(data).hexdigest() == record['sha256'],
+                'Static FIR identity mismatch: ' + name)
+        payload[name] = data
+    return payload
+
+
 def prepare_root(source, image, root, tree, identity, kernel=None, allow_unverified=False):
+    filters = static_filters(tree)
     require(sha(source) == BASE_ROOT, 'Retained root image changed')
     command('cp', '--reflink=auto', '--sparse=always', source, image)
     root.mkdir()
@@ -476,9 +491,8 @@ def prepare_root(source, image, root, tree, identity, kernel=None, allow_unverif
             path = root / 'usr/share/asahi-audio/j713' / name
             require(path.is_file() and not path.is_symlink() and
                     sha(path) == manifest['reference_outputs'][name]['sha256'], 'Unexpected original FIR')
-            with path.open('r+b') as stream:
-                stream.write(bytes(path.stat().st_size)); stream.flush(); os.fsync(stream.fileno())
-            path.unlink()
+            path.write_bytes(filters[name])
+            path.chmod(0o644)
         audio_manifest.write_bytes(native_audio)
         for profile in PROFILES:
             path = root / ('etc/skel/.config/omarchy/pending/widevine-' + profile + '.json')
@@ -490,8 +504,6 @@ def prepare_root(source, image, root, tree, identity, kernel=None, allow_unverif
         additions = {
             'usr/lib/omarchy/m4-j713-owner-assets.py': 'tools/m4-j713-owner-assets.py',
             'usr/lib/systemd/system/j713-owner-assets.service': 'packaging/j713-owner-assets.service',
-            'usr/lib/systemd/system/m4-j713-audio-register.service.d/10-owner-assets.conf':
-                'packaging/j713-owner-assets-audio.conf',
             'usr/lib/systemd/system/systemd-user-sessions.service.d/10-owner-assets.conf':
                 'packaging/j713-owner-assets-session.conf',
             'usr/lib/systemd/system/omarchy-provision-owner.service.d/10-owner-assets.conf':
@@ -533,6 +545,10 @@ def assemble(args):
     require(os.geteuid() == 0, 'Build on a Linux host through its scoped root job')
     tree, baseline = args.source_tree.resolve(), args.baseline.resolve()
     revision = source_revision(tree)
+    tracked = [raw.decode() for raw in subprocess.check_output(
+        ['git', '-C', str(tree), 'ls-files', '-z']).split(b'\0') if raw]
+    require(all('audio/j713/filters/' + name in tracked for name in FIRS),
+            'Static FIR assets must be tracked in the release source')
     kernel = kernel_input(getattr(args, 'kernel', None), getattr(args, 'kernel_receipt', None),
                           tree, revision)
     require(args.output.is_absolute() and not args.output.exists() and
@@ -543,10 +559,6 @@ def assemble(args):
     for line in (baseline / 'SHA256SUMS').read_text().splitlines():
         pin, name = line.split('  ', 1)
         require(sha(baseline / name) == pin, 'Retained delivery mismatch: ' + name)
-    require(sha(args.owner_bundle) == '4b59c1549e821d79ca4043ade37c02cdbbcc38e5a8eb5202f285b8eb2ff97e07',
-            'Unknown owner helper bundle')
-    require(sha(args.numpy_source) == 'df2d5874ff183595a4ba404edd04f6bd9b5505c1d7708573f6a6c17489a67563',
-            'Unknown numerical dependency source')
     require(sha(args.cargo_source) == 'faf50f21db4b622900bd275441bc321d1a01933afb555e84d1446d38d6027a34',
             'Unknown locked dependency sources')
     require(sha(args.sound_exports) == '9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362',
@@ -555,11 +567,7 @@ def assemble(args):
             'Unknown source reconstruction guidance')
     require(args.poweroff_dtb.is_file() and not args.poweroff_dtb.is_symlink() and
             sha(args.poweroff_dtb) == POWEROFF_DTB, 'Unknown SMC poweroff device tree')
-    owner_profile = json.loads((tree / 'audio/j713/owner-fir/manifest.json').read_bytes())
-    handoff = runpy.run_path(str(tree / 'tools/m4-j713-owner-assets.py'))['FIRS']
-    require(handoff == {name: (record['size'], record['sha256'])
-                        for name, record in owner_profile['outputs'].items()},
-            'Owner generation and installer handoff identities disagree')
+    static_filters(tree)
     config = json.loads((baseline / 'installer_data.json').read_bytes())
     old_image = json.loads((baseline / 'IMAGE.json').read_bytes())
     require(old_image['audio_manifest_sha256'] == BASE_AUDIO, 'Baseline audio identity changed')
@@ -577,8 +585,8 @@ def assemble(args):
     # Where each source/ file of the kit comes from (None: written by this assembler).
     planned = {'source/' + path.name: path for path in sorted((baseline / 'source').glob('*'))
                if path.is_file()}
-    planned.update({'source/numpy-2.5.3.tar.gz': args.numpy_source,
-                    'source/j713-audio-cargo-sources.tar.gz': args.cargo_source,
+    planned.pop('source/numpy-2.5.3.tar.gz', None)
+    planned.update({'source/j713-audio-cargo-sources.tar.gz': args.cargo_source,
                     'source/reference-sound-exports.symvers': args.sound_exports,
                     'source/j713-audio-reconstruction.tar': args.reconstruction})
     planned.update({'source/' + path.name: path for path in join_sources})
@@ -600,13 +608,13 @@ def assemble(args):
     skipped = {'SHA256SUMS', 'KIT.json', 'IMAGE.json', 'installer_data.json', 'Install.command',
                'START-HERE.md', 'KNOWN-LIMITATIONS.md', 'fir-origin.json', 'installer-macos.tar.gz',
                'source/integration-inputs.tar.gz', 'source/installer-source.tar.gz',
-               'source/README.md', 'os/' + old_package}
+               'source/README.md', 'source/numpy-2.5.3.tar.gz', 'os/' + old_package}
     for source in sorted(baseline.rglob('*')):
         if source.is_dir():
             continue
         name = source.relative_to(baseline).as_posix()
         require(not source.is_symlink(), 'Unexpected delivery link')
-        if name not in skipped:
+        if name not in skipped and not name.startswith('owner-audio/'):
             target = output / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, target)
@@ -634,40 +642,6 @@ def assemble(args):
     repack_installer(baseline / 'source/installer-source.tar.gz',
                      output / 'source/installer-source.tar.gz', module, True)
     clean_integration(baseline / 'source/integration-inputs.tar.gz', output / 'source/integration-inputs.tar.gz')
-    tracked = [raw.decode() for raw in subprocess.check_output(
-        ['git', '-C', str(tree), 'ls-files', '-z']).split(b'\0') if raw]
-    owner = output / 'owner-audio'
-    bundle = owner / 'bundle'
-    owner.mkdir()
-    helpers = args.output / 'owner-helpers'
-    with tarfile.open(args.owner_bundle) as archive:
-        archive.extractall(helpers, filter='data')
-    attributes = helpers / 'owner-fir/.gitattributes'
-    require(attributes.is_file() and not attributes.is_symlink(), 'Owner bundle metadata changed')
-    # The pinned archive supplies only the natively built helpers and the wheel.
-    # This revision owns every other runtime file, so scripts and their pins move together.
-    for name in ('bin', 'dependencies'):
-        native = helpers / 'owner-fir' / name
-        require(native.is_dir() and not native.is_symlink(), 'Owner helper bundle lacks ' + name)
-        shutil.copytree(native, bundle / name, symlinks=True)
-    shutil.rmtree(helpers)
-    for name in tracked:
-        relative = name.removeprefix('audio/j713/owner-fir/')
-        # Checkout formatting metadata stays in the source archive, not the runtime bundle.
-        if relative == name or relative == '.gitattributes':
-            continue
-        require(relative.split('/')[0] not in ('bin', 'dependencies'),
-                'Native owner files are tracked in the source: ' + name)
-        target = bundle / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(tree / name, target)
-    require(owner_profile['sources'] and owner_profile['helpers'], 'Incomplete owner filter manifest')
-    for directory, records in (('src', owner_profile['sources']), ('bin', owner_profile['helpers'])):
-        for name, record in records.items():
-            pinned(bundle / directory / name, record)
-    pinned(bundle / 'dependencies' / owner_profile['numpy']['filename'], owner_profile['numpy'])
-    shutil.copyfile(tree / 'tools/m4-j713-fir-owner.py', owner / 'm4-j713-fir-owner.py')
-    shutil.copyfile(args.numpy_source, output / 'source/numpy-2.5.3.tar.gz')
     shutil.copyfile(args.cargo_source, output / 'source/j713-audio-cargo-sources.tar.gz')
     shutil.copyfile(args.sound_exports, output / 'source/reference-sound-exports.symvers')
     shutil.copyfile(args.reconstruction, output / 'source/j713-audio-reconstruction.tar')
@@ -709,7 +683,7 @@ def assemble(args):
         'video_manifest_sha256': manifest_pins['video'],
         'fresh_install_qualified': False,
         'qualification': 'The preceding owner-input candidate failed fresh startup. This image includes startup and recovery corrections; a successful owner installation is still required before publication.',
-        'owner_inputs': 'Speaker filters generated from installed macOS and hash checked before partitioning; Widevine requires each owner choice.',
+        'owner_inputs': 'The root image contains the exact approved J713 FIR profile; Widevine requires each owner choice.',
         'baseline_root_sha256': BASE_ROOT,
         'source_joins_sha256': sha(tree / SOURCE_JOINS),
         'source_correspondence_unverified': manifest_pins['unverified'],
@@ -744,7 +718,7 @@ def assemble(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ('source-tree', 'baseline', 'root-image', 'owner-bundle', 'numpy-source', 'cargo-source',
+    for name in ('source-tree', 'baseline', 'root-image', 'cargo-source',
                  'sound-exports', 'reconstruction', 'poweroff-dtb', 'output'):
         parser.add_argument('--' + name, required=True, type=Path)
     parser.add_argument('--kernel', type=Path, help='Exact startup-qualified J713 AFE action Image.gz')

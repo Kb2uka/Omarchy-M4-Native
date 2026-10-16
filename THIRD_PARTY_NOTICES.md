@@ -154,7 +154,9 @@ release as required by their licenses. Listing a dependency here does not mean
 its complete source or binaries are already included in this checkout. Preserve
 every upstream file-level notice when those components are joined.
 
-The measured speaker FIR assets have no established redistribution license.
-No project credit or source license grants rights to Apple firmware, macOS,
-Widevine or separately obtained assets. See the
-[experimental release boundary](docs/experimental-release.md).
+The static J713 FIR assets are final numerical responses reproduced with the
+retained measurement pipeline. Their [provenance record](audio/j713/filters/README.md)
+identifies the inputs, approved output identities and proposed change to the
+previous withholding policy. No project credit or source-code license grants
+rights in Apple firmware, macOS, tuning files, Widevine or separately obtained
+assets. See the [experimental release boundary](docs/experimental-release.md).

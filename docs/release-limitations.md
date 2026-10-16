@@ -22,11 +22,11 @@
   Startup dependency changes do not establish a fix for that hardware condition.
   Keep a USB or paired Bluetooth pointing device available for qualification.
   Code review and checksums do not prove successful installation on another Mac.
-- **macOS audio inputs are pinned.** The local generator refuses unknown Apple
-  AudioDSP/tuning hashes or unequal filter output before disk changes. Minimum
-  macOS version alone does not guarantee those files match. The ARM64 filter
-  generation pipeline passed end to end on macOS 26.5.1, 26.5.2 and 26.6.2 with
-  identical output hashes. The rebuilt installer's physical audio check remains pending.
+- **Static J713 speaker profile.** Installers built from this revision contain
+  the exact approved filters rather than generating them from the host macOS.
+  Published update 2 retains its original AudioDSP restrictions. Changing the
+  delivery path does not qualify a new filter response, another Mac model or a
+  fresh installation; the replacement installer's physical check remains pending.
 - **Video acceleration is selective.** Brave and mpv have used hardware H264
   8-bit / VP9 Profile 0 decoding with the pinned stack. The shipped Chromium build
   and some protected movies use CPU decoding while the desktop uses GPU rendering.

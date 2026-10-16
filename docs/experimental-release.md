@@ -88,21 +88,23 @@ replacement for upstream authorship. When binaries are included, the applicable
 license's corresponding-source and notice requirements still apply. A hash is
 an identity check, not a redistribution license or a complete source bundle.
 
-Measured speaker FIR responses currently have no established redistribution
-license. Apple firmware, macOS components and Widevine are not covered by this
-project's original-work license. Exclude them from a public artifact unless a
-separately established lawful distribution path applies. Private assembly does
-not resolve those rights. Keep raw device trees, personal browser state, account
+The static J713 profile is a proposed exception to the previous policy of
+withholding all generated FIR responses. Its [provenance and distribution proposal](../audio/j713/filters/README.md)
+must be reviewed before publishing a release containing those files. They are
+final numerical filters, not permission to distribute Apple source inputs.
+Apple firmware, macOS components, tuning strips, extracted presets, raw render
+captures and Widevine remain excluded unless a separately established lawful
+distribution path applies. Private assembly alone does not resolve those rights. Keep raw device trees, personal browser state, account
 credentials, machine identities, build-host paths and unredacted native logs out
 of installable artifacts and any public tree.
 
 ## Final packaging evidence boundary
 
-The new per-owner ARM64 filter generation path has not been executed end to end.
-It checks the installed Apple input identities and all four resulting WAV hashes,
-refusing mismatches before the installer's partitioning flow. A clean source
-review cannot establish that its numerical output will match on every supported
-macOS build. The firmware minimum and audio-input compatibility are separate.
+The static profile was independently reproduced with every existing native
+output hash intact. The release assembler verifies those files before changing
+the root image. The host macOS AudioDSP is no longer part of installation, while
+firmware and recovery prerequisites remain. Local reproduction and offline
+packaging checks do not establish a successful fresh installation.
 
 No new native installation, playback, reboot or test-suite result is claimed for
 the final release packaging. Asset hashes and image readbacks identify what is

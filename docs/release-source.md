@@ -25,16 +25,17 @@ outer files. Their authorship and licenses are preserved.
   ALSA dependency is separately retained in the application source.
 - `j713-audio-reconstruction.tar`: sanitized sysroot member inventory, retained
   Dockerfiles, compiler/dependency versions, supplemental exports and build joins.
-- `numpy-2.5.3.tar.gz`: source for the bundled numerical dependency. Wheel notices
-  and the local filter-generator source are also in `owner-audio/bundle/`.
 
-Speaker filters are generated from each owner's installed macOS components;
-neither those Apple components nor the resulting WAV files are distributed in
-this kit. The generator requires exactly the output hashes already required by
-the unchanged audio graph and protection manifest. The macOS installer inserts
-the owner files into its locally collected firmware package; first Linux boot
-installs regular WAV files before audio registration and first-user creation.
-Widevine binaries are also excluded and acquired separately only after consent.
+The four static speaker filters in `audio/j713/filters/` are included in the
+root image and current integration source. The assembler verifies every file
+against the approved native identities before modifying the image. It keeps
+those identities in the installed audio manifest; runtime integrity checks
+still require the exact files. See the [profile provenance](../audio/j713/filters/README.md).
+
+The historical generation sources remain available for development and
+reproduction. The installer does not ship or execute their native helpers or
+NumPy dependency. No Apple executable, tuning strip, extracted preset or raw
+render capture is included. Widevine is acquired separately only after consent.
 
 ## Binaries outside packages
 
@@ -222,8 +223,8 @@ output hashes. Reconstructed kernel and userspace build environments have not
 been qualified as a complete clean rebuild.
 
 The assembler `tools/prepare-j713-release.py` records how the retained private
-root was copied, owner-specific payloads removed, freed blocks overwritten,
-new service installed and the existing SMC poweroff handler enabled through the
+root was copied, historical filters replaced by the approved static profile,
+preset consent removed, freed blocks overwritten, the owner-options service installed and the existing SMC poweroff handler enabled through the
 device-tree child described in [j713-poweroff.md](j713-poweroff.md).
 The four native filter identities replace the historical x86_64 calculation's
 identities in the installed audio manifest. The audio registration helper drops

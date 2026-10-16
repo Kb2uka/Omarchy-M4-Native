@@ -197,10 +197,12 @@ unrestricted. Do not substitute the older broad session-placement experiment.
 ## Release scope
 
 The download includes the installer, image, checksums, source archives and
-upstream notices. It excludes Apple components, generated speaker-filter WAVs,
-Widevine binaries and preset personal consent. Speaker filters are prepared
-from the owner's installed macOS components and must match the expected hashes
-before partitioning begins. Unrecognized inputs are refused.
+upstream notices. The published update 2 kit excludes generated speaker-filter
+WAVs and prepares them from the owner's installed macOS before partitioning.
+Installers built from this revision instead include the exact approved
+[static J713 profile](audio/j713/filters/README.md), subject to its proposed
+distribution-policy change. Apple components, Widevine binaries and preset
+personal consent remain excluded.
 
 The front USB port, camera, suspend/resume, broad hardware coverage
 and coordinated updates remain open work. This alpha is not a daily-driver,

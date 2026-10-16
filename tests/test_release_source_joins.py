@@ -247,7 +247,10 @@ class RootGateTests(unittest.TestCase):
         base = Path(self.temp.name).resolve()
         self.tree, self.root, self.image = base / 'tree', base / 'mounted', base / 'root.ext4'
         firs = {name: name.encode() for name in release.FIRS}
-        manifest = {'reference_outputs': {name: {'sha256': digest(data)} for name, data in firs.items()}}
+        manifest = {'reference_outputs': {name: {'sha256': digest(data)} for name, data in firs.items()},
+                    'outputs': {name: {'size': len(data), 'sha256': digest(data)} for name, data in firs.items()}}
+        for name, data in firs.items():
+            self.write(self.tree, 'audio/j713/filters/' + name, data)
         self.write(self.tree, 'audio/j713/owner-fir/manifest.json', json.dumps(manifest).encode())
         for source in ('tools/m4-j713-owner-assets.py', 'packaging/j713-owner-assets.service',
                        'packaging/j713-owner-assets-audio.conf', 'packaging/j713-owner-assets-session.conf',

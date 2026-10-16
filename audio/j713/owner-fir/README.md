@@ -1,9 +1,11 @@
 # Owner-local J713 audio filters
 
-This tool prepares four J713 FIR files from the owner's installed
-macOS AudioDSP component and AID37 tuning strip. The distributed bundle contains
-the generator, two native helpers, and NumPy. It must not contain Apple presets,
-tuning strips, AudioDSP, measured responses, or generated WAV files.
+This development tool reproduces the four J713 FIR files from installed
+macOS AudioDSP and AID37 tuning inputs. Installation uses the
+[static approved profile](../filters/README.md) instead. The generator, native
+helpers and NumPy are no longer installer dependencies. A local reproduction
+bundle must not contain or publish Apple presets, tuning strips, AudioDSP or
+raw render captures.
 
 ```sh
 /path/to/bundled/python3.13 tools/m4-j713-fir-owner.py --output /absolute/new/owner-firs
@@ -37,13 +39,11 @@ rechecks every input against the same entry after generation and records the
 matched entry and macOS version in `receipt.json`.
 
 Success creates exactly four `j713-static-minimal-laneN-48000.wav` files and
-`receipt.json`. The installer must require success and independently verify the
-four hashes **before offering partition changes**. The receipt describes asset
-generation, not installation or hardware qualification. Temporary presets,
-responses and extracted NumPy files are removed when the command exits normally
-or reports an error. The release builder carries the native output pins into
-the installer handoff and installed audio manifest. Speaker protection policy
-is unchanged.
+`receipt.json`. The receipt describes reproduction, not installation or hardware
+qualification. Temporary presets, responses and extracted NumPy files are
+removed when the command exits normally or reports an error. The release
+builder verifies the committed static filters against these native output pins
+and carries their identities into the installed audio manifest.
 
 ## Assembly and source
 
@@ -102,8 +102,8 @@ See `docs/j713-owner-fir-native.md` in the repository or the included
 This verifies local generation and its byte identities. Physical playback of
 the rebuilt installer remains part of the maintainer's final installation.
 
-The existing measured WAV assets have no established redistribution license.
-This arrangement avoids including them in a download. It does not establish
-their legal status, grant rights in Apple's software or data, or remove any
-other corresponding-source obligation. Existing runtime protection and package
-verification remain required.
+The static-profile change revisits the earlier decision to withhold generated
+WAVs. Its [provenance record](../filters/README.md) distinguishes the final
+numerical filters from the Apple inputs and raw intermediate captures. It does
+not grant rights in Apple's software or tuning data. Existing runtime protection
+and corresponding-source obligations remain in place.
