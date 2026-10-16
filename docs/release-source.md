@@ -46,6 +46,9 @@ that built it. Each entry names archives in this `source/` directory, most of
 them pinned by hash, and tracked paths in `release-integration.tar.gz`. A
 tracked path may be pinned to the commit that built the binary. The assembler
 then refuses unless that path is unchanged in the revision being assembled.
+The package channel similarly requires every binary downloaded from the
+`package-inputs` release to be joined to its pinned corresponding source in
+`packaging/channel-source-joins.json` (see [package-channel.md](package-channel.md)).
 
 `correspondence` records how the join was established:
 
