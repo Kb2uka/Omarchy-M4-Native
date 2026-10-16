@@ -40,15 +40,8 @@ chmod 700 "$work"
 tar -xzf "$kit/installer-macos.tar.gz" -C "$work"
 cp "$kit/installer_data.json" "$work/installer_data.json"
 printf 'Installer working directory: %s\n' "$work"
-printf '%s\n' 'Preparing speaker filters from this Mac. No partition changes have started.'
-python="$work/Frameworks/Python.framework/Versions/3.13/bin/python3.13"
-/usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$HOME" \
-  DYLD_LIBRARY_PATH="$work/Frameworks/Python.framework/Versions/Current/lib" \
-  DYLD_FRAMEWORK_PATH="$work/Frameworks" \
-  "$python" -I -B "$kit/owner-audio/m4-j713-fir-owner.py" \
-  --bundle "$kit/owner-audio/bundle" --output "$work/owner-firs"
 args=(/usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME=/var/root \
   TERM="${TERM:-xterm-256color}" LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 \
-  EXPERT=1 REPO_BASE="$kit" M4_OWNER_FIRS="$work/owner-firs" M4_OWNER_WIDEVINE="$widevine")
+  EXPERT=1 REPO_BASE="$kit" M4_OWNER_WIDEVINE="$widevine")
 if [[ -n "$ipsw" ]]; then args+=(IPSW_BASE="$ipsw"); fi
 exec /usr/bin/caffeinate -dis /usr/bin/sudo -H "${args[@]}" /bin/sh "$work/install.sh"

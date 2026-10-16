@@ -15,6 +15,9 @@ one state a power cut between the two writes can leave (module fixed, pin
 stock). Anything else, such as a hand-patched module, is refused and left
 untouched. --rollback asks the next boot to restore the alpha.1 files and to
 stop applying the fix. Inspection is the default.
+
+Every report also names the GPU values the module's Air gate checks (core mask,
+power limit and firmware build), so a refused GPU can be read from the journal.
 """
 import argparse
 import hashlib
@@ -30,6 +33,7 @@ STAGED = 'usr/lib/omarchy-m4/gpu/asahi_m4.ko'
 STATE = 'var/lib/omarchy-m4/gpu-module'
 # Where gpu/j713/m4-gpu-test-module keeps alpha.1 on an Air that ran the test build.
 TEST_BACKUP = 'opt/m4-gpu/alpha1-backup'
+GPU_NODE = 'sys/firmware/devicetree/base/soc/gpu@302600000'
 STOCK = {'sha256': '80cf3669575edd09aed226a93e47aaaf132e70f1070154629c413c0b40d34578', 'size': 388216}
 FIXED = {'sha256': '3cf47fa706630ddc5fc55a3bce00ab31e8a4c5ee48e1ba563e26a0406da196f8', 'size': 390752}
 
@@ -85,13 +89,36 @@ def regular(path):
     return path.read_bytes()
 
 
+def gpu_values(root):
+    """The devicetree values gpu/j713/asahi/g16.rs gates on; None where one is missing."""
+    node = root / GPU_NODE
+
+    def read(name):
+        try:
+            return (node / name).read_bytes()
+        except OSError:
+            return None
+
+    def cell(name):
+        raw = read(name)
+        return int.from_bytes(raw, 'big') if raw is not None and len(raw) == 4 else None
+
+    mask, build = cell('apple,m4-core-mask'), read('apple,firmware-build')
+    try:
+        build = build.rstrip(b'\0').decode('ascii') if build else None
+    except UnicodeDecodeError:
+        build = None
+    return {'core_mask': None if mask is None else f'{mask:#x}',
+            'max_power_mw': cell('apple,m4-max-power-mw'), 'firmware_build': build or None}
+
+
 def inspect(root):
     sums = regular(root / SUMS)
     module_sha, pin = sha(regular(root / MODULE)), pinned(sums)
     stage = root / STATE
     report = {'module': module_sha, 'pinned': pin, 'held': (stage / 'hold').exists(),
               'rollback_requested': (stage / 'rollback').exists(),
-              'loaded': (root / 'sys/module' / NAME).exists()}
+              'loaded': (root / 'sys/module' / NAME).exists(), 'gpu': gpu_values(root)}
     if module_sha == FIXED['sha256'] and pin == FIXED['sha256']:
         report['state'] = 'fixed'
     elif module_sha == STOCK['sha256'] and pin == STOCK['sha256']:

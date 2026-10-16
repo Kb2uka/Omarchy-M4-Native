@@ -227,6 +227,22 @@ file.
 - **Protected exceptions:** the same five paths. The reasons for the
   WirePlumber fragment and its hook now name the headset mic source too.
 
+### omarchy-m4-gpu 1-2
+
+- **A failed GPU start can be read from the journal**
+  ([#82](https://github.com/Kb2uka/Omarchy-M4-Native/issues/82)). alpha.1's
+  `m4-gpu.service` appends `m4-gpu-start`'s output to `/tmp/m4-gpu-start.log`,
+  which a restart clears, so the "desktop could not start" notice's
+  `journalctl -u m4-gpu.service` showed nothing from the script. The drop-in now
+  also sets `StandardOutput=journal` and `StandardError=journal`.
+- **The report names the GPU values the module's Air gate checks:** core mask,
+  power limit and firmware build, read from the GPU's devicetree node. Each
+  boot's `m4-gpu-module --boot` report, and `m4-gpu-module` run by hand, carries
+  them under `gpu`. A missing or malformed value is `null`. Nothing else in the
+  tool changed: the same states, swaps and refusals.
+- The module is unchanged (`3cf47fa7…`). Like every channel package, 1-2 arrives
+  with `omarchy-m4-update` and takes effect at the next boot.
+
 ### omarchy-m4-boot 1-12
 
 - **Opt-in full-panel desktop** ([J713 camera notch](j713-notch.md),
@@ -413,11 +429,43 @@ one. Sign it with the old key, then switch the fingerprint in
 
 ## Corresponding source
 
-The kernel package's source is the kernel tree and configuration published with
-[v0.1.0-alpha.1](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1)
-(see [release-source.md](release-source.md)), plus the J713 input patches in
-`patches-kernel/j713-input/`. The devicetree's source is the alpha.1 portable
-devicetree plus [j713-smc-poweroff.dtso](../patches/j713-smc-poweroff.dtso).
+Every compiled binary downloaded from the `package-inputs` release is joined to
+its pinned corresponding source and its rebuild correspondence in
+[`packaging/channel-source-joins.json`](../packaging/channel-source-joins.json).
+`tools/check-m4-packages.py` enforces that every channel package's downloaded
+binaries have a `rebuilt-identical` join in CI, with no override. Every join is
+`unverified` until a byte-identical rebuild is recorded, so the Package channel
+check refuses those packages until then:
+
+- **Kernel (`linux-m4-omarchy`):** The kernel package's build identity is recorded
+  from the kernel tree and configuration published with
+  [v0.1.0-alpha.1](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1)
+  (`source/kernel-controller.tar.gz`), plus the J713 input patches in
+  `patches-kernel/j713-input/` in this repository; as with the release kernel, a
+  byte-identical rebuild is not claimed.
+- **Devicetrees (`omarchy-m4-boot`):** The devicetree's base source is the alpha.1
+  portable devicetree plus [`j713-smc-poweroff.dtso`](../patches/j713-smc-poweroff.dtso),
+  followed in order by the cpu-temperature (`patches/j713-cpu-temperature.dtso`),
+  ecluster (`patches/j713-ecluster-thermal.dtso`), and pboost
+  (`patches/j713-pboost.dtso`) overlays built with DTC 1.8.1 and their respective
+  builder tools (`tools/build-j713-cputemp-dtb.py`, `tools/build-j713-ecluster-dtb.py`,
+  `tools/build-j713-pboost-dtb.py`).
+- **Speaker protection module (`omarchy-m4-speaker`):** `snd-soc-j713-group.ko`
+  (`aaad802e…`), built from `audio/j713/kernel/` on the alpha.1
+  kernel-controller tree with `reference-sound-exports.symvers`; an identical
+  rebuild is not yet recorded.
+- **Air GPU module (`omarchy-m4-gpu`):** `asahi_m4.ko` (`3cf47fa7…`), built from
+  `gpu/j713/asahi/g16.rs` on the alpha.1 kernel tree with
+  `gpu/j713/build-test-module.sh`; an identical rebuild is not yet recorded.
+- **Headphone jack modules (`omarchy-m4-headphones`):** `j713_hp_dt.ko` and
+  `snd-soc-j713-headphones.ko`, built from `audio/j713/headphones/kernel/` on
+  the alpha.1 kernel-controller tree with `tools/build-j713-headphones.sh`.
+- **CPU idle and boost guard (`omarchy-m4-cpu`):** `j713_cpuidle.ko` (`a2a7947a…`)
+  and `j713_pguard.ko` (`91fe247e…`), built from `cpu/j713/` on the alpha.1
+  kernel tree with `cpu/j713/build-module.sh`.
+- **GStreamer audio sinks (`omarchy-m4-gst-audio`):** `libgstautodetect.so` and
+  `libgstpulseaudio.so`, built by `tools/m4-webkit-audio-plugins.py` from
+  `gst-plugins-good-1.28.7.tar.xz` (mirrored in `package-inputs`).
 
 ## Limits
 

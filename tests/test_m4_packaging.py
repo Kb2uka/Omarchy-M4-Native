@@ -260,6 +260,17 @@ class PolicyTests(unittest.TestCase):
         text = (PACKAGING / 'omarchy-m4-gpu/20-m4-gpu-module.conf').read_text()
         self.assertIn('ExecStartPre=-/usr/bin/m4-gpu-module --boot\n', text)
 
+    def test_gpu_start_output_reaches_the_journal(self):
+        # The failure notice points at journalctl -u m4-gpu.service; /tmp is gone after a restart.
+        for path in (PACKAGING / 'omarchy-m4-gpu/20-m4-gpu-module.conf',
+                     ROOT / 'packaging/j713-startup/m4-gpu.service'):
+            with self.subTest(path.name):
+                text = path.read_text()
+                self.assertIn('[Service]\n', text)
+                self.assertIn('StandardOutput=journal\n', text)
+                self.assertIn('StandardError=journal\n', text)
+                self.assertNotIn('append:', text)
+
     def test_speaker_drop_in_cannot_block_registration(self):
         text = (PACKAGING / 'omarchy-m4-speaker/20-m4-speaker-module.conf').read_text()
         self.assertIn('ExecStartPre=-/usr/bin/m4-speaker-module --boot\n', text)
@@ -472,6 +483,15 @@ class PolicyTests(unittest.TestCase):
         files = {'usr/lib/modules/7.2.0-other/kernel/x.ko': (0o644, '1' * 64)}
         with self.assertRaisesRegex(ValueError, 'unlisted path'):
             CHECK.check_package(CHANNEL, *self.package('linux-m4-omarchy', files, version='7.2.0-1'))
+
+    def test_package_inputs_must_have_source_joins(self):
+        joins = CHECK.source_joins()
+        for name in CHANNEL['packages']:
+            inputs = CHECK.package_inputs(name)
+            for filename, digest in inputs.items():
+                self.assertIn(filename, joins['binaries'])
+                self.assertEqual(joins['binaries'][filename]['sha256'], digest)
+                self.assertIn(joins['binaries'][filename]['correspondence'], CHECK.CORRESPONDENCE)
 
 
 if __name__ == '__main__':
