@@ -61,7 +61,7 @@ class ManifestTests(unittest.TestCase):
     def test_repository_channel_joins_pass_schema_and_match_pins(self):
         joins = CHECK.source_joins()
         binaries = joins['binaries']
-        self.assertEqual(len(binaries), 12)
+        self.assertEqual(len(binaries), 11)
         for name, entry in binaries.items():
             with self.subTest(name=name):
                 self.assertIn(entry['correspondence'], CHECK.CORRESPONDENCE)

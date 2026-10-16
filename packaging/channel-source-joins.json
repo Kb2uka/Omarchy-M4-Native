@@ -55,22 +55,6 @@
       ],
       "evidence": "Built by tools/m4-webkit-audio-plugins.py from gst-plugins-good-1.28.7.tar.xz (meson options -Dauto_features=disabled -Dautodetect=enabled -Dpulse=enabled)."
     },
-    "j713-pboost.dtb": {
-      "sha256": "c4f036b819ce757ce790b01779a3f7532eacd5cb1c1097fa20286d1a9c9ec6ca",
-      "license": "GPL-2.0-only",
-      "correspondence": "unverified",
-      "sources": [
-        {
-          "tree": "patches/j713-pboost.dtso",
-          "commit": "09998c5268e86e0b5304a071d956949f824b3ba6"
-        },
-        {
-          "tree": "tools/build-j713-pboost-dtb.py",
-          "commit": "09998c5268e86e0b5304a071d956949f824b3ba6"
-        }
-      ],
-      "evidence": "J713 P-core boost devicetree with closed boost gate. Built with tools/build-j713-pboost-dtb.py on the E-cluster devicetree (fdedc09f...)."
-    },
     "j713_cpuidle-a2a7947a.ko": {
       "sha256": "a2a7947a1d2260abcfc6eb10d7d63643ad2e191e73e93fedddf605116cdfd5a9",
       "license": "GPL-2.0-only",
