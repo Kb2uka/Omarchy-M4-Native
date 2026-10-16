@@ -233,14 +233,16 @@ Install the build from 1TR exactly as test 1 was installed (see
 the bare loader with the installer's 64 KiB vars block appended, then
 `kmutil configure-boot -c <file> --raw --entry-point 2048 --lowest-virtual-address 0 -v <Omarchy stub system volume>`.
 A run passes when the desktop comes up and
-`/proc/device-tree/chosen/asahi,m1n1-stage1-version` reads
-`air-c9ef56f-gpu-stage1-20261008-ans1`.
+`/proc/device-tree/chosen/asahi,m1n1-stage1-version` reads the build's tag:
+`air-c9ef56f-gpu-stage1-20261008-ans1` or
+`air-c9ef56f-gpu-stage1-20261008-dctx1-ans1`.
 
-**Rollback.** Keep alpha.1's stage 1 with the same vars block before
-installing. The build script writes the bare alpha.1 loader as
-`stage1-stock-m1n1.bin` (`18cc4cd1…`). If the Air freezes on the logo, hold
-the power button to reach 1TR, which does not run stage 1, and run the same
-`kmutil` command on that file.
+**Rollback.** Before installing, prepare alpha.1's stage 1 the same way: the
+build script writes the bare alpha.1 loader as `stage1-stock-m1n1.bin`
+(`18cc4cd1…`); append the same 64 KiB vars block to it. Never pass a bare
+loader to `kmutil`. If the Air freezes on the logo, hold the power button to
+reach 1TR, which does not run stage 1, and run the same `kmutil` command on
+that prepared file.
 
 Neither build is byte-identical to `v1`. `v1` is test 1 with two
 instructions removed, and test 1 was built from an earlier revision of the
