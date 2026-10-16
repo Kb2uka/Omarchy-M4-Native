@@ -12,7 +12,7 @@ reviewers.
 | Package | Installs | Version at launch |
 | --- | --- | --- |
 | `omarchy-m4-keyring` | The channel's public signing key for `pacman-key` | `20261012-1` |
-| `omarchy-m4-boot` | `m4-boot-compose`, its pacman hook, the J713 devicetree, the daily update notifier and, from 1-4, the real-time speaker protection drop-in | `1-1`; `1-4` adds CPU frequency scaling and CPU temperature; `1-12` adds the opt-in notch switch |
+| `omarchy-m4-boot` | `m4-boot-compose`, its pacman hook, the J713 devicetree, the daily update notifier and, from 1-4, the real-time speaker protection drop-in | `1-1`; `1-4` adds CPU frequency scaling and CPU temperature; `1-12` adds the opt-in notch switch and turns on the front USB-C port |
 | `linux-m4-omarchy` | The J713 kernel image and its modules | `7.1.9.m4.20261008-2` |
 | `omarchy-m4-gst-audio` | GStreamer's `autodetect` and `pulse` sinks in `/usr/lib/gstreamer-1.0`, for WebKitGTK and GStreamer apps | `1.28.7-1` |
 | `omarchy-m4-headphones` | The headphone jack card: two pinned modules, `m4-headphones`, its registration drop-in, UCM and WirePlumber files | `1-1`; `1-2` adds the headset microphone |
@@ -260,6 +260,12 @@ file.
   install script, like the update notifier) runs `m4-notch --desktop`, which
   fits the bar to what the boot shows and changes nothing on a cropped boot
   without its marks.
+- **Front USB-C port** ([J713 front USB-C port](j713-front-usb.md)): devicetree
+  `352bfa74…` (`j713-usb0`) turns on the front port's controller and both of
+  its DARTs, with the hinge-side port's stream IDs, so both ports work the
+  same. Built by `tools/build-j713-usb0-dtb.py` on the boost-state devicetree
+  and pinned in `package-inputs`. The composer and updater accept it only after
+  the boost-state devicetree.
 
 ## Connecting new installs
 

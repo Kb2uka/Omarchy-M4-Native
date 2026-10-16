@@ -186,7 +186,8 @@ As of October 11, 2026, with the pinned experimental runtime:
 | Normal media-player launch | A 10-second normal mpv file-open check used `vaapi-copy` with zero reported frame/decoder drops; an AV1 control reached EOF in software with one startup frame drop. `vaapi-copy` still uses the hardware decoder, with a copy into CPU-accessible memory afterward. |
 | Protected movies | A tested Widevine movie used CPU decoding and played. Hardware decoding is not promised for protected content, and no license or DRM restrictions are bypassed. |
 | Known video issue | A tested 1080p60 browser video dropped roughly 47% of frames in a normal window; the fullscreen comparison reported 1 drop in 1,804 frames. This geometry-dependent problem remains open. Fullscreen is a tested discriminator, not a universal fix. |
-| Camera, suspend/resume, battery life, broad USB-host support | Not qualified for release. |
+| USB-C ports | The hinge-side port works in alpha.1. With `omarchy-m4-boot` 1-12 from `omarchy-m4-update`, the front port works too: the same SuperSpeed drive enumerated and read cleanly on both (October 16). Alternate modes and broad peripheral coverage are not qualified. |
+| Camera, suspend/resume, battery life | Not qualified for release. |
 
 These are observations from one machine and specific builds, not a statement
 about current upstream Asahi support or every M4 system. Good decoder counters
@@ -204,7 +205,7 @@ The release assembler includes the exact approved
 [static J713 profile](audio/j713/filters/README.md) in the root image. Apple components, Widevine binaries and preset
 personal consent remain excluded.
 
-The front USB port, camera, suspend/resume, broad hardware coverage
+The camera, suspend/resume, broad hardware coverage
 and coordinated updates remain open work. This alpha is not a daily-driver,
 safe-update or all-M4 compatibility promise. See the
 [source package guide](docs/release-source.md) for source/build boundaries.

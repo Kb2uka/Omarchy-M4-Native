@@ -118,6 +118,9 @@ class ChannelBinaryJoinTests(unittest.TestCase):
         self.assertTrue(tested_any, 'Expected package-inputs binaries across packages')
 
     def test_unverified_correspondence_is_refused_for_every_downloading_package(self):
+        unverified = json.loads(json.dumps(self.joins))
+        for entry in unverified['binaries'].values():
+            entry['correspondence'] = 'unverified'
         tested_any = False
         for pkg_name in CHANNEL['packages']:
             inputs = CHECK.package_inputs(pkg_name)
@@ -125,7 +128,7 @@ class ChannelBinaryJoinTests(unittest.TestCase):
                 tested_any = True
                 with self.subTest(pkg=pkg_name):
                     with self.assertRaisesRegex(ValueError, 'not verified by an identical rebuild'):
-                        CHECK.check_channel_joins(pkg_name, self.joins)
+                        CHECK.check_channel_joins(pkg_name, unverified)
         self.assertTrue(tested_any)
 
     def test_different_build_of_downloaded_binary_is_refused(self):

@@ -1,0 +1,44 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
+// Copyright (c) 2026 KB2UKA
+/dts-v1/;
+/plugin/;
+
+/*
+ * Front USB-C port on the J713: turn on its controller (USB0, DWC3 at
+ * 0x402280000, PD controller at SPMI 0xc) and both of its DARTs, so it works
+ * as the hinge-side port (USB1) does.
+ *
+ * Both ports run the same DWC3, ATC PHY, DART pair and power domain layout.
+ * Before this the only differences between them in the devicetree were the
+ * three disabled nodes and USB0's stream IDs, 1 and 14, from patch 0012's
+ * reading of the ADT mapper. The working USB1 uses streams 0 and 1 on its own
+ * DARTs (docs/j713-usb-eem-evidence.md), so USB0 takes the same streams on its
+ * own DARTs. The connector graph, PHY, reset and power domain references are
+ * unchanged; m1n1 already copies the ATC tunables into both PHY nodes.
+ *
+ * iommus names the USB0 DARTs by their phandles, 0x53 and 0x54: the base has
+ * no __symbols__, and tools/build-j713-usb0-dtb.py checks them.
+ */
+/ {
+	fragment@0 {
+		target-path = "/soc/usb@402280000";
+		__overlay__ {
+			status = "okay";
+			iommus = <0x53 0>, <0x54 1>;
+		};
+	};
+
+	fragment@1 {
+		target-path = "/soc/iommu@402f00000";
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	fragment@2 {
+		target-path = "/soc/iommu@402f80000";
+		__overlay__ {
+			status = "okay";
+		};
+	};
+};

@@ -322,10 +322,10 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual(MODULE.KNOWN_KERNELS, {channel['kernel']['image_sha256']: channel['kernel']['release']})
         self.assertEqual(list(MODULE.KNOWN_DTBS),
                          [updater.ALPHA1_DTB, updater.POWEROFF_DTB, updater.CPUFREQ_DTB, updater.CPUTEMP_DTB,
-                          updater.ECLUSTER_DTB, updater.PBOOST_DTB])
-        # The channel ships the newest devicetree in the lineage (P and E boost states
-        # behind the boost gate), so connecting never moves an Air back.
-        self.assertEqual(channel['devicetree']['sha256'], updater.PBOOST_DTB)
+                          updater.ECLUSTER_DTB, updater.PBOOST_DTB, updater.USB0_DTB])
+        # The channel ships the newest devicetree in the lineage (the front USB-C port
+        # on top of the boost states), so connecting never moves an Air back.
+        self.assertEqual(channel['devicetree']['sha256'], updater.USB0_DTB)
 
 
 def load_tool(name):
