@@ -412,10 +412,12 @@ one. Sign it with the old key, then switch the fingerprint in
 ## Corresponding source
 
 Every compiled binary downloaded from the `package-inputs` release is joined to
-its pinned corresponding source and verified rebuild correspondence in
+its pinned corresponding source and its rebuild correspondence in
 [`packaging/channel-source-joins.json`](../packaging/channel-source-joins.json).
 `tools/check-m4-packages.py` enforces that every channel package's downloaded
-binaries have a `rebuilt-identical` join in CI, with no override:
+binaries have a `rebuilt-identical` join in CI, with no override. Every join is
+`unverified` until a byte-identical rebuild is recorded, so the Package channel
+check refuses those packages until then:
 
 - **Kernel (`linux-m4-omarchy`):** The kernel package's build identity is recorded
   from the kernel tree and configuration published with
@@ -431,11 +433,12 @@ binaries have a `rebuilt-identical` join in CI, with no override:
   builder tools (`tools/build-j713-cputemp-dtb.py`, `tools/build-j713-ecluster-dtb.py`,
   `tools/build-j713-pboost-dtb.py`).
 - **Speaker protection module (`omarchy-m4-speaker`):** `snd-soc-j713-group.ko`
-  (`aaad802e…`), rebuilt byte for byte from `audio/j713/kernel/` on the alpha.1
-  kernel-controller tree with `reference-sound-exports.symvers`.
-- **Air GPU module (`omarchy-m4-gpu`):** `asahi_m4.ko` (`3cf47fa7…`), rebuilt byte
-  for byte from `gpu/j713/asahi/g16.rs` on the alpha.1 kernel tree with
-  `gpu/j713/build-test-module.sh`.
+  (`aaad802e…`), built from `audio/j713/kernel/` on the alpha.1
+  kernel-controller tree with `reference-sound-exports.symvers`; an identical
+  rebuild is not yet recorded.
+- **Air GPU module (`omarchy-m4-gpu`):** `asahi_m4.ko` (`3cf47fa7…`), built from
+  `gpu/j713/asahi/g16.rs` on the alpha.1 kernel tree with
+  `gpu/j713/build-test-module.sh`; an identical rebuild is not yet recorded.
 - **Headphone jack modules (`omarchy-m4-headphones`):** `j713_hp_dt.ko` and
   `snd-soc-j713-headphones.ko`, built from `audio/j713/headphones/kernel/` on
   the alpha.1 kernel-controller tree with `tools/build-j713-headphones.sh`.

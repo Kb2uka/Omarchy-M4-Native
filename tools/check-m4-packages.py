@@ -54,9 +54,8 @@ def git_tree_id(tree, revision, path):
 
 def source_joins(path=None):
     """Load the channel binary-to-source joins and reject malformed entries."""
-    target = path or (ROOT / 'packaging/channel-source-joins.json')
-    if not target.is_file():
-        target = SOURCE_JOINS
+    target = path or SOURCE_JOINS
+    require(target.is_file() and not target.is_symlink(), 'Missing channel source joins: ' + str(target))
     joins = json.loads(target.read_bytes())
     require(joins.get('schema') == 1 and isinstance(joins.get('binaries'), dict),
             'Unknown channel source joins schema')
@@ -65,7 +64,7 @@ def source_joins(path=None):
                 entry.get('correspondence') in CORRESPONDENCE and entry.get('sources'),
                 'Incomplete channel source join: ' + name)
         for source in entry['sources']:
-            require(set(source) in ({'tree'}, {'tree', 'commit'}, {'archive', 'sha256'}),
+            require(set(source) in ({'tree', 'commit'}, {'archive', 'sha256'}),
                     'Unknown source reference for ' + name)
             require('commit' not in source or re.fullmatch(r'[0-9a-f]{40}', source['commit']),
                     'A joined tree commit is a full commit ID: ' + name)

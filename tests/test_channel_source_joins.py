@@ -42,6 +42,7 @@ class ManifestTests(unittest.TestCase):
                       {**good, 'sources': [{'archive': 'source/nested/kernel.tar.gz', 'sha256': digest(b'k')}]},
                       {**good, 'sources': [{'archive': 'source/kernel.tar.gz'}]},  # missing sha256
                       {**good, 'sources': [{'url': 'https://example.invalid/kernel.tar.gz'}]},
+                      {**good, 'sources': [{'tree': 'audio/j713/kernel'}]},  # tree without a commit pin
                       {**good, 'sources': [{'tree': 'audio/j713/kernel', 'commit': 'ee98743a'}]},
                       {**good, 'sources': [{'archive': 'source/kernel.tar.gz', 'sha256': 'abc'}]},
                       {**good, 'sources': [{'archive': 'source/kernel.tar.gz', 'commit': 'e' * 40}]}):
@@ -51,6 +52,11 @@ class ManifestTests(unittest.TestCase):
             self.load({'schema': 2, 'binaries': {}})
         self.load({'schema': 1, 'binaries': {'tool.ko': {
             **good, 'sources': [{'tree': 'audio/j713/kernel', 'commit': 'e' * 40}]}}})
+
+    def test_missing_joins_file_is_refused_instead_of_falling_back(self):
+        with tempfile.TemporaryDirectory() as temp:
+            with self.assertRaisesRegex(ValueError, 'Missing channel source joins'):
+                CHECK.source_joins(Path(temp) / 'absent.json')
 
     def test_repository_channel_joins_pass_schema_and_match_pins(self):
         joins = CHECK.source_joins()
@@ -135,7 +141,7 @@ class ChannelBinaryJoinTests(unittest.TestCase):
         inputs = CHECK.package_inputs('omarchy-m4-gpu')
         filename = next(iter(inputs))
         fake_joins['binaries'][filename]['correspondence'] = 'rebuilt-identical'
-        fake_joins['binaries'][filename]['sources'] = [{'tree': 'nonexistent/path/for/test'}]
+        fake_joins['binaries'][filename]['sources'] = [{'tree': 'nonexistent/path/for/test', 'commit': '0' * 40}]
         with self.assertRaisesRegex(ValueError, 'Joined source tree missing for'):
             CHECK.check_channel_joins('omarchy-m4-gpu', fake_joins)
 
@@ -246,6 +252,25 @@ class ChannelBinaryJoinTests(unittest.TestCase):
             root = Path(temp)
             with self.assertRaisesRegex(ValueError, 'downloads binary without a source join'):
                 CHECK.check_package(CHANNEL, package, info, good, root, joins=fake_joins)
+
+    def test_check_enforces_stale_and_per_package_joins_on_every_package(self):
+        joins = {'schema': 1, 'binaries': {}}
+        names = {name + '-1-1-aarch64.pkg.tar.zst': name for name in CHANNEL['packages']}
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            for filename in names:
+                (directory / filename).write_bytes(b'')
+            with mock.patch.object(CHECK, 'source_joins', return_value=joins), \
+                    mock.patch.object(CHECK, 'check_stale_joins') as stale, \
+                    mock.patch.object(CHECK, 'extract', return_value=({}, {})), \
+                    mock.patch.object(CHECK, 'check_package',
+                                      side_effect=lambda channel, package, *rest, **kw: names[package.name]) as package:
+                CHECK.check(directory, compare_published=False)
+        stale.assert_called_once()
+        self.assertIs(stale.call_args.args[1], joins)
+        self.assertEqual(package.call_count, len(names))
+        for call in package.call_args_list:
+            self.assertIs(call.kwargs.get('joins'), joins)
 
     def test_no_ci_override_flag_exists_in_check_tool(self):
         # Issue 93 specifies: "refuse a channel package whose downloaded binary has no rebuilt-identical join, with no override in CI."
