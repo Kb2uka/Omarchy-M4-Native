@@ -177,7 +177,8 @@ class Lineage(unittest.TestCase):
         self.assertEqual(MODULE.BASE_SHA256, updater.ECLUSTER_DTB)
         self.assertEqual(updater.UPDATES[updater.PBOOST_DTB], ((updater.ECLUSTER_DTB,), '.pre-pboost'))
         compose = load('composer', 'tools/m4-boot-compose.py')
-        self.assertEqual(list(compose.KNOWN_DTBS)[-2:], [updater.ECLUSTER_DTB, updater.PBOOST_DTB])
+        lineage = list(compose.KNOWN_DTBS)
+        self.assertEqual(lineage.index(updater.PBOOST_DTB), lineage.index(updater.ECLUSTER_DTB) + 1)
         self.assertEqual(compose.KNOWN_DTBS[updater.PBOOST_DTB], 'j713-pboost')
 
     def test_states_are_the_adt_tables(self):

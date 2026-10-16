@@ -37,7 +37,9 @@
 - **1080p60 windowed playback remains problematic.** An earlier comparison saw
   many more dropped frames in a normal browser window than fullscreen. Smooth
   30 fps playback does not establish that this issue is fixed.
-- **USB:** use the hinge-side port. The front USB0 controller remains disabled.
+- **USB:** in alpha.1 only the hinge-side port works. `omarchy-m4-boot` 1-12,
+  from `omarchy-m4-update`, turns on the front port as well
+  ([J713 front USB-C port](j713-front-usb.md)).
 - **Incomplete hardware qualification:** camera, suspend/resume, battery life,
   Bluetooth audio, arbitrary peripherals and fault recovery are not qualified.
   Speaker protection remains enabled; do not substitute unqualified filters or
