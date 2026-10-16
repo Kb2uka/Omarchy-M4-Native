@@ -42,9 +42,9 @@ Linux image leaves the front port disabled. macOS may recognize both ports.
    Apple AudioDSP and AID37 tuning files recorded in
    `owner-audio/bundle/manifest.json`. macOS 26.5.1, 26.5.2 and 26.6.2 (25G83)
    are qualified; other builds may be refused before any partition changes.
-   Kits assembled from this source tree include the approved speaker filters
-   and do not read macOS AudioDSP. Their remaining firmware, recovery and
-   installer dependencies still need qualification on a newer macOS build.
+   If your kit has no `owner-audio/` folder, it already includes the approved
+   speaker filters and does not read macOS AudioDSP. Its firmware, recovery and
+   other installer dependencies still need qualification on a newer macOS build.
 2. Change into the kit directory. For the default download location:
 
    ```sh
@@ -64,8 +64,8 @@ Linux image leaves the front port disabled. macOS may recognize both ports.
 5. The published update 2 kit generates speaker filters from the Mac's installed
    components and requires exact output hashes. If that preparation fails, stop:
    no partitioning has begun. Do not bypass its checks or substitute filters.
-   Kits assembled from this source tree include those same approved filters,
-   so they proceed directly to administrator authentication.
+   If your kit has no `owner-audio/` folder, those filters are already included:
+   it proceeds directly to administrator authentication.
 6. Enter your **macOS** password when requested. Terminal displays no characters
    while you type it. Sleep prevention stays active during the installer.
 

@@ -83,10 +83,6 @@ distinguishes those final coefficients from the Apple software and tuning inputs
 used to reproduce them. The source-code licenses above do not grant rights in
 those Apple inputs.
 
-`audio/j713/qualified.json` retains the historical reference identities and their
-original distribution hold. The release assembler records the native profile's
-provenance in the derived image in place of that FIR-specific hold and its
-`redistributable: false` flag. Removing the historical policy fields does not
-assert that the whole image is cleared for redistribution. Other
-corresponding-source requirements remain described in
+`audio/j713/qualified.json` keeps its historical hold for the earlier reference
+files. Other corresponding-source requirements remain described in
 [audio/j713/README.md](audio/j713/README.md).
