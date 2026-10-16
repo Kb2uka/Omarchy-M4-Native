@@ -12,7 +12,7 @@ reviewers.
 | Package | Installs | Version at launch |
 | --- | --- | --- |
 | `omarchy-m4-keyring` | The channel's public signing key for `pacman-key` | `20261012-1` |
-| `omarchy-m4-boot` | `m4-boot-compose`, its pacman hook, the J713 devicetree, the daily update notifier and, from 1-4, the real-time speaker protection drop-in | `1-1`; `1-4` adds CPU frequency scaling and CPU temperature |
+| `omarchy-m4-boot` | `m4-boot-compose`, its pacman hook, the J713 devicetree, the daily update notifier and, from 1-4, the real-time speaker protection drop-in | `1-1`; `1-4` adds CPU frequency scaling and CPU temperature; `1-12` adds the opt-in notch switch |
 | `linux-m4-omarchy` | The J713 kernel image and its modules | `7.1.9.m4.20261008-2` |
 | `omarchy-m4-gst-audio` | GStreamer's `autodetect` and `pulse` sinks in `/usr/lib/gstreamer-1.0`, for WebKitGTK and GStreamer apps | `1.28.7-1` |
 | `omarchy-m4-headphones` | The headphone jack card: two pinned modules, `m4-headphones`, its registration drop-in, UCM and WirePlumber files | `1-1`; `1-2` adds the headset microphone |
@@ -243,6 +243,24 @@ file.
 - The module is unchanged (`3cf47fa7…`). Like every channel package, 1-2 arrives
   with `omarchy-m4-update` and takes effect at the next boot.
 
+### omarchy-m4-boot 1-12
+
+- **Opt-in full-panel desktop** ([J713 camera notch](j713-notch.md),
+  [#89](https://github.com/Kb2uka/Omarchy-M4-Native/issues/89)):
+  `sudo m4-notch --show` makes the next boot use all 2560x1664 pixels, with the
+  Omarchy bar's center widgets split left and right of the camera.
+  `sudo m4-notch --hide` goes back. Installing the package changes nothing.
+- **Notch stage 2:** `m1n1-stage2-notch.bin` (`f2417a74…`, 0x110000 bytes),
+  alpha.1's stage 2 rebuilt byte for byte plus `display/j713/m1n1-show-notch.patch`,
+  built by `display/j713/build-notch-loader.sh` and pinned in `package-inputs`
+  and `notch_loader`. Only `m4-notch --show` writes it into `boot.bin`; the
+  composer then carries it like any loader. m1n1's license notices are installed
+  under `/usr/share/licenses/omarchy-m4-boot/m1n1/`.
+- **Login unit:** `omarchy-m4-notch.service` (user, enabled globally by the
+  install script, like the update notifier) runs `m4-notch --desktop`, which
+  fits the bar to what the boot shows and changes nothing on a cropped boot
+  without its marks.
+
 ## Connecting new installs
 
 The release root builder (`tools/prepare-j713-release.py`) adds
@@ -445,6 +463,10 @@ check refuses those packages until then:
 - **CPU idle and boost guard (`omarchy-m4-cpu`):** `j713_cpuidle.ko` (`a2a7947a…`)
   and `j713_pguard.ko` (`91fe247e…`), built from `cpu/j713/` on the alpha.1
   kernel tree with `cpu/j713/build-module.sh`.
+- **Notch stage 2 (`omarchy-m4-boot`):** `m1n1-stage2-notch.bin` (`f2417a74…`),
+  alpha.1's `source/m1n1-stage2-source.tar.gz` plus `display/j713/m1n1-show-notch.patch`,
+  built by `display/j713/build-notch-loader.sh`. Rebuilt byte for byte
+  (`rebuilt-identical`).
 - **GStreamer audio sinks (`omarchy-m4-gst-audio`):** `libgstautodetect.so` and
   `libgstpulseaudio.so`, built by `tools/m4-webkit-audio-plugins.py` from
   `gst-plugins-good-1.28.7.tar.xz` (mirrored in `package-inputs`).

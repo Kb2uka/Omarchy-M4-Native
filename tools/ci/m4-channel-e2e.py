@@ -249,6 +249,10 @@ def main():
                 require(sha((root / path).read_bytes()) == digest, 'Staged CPU module missing or wrong: ' + path)
             require((root / 'usr/lib/systemd/system/m4-cpu-idle.service').is_file()
                     and os.access(root / 'usr/bin/m4-cpu-idle', os.X_OK), 'The CPU idle step is missing')
+            for path, digest in CHANNEL['notch_loader'].items():
+                require(sha((root / path).read_bytes()) == digest, 'Staged notch stage 2 missing or wrong: ' + path)
+            require((root / 'usr/lib/systemd/user/omarchy-m4-notch.service').is_file()
+                    and os.access(root / 'usr/bin/m4-notch', os.X_OK), 'The notch switch is missing')
             require(os.access(root / 'usr/bin/omarchy-m4-update', os.X_OK) and
                     (root / 'usr/lib/omarchy-m4/m4-channel-setup.py').is_file(), 'omarchy-m4-update is missing')
             require((root / 'usr/lib/systemd/user/omarchy-m4-update-check.timer').is_file() and

@@ -1,0 +1,11 @@
+[Unit]
+Description=Fit the Omarchy bar around the J713 camera cutout when the notch is shown
+Documentation=https://github.com/Kb2uka/Omarchy-M4-Native/blob/main/docs/j713-notch.md
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/m4-notch --desktop
+
+[Install]
+WantedBy=graphical-session.target
