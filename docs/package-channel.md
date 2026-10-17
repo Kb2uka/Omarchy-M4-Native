@@ -438,10 +438,11 @@ one. Sign it with the old key, then switch the fingerprint in
 Every compiled binary downloaded from the `package-inputs` release is joined to
 its pinned corresponding source and its rebuild correspondence in
 [`packaging/channel-source-joins.json`](../packaging/channel-source-joins.json).
-`tools/check-m4-packages.py` enforces that every channel package's downloaded
-binaries have a `rebuilt-identical` join in CI, with no override. Every join is
-`unverified` until a byte-identical rebuild is recorded, so the Package channel
-check refuses those packages until then:
+`tools/check-m4-packages.py` enforces in CI, with no override, that every
+package version not yet published has a `rebuilt-identical` join for each
+binary it downloads. A version already published byte for byte is on Airs and
+is not uploaded again, so it passes; any new version of it needs the rebuild
+first. Joins stay `unverified` until a byte-identical rebuild is recorded:
 
 - **Kernel (`linux-m4-omarchy`):** The kernel package's build identity is recorded
   from the kernel tree and configuration published with
@@ -462,7 +463,8 @@ check refuses those packages until then:
   rebuild is not yet recorded.
 - **Air GPU module (`omarchy-m4-gpu`):** `asahi_m4.ko` (`3cf47fa7…`), built from
   `gpu/j713/asahi/g16.rs` on the alpha.1 kernel tree with
-  `gpu/j713/build-test-module.sh`; an identical rebuild is not yet recorded.
+  `gpu/j713/build-test-module.sh`. Rebuilt byte for byte (`rebuilt-identical`),
+  after the same run reproduced alpha.1's module.
 - **Headphone jack modules (`omarchy-m4-headphones`):** `j713_hp_dt.ko` and
   `snd-soc-j713-headphones.ko`, built from `audio/j713/headphones/kernel/` on
   the alpha.1 kernel-controller tree with `tools/build-j713-headphones.sh`.

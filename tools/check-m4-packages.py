@@ -369,9 +369,7 @@ def check(directory, compare_published=True):
             root = scratch / package.name
             root.mkdir()
             info, files = extract(package, root)
-            name = check_package(channel, package, info, files, root, joins=joins)
-            require(name not in seen, 'Duplicate package ' + name)
-            seen.add(name)
+            shipped = False
             if compare_published:
                 previous = published(channel, package.name, scratch)
                 if previous is not None:
@@ -380,7 +378,13 @@ def check(directory, compare_published=True):
                     require(release_identity(*extract(previous, other)) == release_identity(info, files),
                             package.name + ' is already published with different contents, install script '
                             'or metadata; bump pkgrel or pkgver')
-            print(f'{package.name}: {len(files)} files, policy passed')
+                    shipped = True
+            # A version already published byte for byte is on Airs and is not uploaded again,
+            # so the rebuilt-identical rule binds every version that has not shipped yet.
+            name = check_package(channel, package, info, files, root, joins=None if shipped else joins)
+            require(name not in seen, 'Duplicate package ' + name)
+            seen.add(name)
+            print(f'{package.name}: {len(files)} files, policy passed' + (' (already published)' if shipped else ''))
     require(seen == set(channel['packages']), 'Missing packages: ' + ', '.join(set(channel['packages']) - seen))
 
 
