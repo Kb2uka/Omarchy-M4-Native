@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[2]
 CHANNEL = json.loads((ROOT / 'packaging/omarchy-m4/channel.json').read_text())
 RELEASE = CHANNEL['kernel']['release']
 # Packages an Air's 1-5 setup script does not list; omarchy-m4-boot's dependencies bring them.
-BROUGHT_BY_BOOT = ('omarchy-m4-gpu', 'omarchy-m4-headphones', 'omarchy-m4-cpu')
+BROUGHT_BY_BOOT = ('omarchy-m4-gpu', 'omarchy-m4-headphones', 'omarchy-m4-cpu', 'omarchy-m4-evdi')
 STUB = '''pkgname=e2e-system
 pkgver=1
 pkgrel=1
@@ -192,8 +192,9 @@ def main():
             require(plan['applied'] is False and plan['pacman_conf_changes'], 'Inspection did not plan the change')
             require(snapshot(root) == before, 'Inspection changed files')
             # The first run is the setup script an Air already has from omarchy-m4-boot 1-5,
-            # which lists none of omarchy-m4-gpu, omarchy-m4-headphones and omarchy-m4-cpu; the
-            # dependencies of boot 1-6 (GPU), 1-7 (headphone jack) and 1-10 (CPU idle and boost guard) must bring them.
+            # which lists none of omarchy-m4-gpu, omarchy-m4-headphones, omarchy-m4-cpu and
+            # omarchy-m4-evdi; the dependencies of boot 1-6 (GPU), 1-7 (headphone jack), 1-10 (CPU
+            # idle and boost guard) and 1-13 (USB displays) must bring them.
             source = (ROOT / 'tools/m4-channel-setup.py').read_text()
             listed = source[source.index('PACKAGES = ('):source.index(')', source.index('PACKAGES = (')) + 1]
             older = scratch / 'm4-channel-setup-1-5.py'
@@ -249,6 +250,10 @@ def main():
                 require(sha((root / path).read_bytes()) == digest, 'Staged CPU module missing or wrong: ' + path)
             require((root / 'usr/lib/systemd/system/m4-cpu-idle.service').is_file()
                     and os.access(root / 'usr/bin/m4-cpu-idle', os.X_OK), 'The CPU idle step is missing')
+            for path, digest in {**CHANNEL['evdi_module'], **CHANNEL['evdi_library']}.items():
+                require(sha((root / path).read_bytes()) == digest, 'USB display (evdi) file missing or wrong: ' + path)
+            require(run(*pacman, '-T', 'evdi<1.16', check=False).returncode == 0,
+                    'The evdi package does not satisfy the displaylink package\'s dependency')
             for path, digest in CHANNEL['notch_loader'].items():
                 require(sha((root / path).read_bytes()) == digest, 'Staged notch stage 2 missing or wrong: ' + path)
             require((root / 'usr/lib/systemd/user/omarchy-m4-notch.service').is_file()

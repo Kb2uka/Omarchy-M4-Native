@@ -275,6 +275,7 @@ def check_package(channel, package, info, files, root, joins=None):
         require('omarchy-m4-gpu' in names, 'Boot package must require the GPU module package')
         require('omarchy-m4-headphones' in names, 'Boot package must require the headphone jack package')
         require('omarchy-m4-cpu' in names, 'Boot package must require the CPU idle package')
+        require('omarchy-m4-evdi' in names, 'Boot package must require the USB display package')
         # The opt-in notch stage 2 (#89): its pin, the tool's own pin, and the login unit.
         for path, digest in channel['notch_loader'].items():
             require(files.get(path) == (0o644, digest), 'Staged notch stage 2 differs from the pin: ' + path)
@@ -323,6 +324,17 @@ def check_package(channel, package, info, files, root, joins=None):
         require(helper['PIN']['sha256'] == channel['cpu_idle_module'][helper['STAGED']] and
                 helper['GUARD_PIN']['sha256'] == channel['cpu_guard_module'][helper['GUARD_STAGED']] and
                 helper['RELEASE'] == kernel['release'], 'CPU idle tool pins a different module or kernel')
+    elif name == 'omarchy-m4-evdi':
+        for pins, label in ((channel['evdi_module'], 'evdi module'), (channel['evdi_library'], 'evdi library')):
+            for path, digest in pins.items():
+                require(files.get(path, (0, ''))[1] == digest, f'Staged {label} differs from the pin: ' + path)
+        # The module is built for exactly the channel kernel; its directory names that release.
+        require(all(p.startswith(f"usr/lib/modules/{kernel['release']}/") for p in channel['evdi_module']),
+                'evdi module is not installed for the channel kernel')
+        # Packages built for Arch's evdi (the displaylink AUR package) must install on this one.
+        require(info.get('provides') == ['evdi=' + info['pkgver'][0].split('-')[0]] and
+                sorted(info.get('conflict', [])) == ['evdi', 'evdi-dkms', 'evdi-git'],
+                'evdi package relations changed')
     elif name == 'omarchy-m4-gst-audio':
         for path, digest in channel['gst_audio'].items():
             require(files.get(path, (0, ''))[1] == digest, 'GStreamer sink differs from the pin: ' + path)

@@ -41,6 +41,14 @@
 - **USB:** in alpha.1 only the hinge-side port works. `omarchy-m4-boot` 1-12,
   from `omarchy-m4-update`, turns on the front port as well
   ([J713 front USB-C port](j713-front-usb.md)).
+- **External displays are unsupported.** Thunderbolt and USB-C DisplayPort
+  Alt Mode do not provide monitor output or hotplug on J713. The required DCP
+  and PCIe-C/Thunderbolt display paths are not part of this release. USB
+  display adapters (DisplayLink, GUD) are the exception: `omarchy-m4-evdi`
+  from `omarchy-m4-update` supplies DisplayLink's kernel side, and Synaptics'
+  DisplayLinkManager comes from the AUR
+  ([J713 external displays](j713-external-displays.md)). No physical adapter
+  has been qualified yet.
 - **Incomplete hardware qualification:** camera, suspend/resume, battery life,
   Bluetooth audio, arbitrary peripherals and fault recovery are not qualified.
   Speaker protection remains enabled; do not substitute unqualified filters or

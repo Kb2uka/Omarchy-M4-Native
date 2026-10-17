@@ -30,6 +30,7 @@ Existing file-level notices using KB2UKA remain valid and are preserved.
 | `patches/omarchy/offline-node-arm64.patch`, `tests/fixtures/mise-work-v4.0.4.sh` | Omarchy MIT terms, retaining its upstream notice in `tests/fixtures/omarchy-LICENSE` |
 | `audio/j713/headphones/kernel/` | GPL-2.0-only |
 | `audio/j713/headphones/policy/` and `README.md`, `tools/m4-headphones.py`, `tools/build-j713-headphones.sh`, `packaging/omarchy-m4/omarchy-m4-headphones/`, `docs/j713-headphones.md` and the headphone tests | MIT |
+| `display/evdi/build.sh`, `display/evdi/bench/evdi_probe.c`, `display/evdi/README.md`, `packaging/omarchy-m4/omarchy-m4-evdi/`, `docs/j713-external-displays.md` | MIT; the evdi binaries they build or package keep DisplayLink's GPL-2.0-only (module) and LGPL-2.1-or-later (library) terms |
 | Full texts in `LICENSES/` | Reproduced license documents; their own terms apply |
 
 The J713 headphone jack rows above are Copyright (c) 2026 Luthfi Hizb, under
@@ -46,6 +47,7 @@ The license texts are included here:
 - [MIT](LICENSES/MIT.txt)
 - [GNU GPL version 2 only](LICENSES/GPL-2.0-only.txt)
 - [GNU GPL version 2 or later](LICENSES/GPL-2.0-or-later.txt)
+- [GNU LGPL version 2.1 or later](LICENSES/LGPL-2.1-or-later.txt)
 - [BSD 2-Clause](LICENSES/BSD-2-Clause.txt)
 - [ISC](LICENSES/ISC.txt)
 - [Gravity/Asahi installer MIT notice](LICENSES/Gravity-installer-MIT.txt)

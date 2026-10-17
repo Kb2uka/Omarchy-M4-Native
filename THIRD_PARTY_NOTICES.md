@@ -152,6 +152,20 @@ configuration and devicetree base published with v0.1.0-alpha.1 (see
 and `patches/j713-smc-poweroff.dtso` in this repository. Each package carries
 its license texts. See [package-channel.md](docs/package-channel.md).
 
+### DisplayLink evdi
+
+`omarchy-m4-evdi` redistributes binaries built from DisplayLink's
+[evdi](https://github.com/DisplayLink/evdi) 1.15.1, unchanged: the `evdi`
+kernel module (GPL-2.0-only; Copyright (c) 2013-2026 DisplayLink (UK) Ltd.,
+with parts Copyright (C) 2012 Red Hat and parts based on `udlfb.c`, Copyright
+(C) 2009 its respective authors) and `libevdi` (LGPL-2.1-or-later; Copyright
+(c) 2015-2024 DisplayLink (UK) Ltd.). Each source file's own notice governs. The
+corresponding source is the upstream `v1.15.1` archive, mirrored in the
+`package-inputs` release, built with `display/evdi/build.sh`. The package
+carries both license texts; the LGPL text is
+[LICENSES/LGPL-2.1-or-later.txt](LICENSES/LGPL-2.1-or-later.txt), copied from
+evdi's `library/LICENSE`. Synaptics' DisplayLinkManager is not redistributed.
+
 ## Additional runtime components
 
 Native runtime candidates also use Gravity/Asahi kernel and decoder work, Mesa,
