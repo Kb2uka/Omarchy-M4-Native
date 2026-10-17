@@ -10,6 +10,15 @@
  * (55f116d), every shared domain has the same block, offset and parent;
  * J773s lacks disp_*, isp_sys and ispsens0 and adds dispext2_* and dptx_phy.
  *
+ * Bring-up policy, from the J614s kernel branch (damsleth/linux
+ * wallace/t6040-bringup, cf08fa5 "pmdomain: apple: add preserve-active /
+ * skip-auto-enable bring-up policy", and its later T6041 quirk patch): the
+ * driver writes AUTO_ENABLE to every domain it finds on, and on T6040 the
+ * dispext CPU domains refuse it. Those carry apple,skip-auto-enable here;
+ * dispext2_cpu is J773s-only and untested. t6040.dtsi sets
+ * apple,preserve-active on the PMGR blocks. Neither property is in an
+ * upstream binding; a kernel without that driver change ignores both.
+ *
  * Copyright The Asahi Linux Contributors
  * Original contributions: Copyright (c) 2026 KB2UKA
  */
@@ -1287,6 +1296,8 @@
 		#power-domain-cells = <0>;
 		#reset-cells = <0>;
 		label = "dispext0_cpu";
+		/* Firmware-locked on T6040: the AUTO_ENABLE write is refused (J614s). */
+		apple,skip-auto-enable;
 		power-domains = <&ps_dispext0_fe>;
 	};
 
@@ -1599,6 +1610,8 @@
 		#power-domain-cells = <0>;
 		#reset-cells = <0>;
 		label = "dispext1_cpu";
+		/* Firmware-locked on T6040: the AUTO_ENABLE write is refused (J614s). */
+		apple,skip-auto-enable;
 		power-domains = <&ps_dispext1_fe>;
 	};
 
@@ -1626,6 +1639,8 @@
 		#power-domain-cells = <0>;
 		#reset-cells = <0>;
 		label = "dispext2_cpu";
+		/* Firmware-locked on T6040: the AUTO_ENABLE write is refused (J614s). */
+		apple,skip-auto-enable;
 		power-domains = <&ps_dispext2_fe>;
 	};
 

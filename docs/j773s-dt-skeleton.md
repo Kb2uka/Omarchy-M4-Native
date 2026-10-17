@@ -19,6 +19,17 @@ boot to a framebuffer console, and nothing more. It has not booted.
   against that machine's ADT and booted. `t6040.dtsi` starts from its
   `dts/t6040.dtsi`; `t6040-j773s.dts` follows its `t6040-j614s.dts` and
   Asahi's `t8132-j773g.dts` (the M4 Mac mini).
+- wallace's kernel branch, [damsleth/linux](https://github.com/damsleth/linux)
+  `wallace/t6040-bringup` (head `e9d2237`), and its m1n1 patch series
+  (`patches/m1n1-t6040-upstream-v1` in wallace). The PMGR bring-up policy and the
+  kernel requirements below come from there.
+- [flokli/linux](https://github.com/flokli/linux) branch `j773s` (`eaded97e`,
+  2026-06-24): an earlier, three-commit J773s start by Florian Klink with a
+  `t6040-j773s.dts` and a 309-line `t6040.dtsi`. It also lists all 16 CPU
+  positions (E 0x0-0x3, P 0x10100-0x10105 and 0x10200-0x10205), declares
+  `chassis-type = "desktop"`, gives the framebuffer no power domains and sizes
+  the AIC window 0x184000 (the J773s ADT says 0x1cc000, used here). wallace's
+  AIC and idle workarounds credit that branch.
 - m1n1 at `c9ef56f` for how CPU nodes are matched and pruned.
 
 ## What is enabled
@@ -28,7 +39,7 @@ boot to a framebuffer console, and nothing more. It has not booted.
 | 16 CPU nodes and `cpu-map` | m1n1 starts the cores and prunes the absent ones |
 | timer, `clock-ref` | Required |
 | AIC (`apple,t6040-aic3`, `apple,t8122-aic3`) | Interrupts |
-| PMGR blocks and 213 power domains | Every other block needs them |
+| PMGR blocks and 213 power domains | Every other block needs them; bring-up policy below |
 | Watchdog (`apple,t6040-wdt`, `apple,t8103-wdt`) | Restart works without SMC |
 | `uart0` | `stdout-path`, as on every Asahi board; no console is expected on it |
 | `framebuffer0` | Left `disabled` for m1n1 to fill in and enable |
@@ -41,8 +52,45 @@ Wi-Fi/Bluetooth module and the Broadcom 57762 Ethernet), the DockChannel UART,
 the Thunderbolt/ATC PHYs, DCP and display, GPU, audio and cpufreq.
 
 The compiled DTB, with `dtc` 1.8.1 and the pinned Asahi `dt-bindings`
-headers, gives 0 warnings (SHA-256 `60dff154…f694`). `dtbs_check` (schema
-validation in a kernel tree) has not been run.
+headers, gives 0 warnings (SHA-256 `513b660a…bb92`). `dtbs_check` (schema
+validation in a kernel tree) has not been run; it would flag the two bring-up
+PMGR properties, which no upstream binding defines.
+
+## PMGR bring-up policy
+
+The Linux PMGR driver writes AUTO_ENABLE to every domain it finds on. On J614s
+that write raised an SError on `dispext0_{sys,fe,cpu}` and did not stick on
+`dispext1_*`; wallace's kernel added two properties (`cf08fa5`) and later reduced
+them to a T6041 compatible quirk: keep every domain firmware left on
+(`apple,preserve-active`) and skip AUTO_ENABLE on `dispext0_cpu` and
+`dispext1_cpu` only. The skeleton carries the property form, which both kernel
+versions honor: `apple,preserve-active` on the four PMGR blocks and
+`apple,skip-auto-enable` on `dispext0_cpu`, `dispext1_cpu` and `dispext2_cpu`.
+`dispext2_cpu` exists only on J773s and is included untested, by analogy. A
+kernel without that driver change ignores both properties, and the boot display
+domain then receives the write that faulted J614s.
+
+## Kernel and m1n1 requirements
+
+From the J614s work, not yet seen on J773s:
+
+- The AIC must not write the firmware-locked EL2 timer-FIQ registers. This
+  repository's `patches-kernel/m4-boot-hacks-7.1.9.patch` already does that for
+  the M4 Air; wallace's `08c0e68` does the same for T6040.
+- M4 cores lose state in WFI, so the kernel needs `idle=nop` (an arm64 `idle=`
+  parameter from the same commits) and m1n1 parks secondaries in WFE.
+- m1n1 for J773s is upstream plus three wallace patches: WFE parking (1/9),
+  DAPF skipped on T6040 (3/9) and the stage-2 log buffer moved off the last RAM
+  page (8/9). The skeleton makes no reserved-memory assumption: m1n1 fills
+  `reserved-memory` and `memory`, and its log buffer and guard page stay outside
+  the memory node.
+- The J773s ADT has no `disp0`/`dcp`, only `dcpext0..2`. m1n1's display
+  carve-outs key on the board's SoC compatible; upstream does not list
+  `apple,t6040`, and wallace's 4/9, which adds it, is not in this build, so
+  m1n1 skips the display reserved-memory setup ("unknown compatible"). The
+  framebuffer still works: m1n1 removes it from usable RAM itself. With no DCP
+  node, nothing in Linux uses those carve-outs. 4/9 also arms a 20 s watchdog
+  before handoff, which this build does not.
 
 ## Audit against the ADT
 
@@ -108,11 +156,16 @@ session:
 
 - The CPU MPIDRs, and that m1n1 starts 12 cores.
 - Which `dispext` drives HDMI at boot. `dispext0` carries the boot display's
-  timing in the capture; the domains follow `t8132-j773g.dts`. If they are
-  wrong, the screen goes dark when Linux turns off unused domains;
-  `pd_ignore_unused` on the command line avoids that while it is checked.
+  timing in the capture; the domains follow `t8132-j773g.dts` (flokli's J773s
+  file gives none). If they are wrong, the screen goes dark when Linux turns off
+  unused domains; `pd_ignore_unused` on the command line avoids that while it
+  is checked.
 - The SMC SRAM window. On J614s it was measured from an RTKit buffer request,
   not read from the ADT. SMC stays disabled.
+- The SART power register. wallace's kernel branch gives the SART a second
+  `power` register at 0x40dcc13e8 with compatible `apple,t8140-sart`; the J773s
+  ADT has the same `sart-power-reg-offset` (0x13e8) on the same base. ANS stays
+  disabled, so the skeleton keeps wallace's dts-repo form.
 - The DockChannel UART interrupt. J614s's ADT gave 360 and measured 816; J773s's
   ADT also gives 360.
 - Which `usb-drdN` serves which physical port, and which is m1n1's tether port.
@@ -127,7 +180,7 @@ Both are T6040 problems on J614s, so J773s should be expected to hit them:
    corruption). Its persistent system runs one core. The missing-barrier theory
    was ruled out; page lifetime or TLB invalidation are the open suspects. Plan
    the first boots with `nosmp` or `maxcpus=1`, as the M4 Air's first boots
-   used `nosmp`.
+   used `nosmp`. Separately, `idle=nop` is required (above).
 2. **NVMe asserts at the first completion-queue wrap.** Linux on J614s trips
    an ANS firmware assert when the first I/O completion queue wraps; m1n1's raw
    reads survive several wraps. NVMe stays disabled here. It may share a cause
@@ -152,6 +205,16 @@ five-core P clusters 0.31 (higher than round 1, so round 2 is weaker).
 | Core addresses equal J614s | 0.59 | 0.50 |
 | The 16-position CPU list brings up all 12 cores | 0.44 | 0.48 |
 | Status: ready for a first controlled boot / needs the live ADT first | 0.50 / 0.49 | 0.48 / 0.51 |
+
+Round 3, after the coordinator's note on wallace's kernel branch and m1n1
+series; controls: the upstream kernel honors `apple,skip-auto-enable` 0.10,
+this m1n1 build arms a 20 s watchdog 0.08.
+
+| Claim | Round 3 |
+|---|---|
+| With wallace's PMGR change, the properties avoid the faulting AUTO_ENABLE write | 0.75 |
+| `skip-auto-enable` on `dispext2_cpu` is by analogy only | 0.73 |
+| m1n1 without 4/9 still hands Linux a framebuffer and keeps booting | 0.21, then 0.69 once the `kboot.c` code paths were added |
 
 Jev is advisory. Its doubt on the CPU list matches the open item above, and the
 split on readiness is resolved by order: the first session runs m1n1 in proxy

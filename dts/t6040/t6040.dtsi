@@ -287,12 +287,17 @@
 		ranges;
 		nonposted-mmio;
 
-		/* Power domains are in t6040-pmgr.dtsi. */
+		/*
+		 * Power domains are in t6040-pmgr.dtsi. apple,preserve-active keeps
+		 * the domains firmware left on, since T6040 raw boot has no earlier OS
+		 * stage to quiesce them (J614s kernel branch, cf08fa5).
+		 */
 		pmgr0: power-management@288e80000 {
 			compatible = "apple,t6041-pmgr", "apple,t8103-pmgr", "syscon", "simple-mfd";
 			#address-cells = <1>;
 			#size-cells = <1>;
 			reg = <0x2 0x88e80000 0 0x4000>;
+			apple,preserve-active;
 		};
 
 		pmgr1: power-management@502280000 {
@@ -300,6 +305,7 @@
 			#address-cells = <1>;
 			#size-cells = <1>;
 			reg = <0x5 0x02280000 0 0x10000>;
+			apple,preserve-active;
 		};
 
 		pmgr2: power-management@502800000 {
@@ -307,6 +313,7 @@
 			#address-cells = <1>;
 			#size-cells = <1>;
 			reg = <0x5 0x02800000 0 0xc000>;
+			apple,preserve-active;
 		};
 
 		pmgr3: power-management@508300000 {
@@ -314,6 +321,7 @@
 			#address-cells = <1>;
 			#size-cells = <1>;
 			reg = <0x5 0x08300000 0 0x4000>;
+			apple,preserve-active;
 		};
 
 		/* ADT /arm-io/aic: reg 0x502400000 + 0x1cc000, aic-iack-offset 0x40000. */
