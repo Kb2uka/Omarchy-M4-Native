@@ -4,6 +4,7 @@
 import hashlib
 import importlib.util
 import io
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -110,7 +111,7 @@ class PublishTests(unittest.TestCase):
             (self.built / name).write_bytes(data)
         self.release = Release()
 
-    def publish(self, release=None):
+    def publish(self, release=None, **kwargs):
         release = release or self.release
         with mock.patch.object(MODULE, 'run', release.run), \
              mock.patch.object(MODULE, 'output', release.output), \
@@ -119,7 +120,7 @@ class PublishTests(unittest.TestCase):
              mock.patch.object(MODULE.subprocess, 'run', release.view), \
              mock.patch.dict(os.environ, {'PACKAGE_SIGNING_KEY': 'private key'}), \
              mock.patch('builtins.print'):
-            MODULE.publish(self.built)
+            MODULE.publish(self.built, **kwargs)
 
     def test_first_publication(self):
         self.publish()
@@ -130,6 +131,74 @@ class PublishTests(unittest.TestCase):
             self.assertEqual(self.release.assets[package.name + '.sig'], signature(package.read_bytes()))
         self.assertEqual(self.release.uploads[-1], f'{REPO}.db.sig', 'the client-facing database goes last')
         self.assertIn(MODULE.SETUP, names)
+        self.assertIn(MODULE.SOURCE_ARCHIVE, names)
+        self.assertEqual(self.release.assets[MODULE.SOURCE_ARCHIVE + '.sig'],
+                         signature(self.release.assets[MODULE.SOURCE_ARCHIVE]))
+        with tarfile.open(fileobj=io.BytesIO(self.release.assets[MODULE.SOURCE_ARCHIVE]), mode='r:gz') as archive:
+            member_names = archive.getnames()
+            self.assertIn('packaging/omarchy-m4/channel.json', member_names)
+            self.assertNotIn('AGENTS.md', member_names)
+            self.assertNotIn('CLAUDE.md', member_names)
+            joins = json.loads(MODULE.SOURCE_JOINS.read_bytes())
+            for binary, entry in joins['binaries'].items():
+                for source in entry['sources']:
+                    if 'tree' in source:
+                        prefix = source['tree'].rstrip('/') + '/'
+                        self.assertTrue(any(m == source['tree'] or m.startswith(prefix) for m in member_names),
+                                        f"Missing joined tree {source['tree']} in source archive for {binary}")
+
+    def test_missing_source_archive_signature_is_repaired(self):
+        self.publish()
+        del self.release.assets[MODULE.SOURCE_ARCHIVE + '.sig']
+        self.release.uploads.clear()
+        self.publish()
+        self.assertIn(MODULE.SOURCE_ARCHIVE + '.sig', self.release.assets)
+        self.assertIn(MODULE.SOURCE_ARCHIVE + '.sig', self.release.uploads)
+
+    def test_stale_served_source_archive_fails(self):
+        self.publish()
+        real_fetch = self.release.fetch
+        self.release.fetch = (lambda name, attempts=4:
+                              b'stale source' if name == MODULE.SOURCE_ARCHIVE else real_fetch(name))
+        with mock.patch.object(MODULE.time, 'sleep'), self.assertRaises(SystemExit) as raised:
+            self.publish()
+        self.assertIn('Published source archive differs', str(raised.exception))
+
+    def test_missing_joined_tree_in_integration_fails(self):
+        fake_joins = json.loads(MODULE.SOURCE_JOINS.read_bytes())
+        first_binary = next(iter(fake_joins['binaries']))
+        fake_joins['binaries'][first_binary]['sources'].append(
+            {'tree': 'nonexistent/untracked/tree', 'commit': '0' * 40}
+        )
+        with mock.patch.object(MODULE.json, 'loads', side_effect=lambda b, orig=json.loads:
+                               fake_joins if b == MODULE.SOURCE_JOINS.read_bytes() else orig(b)):
+            with self.assertRaises(SystemExit) as raised:
+                self.publish()
+        self.assertIn('Joined source tree is not in the release integration: nonexistent/untracked/tree',
+                      str(raised.exception))
+
+    def test_join_source_archive_is_uploaded_and_verified(self):
+        dummy_name = 'gst-plugins-good-1.28.7.tar.xz'
+        dummy_data = b'package-input-archive-content'
+        (self.built / dummy_name).write_bytes(dummy_data)
+        fake_joins = json.loads(MODULE.SOURCE_JOINS.read_bytes())
+        for entry in fake_joins['binaries'].values():
+            for s in entry['sources']:
+                if 'archive' in s and Path(s['archive']).name == dummy_name:
+                    s['sha256'] = hashlib.sha256(dummy_data).hexdigest()
+        with mock.patch.object(MODULE.json, 'loads', side_effect=lambda b, orig=json.loads:
+                               fake_joins if b == MODULE.SOURCE_JOINS.read_bytes() else orig(b)):
+            self.publish()
+        self.assertIn(dummy_name, self.release.assets)
+        self.assertIn(dummy_name + '.sig', self.release.assets)
+        self.assertEqual(self.release.assets[dummy_name + '.sig'], signature(dummy_data))
+
+    def test_join_source_archive_with_mismatched_sha256_fails(self):
+        dummy_name = 'gst-plugins-good-1.28.7.tar.xz'
+        (self.built / dummy_name).write_bytes(b'corrupted content')
+        with self.assertRaises(SystemExit) as raised:
+            self.publish()
+        self.assertIn('Join source is not a pinned archive any join names', str(raised.exception))
 
     def test_connect_script_carries_the_published_setup_hash(self):
         self.publish()
