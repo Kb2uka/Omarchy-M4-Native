@@ -324,7 +324,7 @@ def prepare_gpu(root, module):
     require(module_pins(sums) == [GPU_ALPHA1], 'Retained GPU pins disagree with the module')
     backup = root / GPU_BACKUP
     require(not backup.exists() and not backup.is_symlink(), 'GPU module state already present')
-    old, module_mode, sums_mode = path.read_bytes(), path.stat().st_mode & 0o777, sums_path.stat().st_mode & 0o777
+    old = path.read_bytes()
     backup.mkdir(mode=0o755, parents=True)
     backup.chmod(0o755)
     for name, data in (('alpha1-module.ko', old), ('alpha1-runtime.sha256', sums)):
@@ -332,10 +332,9 @@ def prepare_gpu(root, module):
         (backup / name).chmod(0o600)
     fixed = ''.join(f'{GPU_FIXED}  /{GPU_MODULE}\n' if line.split()[1:] == ['/' + GPU_MODULE] else line
                     for line in sums.decode().splitlines(keepends=True)).encode()
+    # Rewritten in place, so both keep their retained modes.
     path.write_bytes(module)
-    path.chmod(module_mode)
     sums_path.write_bytes(fixed)
-    sums_path.chmod(sums_mode)
     require(sha(path) == GPU_FIXED and module_pins(sums_path.read_bytes()) == [GPU_FIXED],
             'GPU module swap did not take')
 
