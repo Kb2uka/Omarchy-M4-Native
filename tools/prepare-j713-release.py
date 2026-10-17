@@ -57,6 +57,13 @@ NATIVE_KERNEL_CHECKS = {'boot', 'touch_mt_ready', 'keyboard_registered', 'trackp
                         'gpu_service_integrity', 'video_service_integrity',
                         'audio_service_integrity', 'repeat_boot'}
 POWEROFF_DTB = 'e54c77a760a5b696486f9d80c7c83ca4295d641113bb9e54d13e259863bf9b07'
+# m1n1 stage 1, the installer's boot/m1n1.bin: alpha.1's, and the #82 fix that leaves an M4's
+# ANS stopped without a PMGR reset (docs/j713-m1n1-issue82-ans-reset.md). Both are 0x120000 bytes.
+STAGE1_MEMBER = 'boot/m1n1.bin'
+STAGE1_ALPHA1 = '18cc4cd1ba07928078d2cb52a2c1c5f40a4661fd3db7ee6af0e6923fd237be10'
+STAGE1_ANS1 = '8c5a15736c19d0a3428e64f01292791fb54dd68e09f2f5304a7210d19c42adce'
+STAGE1_BYTES = 0x120000
+STAGE1_PATCH = 'patches-m1n1/stage1-ans-no-reset.patch'
 FIRS = ('j713-static-minimal-lane0-48000.wav', 'j713-static-minimal-lane1-48000.wav',
         'j713-static-minimal-lane2-48000.wav', 'j713-static-minimal-lane3-48000.wav')
 PROFILES = ('Brave-Browser', 'Brave-Browser-M4', 'Chromium')
@@ -266,6 +273,21 @@ def kernel_input(kernel, receipt_path, tree, revision):
     return {'data': data, 'receipt': receipt, 'receipt_bytes': raw}
 
 
+def stage1_input(path, tree, revision):
+    """Accept only the #82 stage 1 build, with its patch frozen in the release revision."""
+    if path is None:
+        return None
+    require(path.is_file() and not path.is_symlink() and path.stat().st_size == STAGE1_BYTES,
+            'Unknown stage 1 input')
+    data = path.read_bytes()
+    require(hashlib.sha256(data).hexdigest() == STAGE1_ANS1, 'Unknown stage 1 input')
+    patch = image_path(tree, STAGE1_PATCH)
+    require(patch.is_file(), 'Missing stage 1 source: ' + STAGE1_PATCH)
+    committed = subprocess.check_output(['git', '-C', str(tree), 'show', revision + ':' + STAGE1_PATCH])
+    require(patch.read_bytes() == committed, 'Stage 1 source is not frozen in the release revision')
+    return data
+
+
 def release_boot(original, kernel):
     boot = copy.deepcopy(original)
     boot['dtb']['sha256'] = POWEROFF_DTB
@@ -300,10 +322,11 @@ def patch_main(data):
     return text.encode('utf-8')
 
 
-def repack_installer(source, destination, module, source_archive=False):
+def repack_installer(source, destination, module, source_archive=False, stage1=None):
     entry = 'src/main.py' if source_archive else 'main.py'
     addition = 'src/j713_owner_assets.py' if source_archive else 'j713_owner_assets.py'
-    replaced = 0
+    require(stage1 is None or not source_archive, 'Stage 1 belongs to the macOS installer only')
+    replaced = loaders = 0
     names = set()
     with tarfile.open(source, 'r:gz') as old, tarfile.open(destination, 'x:gz') as new:
         for item in old:
@@ -318,9 +341,20 @@ def repack_installer(source, destination, module, source_archive=False):
                 item.size = len(data)
                 new.addfile(item, io.BytesIO(data))
                 replaced += 1
+            elif name == STAGE1_MEMBER and not source_archive:
+                require(item.isfile(), 'Installer stage 1 is not regular')
+                data = old.extractfile(item).read()
+                require(hashlib.sha256(data).hexdigest() == STAGE1_ALPHA1, 'Unknown installer stage 1')
+                loaders += 1
+                if stage1 is not None:
+                    item = copy.copy(item)
+                    item.size = len(stage1)
+                    data = stage1
+                new.addfile(item, io.BytesIO(data))
             else:
                 new.addfile(item, old.extractfile(item) if item.isfile() else None)
         require(replaced == 1, 'Missing installer entry point')
+        require(source_archive or loaders == 1, 'Missing installer stage 1')
         item = tarfile.TarInfo(addition)
         item.mode, item.size = 0o644, len(module)
         new.addfile(item, io.BytesIO(module))
@@ -551,6 +585,7 @@ def assemble(args):
             'Static FIR assets must be tracked in the release source')
     kernel = kernel_input(getattr(args, 'kernel', None), getattr(args, 'kernel_receipt', None),
                           tree, revision)
+    stage1 = stage1_input(getattr(args, 'stage1', None), tree, revision)
     require(args.output.is_absolute() and not args.output.exists() and
             not args.output.is_symlink(), 'A new absolute build output is required')
     require(shutil.disk_usage(args.output.parent).free > 40 * 1024**3,
@@ -637,7 +672,8 @@ def assemble(args):
                     'Release boot payload pin mismatch')
             new.writestr(entry['file'], data)
     module = (tree / 'tools/m4-j713-owner-assets.py').read_bytes()
-    repack_installer(baseline / 'installer-macos.tar.gz', output / 'installer-macos.tar.gz', module)
+    repack_installer(baseline / 'installer-macos.tar.gz', output / 'installer-macos.tar.gz', module,
+                     stage1=stage1)
     repack_installer(baseline / 'source/installer-source.tar.gz',
                      output / 'source/installer-source.tar.gz', module, True)
     clean_integration(baseline / 'source/integration-inputs.tar.gz', output / 'source/integration-inputs.tar.gz')
@@ -688,6 +724,10 @@ def assemble(args):
         'source_correspondence_unverified': manifest_pins['unverified'],
         'poweroff': {'change': 'Enable existing SMC handler with its Abbey shutdown-state PMU cells',
                     'hardware_verified': False, 'issue': 24},
+        'stage1': ({'file': 'installer-macos.tar.gz:' + STAGE1_MEMBER, 'sha256': STAGE1_ALPHA1}
+                   if stage1 is None else
+                   {'file': 'installer-macos.tar.gz:' + STAGE1_MEMBER, 'sha256': STAGE1_ANS1,
+                    'replaces_sha256': STAGE1_ALPHA1, 'source': STAGE1_PATCH, 'issue': 82}),
     }
     if kernel is not None:
         metadata.update(kernel_receipt_sha256=hashlib.sha256(kernel['receipt_bytes']).hexdigest(),
@@ -722,6 +762,8 @@ def main():
         parser.add_argument('--' + name, required=True, type=Path)
     parser.add_argument('--kernel', type=Path, help='Exact startup-qualified J713 AFE action Image.gz')
     parser.add_argument('--kernel-receipt', type=Path, help='Matching build and native startup receipt')
+    parser.add_argument('--stage1', type=Path,
+                        help='The #82 m1n1 stage 1 build, in place of alpha.1\'s in the macOS installer')
     parser.add_argument('--join-source', type=Path, action='append', default=[],
                         help='A source archive that ' + SOURCE_JOINS + ' names and pins; copied into source/')
     parser.add_argument('--allow-unverified-source', action='store_true',

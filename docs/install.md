@@ -13,8 +13,11 @@ development computer or USB drive afterward.
 
 Get `download-j713.command` from the **v0.1.0-alpha.1-update.2** GitHub release.
 It installs the same alpha.1 system as the original v0.1.0-alpha.1 kit; its
-speaker-filter step also accepts macOS 26.6.2. In macOS Terminal, run the
-downloaded file:
+speaker-filter step also accepts macOS 26.6.2. A test pre-release,
+`v0.1.0-alpha.1-update.3`, ships the speaker filters in the image and the
+stage 1 fix for #82 (see [UPDATES.md](updates.md#installer-update-3-test-pre-release));
+with it, use `update.3` in place of `update.2` in the paths below. In macOS
+Terminal, run the downloaded file:
 
 ```sh
 bash "$HOME/Downloads/download-j713.command"
