@@ -1,0 +1,4 @@
+post_install() {
+  echo '==> USB displays: DisplayLink adapters also need the displaylink package; see'
+  echo '    docs/j713-external-displays.md. USB-C and Thunderbolt monitors do not work yet.'
+}

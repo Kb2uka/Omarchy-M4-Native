@@ -1,0 +1,36 @@
+# Maintainer: KB2UKA
+# Built and signed by .github/workflows/packages.yml; see docs/package-channel.md.
+# DisplayLink's evdi 1.15.1 (https://github.com/DisplayLink/evdi) for the J713 kernel, built by
+# display/evdi/build.sh: the module on the v0.1.0-alpha.1 kernel tree, the library for aarch64.
+# GPL-2.0-only.txt and LGPL-2.1-or-later.txt are staged from LICENSES/ by tools/build-m4-packages.py.
+# DisplayLink adapters also need Synaptics' DisplayLinkManager, which this channel does not ship
+# (docs/j713-external-displays.md).
+pkgname=omarchy-m4-evdi
+pkgver=1.15.1
+pkgrel=1
+pkgdesc='DisplayLink evdi module and library for the J713 kernel: USB external displays (#58)'
+arch=('aarch64')
+url='https://github.com/Kb2uka/Omarchy-M4-Native'
+license=('GPL-2.0-only' 'LGPL-2.1-or-later')
+depends=('linux-m4-omarchy' 'kmod')
+# The same files as Arch's evdi packages, so packages built for those (the displaylink
+# AUR package depends on evdi<1.16) install on top of this one.
+provides=('evdi=1.15.1')
+conflicts=('evdi' 'evdi-dkms' 'evdi-git')
+install=omarchy-m4-evdi.install
+options=('!strip' '!debug')
+source=('GPL-2.0-only.txt' 'LGPL-2.1-or-later.txt'
+        "evdi.ko::${url}/releases/download/package-inputs/evdi-1.15.1-c5e65a2b.ko"
+        "libevdi.so::${url}/releases/download/package-inputs/libevdi-1.15.1-0f1da52d.so")
+sha256sums=('aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3'
+            '592987e8510228d546540b84a22444bde98e48d03078d3b2eefcd889bec5ce8c'
+            'c5e65a2bcba6433ff8369fea449ccc4e6be178a392b9c4a959884415953c671a'
+            '0f1da52db1f7cbd7e0c420d47285ddee78e22dc0a57e789305c1456b163034ce')
+
+package() {
+  # updates/ beside the kernel's own modules: pacman's depmod hook indexes it, so
+  # `modprobe evdi` (DisplayLinkManager's service runs it) finds the module.
+  install -Dm644 evdi.ko "$pkgdir/usr/lib/modules/7.1.9-m4-gpu-backport-20261008/updates/evdi.ko"
+  install -Dm755 libevdi.so "$pkgdir/usr/lib/libevdi.so"
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" GPL-2.0-only.txt LGPL-2.1-or-later.txt
+}

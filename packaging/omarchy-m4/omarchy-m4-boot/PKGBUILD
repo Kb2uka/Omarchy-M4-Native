@@ -4,16 +4,16 @@
 # from tools/ and LICENSES/, and the m1n1-* notices from display/j713/m1n1-base/, by tools/build-m4-packages.py.
 pkgname=omarchy-m4-boot
 pkgver=1
-pkgrel=12
+pkgrel=13
 pkgdesc='Keeps the J713 boot.bin in step with the packaged M4 kernel and devicetree'
 arch=('aarch64')
 url='https://github.com/Kb2uka/Omarchy-M4-Native'
 # The notch stage 2 is an m1n1 build: MIT, with the embedded parts its README lists.
 license=('MIT' 'GPL-2.0-or-later OR MIT' 'BSD-2-Clause OR GPL-2.0-or-later' 'BSD-3-Clause' 'Zlib' 'CC0-1.0' 'OFL-1.1')
-# omarchy-m4-gpu (from 1-6), omarchy-m4-headphones (from 1-7) and omarchy-m4-cpu (from 1-10):
-# an older installed setup script does not list them, so this pulls them in on the first
-# omarchy-m4-update run that installs this version.
-depends=('python' 'pacman' 'omarchy-m4-gpu' 'omarchy-m4-headphones' 'omarchy-m4-cpu')
+# omarchy-m4-gpu (from 1-6), omarchy-m4-headphones (from 1-7), omarchy-m4-cpu (from 1-10) and
+# omarchy-m4-evdi (from 1-13): an older installed setup script does not list them, so this
+# pulls them in on the first omarchy-m4-update run that installs this version.
+depends=('python' 'pacman' 'omarchy-m4-gpu' 'omarchy-m4-headphones' 'omarchy-m4-cpu' 'omarchy-m4-evdi')
 install=omarchy-m4-boot.install
 options=('!strip' '!debug')
 # The CPU frequency, CPU temperature, CPU thermal zone and boost-state devicetree, with P

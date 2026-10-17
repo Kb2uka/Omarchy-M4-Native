@@ -89,9 +89,24 @@ class RecipeTests(unittest.TestCase):
         self.assertIn(CHANNEL['devicetree']['sha256'], text)
         self.assertEqual(load('tools/m4-boot-compose.py').KNOWN_DTBS[CHANNEL['devicetree']['sha256']],
                          'j713-usb0')
-        self.assertIn("depends=('python' 'pacman' 'omarchy-m4-gpu' 'omarchy-m4-headphones' 'omarchy-m4-cpu')\n",
-                      text, 'gst-plugins-good must be able to replace the sinks; the GPU fix, the headphone '
-                      'jack and CPU idle must come with this version')
+        self.assertIn("depends=('python' 'pacman' 'omarchy-m4-gpu' 'omarchy-m4-headphones' 'omarchy-m4-cpu' "
+                      "'omarchy-m4-evdi')\n", text, 'gst-plugins-good must be able to replace the sinks; the GPU '
+                      'fix, the headphone jack, CPU idle and USB displays must come with this version')
+
+    def test_evdi_recipe_pins_the_channel_builds(self):
+        text = recipe('omarchy-m4-evdi')
+        self.assertEqual((field(text, 'pkgver'), field(text, 'pkgrel')), ('1.15.1', '1'))
+        for pins, name in ((CHANNEL['evdi_module'], 'evdi-1.15.1'), (CHANNEL['evdi_library'], 'libevdi-1.15.1')):
+            for path, digest in pins.items():
+                self.assertIn(f"'{digest}'", text)
+                self.assertIn(f'package-inputs/{name}-{digest[:8]}.', text)
+                self.assertIn(f'"$pkgdir/{path}"', text)
+        self.assertIn("provides=('evdi=1.15.1')", text)
+        self.assertIn("conflicts=('evdi' 'evdi-dkms' 'evdi-git')", text)
+        build = (ROOT / 'display/evdi/build.sh').read_text()
+        # The module is built on the alpha.1 kernel tree the channel kernel came from.
+        self.assertIn('tree_sha=810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57', build)
+        self.assertIn(f"/usr/lib/modules/{CHANNEL['kernel']['release']}/updates/evdi.ko", text)
 
     def test_gpu_recipe_pins_the_channel_module(self):
         text = recipe('omarchy-m4-gpu')
@@ -232,7 +247,7 @@ class PolicyTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     CHECK.check_package(CHANNEL, *self.package('omarchy-m4-speaker', files))
 
-    def test_boot_package_must_bring_the_gpu_and_headphone_packages(self):
+    def test_boot_package_must_bring_the_gpu_headphone_cpu_and_evdi_packages(self):
         realtime = (PACKAGING / 'omarchy-m4-boot/speakersafetyd-j713-realtime.conf').read_bytes()
         files = {**self.boot_files(), CHECK.REALTIME: (0o644, hashlib.sha256(realtime).hexdigest())}
         CHECK.check_package(CHANNEL, *self.boot_package(files))
@@ -241,6 +256,39 @@ class PolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'must require the headphone jack package'):
             CHECK.check_package(CHANNEL, *self.boot_package(
                 files, {**self.boot_info(), 'depend': ['python', 'pacman', 'omarchy-m4-gpu']}))
+        without_evdi = [d for d in self.boot_info()['depend'] if d != 'omarchy-m4-evdi']
+        with self.assertRaisesRegex(ValueError, 'must require the USB display package'):
+            CHECK.check_package(CHANNEL, *self.boot_package(files, {**self.boot_info(), 'depend': without_evdi}))
+
+    def evdi_info(self):
+        return {'pkgname': ['omarchy-m4-evdi'], 'pkgver': ['1.15.1-1'], 'arch': ['aarch64'],
+                'provides': ['evdi=1.15.1'], 'conflict': ['evdi', 'evdi-dkms', 'evdi-git'],
+                'depend': ['linux-m4-omarchy', 'kmod']}
+
+    def test_evdi_package_must_be_the_pin_with_arch_evdi_relations(self):
+        good = {**{p: (0o644, d) for p, d in CHANNEL['evdi_module'].items()},
+                **{p: (0o755, d) for p, d in CHANNEL['evdi_library'].items()},
+                'usr/share/licenses/omarchy-m4-evdi/GPL-2.0-only.txt': (0o644, file_sha('LICENSES/GPL-2.0-only.txt'))}
+        package = lambda files, info=None: self.package('omarchy-m4-evdi', files, info or self.evdi_info(),
+                                                         version='1.15.1-1')
+        CHECK.check_package(CHANNEL, *package(good))
+        module, library = next(iter(CHANNEL['evdi_module'])), next(iter(CHANNEL['evdi_library']))
+        other_release = module.replace(CHANNEL['kernel']['release'], '7.2.0-other')
+        for files, info, message in (
+                ({**good, module: (0o644, '0' * 64)}, None, 'evdi module differs from the pin'),
+                ({k: v for k, v in good.items() if k != library}, None, 'evdi library differs from the pin'),
+                ({**good, 'usr/lib/libevdi.so.1': (0o644, 'x')}, None, 'unlisted path'),
+                ({**good, other_release: (0o644, 'x')}, None, 'unlisted path'),
+                (good, {**self.evdi_info(), 'provides': []}, 'relations changed'),
+                (good, {**self.evdi_info(), 'provides': ['evdi=1.16.0']}, 'relations changed'),
+                (good, {**self.evdi_info(), 'conflict': ['evdi']}, 'relations changed')):
+            with self.subTest(message), self.assertRaisesRegex(ValueError, message):
+                CHECK.check_package(CHANNEL, *package(files, info))
+        channel = json.loads(json.dumps(CHANNEL))
+        channel['evdi_module'] = {other_release: '0' * 64}
+        channel['allowed_paths']['omarchy-m4-evdi'].append(other_release)
+        with self.assertRaisesRegex(ValueError, 'not installed for the channel kernel'):
+            CHECK.check_package(channel, *package({**good, other_release: (0o644, '0' * 64)}))
 
     def test_gpu_package_must_be_the_pin(self):
         good = {path: (0o644, digest) for path, digest in CHANNEL['gpu_module'].items()}
@@ -363,7 +411,8 @@ class PolicyTests(unittest.TestCase):
 
     def boot_info(self):
         return {'pkgname': ['omarchy-m4-boot'], 'pkgver': ['1-4'], 'arch': ['aarch64'],
-                'depend': ['python', 'pacman', 'omarchy-m4-gpu', 'omarchy-m4-headphones', 'omarchy-m4-cpu']}
+                'depend': ['python', 'pacman', 'omarchy-m4-gpu', 'omarchy-m4-headphones', 'omarchy-m4-cpu',
+                           'omarchy-m4-evdi']}
 
     def boot_files(self):
         """A boot package that passes every check except the ones under test, unpacked on disk."""
