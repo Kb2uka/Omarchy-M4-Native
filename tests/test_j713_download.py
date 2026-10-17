@@ -181,6 +181,35 @@ class DownloadTests(unittest.TestCase):
         self.assertFalse(self.release_output.exists())
         self.assertFalse(self.requests.exists())
 
+    def test_an_installer_update_tag_names_every_asset_and_the_downloader(self):
+        receipt = self.package(tag='v0.1.0-alpha.1-update.4')
+        self.assertEqual(receipt['release_tag'], 'v0.1.0-alpha.1-update.4')
+        self.assertEqual(self.rows()[1], ['release', 'v0.1.0-alpha.1-update.4'])
+        parts = {name for name in receipt['artifacts'] if '-os.part' in name}
+        self.assertTrue(parts)
+        self.assertTrue(all(name.startswith('omarchy-j713-v0.1.0-alpha.1-update.4-') for name in parts))
+        downloader = (self.assets / packager.DOWNLOADER).read_text()
+        self.assertIn("release_tag='v0.1.0-alpha.1-update.4'", downloader)
+        self.assertIn(packager.RELEASE_URL + 'v0.1.0-alpha.1-update.4', downloader)
+
+    def test_a_tag_for_another_version_or_a_malformed_update_is_refused(self):
+        for tag in ('v0.1.0-alpha.2', 'v0.1.0-alpha.1-update.0', 'v0.1.0-alpha.1-update.04',
+                    'v0.1.0-alpha.1-update.x', 'v0.1.0-alpha.1-update', 'v0.1.0-alpha.1-beta.1',
+                    'v0.1.0-alpha.10'):
+            with self.subTest(tag=tag):
+                with self.assertRaisesRegex(ValueError, 'Release tag does not match'):
+                    self.package(tag=tag)
+                self.assertFalse(self.assets.exists())
+
+    def test_image_and_kit_must_name_the_same_release(self):
+        self.files['IMAGE.json'] = b'{"private_only":false,"release_version":"0.1.0-alpha.2"}\n'
+        put(self.delivery / 'IMAGE.json', self.files['IMAGE.json']); self.seal()
+        for tag in ('v0.1.0-alpha.1', 'v0.1.0-alpha.2', 'v0.1.0-alpha.1-update.4'):
+            with self.subTest(tag=tag):
+                with self.assertRaisesRegex(ValueError, 'Release tag does not match'):
+                    self.package(tag=tag)
+                self.assertFalse(self.assets.exists())
+
     def test_release_tag_must_be_safe_before_embedding(self):
         with self.assertRaisesRegex(ValueError, 'Invalid release tag'):
             self.package(tag='v0.1.0-alpha.1/other')
