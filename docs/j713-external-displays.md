@@ -10,10 +10,15 @@ what the kernel side needs.
 | Connection | Works? | Why |
 | --- | --- | --- |
 | USB-C monitor (DisplayPort Alt Mode), USB-C to HDMI/DP cable or adapter | No | Needs Apple's display coprocessor (DCP), which Linux cannot drive on M4 yet |
-| Thunderbolt dock or monitor | No (USB devices on the dock work as USB) | Same: Thunderbolt carries DisplayPort from the same DCP |
+| Thunderbolt dock or monitor | No; whether a dock's own USB ports work over plain USB is untested | Same: Thunderbolt carries DisplayPort from the same DCP |
 | DisplayLink adapter or dock (DL-3xxx, DL-5xxx, DL-6xxx chips) | Yes, after the setup below | Runs over USB; `omarchy-m4-evdi` from `omarchy-m4-update` plus Synaptics' DisplayLinkManager |
 | Older DisplayLink USB 2.0 adapters (DL-1x0, DL-1x5) | Yes, no setup | The kernel's `udl` driver |
 | GUD USB displays | Yes, no setup | The kernel's `gud` driver |
+
+**A plain USB-C to HDMI or DisplayPort cable or adapter does not work, and
+neither do a Thunderbolt dock's display ports** (for example an Anker Prime
+Thunderbolt 5 dock). They all carry DisplayPort from the DCP. For a second
+screen, use an adapter or dock whose specifications say **DisplayLink**.
 
 ## Why USB-C and Thunderbolt monitors do not work
 

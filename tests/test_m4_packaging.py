@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import io
 import re
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -107,6 +108,20 @@ class RecipeTests(unittest.TestCase):
         # The module is built on the alpha.1 kernel tree the channel kernel came from.
         self.assertIn('tree_sha=810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57', build)
         self.assertIn(f"/usr/lib/modules/{CHANNEL['kernel']['release']}/updates/evdi.ko", text)
+
+    def test_evdi_build_refuses_unpinned_inputs_before_building(self):
+        build = ROOT / 'display/evdi/build.sh'
+        with tempfile.TemporaryDirectory() as temp:
+            temp = Path(temp)
+            other = temp / 'other.tar.gz'
+            other.write_bytes(b'not the pinned archive')
+            for mode, args in (('module', [other, other]), ('library', [other])):
+                with self.subTest(mode):
+                    out = temp / ('out-' + mode)
+                    result = subprocess.run(['bash', str(build), mode, *map(str, args), str(out)],
+                                            capture_output=True, text=True)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertFalse(out.exists(), 'nothing is built from an unpinned archive')
 
     def test_gpu_recipe_pins_the_channel_module(self):
         text = recipe('omarchy-m4-gpu')
