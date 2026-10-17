@@ -6,7 +6,7 @@
     "asahi_m4-3cf47fa7.ko": {
       "sha256": "3cf47fa706630ddc5fc55a3bce00ab31e8a4c5ee48e1ba563e26a0406da196f8",
       "license": "GPL-2.0-only",
-      "correspondence": "unverified",
+      "correspondence": "rebuilt-identical",
       "sources": [
         {
           "tree": "gpu/j713",
@@ -21,7 +21,7 @@
           "sha256": "c19a7c97184b3f954795c50dfeff857e8baf685f901524845710da839cbd2562"
         }
       ],
-      "evidence": "Issue #57: accept each M4 Air's own GPU power limit up to 24800 mW. Built by gpu/j713/build-test-module.sh from alpha.1 kernel-controller and source packet with gpu/j713/asahi/g16.rs."
+      "evidence": "Issue #57: accept each M4 Air's own GPU power limit up to 24800 mW. Built by gpu/j713/build-test-module.sh from alpha.1 kernel-controller and source packet with gpu/j713/asahi/g16.rs. Rebuilt byte for byte on 2026-10-16 in homebase m4-gravity-builder:20261008 (b2069edb), run as root with --network none: the script first reproduced alpha.1's stock asahi_m4.ko (80cf3669), then built 3cf47fa7 exactly from gpu/j713/asahi/g16.rs at develop 0fac63c."
     },
     "gst-plugins-good-1.28.7-libgstautodetect-aarch64.so": {
       "sha256": "ffb41a1812d1ea398b567692b730df0ea6bea5620511390d8731704eae7515b7",

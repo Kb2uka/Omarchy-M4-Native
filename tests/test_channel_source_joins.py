@@ -275,6 +275,48 @@ class ChannelBinaryJoinTests(unittest.TestCase):
         for call in package.call_args_list:
             self.assertIs(call.kwargs.get('joins'), joins)
 
+    def test_joins_bind_every_version_not_yet_published(self):
+        joins = {'schema': 1, 'binaries': {}}
+        names = {name + '-1-1-aarch64.pkg.tar.zst': name for name in CHANNEL['packages']}
+        shipped = sorted(names)[:2]
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            for filename in names:
+                (directory / filename).write_bytes(b'')
+            with mock.patch.object(CHECK, 'source_joins', return_value=joins), \
+                    mock.patch.object(CHECK, 'check_stale_joins'), \
+                    mock.patch.object(CHECK, 'extract', return_value=({}, {})), \
+                    mock.patch.object(CHECK, 'published',
+                                      side_effect=lambda channel, filename, scratch:
+                                      scratch / filename if filename in shipped else None), \
+                    mock.patch.object(CHECK, 'check_package',
+                                      side_effect=lambda channel, package, *rest, **kw: names[package.name]) as package:
+                CHECK.check(directory, compare_published=True)
+        by_name = {call.args[1].name: call.kwargs.get('joins') for call in package.call_args_list}
+        self.assertEqual(len(by_name), len(names))
+        for filename, given in by_name.items():
+            with self.subTest(package=filename):
+                if filename in shipped:
+                    self.assertIsNone(given, 'an identical published version is already on Airs')
+                else:
+                    self.assertIs(given, joins, 'an unpublished version must be rebuilt-identical')
+
+    def test_published_name_with_other_contents_is_still_refused(self):
+        joins = {'schema': 1, 'binaries': {}}
+        filename = CHANNEL['packages'][0] + '-1-1-aarch64.pkg.tar.zst'
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            (directory / filename).write_bytes(b'')
+            extracted = iter([({'pkgver': ['1-1']}, {'a': (0o644, '1')}), ({'pkgver': ['1-1']}, {'a': (0o644, '2')})])
+            with mock.patch.object(CHECK, 'source_joins', return_value=joins), \
+                    mock.patch.object(CHECK, 'check_stale_joins'), \
+                    mock.patch.object(CHECK, 'extract', side_effect=lambda *a: next(extracted)), \
+                    mock.patch.object(CHECK, 'published', side_effect=lambda channel, name, scratch: scratch / name), \
+                    mock.patch.object(CHECK, 'check_package') as package:
+                with self.assertRaisesRegex(ValueError, 'already published with different contents'):
+                    CHECK.check(directory, compare_published=True)
+        package.assert_not_called()
+
     def test_no_ci_override_flag_exists_in_check_tool(self):
         # Issue 93 specifies: "refuse a channel package whose downloaded binary has no rebuilt-identical join, with no override in CI."
         code = (ROOT / 'tools/check-m4-packages.py').read_text()
