@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import subprocess
@@ -124,6 +125,12 @@ class KernelReleaseTests(unittest.TestCase):
         self.untracked = set()
         self.prepared = []
         self.allowed = []
+        self.repacked = []
+        self.stage1_data = b'\x00fixed stage 1'.ljust(64, b'\x01')
+        self.stage1 = self.base / 'm1n1-stage1-ans1.bin'
+        self.stage1.write_bytes(self.stage1_data)
+        self.write(self.tree, release.STAGE1_PATCH, b'synthetic stage 1 patch')
+        self.committed = {}
 
     def write(self, root, name, data):
         path = root / name
@@ -145,7 +152,7 @@ class KernelReleaseTests(unittest.TestCase):
         if 'show' in command:
             revision, name = command[-1].split(':', 1)
             self.assertEqual(revision, self.revision)
-            return (self.tree / name).read_bytes()
+            return self.committed.get(name, (self.tree / name).read_bytes())
         self.fail('Unexpected git call: ' + repr(command))
 
     def assemble(self):
@@ -160,7 +167,8 @@ class KernelReleaseTests(unittest.TestCase):
             image.write_bytes(b'new root')
             return {'audio': 'a' * 64, 'video': 'v' * 64, 'unverified': []}
 
-        def copy_archive(source, destination, *args):
+        def copy_archive(source, destination, *args, **kwargs):
+            self.repacked.append((destination.name, kwargs.get('stage1')))
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(b'retained archive')
 
@@ -168,6 +176,8 @@ class KernelReleaseTests(unittest.TestCase):
              mock.patch.object(release, 'KERNEL_PATCHES', self.patches, create=True), \
              mock.patch.object(release, 'BASE_KERNEL', digest(self.original_kernel), create=True), \
              mock.patch.object(release, 'POWEROFF_DTB', digest(self.dtb.read_bytes())), \
+             mock.patch.object(release, 'STAGE1_ANS1', digest(self.stage1_data)), \
+             mock.patch.object(release, 'STAGE1_BYTES', len(self.stage1_data)), \
              mock.patch.object(release, 'source_revision', return_value=self.revision), \
              mock.patch.object(release, 'sha', side_effect=sha), \
              mock.patch.object(release, 'prepare_root', side_effect=root), \
@@ -206,6 +216,52 @@ class KernelReleaseTests(unittest.TestCase):
                                  (self.tree / 'audio/j713/filters' / name).read_bytes())
         kit = json.loads((delivery / 'KIT.json').read_bytes())
         self.assertEqual(kit['files']['IMAGE.json']['sha256'], digest((delivery / 'IMAGE.json').read_bytes()))
+
+    def test_without_stage1_the_installer_keeps_alpha1s_loader(self):
+        delivery = self.assemble()
+        image = json.loads((delivery / 'IMAGE.json').read_bytes())
+        self.assertEqual(image['stage1'], {'file': 'installer-macos.tar.gz:boot/m1n1.bin',
+                                           'sha256': release.STAGE1_ALPHA1})
+        self.assertEqual(self.repacked[:2], [('installer-macos.tar.gz', None), ('installer-source.tar.gz', None)])
+
+    def test_stage1_reaches_only_the_macos_installer_and_the_image_records_it(self):
+        self.args.stage1 = self.stage1
+        delivery = self.assemble()
+        self.assertEqual(self.repacked[:2], [('installer-macos.tar.gz', self.stage1_data),
+                                             ('installer-source.tar.gz', None)])
+        image = json.loads((delivery / 'IMAGE.json').read_bytes())
+        self.assertEqual(image['stage1']['sha256'], digest(self.stage1_data))
+        self.assertEqual(image['stage1']['replaces_sha256'], release.STAGE1_ALPHA1)
+        self.assertEqual(image['stage1']['source'], release.STAGE1_PATCH)
+        self.assertEqual(image['stage1']['issue'], 82)
+        with tarfile.open(delivery / 'source/release-integration.tar.gz') as archive:
+            self.assertEqual(archive.extractfile(release.STAGE1_PATCH).read(),
+                             (self.tree / release.STAGE1_PATCH).read_bytes())
+
+    def test_unknown_stage1_refuses_before_any_output(self):
+        for data in (self.stage1_data[:-1] + b'\x02', self.stage1_data + b'\x00'):
+            with self.subTest(size=len(data)):
+                self.stage1.write_bytes(data)
+                self.args.stage1 = self.stage1
+                with self.assertRaisesRegex(RuntimeError, 'Unknown stage 1 input'):
+                    self.assemble()
+                self.assertFalse(self.args.output.exists())
+                self.assertEqual(self.prepared, [])
+
+    def test_stage1_patch_must_be_committed(self):
+        self.args.stage1 = self.stage1
+        self.committed[release.STAGE1_PATCH] = b'another patch'
+        with self.assertRaisesRegex(RuntimeError, 'Stage 1 source is not frozen'):
+            self.assemble()
+        self.assertFalse(self.args.output.exists())
+
+    def test_cli_accepts_stage1(self):
+        with mock.patch.object(release, 'assemble') as assemble, \
+             mock.patch.object(release.sys, 'argv', ['prepare', *(f'--{n}=x' for n in (
+                 'source-tree', 'baseline', 'root-image', 'cargo-source', 'sound-exports',
+                 'reconstruction', 'poweroff-dtb', 'output')), '--stage1=/k/ans1.bin']):
+            release.main()
+        self.assertEqual(assemble.call_args.args[0].stage1, Path('/k/ans1.bin'))
 
     def test_untracked_static_filter_refuses_before_image_preparation(self):
         self.untracked.add('audio/j713/filters/' + release.FIRS[-1])
@@ -514,6 +570,60 @@ class KernelReleaseTests(unittest.TestCase):
             release.main()
         self.assertEqual(assemble.call_args.args[0].kernel, self.kernel)
         self.assertEqual(assemble.call_args.args[0].kernel_receipt, self.receipt_path)
+
+
+class InstallerStage1Tests(unittest.TestCase):
+    SEAMS = ('import system, osenum, stub, diskutil, osinstall, gravity_firmware, m1n1\n'
+             'class Installer:\n    def __init__(self, version):\n        pass\n'
+             '    def a(self):\n        self.ins.collect_firmware(fw_pkg)\n'
+             '    def b(self):\n            self.ins.collect_firmware(pkg)\n')
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.base = Path(temp.name)
+        self.old_loader, self.new_loader = b'alpha.1 stage 1' * 4, b'fixed stage 1!!' * 4
+
+    def installer(self, members, name='installer.tar.gz'):
+        path = self.base / name
+        with tarfile.open(path, 'w:gz') as archive:
+            for member, data in members.items():
+                item = tarfile.TarInfo(member)
+                item.size, item.mode = len(data), 0o755
+                archive.addfile(item, io.BytesIO(data))
+        return path
+
+    def repack(self, source, stage1=None, source_archive=False):
+        output = self.base / ('out-' + str(len(list(self.base.iterdir()))) + '.tar.gz')
+        with mock.patch.object(release, 'STAGE1_ALPHA1', digest(self.old_loader)):
+            release.repack_installer(source, output, b'module', source_archive, stage1=stage1)
+        with tarfile.open(output) as archive:
+            return {item.name: archive.extractfile(item).read() for item in archive if item.isfile()}
+
+    def test_stage1_replaces_only_the_loader(self):
+        source = self.installer({'./main.py': self.SEAMS.encode(), './boot/m1n1.bin': self.old_loader,
+                                 './m1n1.py': b'builder'})
+        before = self.repack(source)
+        after = self.repack(source, stage1=self.new_loader)
+        self.assertEqual(before['./boot/m1n1.bin'], self.old_loader)
+        self.assertEqual(after['./boot/m1n1.bin'], self.new_loader)
+        self.assertEqual({k: v for k, v in after.items() if k != './boot/m1n1.bin'},
+                         {k: v for k, v in before.items() if k != './boot/m1n1.bin'})
+        self.assertIn('j713_owner_assets.py', after)
+
+    def test_unknown_or_missing_installer_loader_refuses(self):
+        for members, message in (
+                ({'./main.py': self.SEAMS.encode(), './boot/m1n1.bin': b'another loader'}, 'Unknown installer stage 1'),
+                ({'./main.py': self.SEAMS.encode()}, 'Missing installer stage 1')):
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(RuntimeError, message):
+                    self.repack(self.installer(members), stage1=self.new_loader)
+
+    def test_source_archive_never_takes_stage1(self):
+        source = self.installer({'src/main.py': self.SEAMS.encode()}, 'source.tar.gz')
+        self.assertIn('src/j713_owner_assets.py', self.repack(source, source_archive=True))
+        with self.assertRaisesRegex(RuntimeError, 'macOS installer only'):
+            self.repack(source, stage1=self.new_loader, source_archive=True)
 
 
 if __name__ == '__main__':
