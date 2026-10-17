@@ -1,0 +1,90 @@
+From b80c05c4fb429f2cbf1a4819da20992b4ebffec4 Mon Sep 17 00:00:00 2001
+From: CJ Damsleth <kim@damsleth.no>
+Date: Sun, 12 Jul 2026 14:32:17 +0200
+Subject: [PATCH 2/4] dapf: gate DAPF init per SoC on the M4 generation
+
+Initializing certain DAPF instances on M4-generation SoCs raises an
+imprecise async L2C ACCESS_FAULT SError (L2C_ERR_STS 0x82) that kills
+m1n1 at kboot handoff. Which DARTs trigger it differs per SoC and there
+is no clean ADT signal, so gate on chip id: t8132 skips dart-aop/isp
+(dart-mtp/pmp verified fine and mtp needs them); t6040 runs ONLY
+dart-mtp and skips the rest pending individual retests.
+
+Programming the dart-mtp DAPF on t6040 is required for the MTP
+(keyboard/trackpad) coprocessor firmware to boot: its six filter windows
+cover the MTP power-state registers and other nub MMIO the firmware
+touches during early boot. Without them the firmware faults right after
+RUN; with them it reaches RUNNING and delivers the RTKit hello.
+Hardware-verified on J614s: the internal keyboard and trackpad work.
+
+Note the async-attribution trap that led to dart-mtp being blacklisted
+here earlier: the SError surfaces after the *next* entry's init prints,
+so per-entry blame from console ordering is unreliable.
+
+Signed-off-by: CJ Damsleth <kim@damsleth.no>
+---
+ src/dapf.c | 36 ++++++++++++++++++++++++++++++++++--
+ 1 file changed, 34 insertions(+), 2 deletions(-)
+
+diff --git a/src/dapf.c b/src/dapf.c
+index 13a04986..cec33fe4 100644
+--- a/src/dapf.c
++++ b/src/dapf.c
+@@ -168,13 +168,40 @@ int dapf_init(const char *path, int index)
+ struct entry {
+     const char *path;
+     int index;
++    // On t8132 ("Neo" M4) initializing this DAPF raises the async L2C SError
++    // (yuka); on t6040 more of them do (see dapf_skip_entry).
++    bool t8132_broken;
+ };
+ 
+ struct entry dapf_entries[] = {
+-    {"/arm-io/dart-aop", 1}, {"/arm-io/dart-mtp", 1},  {"/arm-io/dart-pmp", 1},
+-    {"/arm-io/dart-isp", 5}, {"/arm-io/dart-isp0", 5}, {NULL, -1},
++    {"/arm-io/dart-aop", 1, true},  {"/arm-io/dart-mtp", 1, false},
++    {"/arm-io/dart-pmp", 1, false}, {"/arm-io/dart-isp", 5, true},
++    {"/arm-io/dart-isp0", 5, true}, {NULL, -1, false},
+ };
+ 
++// Initializing certain DAPF (DART page-fault filter) MMIO on the M4 generation
++// raises an imprecise async L2C ACCESS_FAULT SError (L2C_ERR_STS 0x82) that kills
++// m1n1 at kboot handoff. Which DARTs trigger it differs per SoC and there is no
++// clean ADT signal, so gate on chip_id:
++//   t8132 "Neo": only dart-aop/dart-isp SError; dart-mtp/pmp init fine and mtp
++//     needs them (yuka).
++//   t6040 M4 Pro: an earlier session blamed dart-mtp because the SError surfaced
++//     right after "Initialized dart-mtp" — but the error is ASYNC and the true
++//     trigger was a later entry. Confirmed on HW 2026-07-11 (session 4): all six
++//     dart-mtp DAPF writes at 0x514810000 succeed from the proxy, and programming
++//     them is REQUIRED for the MTP (keyboard/trackpad) firmware to boot: without
++//     them it faults on its nub windows (its own PS regs at 0x50830c000 etc.)
++//     right after RUN; with them it reaches RUNNING (status 0x4d) and sends the
++//     RTKit hello. Keep aop/pmp/isp skipped pending individual retests.
++static bool dapf_skip_entry(const struct entry *e)
++{
++    if (chip_id == T6040)
++        return strcmp(e->path, "/arm-io/dart-mtp") != 0;
++    if (chip_id == T8132)
++        return e->t8132_broken;
++    return false;
++}
++
+ int dapf_init_all(void)
+ {
+     int ret = 0;
+@@ -186,6 +213,11 @@ int dapf_init_all(void)
+             entry++;
+             continue;
+         }
++        if (dapf_skip_entry(entry)) {
++            printf("dapf: Skipping %s (async L2C SError on this M4 SoC)\n", entry->path);
++            entry++;
++            continue;
++        }
+         if (dapf_init(entry->path, entry->index) < 0) {
+             ret = -1;
+         }
+-- 
+2.55.0
+

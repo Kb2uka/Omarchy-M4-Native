@@ -1,0 +1,43 @@
+From 95d442d13d6f7fae645cae2e6d6dbf014c630fb4 Mon Sep 17 00:00:00 2001
+From: CJ Damsleth <kim@damsleth.no>
+Date: Tue, 14 Jul 2026 13:09:38 +0200
+Subject: [PATCH 3/4] kboot: guard stage 2 log buffer at top of RAM
+
+Signed-off-by: CJ Damsleth <kim@damsleth.no>
+---
+ src/kboot.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/src/kboot.c b/src/kboot.c
+index 9bb95481..b79e4b21 100644
+--- a/src/kboot.c
++++ b/src/kboot.c
+@@ -2728,7 +2728,8 @@ int kboot_set_uboot(const char *name, const char *value)
+     return i;
+ }
+ 
+-#define LOGBUF_SIZE SZ_16K
++#define LOGBUF_SIZE           SZ_16K
++#define LOGBUF_TOP_GUARD_SIZE SZ_16K
+ 
+ struct {
+     void *buffer;
+@@ -2787,8 +2788,13 @@ static int dt_setup_mtd_phram(void)
+             bail("FDT: failed to setup ADT MTD phram label\n");
+     }
+ 
+-    // init memory backed iodev for console log
+-    logbuf.buffer = (void *)top_of_memory_alloc(LOGBUF_SIZE);
++    /*
++     * Keep the active ring away from the exclusive top-of-RAM boundary. On
++     * T6040, wrapping a ring placed in the final physical page raises a delayed
++     * L2C access-fault SError at that boundary. The unused upper page remains
++     * outside the Linux memory node along with the log allocation.
++     */
++    logbuf.buffer = (void *)top_of_memory_alloc(LOGBUF_SIZE + LOGBUF_TOP_GUARD_SIZE);
+     if (!logbuf.buffer)
+         bail("FDT: failed to allocate m1n1 log buffer\n");
+ 
+-- 
+2.55.0
+

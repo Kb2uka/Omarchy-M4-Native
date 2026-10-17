@@ -1,0 +1,5 @@
+# Apply in order on AsahiLinux/m1n1 e4419ba8 (docs/j773s-m1n1.md).
+../dockchannel-tx-bound.patch
+0002-dapf-gate-DAPF-init-per-SoC-on-the-M4-generation.patch
+0003-kboot-guard-stage-2-log-buffer-at-top-of-RAM.patch
+0004-cpu-M4-park-secondaries-in-WFE-WFI-loses-architectur.patch

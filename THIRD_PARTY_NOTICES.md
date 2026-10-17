@@ -92,6 +92,13 @@ alpha.1 bootloader source, with that tree's `LICENSE` beside them in
 [docs/j713-m1n1-dockchannel-tx.md](docs/j713-m1n1-dockchannel-tx.md) and
 [docs/j713-m1n1-issue82-ans-reset.md](docs/j713-m1n1-issue82-ans-reset.md).
 
+`patches-m1n1/j773s/` holds three m1n1 changes by CJ Damsleth from the
+T6040 series in [damsleth/wallace](https://github.com/damsleth/wallace)
+(commit `55f116d`), whose README publishes its m1n1 patches under MIT. Two are
+unchanged; the third was ported to upstream m1n1 `e4419ba8`, keeping its
+author. Upstream m1n1 itself has been GPL-2.0 since `ce2b8a4`; no m1n1 tree or
+binary is bundled here. See [docs/j773s-m1n1.md](docs/j773s-m1n1.md).
+
 The upstream [MIT license](https://github.com/AsahiLinux/m1n1/blob/main/LICENSE)
 is reproduced below to preserve its notice for any adapted reference material:
 
