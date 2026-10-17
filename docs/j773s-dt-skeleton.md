@@ -6,8 +6,10 @@ boot to a framebuffer console, and nothing more. It has not booted.
 
 ## Sources
 
-- The J773s ADT, from the macOS-side survey of 2026-10-17
-  ([j773s-macos-survey.md](j773s-macos-survey.md)). macOS shows it as text
+- The J773s ADT, from the read-only macOS-side survey of 2026-10-17
+  ([j773s-macos-survey.md](j773s-macos-survey.md), added by
+  [#126](https://github.com/Kb2uka/Omarchy-M4-Native/pull/126); the raw capture
+  holds serial numbers and is kept privately, as for the J713). macOS shows it as text
   (`ioreg -p IODeviceTree -l -w0`). `tools/ioreg-adt.py` rebuilds that text into
   a binary ADT, so this repository's `tools/adt.py` and `tools/adt-audit.py`
   node audit, and m1n1's `pmgr_adt2dt.py`, can read it. The rebuild is not
@@ -187,36 +189,10 @@ Both are T6040 problems on J614s, so J773s should be expected to hit them:
    with two M4 Air fixes, the split NVMe and NVMMU windows
    ([patch 0013](../patches/0013-fix-dts-t8132-split-M4-NVMe-and-NVMMU-windows.patch)) and the
    swapped ANS receive interrupts
-   ([patch 0015](../patches/0015-fix-dts-t8132-ans-receive-irq-roles.patch)); Jev rated that
-   0.67 as worth testing. Untested.
+   ([patch 0015](../patches/0015-fix-dts-t8132-ans-receive-irq-roles.patch)). Untested.
 
-## Advisory grading (Jev)
+## Order of the first session
 
-`jev-latest`, two rounds, with false claims mixed in. Round 1 controls: MTP on
-J773s 0.02, NVMe enabled 0.04, five-core P clusters 0.17. Round 2 added the
-wallace MPIDR log; controls: NVMe enabled 0.03, E cores at 0x10000 0.04,
-five-core P clusters 0.31 (higher than round 1, so round 2 is weaker).
-
-| Claim | Round 1 | Round 2 |
-|---|---|---|
-| PMGR matches J614s for shared domains | 0.85 | — |
-| USB stream IDs should be `<1 14>` | 0.88 | — |
-| Framebuffer domains are unproven | 0.71 | — |
-| Core addresses equal J614s | 0.59 | 0.50 |
-| The 16-position CPU list brings up all 12 cores | 0.44 | 0.48 |
-| Status: ready for a first controlled boot / needs the live ADT first | 0.50 / 0.49 | 0.48 / 0.51 |
-
-Round 3, after the coordinator's note on wallace's kernel branch and m1n1
-series; controls: the upstream kernel honors `apple,skip-auto-enable` 0.10,
-this m1n1 build arms a 20 s watchdog 0.08.
-
-| Claim | Round 3 |
-|---|---|
-| With wallace's PMGR change, the properties avoid the faulting AUTO_ENABLE write | 0.75 |
-| `skip-auto-enable` on `dispext2_cpu` is by analogy only | 0.73 |
-| m1n1 without 4/9 still hands Linux a framebuffer and keeps booting | 0.21, then 0.69 once the `kboot.c` code paths were added |
-
-Jev is advisory. Its doubt on the CPU list matches the open item above, and the
-split on readiness is resolved by order: the first session runs m1n1 in proxy
+The open items above are settled by order: the first session runs m1n1 in proxy
 mode, captures the binary ADT, re-runs this audit on it, and only then boots
 Linux.

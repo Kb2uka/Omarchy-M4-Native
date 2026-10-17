@@ -112,6 +112,24 @@ class IoregAdt(unittest.TestCase):
         self.assertEqual(node['props']['name'], b'memory-map\0')
         self.assertEqual(node['props']['TrustCache'], b'')
 
+    def test_names_too_long_for_the_adt_field_are_dropped(self):
+        # An ADT property name is a 32-byte field ending in NUL, so 31 characters fit.
+        fits, too_long = 'a' * 31, ('b' * 32, 'bluetooth.function-bootstrap_lock')
+        lines = ''.join(f'      | |   "{key}" = <01000000>\n' for key in (fits,) + too_long)
+        dump = DUMP.replace('|   "name" = <"aic">\n', '|   "name" = <"aic">\n' + lines)
+        root, end, nodes = rebuild(dump)
+        self.assertEqual(nodes['/arm-io/aic']['props'][fits], b'\x01\0\0\0')
+        for key in too_long:
+            self.assertNotIn(key, nodes['/arm-io/aic']['props'])
+        self.assertEqual(sorted(nodes), ['/', '/arm-io', '/arm-io/aic', '/arm-io/uart0', '/chosen', '/chosen/memory-map'])
+
+    def test_only_a_whole_data_value_is_data(self):
+        self.assertEqual(IOREG_ADT.value('<0a0b>'), b'\x0a\x0b')
+        self.assertEqual(IOREG_ADT.value('<"a","b">'), b'a\0b\0')
+        for text in ('<0a0b>,<0c>', '(<00>,<01>)', '<0a0b> trailing', '"IOCommand is not serializable"', '4'):
+            with self.subTest(text=text):
+                self.assertIsNone(IOREG_ADT.value(text))
+
     def test_a_dump_without_a_device_tree_is_refused(self):
         with self.assertRaisesRegex(ValueError, 'IODeviceTree'):
             IOREG_ADT.device_tree(IOREG_ADT.parse_text(['+-o Root  <class IORegistryEntry>']))
