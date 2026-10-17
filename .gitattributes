@@ -13,3 +13,6 @@ audio/j713/speakersafetyd/src/helpers.rs whitespace=-blank-at-eol
 audio/j713/speakersafetyd/vendor/alsa/src/card.rs whitespace=-blank-at-eol
 audio/j713/speakersafetyd/vendor/alsa/src/poll.rs whitespace=-blank-at-eol
 audio/j713/speakersafetyd/vendor/alsa/README.md whitespace=-blank-at-eol,-blank-at-eof
+patches-m1n1/j773s/0002-dapf-gate-DAPF-init-per-SoC-on-the-M4-generation.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+patches-m1n1/j773s/0003-kboot-guard-stage-2-log-buffer-at-top-of-RAM.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+patches-m1n1/j773s/0004-cpu-M4-park-secondaries-in-WFE-WFI-loses-architectur.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
