@@ -192,8 +192,12 @@ class DownloadTests(unittest.TestCase):
         self.assertIn("release_tag='v0.1.0-alpha.1-update.4'", downloader)
         self.assertIn(packager.RELEASE_URL + 'v0.1.0-alpha.1-update.4', downloader)
 
+    def test_a_multi_digit_update_number_is_accepted(self):
+        self.assertEqual(self.package(tag='v0.1.0-alpha.1-update.12')['release_tag'], 'v0.1.0-alpha.1-update.12')
+
     def test_a_tag_for_another_version_or_a_malformed_update_is_refused(self):
         for tag in ('v0.1.0-alpha.2', 'v0.1.0-alpha.1-update.0', 'v0.1.0-alpha.1-update.04',
+                    'v0.1.0-alphaX1-update.4',
                     'v0.1.0-alpha.1-update.x', 'v0.1.0-alpha.1-update', 'v0.1.0-alpha.1-beta.1',
                     'v0.1.0-alpha.10'):
             with self.subTest(tag=tag):
