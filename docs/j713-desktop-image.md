@@ -181,6 +181,14 @@ an offline build candidate, not an installed user's customized desktop.
 Symlinks in configuration paths are rejected to prevent writes outside the
 candidate. This is a build step, not a complete installer or an update policy.
 
+### The camera notch
+
+The image's desktop is 2560x1600, below the camera: m1n1's stage 2 hands Linux
+only the rows under the cutout, and the panel's `simpledrm` connector
+`Unknown-1` offers that one mode, so a Hyprland mode override cannot reach the
+other 64 rows. An owner can opt in to the whole 2560x1664 panel with
+`sudo m4-notch --show`; see [J713 camera notch](j713-notch.md).
+
 ## Remaining hardware qualification
 
 The October 9 package audit found all 147 entries in Omarchy 4.0.4's core list

@@ -4,6 +4,8 @@ patches-kernel/brcmfmac-bcm4388-rev6-c2-v116.patch whitespace=-blank-at-eol,-bla
 patches/installer/root-identity.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
 patches/installer/linux-partition-guid.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
 patches/omarchy/offline-node-arm64.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+patches-m1n1/dockchannel-tx-bound.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+patches-m1n1/stage1-ans-no-reset.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
 
 # Exact imported source is hash-pinned by audio/j713/imported-source.sha256.
 # Preserve its formatting: Cargo fingerprints change even for whitespace.

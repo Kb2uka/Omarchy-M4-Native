@@ -67,6 +67,13 @@ as a reference (the research notes record `53f8ee9b`). The boot sessions
 used a separately obtained m1n1 checkout. No m1n1 tree or binary is bundled;
 `tools/adt.py` is a standalone parser, not a copied m1n1 module.
 
+`patches-m1n1/base/src/` holds five unmodified MIT-licensed m1n1 files
+(`dockchannel_uart.c`, `iodev.c`, `iodev.h`, `nvme.c`, `nvme.h`) from the
+alpha.1 bootloader source, with that tree's `LICENSE` beside them in
+`patches-m1n1/base/`. The tests compile them against host shims. See
+[docs/j713-m1n1-dockchannel-tx.md](docs/j713-m1n1-dockchannel-tx.md) and
+[docs/j713-m1n1-issue82-ans-reset.md](docs/j713-m1n1-issue82-ans-reset.md).
+
 The upstream [MIT license](https://github.com/AsahiLinux/m1n1/blob/main/LICENSE)
 is reproduced below to preserve its notice for any adapted reference material:
 
@@ -154,7 +161,9 @@ release as required by their licenses. Listing a dependency here does not mean
 its complete source or binaries are already included in this checkout. Preserve
 every upstream file-level notice when those components are joined.
 
-The measured speaker FIR assets have no established redistribution license.
-No project credit or source license grants rights to Apple firmware, macOS,
-Widevine or separately obtained assets. See the
-[experimental release boundary](docs/experimental-release.md).
+The static J713 FIR assets are final numerical responses reproduced with the
+retained measurement pipeline. Their [provenance record](audio/j713/filters/README.md)
+identifies the inputs, approved output identities and the distinction between
+final numerical filters and the source inputs. No project credit or source-code license grants
+rights in Apple firmware, macOS, tuning files, Widevine or separately obtained
+assets. See the [experimental release boundary](docs/experimental-release.md).

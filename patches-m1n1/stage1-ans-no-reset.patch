@@ -1,0 +1,47 @@
+--- a/src/nvme.c
++++ b/src/nvme.c
+@@ -176,6 +176,22 @@
+     free(q->cqes);
+ }
+ 
++static void nvme_reset_ans(void)
++{
++    /*
++     * M4 (T8132): leave ANS asleep and stopped. A PMGR reset issued right after
++     * rtkit_sleep() stops the ANS CPU can wedge the machine on some units
++     * (J713, issue #82). Linux's apple-nvme driver resets the stopped ANS
++     * itself before booting it again.
++     */
++    if (nvme_type == NVME_T8132)
++        return;
++
++    // Some machines call this ANS, some ANS2...
++    pmgr_reset(nvme_die, "ANS");
++    pmgr_reset(nvme_die, "ANS2");
++}
++
+ static void nvme_poll_syslog(void)
+ {
+     struct rtkit_message msg;
+@@ -449,9 +465,7 @@
+     nvme_poll_syslog();
+ out_shutdown:
+     rtkit_sleep(nvme_rtkit);
+-    // Some machines call this ANS, some ANS2...
+-    pmgr_reset(nvme_die, "ANS");
+-    pmgr_reset(nvme_die, "ANS2");
++    nvme_reset_ans();
+ out_rtkit:
+     rtkit_free(nvme_rtkit);
+ out_sart:
+@@ -537,9 +551,7 @@
+         printf("nvme: timeout while waiting for CSTS.RDY to clear\n");
+ 
+     rtkit_sleep(nvme_rtkit);
+-    // Some machines call this ANS, some ANS2...
+-    pmgr_reset(nvme_die, "ANS");
+-    pmgr_reset(nvme_die, "ANS2");
++    nvme_reset_ans();
+     rtkit_free(nvme_rtkit);
+     sart_free(nvme_sart);
+     asc_free(nvme_asc);

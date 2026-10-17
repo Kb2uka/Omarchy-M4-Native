@@ -151,6 +151,7 @@ once applies them:
 | P cores boost up to 4464 MHz and E cores up to 2808 MHz under a predictive heat guard ([#66](https://github.com/Kb2uka/Omarchy-M4-Native/issues/66)); starts at the next boot, off switch `sudo m4-cpu-idle --boost off` ([details](docs/j713-cpu-boost.md#existing-installs)) | `omarchy-m4-boot` 1-11, `omarchy-m4-cpu` 1-2 |
 | The boost guard's limits match macOS on the fanless Air (105 C bursts, 100 C sustained), so one busy core runs at its top boost (4.04 GHz, bursts to 4.46 GHz) for most of a 45 s job, and it estimates the die's temperature from heat measured on the Air ([#66](https://github.com/Kb2uka/Omarchy-M4-Native/issues/66), [details](docs/j713-cpu-boost.md#settled-heat-the-base-estimate)) | `omarchy-m4-cpu` 1-3 |
 | Headset microphone on the headphone jack ([#105](https://github.com/Kb2uka/Omarchy-M4-Native/pull/105)); starts at the next boot ([details](docs/j713-headphones.md#headset-microphone)) | `omarchy-m4-headphones` 1-2 |
+| Opt-in: the desktop uses the whole 2560x1664 panel, with the bar's widgets left and right of the camera ([#89](https://github.com/Kb2uka/Omarchy-M4-Native/issues/89)); `sudo m4-notch --show`, then restart; `sudo m4-notch --hide` goes back ([details](docs/j713-notch.md)) | `omarchy-m4-boot` 1-12 |
 
 A devicetree you applied by hand from the guides is kept; the update never
 moves an Air back to an older one. An Air connected before
@@ -185,7 +186,8 @@ As of October 11, 2026, with the pinned experimental runtime:
 | Normal media-player launch | A 10-second normal mpv file-open check used `vaapi-copy` with zero reported frame/decoder drops; an AV1 control reached EOF in software with one startup frame drop. `vaapi-copy` still uses the hardware decoder, with a copy into CPU-accessible memory afterward. |
 | Protected movies | A tested Widevine movie used CPU decoding and played. Hardware decoding is not promised for protected content, and no license or DRM restrictions are bypassed. |
 | Known video issue | A tested 1080p60 browser video dropped roughly 47% of frames in a normal window; the fullscreen comparison reported 1 drop in 1,804 frames. This geometry-dependent problem remains open. Fullscreen is a tested discriminator, not a universal fix. |
-| Camera, suspend/resume, battery life, broad USB-host support | Not qualified for release. |
+| USB-C ports | The hinge-side port works in alpha.1. With `omarchy-m4-boot` 1-12 from `omarchy-m4-update`, the front port works too: the same SuperSpeed drive enumerated and read cleanly on both (October 16). Alternate modes and broad peripheral coverage are not qualified. |
+| Camera, suspend/resume, battery life | Not qualified for release. |
 
 These are observations from one machine and specific builds, not a statement
 about current upstream Asahi support or every M4 system. Good decoder counters
@@ -197,12 +199,13 @@ unrestricted. Do not substitute the older broad session-placement experiment.
 ## Release scope
 
 The download includes the installer, image, checksums, source archives and
-upstream notices. It excludes Apple components, generated speaker-filter WAVs,
-Widevine binaries and preset personal consent. Speaker filters are prepared
-from the owner's installed macOS components and must match the expected hashes
-before partitioning begins. Unrecognized inputs are refused.
+upstream notices. The published update 2 kit excludes generated speaker-filter
+WAVs and prepares them from the owner's installed macOS before partitioning.
+The release assembler includes the exact approved
+[static J713 profile](audio/j713/filters/README.md) in the root image. Apple components, Widevine binaries and preset
+personal consent remain excluded.
 
-The front USB port, camera, suspend/resume, broad hardware coverage
+The camera, suspend/resume, broad hardware coverage
 and coordinated updates remain open work. This alpha is not a daily-driver,
 safe-update or all-M4 compatibility promise. See the
 [source package guide](docs/release-source.md) for source/build boundaries.

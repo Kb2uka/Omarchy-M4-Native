@@ -25,16 +25,17 @@ outer files. Their authorship and licenses are preserved.
   ALSA dependency is separately retained in the application source.
 - `j713-audio-reconstruction.tar`: sanitized sysroot member inventory, retained
   Dockerfiles, compiler/dependency versions, supplemental exports and build joins.
-- `numpy-2.5.3.tar.gz`: source for the bundled numerical dependency. Wheel notices
-  and the local filter-generator source are also in `owner-audio/bundle/`.
 
-Speaker filters are generated from each owner's installed macOS components;
-neither those Apple components nor the resulting WAV files are distributed in
-this kit. The generator requires exactly the output hashes already required by
-the unchanged audio graph and protection manifest. The macOS installer inserts
-the owner files into its locally collected firmware package; first Linux boot
-installs regular WAV files before audio registration and first-user creation.
-Widevine binaries are also excluded and acquired separately only after consent.
+The four static speaker filters in `audio/j713/filters/` are included in the
+root image and current integration source. The assembler verifies every file
+against the approved native identities before modifying the image. It keeps
+those identities in the installed audio manifest; runtime integrity checks
+still require the exact files. See the [profile provenance](../audio/j713/filters/README.md).
+
+The historical generation sources remain available for development and
+reproduction. The installer does not ship or execute their native helpers or
+NumPy dependency. No Apple executable, tuning strip, extracted preset or raw
+render capture is included. Widevine is acquired separately only after consent.
 
 ## Binaries outside packages
 
@@ -45,6 +46,9 @@ that built it. Each entry names archives in this `source/` directory, most of
 them pinned by hash, and tracked paths in `release-integration.tar.gz`. A
 tracked path may be pinned to the commit that built the binary. The assembler
 then refuses unless that path is unchanged in the revision being assembled.
+The package channel similarly requires every binary downloaded from the
+`package-inputs` release to be joined to its pinned corresponding source in
+`packaging/channel-source-joins.json` (see [package-channel.md](package-channel.md)).
 
 `correspondence` records how the join was established:
 
@@ -217,14 +221,15 @@ Rust/Cargo 1.93.1, LLVM/Clang 21.1.8 and GCC 15.2.0. Reconstruct those external
 toolchain/sysroot inputs using the retained recipes and package versions; local
 Docker image hashes alone are not public download locations. This source packet
 does not claim a fully self-contained or byte-identical clean rebuild. The
-owner-input pipeline passed on native ARM64 macOS 26.5.1 and 26.5.2 with matching
-output hashes. Reconstructed kernel and userspace build environments have not
+historical filter-generation pipeline passed on native ARM64 macOS 26.5.1
+and 26.5.2 with matching output hashes. The static profile was reproduced on
+macOS 26.6.2 as recorded in its provenance. Reconstructed kernel and userspace build environments have not
 been qualified as a complete clean rebuild.
 
 The assembler `tools/prepare-j713-release.py` records how the retained private
-root was copied, owner-specific payloads removed, freed blocks overwritten,
-new service installed and the existing SMC poweroff handler enabled through the
-device-tree child described in [j713-poweroff.md](j713-poweroff.md).
+root was copied, historical filters replaced by the approved static profile,
+preset consent removed, freed blocks overwritten, the owner-options service
+installed and the existing SMC poweroff handler enabled through the device-tree child described in [j713-poweroff.md](j713-poweroff.md).
 The four native filter identities replace the historical x86_64 calculation's
 identities in the installed audio manifest. The audio registration helper drops
 unrelated global device waits, and both integrity maps record its new identity.

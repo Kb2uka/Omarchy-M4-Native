@@ -1,0 +1,51 @@
+--- a/src/dockchannel_uart.c
++++ b/src/dockchannel_uart.c
+@@ -13,7 +13,19 @@
+ #define DATA_RX8      0x401c
+ #define DATA_RX_COUNT 0x402c
+ 
++/*
++ * On some machines nothing drains the TX FIFO, so once it fills it stays
++ * full. Never wait for space without a limit: wait briefly until something
++ * has been seen draining the FIFO, longer once it has (a debug host may
++ * pause), then drop output until space appears again.
++ */
++#define TX_TIMEOUT_US          100000
++#define TX_CONSUMER_TIMEOUT_US 2000000
++
+ static u64 uart_base = 0;
++static u32 tx_free = 0xffffffff; /* space left after our last write; more means a drain */
++static bool tx_consumer = false;
++static bool tx_stalled = false;
+ 
+ int dockchannel_uart_init(void)
+ {
+@@ -37,9 +49,26 @@
+     if (!uart_base)
+         return;
+ 
+-    while (read32(uart_base + DATA_TX_FREE) == 0)
+-        ;
++    u32 space = read32(uart_base + DATA_TX_FREE);
++    if (space > tx_free)
++        tx_consumer = true;
++
++    if (!space) {
++        if (tx_stalled)
++            return;
++
++        u64 timeout = timeout_calculate(tx_consumer ? TX_CONSUMER_TIMEOUT_US : TX_TIMEOUT_US);
++        while (!(space = read32(uart_base + DATA_TX_FREE))) {
++            if (timeout_expired(timeout)) {
++                tx_stalled = true;
++                return;
++            }
++        }
++        tx_consumer = true;
++    }
+ 
++    tx_stalled = false;
++    tx_free = space - 1;
+     write32(uart_base + DATA_TX8, c);
+ }
+ 

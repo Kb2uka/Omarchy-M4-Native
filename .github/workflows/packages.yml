@@ -23,6 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Install package tools
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends makepkg pacman-package-manager libarchive-tools fakeroot zstd gnupg && sudo mkdir -p /var/lib/pacman/local && echo 9 | sudo tee /var/lib/pacman/local/ALPM_DB_VERSION
       - name: Build packages
@@ -48,6 +49,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Install package tools
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends makepkg pacman-package-manager libarchive-tools fakeroot zstd gnupg && sudo mkdir -p /var/lib/pacman/local && echo 9 | sudo tee /var/lib/pacman/local/ALPM_DB_VERSION
       - name: Build packages

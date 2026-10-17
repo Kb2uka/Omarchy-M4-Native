@@ -33,6 +33,7 @@ KNOWN_DTBS = {
     '08e8e719381f88a1e50d821c145dad5b2d97fd772609e13d7778e19795e9cad1': 'j713-cpu-temperature',
     'fdedc09f2fe8ed681a61208589024e01fb5efa77beebbd0eb4ad267c08e77f7c': 'j713-ecluster-thermal',
     'c4f036b819ce757ce790b01779a3f7532eacd5cb1c1097fa20286d1a9c9ec6ca': 'j713-pboost',
+    '352bfa74351ad7d12d993f752fe9c09d682511bca0d4a60177cda0d716d1d614': 'j713-usb0',
 }
 BOARD = b'apple,j713'
 BOOT = 'boot/efi/omarchy/boot.bin'

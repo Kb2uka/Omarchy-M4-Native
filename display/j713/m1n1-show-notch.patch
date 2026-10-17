@@ -1,0 +1,18 @@
+--- a/src/kboot.c
++++ b/src/kboot.c
+@@ -98,11 +98,10 @@
+ 
+     u64 offset = cur_boot_args.video.height - new_height;
+ 
+-    printf("display: Hiding notch, %lux%lu -> %lux%lu (+%lu, 16:%lu)\n", cur_boot_args.video.width,
+-           cur_boot_args.video.height, cur_boot_args.video.width, new_height, offset, hfrac);
+-
+-    *fb_base += cur_boot_args.video.stride * offset;
+-    *fb_height = new_height;
++    // J713 notch build (Omarchy-M4-Native display/j713): hand Linux the whole
++    // panel, including the rows beside the camera cutout that stock m1n1 hides.
++    printf("display: Showing notch, %lux%lu (stock m1n1 hides %lu rows, 16:%lu)\n",
++           cur_boot_args.video.width, cur_boot_args.video.height, offset, hfrac);
+ }
+ 
+ static int dt_set_rng_seed_sep(int node)
