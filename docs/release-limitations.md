@@ -22,8 +22,9 @@
   Startup dependency changes do not establish a fix for that hardware condition.
   Keep a USB or paired Bluetooth pointing device available for qualification.
   Code review and checksums do not prove successful installation on another Mac.
-- **Speaker-filter preparation depends on the kit.** The published update 2 kit
-  has an `owner-audio/` folder. Its generator refuses unknown Apple AudioDSP or
+- **Speaker-filter preparation depends on the kit.** Update 3 includes the
+  approved filters and does not read macOS AudioDSP. The update 2 kit has an
+  `owner-audio/` folder. Its generator refuses unknown Apple AudioDSP or
   tuning hashes and unequal filter output before disk changes; macOS 26.5.1,
   26.5.2 and 26.6.2 produced identical approved outputs. Minimum macOS version
   alone does not guarantee a match. If your kit has no `owner-audio/` folder,
