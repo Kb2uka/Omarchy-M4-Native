@@ -1,0 +1,65 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * Apple Mac mini (M4 Pro, 2024): first-boot bring-up description
+ *
+ * target-type: J773s, model Mac16,11
+ *
+ * Board layout follows t6040-j614s.dts from damsleth/wallace (commit 55f116d)
+ * and Asahi's t8132-j773g.dts (Mac mini, M4). Console is the framebuffer that
+ * the boot firmware lights on a monitor connected at power-on.
+ *
+ * Copyright The Asahi Linux Contributors
+ * Original contributions: Copyright (c) 2026 KB2UKA
+ */
+
+/dts-v1/;
+
+#include "t6040.dtsi"
+
+/ {
+	compatible = "apple,j773s", "apple,t6040", "apple,arm-platform";
+	model = "Apple Mac mini (M4 Pro, 2024)";
+
+	aliases {
+		serial0 = &serial0;
+	};
+
+	chosen {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		stdout-path = "serial0";
+
+		/*
+		 * The HDMI port is ADT /arm-io/lpdptx-phy0, routed through
+		 * display-crossbar0 to one of dispext0..2. dispext0 carries the
+		 * boot display's timing in the macOS capture; the domains follow
+		 * t8132-j773g.dts and are unconfirmed until m1n1 reports them.
+		 */
+		framebuffer0: framebuffer@0 {
+			compatible = "apple,simple-framebuffer", "simple-framebuffer";
+			reg = <0 0 0 0>; /* To be filled by loader */
+			power-domains = <&ps_dispext0_cpu>, <&ps_dptx_phy>;
+			/* Format properties will be added by loader */
+			status = "disabled";
+		};
+	};
+
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+		/* To be filled by loader */
+	};
+
+	/* ADT /chosen dram-base 0x10000000000. */
+	memory@10000000000 {
+		device_type = "memory";
+		reg = <0x100 0 0x0 0>; /* To be filled by loader */
+	};
+};
+
+&serial0 {
+	status = "okay";
+};
