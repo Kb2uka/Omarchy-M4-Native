@@ -119,12 +119,32 @@ over `omarchy/boot.bin`. A rollback lasts until the next M4 package update
 composes the boot object again; report the problem in issue #49 before
 updating again.
 
+## Installer update 4
+
+`v0.1.0-alpha.1-update.4` is the **latest installer kit**, for **new
+installations only**. No fresh installation from this exact kit has been
+confirmed yet; update 3 remains available. An Air that is already installed
+needs nothing new from it: `omarchy-m4-update` brings the same GPU module as
+`omarchy-m4-gpu` 1-3, and the stage 1 loader is update 3's.
+
+- **The GPU starts on every 13-inch M4 Air**
+  ([#57](https://github.com/Kb2uka/Omarchy-M4-Native/issues/57),
+  [#118](https://github.com/Kb2uka/Omarchy-M4-Native/pull/118)). The image
+  runs GPU module `de0337a7…` in place of alpha.1's `80cf3669…`. It accepts
+  each Air's own GPU power limit up to 24800 mW and the base model's
+  eight-core GPU, so a fresh install reaches the desktop on its first boot
+  without first connecting to M4 updates. `sudo m4-gpu-module --rollback`
+  still restores alpha.1's module.
+- Everything else is as in update 3.
+
+The kit lands in `~/Downloads/Omarchy-M4-v0.1.0-alpha.1-update.4/installer/`;
+use that directory in the installation guide.
+
 ## Installer update 3
 
-`v0.1.0-alpha.1-update.3` is the **latest installer kit**, for **new
-installations only**. No fresh installation from this exact kit has been
-confirmed yet; update 2 remains available. An Air that is already installed needs
-nothing from it: everything it adds to the system also arrives through
+`v0.1.0-alpha.1-update.3` was the previous installer kit, for **new
+installations only**; update 4 replaces it. An Air that is already installed
+needs nothing from it: everything it adds to the system also arrives through
 `omarchy-m4-update`, except the stage 1 loader below.
 
 - **Speaker filters ship in the image**

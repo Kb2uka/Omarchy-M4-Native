@@ -206,6 +206,42 @@
         }
       ],
       "evidence": "J713 front USB-C port devicetree (omarchy-m4-boot 1-12). tools/build-j713-usb0-dtb.py applied patches/j713-usb0.dtso to the boost-state devicetree (c4f036b8...) and produced 352bfa74 with DTC 1.8.1 on two hosts: Arch dtc 1.8.1 on the OptiPlex and the m4-dtc:66 builder image on homebase (2026-10-16)."
+    },
+    "evdi-1.15.1-c5e65a2b.ko": {
+      "sha256": "c5e65a2bcba6433ff8369fea449ccc4e6be178a392b9c4a959884415953c671a",
+      "license": "GPL-2.0-only",
+      "correspondence": "rebuilt-identical",
+      "sources": [
+        {
+          "tree": "display/evdi",
+          "commit": "c16a6e744a0ea62767c96c9b5062ee513ddb1ec3"
+        },
+        {
+          "archive": "package-inputs/evdi-1.15.1.tar.gz",
+          "sha256": "b120df303d14be09062157aab17a8598746c0caf2e076ff3388b4091186cf2d9"
+        },
+        {
+          "archive": "source/kernel-controller.tar.gz",
+          "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        }
+      ],
+      "evidence": "Issue #58: USB external displays. DisplayLink evdi 1.15.1 module (the unchanged upstream v1.15.1 archive) built by display/evdi/build.sh module on the alpha.1 kernel tree in homebase m4-gravity-builder:20261008 (b2069edb), --network none. Two builds in separate job directories on 2026-10-17 gave the same bytes. vermagic 7.1.9-m4-gpu-backport-20261008; depends drm_ttm_helper. Loaded on the owner's Air with an evdi_probe virtual monitor: Hyprland lit it and drew the desktop into it."
+    },
+    "libevdi-1.15.1-0f1da52d.so": {
+      "sha256": "0f1da52db1f7cbd7e0c420d47285ddee78e22dc0a57e789305c1456b163034ce",
+      "license": "LGPL-2.1-or-later",
+      "correspondence": "rebuilt-identical",
+      "sources": [
+        {
+          "tree": "display/evdi",
+          "commit": "c16a6e744a0ea62767c96c9b5062ee513ddb1ec3"
+        },
+        {
+          "archive": "package-inputs/evdi-1.15.1.tar.gz",
+          "sha256": "b120df303d14be09062157aab17a8598746c0caf2e076ff3388b4091186cf2d9"
+        }
+      ],
+      "evidence": "Issue #58: USB external displays. libevdi.so.1.15.1 (soname libevdi.so.1, needs only libc) from the unchanged upstream v1.15.1 archive, built by display/evdi/build.sh library in homebase m4-gravity-mesa-arm-builder:20261008 (ed20ced8), --network none. Two builds in separate job directories on 2026-10-17 gave the same bytes. Used by evdi_probe on the owner's Air."
     }
   }
 }

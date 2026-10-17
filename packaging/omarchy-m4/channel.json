@@ -12,7 +12,8 @@
     "omarchy-m4-speaker",
     "omarchy-m4-gpu",
     "omarchy-m4-headphones",
-    "omarchy-m4-cpu"
+    "omarchy-m4-cpu",
+    "omarchy-m4-evdi"
   ],
   "kernel": {
     "release": "7.1.9-m4-gpu-backport-20261008",
@@ -80,6 +81,11 @@
       "usr/lib/omarchy-m4/cpu/j713_pguard.ko",
       "usr/lib/systemd/system/m4-cpu-idle.service",
       "usr/share/licenses/omarchy-m4-cpu/"
+    ],
+    "omarchy-m4-evdi": [
+      "usr/lib/modules/7.1.9-m4-gpu-backport-20261008/updates/evdi.ko",
+      "usr/lib/libevdi.so",
+      "usr/share/licenses/omarchy-m4-evdi/"
     ]
   },
   "protected_paths": [
@@ -136,5 +142,11 @@
   },
   "notch_loader": {
     "usr/lib/omarchy-m4/m1n1-stage2-notch.bin": "f2417a74d13838004847a6fbdf946b524005301b88b5a403b1e79cb36d0ec7ca"
+  },
+  "evdi_module": {
+    "usr/lib/modules/7.1.9-m4-gpu-backport-20261008/updates/evdi.ko": "c5e65a2bcba6433ff8369fea449ccc4e6be178a392b9c4a959884415953c671a"
+  },
+  "evdi_library": {
+    "usr/lib/libevdi.so": "0f1da52db1f7cbd7e0c420d47285ddee78e22dc0a57e789305c1456b163034ce"
   }
 }

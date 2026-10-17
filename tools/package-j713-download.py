@@ -34,6 +34,12 @@ def safe_path(name):
     return name
 
 
+def release_matches(version, tag):
+    """A kit's release tag: v<release_version>, or v<release_version>-update.N for an installer update."""
+    return isinstance(version, str) and (
+        tag[1:] == version or re.fullmatch(re.escape(version) + r'-update\.[1-9][0-9]*', tag[1:]) is not None)
+
+
 def no_links(path):
     require(path.is_absolute(), 'Use absolute input and output paths')
     require(not any(p.is_symlink() for p in (path, *path.parents)), 'Symlink path refused')
@@ -91,7 +97,8 @@ def inventory(delivery, kit_pin, sums_pin, tag):
     # Transport does not grant distribution rights or override historical private evidence.
     require(kit.get('private_only') is False and image.get('private_only') is False,
             'Private or unclassified delivery cannot be packaged for download')
-    require(kit.get('release_version') == tag[1:] and image.get('release_version') == tag[1:],
+    require(release_matches(kit.get('release_version'), tag) and
+            image.get('release_version') == kit.get('release_version'),
             'Release tag does not match the frozen delivery')
     require(isinstance(kit.get('files'), dict) and set(kit['files']) == set(files) - {'KIT.json', 'SHA256SUMS'},
             'KIT.json does not close the delivery inventory')

@@ -206,16 +206,26 @@ class ManifestTests(unittest.TestCase):
     def test_repository_joins_cover_alpha1_and_every_gpl_binary_is_proven(self):
         joins = release.source_joins(ROOT)
         binaries = joins['binaries']
-        self.assertEqual(len(binaries), 24)
-        gpu = binaries['opt/m4-gpu/asahi_m4.ko']
-        self.assertEqual(gpu['correspondence'], 'rebuilt-identical')
-        self.assertEqual(gpu['sources'], [
+        self.assertEqual(len(binaries), 25)
+        alpha1_tree = [
             {'archive': 'source/kernel-controller.tar.gz',
              'sha256': '810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57'},
             {'archive': 'source/omarchy-j713-v0.1.0-alpha.1-gpu-air-source.tar.gz',
-             'sha256': 'c19a7c97184b3f954795c50dfeff857e8baf685f901524845710da839cbd2562'}])
+             'sha256': 'c19a7c97184b3f954795c50dfeff857e8baf685f901524845710da839cbd2562'}]
+        # alpha.1's GPU module stays in the image only as m4-gpu-module's rollback target.
+        alpha1 = binaries['var/lib/omarchy-m4/gpu-module/alpha1-module.ko']
+        self.assertEqual((alpha1['sha256'], alpha1['correspondence'], alpha1['sources']),
+                         (release.GPU_ALPHA1, 'rebuilt-identical', alpha1_tree))
         documented = (ROOT / 'docs/j713-gpu-normal-root.md').read_text()
-        self.assertIn('| GPU module | `' + gpu['sha256'] + '` |', documented)
+        self.assertIn('| GPU module | `' + alpha1['sha256'] + '` |', documented)
+        # The image runs the module omarchy-m4-gpu 1-3 ships, joined exactly as the channel joins it.
+        gpu = binaries['opt/m4-gpu/asahi_m4.ko']
+        self.assertEqual((gpu['sha256'], gpu['correspondence']), (release.GPU_FIXED, 'rebuilt-identical'))
+        channel = json.loads((ROOT / 'packaging/channel-source-joins.json').read_bytes())['binaries']
+        shipped = channel['asahi_m4-' + release.GPU_FIXED[:8] + '.ko']
+        self.assertEqual((gpu['sha256'], gpu['license'], gpu['sources']),
+                         (shipped['sha256'], shipped['license'], shipped['sources']))
+        self.assertEqual(gpu['sources'][1:], alpha1_tree)
         # Every GPL binary was rebuilt byte for byte from published source (GPU: issue 77;
         # audio and video modules: 2026-10-14). The MIT userspace remains unverified.
         for name, entry in binaries.items():
@@ -249,12 +259,11 @@ class ManifestTests(unittest.TestCase):
             sources = binaries['opt/m4-video/20261011/kernel/' + name]['sources']
             self.assertIn({'archive': 'source/build-inputs-final.tar.gz',
                            'sha256': '6a800de13f6c4ab7318d66a91fe0c68bf1a0c8a49a969228fb709772c1576945'}, sources)
-        tracked = [path.relative_to(ROOT).as_posix() for path in (ROOT / 'audio').rglob('*') if path.is_file()]
         for name, entry in binaries.items():
             for source in entry['sources']:
                 if 'tree' in source:
                     with self.subTest(name=name, tree=source['tree']):
-                        self.assertTrue(any(path.startswith(source['tree'] + '/') for path in tracked))
+                        self.assertTrue(any(path.is_file() for path in (ROOT / source['tree']).rglob('*')))
 
 
 class RootGateTests(unittest.TestCase):
@@ -315,6 +324,30 @@ class RootGateTests(unittest.TestCase):
                 return release.prepare_root(self.image, self.image, self.root, self.tree, 'id', **options)
             finally:
                 self.filled = filled.called
+
+    def test_the_fixed_gpu_module_is_in_place_before_the_join_gate(self):
+        # The joins name the fixed module where it runs and alpha.1's where rollback keeps it, so
+        # the gate passes only if prepare_root swapped the module before checking.
+        old, new = b'alpha.1 gpu module.ko', b'fixed gpu module.ko'
+        joins = json.loads((self.tree / release.SOURCE_JOINS).read_bytes())
+        joins['binaries'].update({release.GPU_MODULE: joined(new, 'rebuilt-identical'),
+                                  release.GPU_BACKUP + '/alpha1-module.ko': joined(old, 'rebuilt-identical')})
+        self.write(self.tree, release.SOURCE_JOINS, json.dumps(joins).encode())
+        original = self.mount
+
+        def mount(*args):
+            original(*args)
+            if args[0] == 'mount':
+                self.write(self.root, release.GPU_MODULE, old)
+                self.write(self.root, release.GPU_SUMS, f'{digest(old)}  /{release.GPU_MODULE}\n'.encode())
+        self.mount = mount
+        with mock.patch.object(release, 'GPU_ALPHA1', digest(old)), \
+             mock.patch.object(release, 'GPU_FIXED', digest(new)):
+            pins = self.prepare(gpu_module=new, allow_unverified=True)
+        self.assertEqual(pins['unverified'], ['opt/m4/tool'])
+        self.assertTrue(self.filled)
+        self.assertEqual((self.root / release.GPU_MODULE).read_bytes(), new)
+        self.assertEqual((self.root / release.GPU_BACKUP / 'alpha1-module.ko').read_bytes(), old)
 
     def test_unverified_binary_stops_assembly_before_filling_free_space(self):
         with self.assertRaisesRegex(RuntimeError, 'not verified by an identical rebuild: opt/m4/tool'):
