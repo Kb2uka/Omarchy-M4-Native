@@ -267,6 +267,28 @@ file.
   and pinned in `package-inputs`. The composer and updater accept it only after
   the boost-state devicetree.
 
+### omarchy-m4-gpu 1-3
+
+- **GPU and desktop on the eight-core GPU**
+  ([#118](https://github.com/Kb2uka/Omarchy-M4-Native/pull/118), by Jeff
+  Hollis). The base-model Air's GPU has the same ten core positions with two
+  fused off. The #57 module accepted only the ten-core mask `0x3ff`, so an
+  eight-core Air (one reports `0x3bd`) got no GPU and no desktop. The module
+  (`de0337a7…`, 390,816 bytes, built from [`gpu/j713/`](../gpu/j713/README.md)
+  on the alpha.1 kernel tree and pinned in `package-inputs`) accepts any mask
+  within `0x3ff` with eight or ten cores. Every other check is unchanged. The
+  mask never reaches the GPU firmware, only Mesa, so a ten-core Air runs exactly
+  as before.
+- **`m4-gpu-module`** moves an Air from #57's module (`3cf47fa7…`, 1-1 and
+  1-2, state `previous`) to the new one at the next boot, the same way it moves
+  one from alpha.1. Its swap still writes the module before the pin, and a
+  module ahead of its pin is completed the next boot, including one that 1-1 or
+  1-2 left. A pin ahead of its module, or any other module, is refused and left
+  untouched. `sudo m4-gpu-module --rollback` still restores alpha.1.
+- The setup script's restart notice (`gpu_pending` in `m4-channel-setup.py`,
+  shipped in `omarchy-m4-boot`) counts only a swap from alpha.1, so an Air
+  moving from 1-2 is told to restart by pacman's install message instead.
+
 ## Connecting new installs
 
 The release root builder (`tools/prepare-j713-release.py`) adds

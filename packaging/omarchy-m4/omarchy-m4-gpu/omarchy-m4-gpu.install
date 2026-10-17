@@ -1,5 +1,5 @@
 post_install() {
-  echo 'omarchy-m4-gpu: the GPU module fix (#57) applies at the next restart.'
+  echo 'omarchy-m4-gpu: the GPU module fix (#57, #118) applies at the next restart.'
 }
 
 post_upgrade() {
