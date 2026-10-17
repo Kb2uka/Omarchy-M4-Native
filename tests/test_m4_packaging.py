@@ -6,6 +6,7 @@ import importlib.util
 import json
 from pathlib import Path
 import io
+import os
 import re
 import subprocess
 import tarfile
@@ -109,17 +110,36 @@ class RecipeTests(unittest.TestCase):
         self.assertIn('tree_sha=810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57', build)
         self.assertIn(f"/usr/lib/modules/{CHANNEL['kernel']['release']}/updates/evdi.ko", text)
 
-    def test_evdi_build_refuses_unpinned_inputs_before_building(self):
+    def test_evdi_build_refuses_each_unpinned_input_before_building(self):
         build = ROOT / 'display/evdi/build.sh'
+        text = build.read_text()
+        tree_pin = re.search(r'^tree_sha=([0-9a-f]{64})$', text, re.M).group(1)
+        evdi_pin = re.search(r'^evdi_sha=([0-9a-f]{64})$', text, re.M).group(1)
         with tempfile.TemporaryDirectory() as temp:
             temp = Path(temp)
-            other = temp / 'other.tar.gz'
-            other.write_bytes(b'not the pinned archive')
-            for mode, args in (('module', [other, other]), ('library', [other])):
-                with self.subTest(mode):
-                    out = temp / ('out-' + mode)
-                    result = subprocess.run(['bash', str(build), mode, *map(str, args), str(out)],
-                                            capture_output=True, text=True)
+            # A sha256sum stand-in: the files named "pinned-tree" and "pinned-evdi" hash to the
+            # pins, so each check is exercised alone with a well-formed but unpinned partner.
+            shim = temp / 'bin/sha256sum'
+            shim.parent.mkdir()
+            shim.write_text('#!/bin/sh\ncase "$(cat)" in\n'
+                            f'  pinned-tree) echo "{tree_pin}  -" ;;\n'
+                            f'  pinned-evdi) echo "{evdi_pin}  -" ;;\n'
+                            '  *) echo "0000000000000000000000000000000000000000000000000000000000000000  -" ;;\n'
+                            'esac\n')
+            shim.chmod(0o755)
+            tree, evdi, other = temp / 'tree.tar.gz', temp / 'evdi.tar.gz', temp / 'other.tar.gz'
+            tree.write_text('pinned-tree')
+            evdi.write_text('pinned-evdi')
+            with tarfile.open(other, 'w:gz') as archive:  # a valid archive that is not the pin
+                archive.addfile(tarfile.TarInfo('evdi-1.15.1/README.md'), io.BytesIO(b''))
+            env = {**os.environ, 'PATH': f"{shim.parent}:{os.environ['PATH']}"}
+            for name, args in (('module: unpinned tree', ['module', other, evdi]),
+                               ('module: unpinned evdi', ['module', tree, other]),
+                               ('library: unpinned evdi', ['library', other])):
+                with self.subTest(name):
+                    out = temp / ('out-' + name.replace(' ', '-').replace(':', ''))
+                    result = subprocess.run(['bash', str(build), *map(str, args), str(out)],
+                                            capture_output=True, text=True, env=env)
                     self.assertNotEqual(result.returncode, 0)
                     self.assertFalse(out.exists(), 'nothing is built from an unpinned archive')
 
