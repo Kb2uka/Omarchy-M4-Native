@@ -58,6 +58,12 @@ KB2UKA's notice for the J773s changes. `dts/t6040/t6040-pmgr.dtsi` is output of
 m1n1's `proxyclient/tools/pmgr_adt2dt.py` (MIT) for the J773s ADT; as with the
 J713 PMGR description, the hardware data does not originate with either
 contributor.
+The `apple,preserve-active` and `apple,skip-auto-enable` PMGR policy, and the
+list of display domains that need it, come from CJ Damsleth's
+[damsleth/linux](https://github.com/damsleth/linux) branch
+`wallace/t6040-bringup` (commit `cf08fa5`, GPL-2.0). Florian Klink's earlier
+J773s devicetree on [flokli/linux](https://github.com/flokli/linux) branch
+`j773s` was consulted for comparison; no text from it is copied.
 
 ### Derived PMGR description
 
