@@ -1,19 +1,25 @@
 # M4 boards
 
 [`packaging/m4-boards.json`](../packaging/m4-boards.json) is the one place
-that says which Apple M4 (T8132) Macs this project supports. Only the 13-inch
-M4 Air (J713) is qualified. Every other M4 board is refused. M4 Pro and M4 Max
-Macs use a different chip and are outside this port.
+that says which Apple M4-family Macs this project supports. Only the 13-inch
+M4 Air (J713) is qualified. Every other board is refused.
+
+Each board names its chip. The M4 boards use the T8132; the M4 Pro Mac mini
+(J773s) uses the T6040, a different chip, and its port is starting from the
+[macOS survey](j773s-macos-survey.md). The M4 Pro and M4 Max MacBook Pros are
+listed under `unlisted`: no board entry yet, and `Install.command` refuses
+them like every other unqualified model.
 
 <!-- m4-boards:begin -->
-| Board | Model identifiers | Mac | Support | Installer profile |
-|---|---|---|---|---|
-| J713 | Mac16,12 | MacBook Air (13-inch, M4, 2025) | qualified | 26.5.1, expert mode only |
-| J715 | Mac16,13 | MacBook Air (15-inch, M4, 2025) | refused | none |
-| J604 | Mac16,1 | MacBook Pro (14-inch, M4, 2024) | refused | none |
-| J623 | Mac16,2 | iMac (24-inch, 2024, Two ports) | refused | none |
-| J624 | Mac16,3 | iMac (24-inch, 2024, Four ports) | refused | none |
-| J773g | Mac16,10 | Mac mini (M4, 2024) | refused | 26.6.2 |
+| Board | Chip | Model identifiers | Mac | Support | Installer profile |
+|---|---|---|---|---|---|
+| J713 | T8132 | Mac16,12 | MacBook Air (13-inch, M4, 2025) | qualified | 26.5.1, expert mode only |
+| J715 | T8132 | Mac16,13 | MacBook Air (15-inch, M4, 2025) | refused | none |
+| J604 | T8132 | Mac16,1 | MacBook Pro (14-inch, M4, 2024) | refused | none |
+| J623 | T8132 | Mac16,2 | iMac (24-inch, 2024, Two ports) | refused | none |
+| J624 | T8132 | Mac16,3 | iMac (24-inch, 2024, Four ports) | refused | none |
+| J773g | T8132 | Mac16,10 | Mac mini (M4, 2024) | refused | 26.6.2 |
+| J773s | T6040 | Mac16,11 | Mac mini (M4 Pro, 2024) | refused | none |
 <!-- m4-boards:end -->
 
 The installer profile is the macOS stub version that the bundled
@@ -42,7 +48,8 @@ a mini.
   `m4-j713-owner-assets` (its fixed paths redirected into the fixture) and the
   board and SoC lines of `m4-video-start` (run with its own `fail()`). Each
   sibling is fed the `compatible` list m1n1 hands Linux on that Mac
-  (`apple,<board>`, `apple,t8132`, `apple,arm-platform`). The gates that also
+  (`apple,<board>`, `apple,<chip>`, `apple,arm-platform`), so the J773s
+  identity also carries a different SoC string. The gates that also
   check the SoC must refuse the J713 name on an M2 SoC;
 - a gate that reads a devicetree file lets a sibling M4 identity, or the J713
   name on an M2 SoC, through: the J713 devicetree builders

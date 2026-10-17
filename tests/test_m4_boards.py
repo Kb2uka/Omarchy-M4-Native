@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 KB2UKA
-"""Every M4 (T8132) Mac in packaging/m4-boards.json, against every board gate.
+"""Every M4-family Mac in packaging/m4-boards.json, against every board gate.
 
 The table is the one place that says which M4 boards this project supports.
 These tests fail when the installer, the shipped manifests or the source code
 disagree with it, and they feed the real devicetree identity of every sibling
-M4 Mac to each live-system board gate. The siblings carry the same
+M4 Mac to each live-system board gate. Most siblings carry the same
 "apple,t8132" SoC string as the J713, so a gate that checks only the SoC, or
-fakes a board, fails here. Passing proves the gates refuse; it does not show
-that anything works on another board.
+fakes a board, fails here; the M4 Pro boards carry their own SoC string.
+Passing proves the gates refuse; it does not show that anything works on
+another board.
 """
 import importlib.util
 import json
@@ -23,8 +24,8 @@ import tempfile
 import unittest
 import unittest.mock
 
-from m4_board_identities import (BOARDS, FOREIGN_SOC, NEAR_MISS_BOARD, NEAR_MISS_SOC, QUALIFIED, REFUSED, ROOT, SOC, TABLE,
-                                 TABLE_PATH, identity, refused_identities)
+from m4_board_identities import (BOARDS, FOREIGN_SOC, NEAR_MISS_BOARD, NEAR_MISS_SOC, QUALIFIED, REFUSED, ROOT, SOC, SOCS,
+                                 TABLE, TABLE_PATH, identity, refused_identities)
 from test_j713_gpu_air_gate import SOURCE as G16, item
 
 DOC = ROOT / 'docs/m4-boards.md'
@@ -41,31 +42,38 @@ def load(name, path):
 
 
 def render_rows():
-    rows = ['| Board | Model identifiers | Mac | Support | Installer profile |',
-            '|---|---|---|---|---|']
+    rows = ['| Board | Chip | Model identifiers | Mac | Support | Installer profile |',
+            '|---|---|---|---|---|---|']
     for board in BOARDS:
         installer = board['installer']
         profile = 'none' if installer is None else installer['stub'] + (
             ', expert mode only' if installer['expert_only'] else '')
-        rows.append(f"| {board['target']} | {', '.join(board['models'])} | {board['name']} "
-                    f"| {board['support']} | {profile} |")
+        rows.append(f"| {board['target']} | {SOCS[board['soc']]['chip']} | {', '.join(board['models'])} "
+                    f"| {board['name']} | {board['support']} | {profile} |")
     return '\n'.join(rows)
 
 
 class BoardTable(unittest.TestCase):
     def test_table_is_well_formed(self):
-        self.assertEqual(TABLE['schema'], 1)
-        self.assertEqual(TABLE['soc'], {'chip': 'T8132', 'compatible': 'apple,t8132'})
+        self.assertEqual(TABLE['schema'], 2)
+        self.assertEqual(set(TABLE), {'schema', 'socs', 'boards', 'unlisted'})
+        self.assertEqual(len(SOCS), len(TABLE['socs']), 'a SoC is listed twice')
+        for soc in TABLE['socs']:
+            with self.subTest(soc=soc['chip']):
+                self.assertEqual(set(soc), {'chip', 'compatible', 'name'})
+                self.assertEqual(soc['compatible'], 'apple,' + soc['chip'].lower())
+        self.assertEqual(SOC, 'apple,t8132')
         self.assertTrue(QUALIFIED, 'at least one board must be qualified')
         for key in ('target', 'compatible'):
             values = [board[key] for board in BOARDS]
             self.assertEqual(len(values), len(set(values)), key)
         models = [model for board in BOARDS for model in board['models']]
-        other = [model for entry in TABLE['other_socs'] for model in entry['models']]
+        other = [model for entry in TABLE['unlisted'] for model in entry['models']]
         self.assertEqual(len(models + other), len(set(models + other)), 'a model identifier is listed twice')
         for board in BOARDS:
             with self.subTest(board=board['target']):
                 self.assertEqual(board['compatible'], 'apple,' + board['target'].lower())
+                self.assertIn(board['soc'], SOCS, 'the board names a SoC the table does not list')
                 self.assertIn(board['support'], ('qualified', 'refused'))
                 self.assertTrue(all(re.fullmatch(r'Mac\d+,\d+', model) for model in board['models']))
                 installer = board['installer']
@@ -81,7 +89,7 @@ class BoardTable(unittest.TestCase):
         gate = 'sysctl() { printf "%s\\n" "$MODEL"; }\n' + gates[0].replace('/usr/sbin/sysctl', 'sysctl')
         qualified = {model for board in QUALIFIED for model in board['models']}
         models = [model for board in BOARDS for model in board['models']]
-        models += [model for entry in TABLE['other_socs'] for model in entry['models']]
+        models += [model for entry in TABLE['unlisted'] for model in entry['models']]
         for model in models + ['Mac15,12', '']:
             with self.subTest(model=model):
                 result = subprocess.run(['bash', '-c', gate], capture_output=True, text=True,

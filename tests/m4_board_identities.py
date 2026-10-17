@@ -12,9 +12,11 @@ ROOT = Path(__file__).resolve().parents[1]
 TABLE_PATH = ROOT / 'packaging/m4-boards.json'
 TABLE = json.loads(TABLE_PATH.read_text())
 BOARDS = TABLE['boards']
-SOC = TABLE['soc']['compatible']
+SOCS = {soc['compatible']: soc for soc in TABLE['socs']}
 QUALIFIED = [board for board in BOARDS if board['support'] == 'qualified']
 REFUSED = [board for board in BOARDS if board['support'] == 'refused']
+# The SoC the release's gates check: every qualified board must share it.
+(SOC,) = {board['soc'] for board in QUALIFIED}
 
 
 # The J713 board name on another SoC (M2): a gate that checks only the board accepts it.
@@ -26,8 +28,8 @@ NEAR_MISS_SOC = ('near-miss SoC', b'apple,j713\0apple,t8132-x\0apple,arm-platfor
 
 
 def identity(board):
-    """The root compatible list m1n1 hands Linux on that Mac (upstream t8132-<board>.dts)."""
-    return f"{board['compatible']}\0{SOC}\0apple,arm-platform\0".encode()
+    """The root compatible list m1n1 hands Linux on that Mac (upstream <soc>-<board>.dts)."""
+    return f"{board['compatible']}\0{board['soc']}\0apple,arm-platform\0".encode()
 
 
 def refused_identities():
