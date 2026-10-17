@@ -7,7 +7,7 @@ These tests fail when the installer, the shipped manifests or the source code
 disagree with it, and they feed the real devicetree identity of every sibling
 M4 Mac to each live-system board gate. Most siblings carry the same
 "apple,t8132" SoC string as the J713, so a gate that checks only the SoC, or
-fakes a board, fails here; the M4 Pro boards carry their own SoC string.
+fakes a board, fails here; the M4 Pro Mac mini carries its own SoC string.
 Passing proves the gates refuse; it does not show that anything works on
 another board.
 """
@@ -139,6 +139,17 @@ class BoardTable(unittest.TestCase):
                     found.setdefault(name, path.relative_to(ROOT))
         self.assertIn('j713', found, 'the board scan found nothing; it is not looking in the right place')
         self.assertEqual({name: str(path) for name, path in found.items() if name not in boards}, {})
+
+    def test_each_identity_carries_its_own_board_soc(self):
+        """The gates see each sibling with its own SoC string, so J773s arrives as apple,t6040."""
+        for board in BOARDS:
+            with self.subTest(board=board['target']):
+                self.assertEqual(identity(board).split(b'\0'),
+                                 [board['compatible'].encode(), board['soc'].encode(), b'apple,arm-platform', b''])
+        j773s = next(board for board in BOARDS if board['target'] == 'J773s')
+        self.assertEqual(identity(j773s), b'apple,j773s\0apple,t6040\0apple,arm-platform\0')
+        self.assertIn(b'apple,j773s\0apple,t6040\0apple,arm-platform\0',
+                      [compatible for _, compatible in refused_identities()])
 
     def test_board_doc_matches_the_table(self):
         text = DOC.read_text()
