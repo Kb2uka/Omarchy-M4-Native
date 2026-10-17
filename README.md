@@ -156,6 +156,7 @@ once applies them:
 | The boost guard's limits match macOS on the fanless Air (105 C bursts, 100 C sustained), so one busy core runs at its top boost (4.04 GHz, bursts to 4.46 GHz) for most of a 45 s job, and it estimates the die's temperature from heat measured on the Air ([#66](https://github.com/Kb2uka/Omarchy-M4-Native/issues/66), [details](docs/j713-cpu-boost.md#settled-heat-the-base-estimate)) | `omarchy-m4-cpu` 1-3 |
 | Headset microphone on the headphone jack ([#105](https://github.com/Kb2uka/Omarchy-M4-Native/pull/105)); starts at the next boot ([details](docs/j713-headphones.md#headset-microphone)) | `omarchy-m4-headphones` 1-2 |
 | Opt-in: the desktop uses the whole 2560x1664 panel, with the bar's widgets left and right of the camera ([#89](https://github.com/Kb2uka/Omarchy-M4-Native/issues/89)); `sudo m4-notch --show`, then restart; `sudo m4-notch --hide` goes back ([details](docs/j713-notch.md)) | `omarchy-m4-boot` 1-12 |
+| External monitors through DisplayLink USB adapters and docks: the kernel side (evdi); DisplayLinkManager comes from the AUR. USB-C and Thunderbolt monitors still do not work ([#58](https://github.com/Kb2uka/Omarchy-M4-Native/issues/58), [details](docs/j713-external-displays.md)) | `omarchy-m4-evdi` 1.15.1-1, `omarchy-m4-boot` 1-13 |
 
 A devicetree you applied by hand from the guides is kept; the update never
 moves an Air back to an older one. An Air connected before
@@ -191,6 +192,7 @@ As of October 11, 2026, with the pinned experimental runtime:
 | Protected movies | A tested Widevine movie used CPU decoding and played. Hardware decoding is not promised for protected content, and no license or DRM restrictions are bypassed. |
 | Known video issue | A tested 1080p60 browser video dropped roughly 47% of frames in a normal window; the fullscreen comparison reported 1 drop in 1,804 frames. This geometry-dependent problem remains open. Fullscreen is a tested discriminator, not a universal fix. |
 | USB-C ports | The hinge-side port works in alpha.1. With `omarchy-m4-boot` 1-12 from `omarchy-m4-update`, the front port works too: the same SuperSpeed drive enumerated and read cleanly on both (October 16). Alternate modes and broad peripheral coverage are not qualified. |
+| External displays | A USB-C or Thunderbolt monitor shows nothing: the M4's display coprocessor (DCP) firmware is not supported by Linux yet. With `omarchy-m4-evdi`, Hyprland drew a virtual DisplayLink-style monitor at 60 Hz (October 17); no physical DisplayLink adapter is qualified yet ([details](docs/j713-external-displays.md)). |
 | Camera, suspend/resume, battery life | Not qualified for release. |
 
 These are observations from one machine and specific builds, not a statement
