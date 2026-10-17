@@ -148,6 +148,8 @@ class BoardTable(unittest.TestCase):
                                  [board['compatible'].encode(), board['soc'].encode(), b'apple,arm-platform', b''])
         j773s = next(board for board in BOARDS if board['target'] == 'J773s')
         self.assertEqual(identity(j773s), b'apple,j773s\0apple,t6040\0apple,arm-platform\0')
+        self.assertEqual(refused_identities(), [(board['target'], identity(board)) for board in REFUSED]
+                         + [FOREIGN_SOC, NEAR_MISS_BOARD, NEAR_MISS_SOC])
         self.assertIn(b'apple,j773s\0apple,t6040\0apple,arm-platform\0',
                       [compatible for _, compatible in refused_identities()])
 
