@@ -11,8 +11,17 @@ J713 backlog before renewal
 ```
 
 Protection fails closed by design and does not restart (see
-[readiness](j713-audio-readiness.md)), so audio stays off until a reboot or a
-manual `systemctl start speakersafetyd-j713`.
+[readiness](j713-audio-readiness.md)). A stale-capture panic also latches the
+transport in a failed state, so `systemctl restart speakersafetyd-j713` cannot
+recover audio on the current release.
+
+## Recovery
+
+Save any useful logs, then reboot the Air. Rebooting is the only supported
+recovery after a protection panic; do not try to unload or reload the audio
+modules in a running session. The J713 audio overlays and their modules are
+retained for the boot, and the transport's failed latch is cleared only when
+the next boot initializes a fresh audio stack.
 
 ## Cause
 
