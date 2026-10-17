@@ -11,17 +11,48 @@ J713 backlog before renewal
 ```
 
 Protection fails closed by design and does not restart (see
-[readiness](j713-audio-readiness.md)). A stale-capture panic also latches the
-transport in a failed state, so `systemctl restart speakersafetyd-j713` cannot
-recover audio on the current release.
+[readiness](j713-audio-readiness.md)), so audio stays off until a reboot. The
+same daemon can also panic later in a session, while something is playing,
+with `J713 stale capture backlog/read`
+([#64](https://github.com/Kb2uka/Omarchy-M4-Native/issues/64)); the cause of
+that panic is still open. The recovery below covers both.
 
 ## Recovery
 
-Save any useful logs, then reboot the Air. Rebooting is the only supported
-recovery after a protection panic; do not try to unload or reload the audio
-modules in a running session. The J713 audio overlays and their modules are
-retained for the boot, and the transport's failed latch is cleared only when
-the next boot initializes a fresh audio stack.
+Reboot the Air. It is the only supported recovery after a protection panic.
+
+1. Optionally save the log first:
+   `journalctl -b -u speakersafetyd-j713 --no-pager > ~/speaker-protection.log`.
+2. Reboot. Do not restart `speakersafetyd-j713`, unload or reload the audio
+   modules, or switch the card profile to `off` to free the speakers.
+3. After the reboot, if `systemctl is-active speakersafetyd-j713` prints
+   `active` but PipeWire offers only "Dummy Output", restore the speaker
+   profile (no `sudo`):
+
+   ```bash
+   pactl set-card-profile alsa_card.platform-sound HiFi
+   ```
+
+None of the in-session attempts work on the current release:
+
+- Restarting protection while PipeWire holds the speaker output fails with
+  `Unhealthy first-lease initialization` (#64 saw the group still
+  `cancelled=1`). The readiness check also requires the output to be closed
+  before the first lease, and PipeWire still holds it.
+- Once protection has gone, PipeWire's next attempt to start the output fails
+  the lease check and sets the transport's `failed` flag
+  (`audio/j713/kernel/j713-mca.h`). After that, setting up the output fails with
+  `I/O error (5)` and starting it with `Operation not permitted`. The driver
+  never clears that flag, so it lasts until the next boot.
+- Registration runs once per boot and never reloads a module or overlay, so
+  the audio stack cannot be rebuilt in a running session either.
+- WirePlumber remembers a card profile across reboots
+  (`~/.local/state/wireplumber/default-profile`). Switching the card to `off`
+  leaves the next boot with healthy protection but no speakers until `HiFi`
+  is restored, which is why step 3 exists.
+
+On the owner's Air (#64) these attempts were followed minutes later by a
+system freeze whose cause is unknown.
 
 ## Cause
 

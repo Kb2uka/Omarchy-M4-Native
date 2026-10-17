@@ -52,7 +52,11 @@
 - **Incomplete hardware qualification:** camera, suspend/resume, battery life,
   Bluetooth audio, arbitrary peripherals and fault recovery are not qualified.
   Speaker protection remains enabled; do not substitute unqualified filters or
-  disable the protection services.
+  disable the protection services. If protection stops and the speakers go
+  silent, reboot; restarting it in the same session does not work. If the
+  reboot leaves only "Dummy Output", run
+  `pactl set-card-profile alsa_card.platform-sound HiFi`
+  ([recovery](https://github.com/Kb2uka/Omarchy-M4-Native/blob/main/docs/j713-protection-startup.md#recovery)).
 - **M4 updates need one connect step.** Read UPDATES.md. After it, M4 kernel
   and boot fixes arrive as signed packages through `omarchy update`. Ordinary
   rolling Arch Linux ARM and Omarchy updates remain unqualified on this hardware.
