@@ -201,8 +201,8 @@
       "correspondence": "rebuilt-identical",
       "sources": [
         {
-          "tree": "audio/j713/kernel",
-          "commit": "ee98743a860437ad5797bf5db080c04e0128528d"
+          "archive": "source/j713-audio-kernel-ee98743a.tar.gz",
+          "sha256": "c9969e3163caa5c26691e22923af73781063f4a08336f13d7e77bfc663496056"
         },
         {
           "archive": "source/kernel-controller.tar.gz",
@@ -258,8 +258,8 @@
       "correspondence": "rebuilt-identical",
       "sources": [
         {
-          "tree": "audio/j713/kernel",
-          "commit": "ee98743a860437ad5797bf5db080c04e0128528d"
+          "archive": "source/j713-audio-kernel-ee98743a.tar.gz",
+          "sha256": "c9969e3163caa5c26691e22923af73781063f4a08336f13d7e77bfc663496056"
         },
         {
           "archive": "source/kernel-controller.tar.gz",
@@ -277,8 +277,8 @@
       "correspondence": "rebuilt-identical",
       "sources": [
         {
-          "tree": "audio/j713/kernel",
-          "commit": "ee98743a860437ad5797bf5db080c04e0128528d"
+          "archive": "source/j713-audio-kernel-ee98743a.tar.gz",
+          "sha256": "c9969e3163caa5c26691e22923af73781063f4a08336f13d7e77bfc663496056"
         },
         {
           "archive": "source/kernel-controller.tar.gz",
@@ -296,8 +296,8 @@
       "correspondence": "rebuilt-identical",
       "sources": [
         {
-          "tree": "audio/j713/kernel",
-          "commit": "ee98743a860437ad5797bf5db080c04e0128528d"
+          "archive": "source/j713-audio-kernel-ee98743a.tar.gz",
+          "sha256": "c9969e3163caa5c26691e22923af73781063f4a08336f13d7e77bfc663496056"
         },
         {
           "archive": "source/kernel-controller.tar.gz",
@@ -315,8 +315,8 @@
       "correspondence": "rebuilt-identical",
       "sources": [
         {
-          "tree": "audio/j713/kernel",
-          "commit": "ee98743a860437ad5797bf5db080c04e0128528d"
+          "archive": "source/j713-audio-kernel-ee98743a.tar.gz",
+          "sha256": "c9969e3163caa5c26691e22923af73781063f4a08336f13d7e77bfc663496056"
         },
         {
           "archive": "source/kernel-controller.tar.gz",

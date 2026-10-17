@@ -82,7 +82,10 @@ the VA-API driver, the speaker daemon) remain `unverified`.
   the v0.1.0-alpha.1 tag (`ee98743a`), built against `kernel-controller.tar.gz`
   with `reference-sound-exports.symvers`, `J713_PROFILE=conservative-v1` and
   `KCFLAGS=-Werror`. Later revisions build a different `snd-soc-j713-group.ko`
-  (the #61 fix), so these joins are pinned to that commit.
+  (the #61 fix). The bootstrap and topology joins are pinned to that commit; the
+  five modules from `audio/j713/kernel` join
+  `j713-audio-kernel-ee98743a.tar.gz` (`c9969e31…`), that tree at the tag, made
+  with `git archive --format=tar ee98743a audio/j713/kernel | gzip -n -9`.
 - **Two video modules:** the module sources and `recipe/BUILD.md` in
   `build-inputs-final.tar.gz`. `apple-avd.ko` builds against
   `kernel-decoder.tar.gz`, and `avd-controller.ko` against
