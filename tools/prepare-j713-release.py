@@ -64,6 +64,17 @@ STAGE1_ALPHA1 = '18cc4cd1ba07928078d2cb52a2c1c5f40a4661fd3db7ee6af0e6923fd237be1
 STAGE1_ANS1 = '8c5a15736c19d0a3428e64f01292791fb54dd68e09f2f5304a7210d19c42adce'
 STAGE1_BYTES = 0x120000
 STAGE1_PATCH = 'patches-m1n1/stage1-ans-no-reset.patch'
+# The Air GPU module: alpha.1's, and the one omarchy-m4-gpu 1-3 ships (#57's per-chip power limit
+# and #118's eight-core GPU), built from gpu/j713. The image carries the fixed module, its pin in
+# runtime.sha256, and alpha.1's files where m4-gpu-module keeps them, so a new install is in the
+# state an Air reaches through the channel and --rollback still restores alpha.1.
+GPU_MODULE = 'opt/m4-gpu/asahi_m4.ko'
+GPU_SUMS = 'opt/m4-gpu/runtime.sha256'
+GPU_BACKUP = 'var/lib/omarchy-m4/gpu-module'
+GPU_ALPHA1 = '80cf3669575edd09aed226a93e47aaaf132e70f1070154629c413c0b40d34578'
+GPU_FIXED = 'de0337a773930c7862a99706112dd71eaaecf2021707da248fd3d07feefdc824'
+GPU_FIXED_BYTES = 390816
+GPU_SOURCE = 'gpu/j713'
 FIRS = ('j713-static-minimal-lane0-48000.wav', 'j713-static-minimal-lane1-48000.wav',
         'j713-static-minimal-lane2-48000.wav', 'j713-static-minimal-lane3-48000.wav')
 PROFILES = ('Brave-Browser', 'Brave-Browser-M4', 'Chromium')
@@ -288,6 +299,46 @@ def stage1_input(path, tree, revision):
     return data
 
 
+def gpu_module_input(path):
+    """Accept only the fixed Air GPU module; its source join pins gpu/j713 (check_planned_sources)."""
+    require(path.is_file() and not path.is_symlink() and path.stat().st_size == GPU_FIXED_BYTES,
+            'Unknown GPU module input')
+    data = path.read_bytes()
+    require(hashlib.sha256(data).hexdigest() == GPU_FIXED, 'Unknown GPU module input')
+    return data
+
+
+def module_pins(sums):
+    """The digests runtime.sha256 pins for the GPU module."""
+    return [fields[0] for fields in (line.split() for line in sums.decode().splitlines())
+            if len(fields) == 2 and fields[1] == '/' + GPU_MODULE]
+
+
+def prepare_gpu(root, module):
+    """Swap alpha.1's GPU module and its one pin for the fixed module, keeping alpha.1's files."""
+    path, sums_path = image_path(root, GPU_MODULE), image_path(root, GPU_SUMS)
+    require(path.is_file() and not path.is_symlink() and sha(path) == GPU_ALPHA1,
+            'Unknown retained GPU module')
+    require(sums_path.is_file() and not sums_path.is_symlink(), 'Missing retained GPU pins')
+    sums = sums_path.read_bytes()
+    require(module_pins(sums) == [GPU_ALPHA1], 'Retained GPU pins disagree with the module')
+    backup = root / GPU_BACKUP
+    require(not backup.exists() and not backup.is_symlink(), 'GPU module state already present')
+    old = path.read_bytes()
+    backup.mkdir(mode=0o755, parents=True)
+    backup.chmod(0o755)
+    for name, data in (('alpha1-module.ko', old), ('alpha1-runtime.sha256', sums)):
+        (backup / name).write_bytes(data)
+        (backup / name).chmod(0o600)
+    fixed = ''.join(f'{GPU_FIXED}  /{GPU_MODULE}\n' if line.split()[1:] == ['/' + GPU_MODULE] else line
+                    for line in sums.decode().splitlines(keepends=True)).encode()
+    # Rewritten in place, so both keep their retained modes.
+    path.write_bytes(module)
+    sums_path.write_bytes(fixed)
+    require(sha(path) == GPU_FIXED and module_pins(sums_path.read_bytes()) == [GPU_FIXED],
+            'GPU module swap did not take')
+
+
 def release_boot(original, kernel):
     boot = copy.deepcopy(original)
     boot['dtb']['sha256'] = POWEROFF_DTB
@@ -504,7 +555,7 @@ def static_filters(tree):
     return profile, payload
 
 
-def prepare_root(source, image, root, tree, identity, kernel=None, allow_unverified=False):
+def prepare_root(source, image, root, tree, identity, kernel=None, allow_unverified=False, gpu_module=None):
     manifest, filters = static_filters(tree)
     require(sha(source) == BASE_ROOT, 'Retained root image changed')
     command('cp', '--reflink=auto', '--sparse=always', source, image)
@@ -519,6 +570,8 @@ def prepare_root(source, image, root, tree, identity, kernel=None, allow_unverif
         audio_manifest = root / 'etc/omarchy/j713-audio-manifest.json'
         native_audio = owner_audio_manifest(audio_manifest.read_bytes(), BASE_AUDIO, manifest)
         native_audio = prepare_startup(root, tree, native_audio)
+        if gpu_module is not None:
+            prepare_gpu(root, gpu_module)
         video_pin = (prepare_decoder(root, tree) if kernel is None else
                      prepare_decoder(root, tree, kernel=kernel))
         for name in FIRS:
@@ -586,6 +639,7 @@ def assemble(args):
     kernel = kernel_input(getattr(args, 'kernel', None), getattr(args, 'kernel_receipt', None),
                           tree, revision)
     stage1 = stage1_input(getattr(args, 'stage1', None), tree, revision)
+    gpu_module = gpu_module_input(args.gpu_module)
     require(args.output.is_absolute() and not args.output.exists() and
             not args.output.is_symlink(), 'A new absolute build output is required')
     require(shutil.disk_usage(args.output.parent).free > 40 * 1024**3,
@@ -634,6 +688,7 @@ def assemble(args):
     identity = str(uuid.uuid4())
     root_args = (args.root_image.resolve(), image, args.output / 'mounted-root', tree, identity)
     root_options = {'kernel': kernel} if kernel is not None else {}
+    root_options['gpu_module'] = gpu_module
     if allow_unverified:
         root_options['allow_unverified'] = True
     manifest_pins = prepare_root(*root_args, **root_options)
@@ -728,6 +783,9 @@ def assemble(args):
                    if stage1 is None else
                    {'file': 'installer-macos.tar.gz:' + STAGE1_MEMBER, 'sha256': STAGE1_ANS1,
                     'replaces_sha256': STAGE1_ALPHA1, 'source': STAGE1_PATCH, 'issue': 82}),
+        'gpu_module': {'file': GPU_MODULE, 'sha256': GPU_FIXED, 'replaces_sha256': GPU_ALPHA1,
+                       'source': GPU_SOURCE, 'issues': [57, 118],
+                       'rollback': GPU_BACKUP + '/alpha1-module.ko'},
     }
     if kernel is not None:
         metadata.update(kernel_receipt_sha256=hashlib.sha256(kernel['receipt_bytes']).hexdigest(),
@@ -758,7 +816,7 @@ def assemble(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('source-tree', 'baseline', 'root-image', 'cargo-source',
-                 'sound-exports', 'reconstruction', 'poweroff-dtb', 'output'):
+                 'sound-exports', 'reconstruction', 'poweroff-dtb', 'gpu-module', 'output'):
         parser.add_argument('--' + name, required=True, type=Path)
     parser.add_argument('--kernel', type=Path, help='Exact startup-qualified J713 AFE action Image.gz')
     parser.add_argument('--kernel-receipt', type=Path, help='Matching build and native startup receipt')

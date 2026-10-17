@@ -74,12 +74,14 @@ contributors. Their authorship and licenses remain theirs.
 
 ## Download and install
 
-**[v0.1.0-alpha.1 installer, update 3](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1-update.3)**,
-based on **Omarchy 4.0.4**. It ships the speaker filters in the image, carries
-the boot fix for Airs that stop on the m1n1 logo
-([#82](https://github.com/Kb2uka/Omarchy-M4-Native/issues/82)) and connects to M4
-updates by itself. No fresh installation from this exact kit has been confirmed
-yet; [update 2](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1-update.2)
+**[v0.1.0-alpha.1 installer, update 4](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1-update.4)**,
+based on **Omarchy 4.0.4**. Its image starts the GPU on every 13-inch M4 Air,
+including the base model's eight-core GPU
+([#118](https://github.com/Kb2uka/Omarchy-M4-Native/pull/118)). It ships the
+speaker filters in the image, carries the boot fix for Airs that stop on the
+m1n1 logo ([#82](https://github.com/Kb2uka/Omarchy-M4-Native/issues/82)) and
+connects to M4 updates by itself. No fresh installation from this exact kit has
+been confirmed yet; [update 3](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1-update.3)
 remains available. Download the release's `download-j713.command` and run it
 from macOS Terminal:
 
@@ -96,7 +98,7 @@ installer starts in macOS; it is not a bootable PC ISO. GitHub's automatic
 
 **Every install from update 2 or earlier needs this once, whether you installed
 today or earlier.** It turns on M4 updates and, if your Air does not have it yet,
-the shutdown fix. Update 3 does it by itself after first login, once the Air is
+the shutdown fix. Updates 3 and 4 do it by themselves after first login, once the Air is
 online ([details](docs/install.md#last-step-connect-to-m4-updates-required)).
 
 1. On the Air, join Wi-Fi (`nmtui`) and open a terminal in Omarchy.
@@ -205,7 +207,7 @@ unrestricted. Do not substitute the older broad session-placement experiment.
 ## Release scope
 
 The download includes the installer, image, checksums, source archives and
-upstream notices. Update 3 carries the speaker filters in the image; the
+upstream notices. Updates 3 and 4 carry the speaker filters in the image; the
 update 2 kit instead prepared them from the owner's installed macOS before
 partitioning. The release assembler includes the exact approved
 [static J713 profile](audio/j713/filters/README.md) in the root image. Apple components, Widevine binaries and preset
