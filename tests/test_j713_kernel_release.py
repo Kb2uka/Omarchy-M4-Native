@@ -121,7 +121,10 @@ class KernelReleaseTests(unittest.TestCase):
             root_image=self.base / 'retained.ext4', cargo_source=self.base / 'cargo_source',
             sound_exports=self.base / 'sound_exports', reconstruction=self.base / 'reconstruction',
             poweroff_dtb=self.dtb, output=self.base / 'output', kernel=self.kernel,
-            kernel_receipt=self.receipt_path)
+            kernel_receipt=self.receipt_path, gpu_module=self.base / 'asahi_m4-fixed.ko')
+        self.gpu_data = b'fixed Air GPU module'.ljust(96, b'\x02')
+        self.args.gpu_module.write_bytes(self.gpu_data)
+        self.gpu_given = []
         self.untracked = set()
         self.prepared = []
         self.allowed = []
@@ -161,8 +164,9 @@ class KernelReleaseTests(unittest.TestCase):
         def sha(path):
             return self.fixed_inputs.get(path) or actual_sha(path)
 
-        def root(source, image, mount, tree, identity, kernel=None, allow_unverified=False):
+        def root(source, image, mount, tree, identity, kernel=None, allow_unverified=False, gpu_module=None):
             self.prepared.append(kernel)
+            self.gpu_given.append(gpu_module)
             self.allowed.append(allow_unverified)
             image.write_bytes(b'new root')
             return {'audio': 'a' * 64, 'video': 'v' * 64, 'unverified': []}
@@ -178,6 +182,8 @@ class KernelReleaseTests(unittest.TestCase):
              mock.patch.object(release, 'POWEROFF_DTB', digest(self.dtb.read_bytes())), \
              mock.patch.object(release, 'STAGE1_ANS1', digest(self.stage1_data)), \
              mock.patch.object(release, 'STAGE1_BYTES', len(self.stage1_data)), \
+             mock.patch.object(release, 'GPU_FIXED', digest(self.gpu_data)), \
+             mock.patch.object(release, 'GPU_FIXED_BYTES', len(self.gpu_data)), \
              mock.patch.object(release, 'source_revision', return_value=self.revision), \
              mock.patch.object(release, 'sha', side_effect=sha), \
              mock.patch.object(release, 'prepare_root', side_effect=root), \
@@ -259,9 +265,48 @@ class KernelReleaseTests(unittest.TestCase):
         with mock.patch.object(release, 'assemble') as assemble, \
              mock.patch.object(release.sys, 'argv', ['prepare', *(f'--{n}=x' for n in (
                  'source-tree', 'baseline', 'root-image', 'cargo-source', 'sound-exports',
-                 'reconstruction', 'poweroff-dtb', 'output')), '--stage1=/k/ans1.bin']):
+                 'reconstruction', 'poweroff-dtb', 'gpu-module', 'output')), '--stage1=/k/ans1.bin']):
             release.main()
         self.assertEqual(assemble.call_args.args[0].stage1, Path('/k/ans1.bin'))
+
+    def test_fixed_gpu_module_reaches_the_image_and_is_recorded(self):
+        delivery = self.assemble()
+        self.assertEqual(self.gpu_given, [self.gpu_data])
+        image = json.loads((delivery / 'IMAGE.json').read_bytes())
+        self.assertEqual(image['gpu_module'], {
+            'file': 'opt/m4-gpu/asahi_m4.ko', 'sha256': digest(self.gpu_data),
+            'replaces_sha256': release.GPU_ALPHA1, 'source': 'gpu/j713', 'issues': [57, 118],
+            'rollback': 'var/lib/omarchy-m4/gpu-module/alpha1-module.ko'})
+
+    def test_unknown_gpu_module_refuses_before_any_output(self):
+        for data in (self.gpu_data[:-1] + b'\x03', self.gpu_data + b'\x00', b''):
+            with self.subTest(size=len(data)):
+                self.args.gpu_module.write_bytes(data)
+                with self.assertRaisesRegex(RuntimeError, 'Unknown GPU module input'):
+                    self.assemble()
+                self.assertFalse(self.args.output.exists())
+                self.assertEqual(self.prepared, [])
+
+    def test_linked_gpu_module_refuses(self):
+        link = self.base / 'linked.ko'
+        link.symlink_to(self.args.gpu_module)
+        self.args.gpu_module = link
+        with self.assertRaisesRegex(RuntimeError, 'Unknown GPU module input'):
+            self.assemble()
+        self.assertFalse(self.args.output.exists())
+
+    def test_cli_requires_gpu_module(self):
+        argv = ['prepare', *(f'--{n}=x' for n in ('source-tree', 'baseline', 'root-image', 'cargo-source',
+                                                  'sound-exports', 'reconstruction', 'poweroff-dtb', 'output'))]
+        with mock.patch.object(release, 'assemble') as assemble, \
+             mock.patch.object(release.sys, 'argv', argv), \
+             mock.patch('sys.stderr'), self.assertRaises(SystemExit):
+            release.main()
+        assemble.assert_not_called()
+        with mock.patch.object(release, 'assemble') as assemble, \
+             mock.patch.object(release.sys, 'argv', argv + ['--gpu-module=/k/asahi_m4.ko']):
+            release.main()
+        self.assertEqual(assemble.call_args.args[0].gpu_module, Path('/k/asahi_m4.ko'))
 
     def test_untracked_static_filter_refuses_before_image_preparation(self):
         self.untracked.add('audio/j713/filters/' + release.FIRS[-1])
@@ -559,7 +604,7 @@ class KernelReleaseTests(unittest.TestCase):
     def test_cli_accepts_optional_pair_and_keeps_it_absent_by_default(self):
         args = ['prepare-j713-release.py']
         for name in ('source-tree', 'baseline', 'root-image',
-                     'cargo-source', 'sound-exports', 'reconstruction', 'poweroff-dtb', 'output'):
+                     'cargo-source', 'sound-exports', 'reconstruction', 'poweroff-dtb', 'gpu-module', 'output'):
             args += ['--' + name, '/fixture/' + name]
         with mock.patch.object(release.sys, 'argv', args), mock.patch.object(release, 'assemble') as assemble:
             release.main()
