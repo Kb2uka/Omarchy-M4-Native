@@ -11,13 +11,13 @@ development computer or USB drive afterward.
 
 ## Download
 
-Get `download-j713.command` from the **v0.1.0-alpha.1-update.2** GitHub release.
-It installs the same alpha.1 system as the original v0.1.0-alpha.1 kit; its
-speaker-filter step also accepts macOS 26.6.2. A test pre-release,
-`v0.1.0-alpha.1-update.3`, ships the speaker filters in the image and the
-stage 1 fix for #82 (see [UPDATES.md](updates.md#installer-update-3-test-pre-release));
-with it, use `update.3` in place of `update.2` in the paths below. In macOS
-Terminal, run the downloaded file:
+Get `download-j713.command` from the **v0.1.0-alpha.1-update.3** GitHub release,
+the latest installer. It ships the speaker filters in the image, carries the
+stage 1 fix for #82 and connects to M4 updates by itself (see
+[UPDATES.md](updates.md#installer-update-3)). No fresh installation from this
+exact kit has been confirmed yet, so please report how yours goes. Update 2
+remains available; with it, use `update.2` in place of `update.3` in the paths
+below. In macOS Terminal, run the downloaded file:
 
 ```sh
 bash "$HOME/Downloads/download-j713.command"
@@ -31,27 +31,27 @@ ZIP as an installer. Downloads become publicly accessible when the repository
 becomes public; before then, GitHub authentication is required to acquire assets.
 
 The resulting kit is at:
-`~/Downloads/Omarchy-M4-v0.1.0-alpha.1-update.2/installer/`.
+`~/Downloads/Omarchy-M4-v0.1.0-alpha.1-update.3/installer/`.
 You may copy that complete directory to an exFAT USB drive. Keep its directory
-layout intact. If using USB, use the **port closest to the hinge**: the current
-Linux image leaves the front port disabled. macOS may recognize both ports.
+layout intact. If using USB, use the **port closest to the hinge**: the
+installed image turns on the front port only after its first M4 update
+(`omarchy-m4-boot` 1-12). macOS may recognize both ports.
 
 ## Start in macOS
 
 1. Connect power and the internet. Boot macOS normally and open Terminal locally.
    An administrator account is required; run from native ARM64 macOS, not Rosetta.
-   The installer firmware profile requires macOS **26.5.1 or newer**. Audio input
-   compatibility in the published update 2 kit is narrower: it recognizes exact
-   Apple AudioDSP and AID37 tuning files recorded in
-   `owner-audio/bundle/manifest.json`. macOS 26.5.1, 26.5.2 and 26.6.2 (25G83)
-   are qualified; other builds may be refused before any partition changes.
-   If your kit has no `owner-audio/` folder, it already includes the approved
-   speaker filters and does not read macOS AudioDSP. Its firmware, recovery and
-   other installer dependencies still need qualification on a newer macOS build.
+   The installer firmware profile requires macOS **26.5.1 or newer**. Update 3
+   already includes the approved speaker filters and does not read macOS
+   AudioDSP. The update 2 kit is narrower: it recognizes exact Apple AudioDSP and
+   AID37 tuning files recorded in `owner-audio/bundle/manifest.json`. macOS
+   26.5.1, 26.5.2 and 26.6.2 (25G83) are qualified there; other builds may be
+   refused before any partition changes. Firmware, recovery and other installer
+   dependencies still need qualification on a newer macOS build.
 2. Change into the kit directory. For the default download location:
 
    ```sh
-   cd "$HOME/Downloads/Omarchy-M4-v0.1.0-alpha.1-update.2/installer"
+   cd "$HOME/Downloads/Omarchy-M4-v0.1.0-alpha.1-update.3/installer"
    bash Install.command --install
    ```
 
@@ -64,11 +64,11 @@ Linux image leaves the front port disabled. macOS may recognize both ports.
 4. Confirm that you have read these instructions. Choose whether to enable Google
    Widevine for protected movies. **No is the default.** No Widevine binary is in
    the download; consenting enables acquisition from Google after Linux starts.
-5. The published update 2 kit generates speaker filters from the Mac's installed
-   components and requires exact output hashes. If that preparation fails, stop:
-   no partitioning has begun. Do not bypass its checks or substitute filters.
-   If your kit has no `owner-audio/` folder, those filters are already included:
-   it proceeds directly to administrator authentication.
+5. Update 3 includes the speaker filters and proceeds directly to administrator
+   authentication. The update 2 kit instead generates them from the Mac's
+   installed components and requires exact output hashes. If that preparation
+   fails, stop: no partitioning has begun. Do not bypass its checks or
+   substitute filters.
 6. Enter your **macOS** password when requested. Terminal displays no characters
    while you type it. Sleep prevention stays active during the installer.
 
@@ -122,7 +122,7 @@ sudo cat /tmp/m4-gpu-start.log
 sudo cat /var/log/omarchy-provision-owner.log
 ```
 
-On the v0.1.0-alpha.1 installers, including update 2, `m4-gpu-start`'s own
+On the v0.1.0-alpha.1 installers through update 2, `m4-gpu-start`'s own
 messages are only in `/tmp/m4-gpu-start.log` until the Air is connected to M4
 updates, and a restart clears that file.
 
@@ -158,8 +158,7 @@ The last lines it prints include
 Air once. From then on, Shut Down turns it off, and `omarchy-m4-update` brings
 new M4 fixes. [Details, messages and rollback](updates.md).
 
-A later installer will do this step on its own (the published v0.1.0-alpha.1
-installers, including update 2, do not). Once your
+Update 3 does this step on its own (installers through update 2 do not). Once your
 account exists and the Air is online, a background service
 (`m4-channel-connect.timer`) runs the same setup within about 20 minutes and
 retries until it succeeds; restart once afterwards. Check it with

@@ -74,11 +74,14 @@ contributors. Their authorship and licenses remain theirs.
 
 ## Download and install
 
-**[v0.1.0-alpha.1 installer, update 2](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1-update.2)**,
-based on **Omarchy 4.0.4**. It installs the same alpha.1 system as the
-[original release](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1)
-and also works on macOS 26.6.2. Download the release's `download-j713.command` and
-run it from macOS Terminal:
+**[v0.1.0-alpha.1 installer, update 3](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1-update.3)**,
+based on **Omarchy 4.0.4**. It ships the speaker filters in the image, carries
+the boot fix for Airs that stop on the m1n1 logo
+([#82](https://github.com/Kb2uka/Omarchy-M4-Native/issues/82)) and connects to M4
+updates by itself. No fresh installation from this exact kit has been confirmed
+yet; [update 2](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1-update.2)
+remains available. Download the release's `download-j713.command` and run it
+from macOS Terminal:
 
 ```sh
 bash "$HOME/Downloads/download-j713.command"
@@ -91,10 +94,10 @@ installer starts in macOS; it is not a bootable PC ISO. GitHub's automatic
 
 ### Then connect to M4 updates — everyone, once
 
-**Every alpha.1 install needs this once, whether you installed today or earlier.**
-It turns on M4 updates and, if your Air does not have it yet, the shutdown fix.
-The published v0.1.0-alpha.1 installers (including update 2) do not do this by
-themselves; a later installer will ([details](docs/install.md#last-step-connect-to-m4-updates-required)).
+**Every install from update 2 or earlier needs this once, whether you installed
+today or earlier.** It turns on M4 updates and, if your Air does not have it yet,
+the shutdown fix. Update 3 does it by itself after first login, once the Air is
+online ([details](docs/install.md#last-step-connect-to-m4-updates-required)).
 
 1. On the Air, join Wi-Fi (`nmtui`) and open a terminal in Omarchy.
 2. Paste this one line, press Enter, and type your password when asked:
@@ -199,9 +202,9 @@ unrestricted. Do not substitute the older broad session-placement experiment.
 ## Release scope
 
 The download includes the installer, image, checksums, source archives and
-upstream notices. The published update 2 kit excludes generated speaker-filter
-WAVs and prepares them from the owner's installed macOS before partitioning.
-The release assembler includes the exact approved
+upstream notices. Update 3 carries the speaker filters in the image; the
+update 2 kit instead prepared them from the owner's installed macOS before
+partitioning. The release assembler includes the exact approved
 [static J713 profile](audio/j713/filters/README.md) in the root image. Apple components, Widevine binaries and preset
 personal consent remain excluded.
 
