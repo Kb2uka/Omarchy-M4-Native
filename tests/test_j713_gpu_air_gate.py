@@ -28,18 +28,30 @@ fn gate(mask: u32, groups: usize, mhz: u32, mw: u32) -> Option<&'static str> {
 #[test] fn measured_airs_accepted() {
     for mw in [24800, 24676, 24304] { assert_eq!(gate(0x3ff, 10, 1470, mw), None, "{}", mw); }
 }
+// The measured eight-core Air: mask 0x3bd, ten groups, 24155 mW.
+#[test] fn measured_eight_core_air_accepted() {
+    assert_eq!(gate(0x3bd, 10, 1470, 24155), None);
+    for mw in [24800, 24304] { assert_eq!(gate(0x3bd, 10, 1470, mw), None, "{}", mw); }
+}
 #[test] fn power_above_or_at_zero_rejected() {
-    for mw in [0, 24801, 30071, 37000, u32::MAX] {
-        assert_eq!(gate(0x3ff, 10, 1470, mw), Some("maximum power"), "{}", mw);
+    for mask in [0x3ff, 0x3bd] {
+        for mw in [0, 24801, 30071, 37000, u32::MAX] {
+            assert_eq!(gate(mask, 10, 1470, mw), Some("maximum power"), "{:#x} {}", mask, mw);
+        }
     }
 }
 #[test] fn other_platform_checks_unchanged() {
-    // Eight-core Air: its 24720 mW limit alone would pass.
+    // Eight-core masks that no Air has reported stay rejected.
     assert_eq!(gate(0xff, 10, 1470, 24720), Some("core mask"));
+    assert_eq!(gate(0x3fc, 10, 1470, 24800), Some("core mask"));
+    assert_eq!(gate(0x2bd, 10, 1470, 24155), Some("core mask"));
+    assert_eq!(gate(0x3bf, 10, 1470, 24155), Some("core mask"));
     assert_eq!(gate(0x3fe, 10, 1470, 24800), Some("core mask"));
     assert_eq!(gate(0x7ff, 10, 1470, 24800), Some("core mask"));
     assert_eq!(gate(0x3ff, 11, 1470, 24800), Some("performance groups"));
     assert_eq!(gate(0x3ff, 9, 1470, 24800), Some("performance groups"));
+    assert_eq!(gate(0x3bd, 8, 1470, 24155), Some("performance groups"));
+    assert_eq!(gate(0x3bd, 10, 1469, 24155), Some("maximum frequency"));
     assert_eq!(gate(0x3ff, 10, 1469, 24800), Some("maximum frequency"));
     assert_eq!(gate(0x3ff, 10, 1471, 24800), Some("maximum frequency"));
 }
@@ -79,7 +91,8 @@ class AirGpuGateTests(unittest.TestCase):
             self.skipTest('rustc not installed')
         source = SOURCE.read_text()
         parts = [item(source, s) for s in ('fn firmware_allowed(', 'fn air_bootstrap_allowed(',
-                                           'const AIR_MAX_POWER_MW', 'fn air_platform_rejection(')]
+                                           'const AIR_MAX_POWER_MW', 'const AIR_CORE_MASKS',
+                                           'fn air_platform_rejection(')]
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary)
             (path / 'gate.rs').write_text('\n'.join(parts) + CASES)

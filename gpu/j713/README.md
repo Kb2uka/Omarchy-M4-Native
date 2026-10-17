@@ -28,6 +28,15 @@ G16: Air bootstrap refused: firmware-build mBoot-... or board not qualified
 G16: Air platform accepted; max-power=24304 mW
 ```
 
+## Eight-core GPU
+
+The gate also accepts core mask `0x3bd`, which the loader reports on an Air
+with the eight-core GPU: ten core positions with cores 1 and 6 fused off,
+still ten performance groups. The power, group, frequency, board and firmware
+checks are unchanged. Other eight-core masks, including `0xff`, stay rejected
+until an Air reports them. The firmware initialization graph does not carry
+the core mask; the DRM driver passes it to Mesa in `core_masks[0]`.
+
 `asahi/g16.rs` began as an exact copy of the file in the v0.1.0-alpha.1 Air GPU
 source packet (`omarchy-j713-v0.1.0-alpha.1-gpu-air-source.tar.gz`); the git
 history shows the change on its own.

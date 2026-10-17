@@ -31,10 +31,15 @@ fn air_bootstrap_allowed(firmware: &[u8], board: &[u8], enabled: u32, probe_only
 /// each Air's own value up to that ceiling instead of one unit's exact value.
 const AIR_MAX_POWER_MW: u32 = 24800;
 
-/// Names the first Air platform value outside the qualified ten-core GPU.
+/// GPU core masks the loader reports on qualified Airs: the ten-core GPU, and
+/// one eight-core GPU with cores 1 and 6 fused off. An eight-core part keeps
+/// ten performance groups, so only its mask tells it apart.
+const AIR_CORE_MASKS: [u32; 2] = [0x3ff, 0x3bd];
+
+/// Names the first Air platform value outside the qualified Air GPUs.
 fn air_platform_rejection(core_mask: u32, groups: usize, max_mhz: u32, max_power: u32)
     -> Option<&'static str> {
-    if core_mask != 0x3ff {
+    if !AIR_CORE_MASKS.contains(&core_mask) {
         Some("core mask")
     } else if groups != 10 {
         Some("performance groups")
