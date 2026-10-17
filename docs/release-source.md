@@ -37,6 +37,19 @@ reproduction. The installer does not ship or execute their native helpers or
 NumPy dependency. No Apple executable, tuning strip, extracted preset or raw
 render capture is included. Widevine is acquired separately only after consent.
 
+## m1n1 stage 1 (installer update 3)
+
+From installer update 3 the macOS installer's `boot/m1n1.bin` is the #82 build
+`8c5a15736c19d0a3428e64f01292791fb54dd68e09f2f5304a7210d19c42adce` in place of
+alpha.1's `18cc4cd1…`. Its source is `m1n1-stage1-source.tar.gz` with
+`patches-m1n1/stage1-ans-no-reset.patch` from `release-integration.tar.gz`,
+built by `patches-m1n1/build-test-loaders.sh` as described in
+[j713-m1n1-issue82-ans-reset.md](j713-m1n1-issue82-ans-reset.md). That script
+first rebuilds alpha.1's stage 1 byte for byte, so the two loaders differ only
+by the patch. The assembler accepts no other build for `--stage1` and records
+both hashes in `IMAGE.json`. `BOOTLOADER-SOURCE.md` still describes the
+retained archives and alpha.1's build of them.
+
 ## Binaries outside packages
 
 The installed root carries some programs, libraries and kernel modules that no
@@ -69,7 +82,10 @@ the VA-API driver, the speaker daemon) remain `unverified`.
   the v0.1.0-alpha.1 tag (`ee98743a`), built against `kernel-controller.tar.gz`
   with `reference-sound-exports.symvers`, `J713_PROFILE=conservative-v1` and
   `KCFLAGS=-Werror`. Later revisions build a different `snd-soc-j713-group.ko`
-  (the #61 fix), so these joins are pinned to that commit.
+  (the #61 fix). The bootstrap and topology joins are pinned to that commit; the
+  five modules from `audio/j713/kernel` join
+  `j713-audio-kernel-ee98743a.tar.gz` (`c9969e31…`), that tree at the tag, made
+  with `git archive --format=tar ee98743a audio/j713/kernel | gzip -n -9`.
 - **Two video modules:** the module sources and `recipe/BUILD.md` in
   `build-inputs-final.tar.gz`. `apple-avd.ko` builds against
   `kernel-decoder.tar.gz`, and `avd-controller.ko` against

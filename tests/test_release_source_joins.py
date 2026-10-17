@@ -2,6 +2,7 @@
 import hashlib
 import importlib.util
 import json
+import subprocess
 import os
 from pathlib import Path
 import re
@@ -223,9 +224,27 @@ class ManifestTests(unittest.TestCase):
                                  'rebuilt-identical' if entry['license'].startswith('GPL') else 'unverified')
         audio = [entry for name, entry in binaries.items() if '/j713-audio/' in name and name.endswith('.ko')]
         self.assertEqual(len(audio), 7)
+        # audio/j713/kernel changed after the tag (#61), so its five modules join an archive of
+        # that tree at the tag; the bootstrap and topology trees are unchanged and stay pinned.
+        alpha1_kernel = {'archive': 'source/j713-audio-kernel-ee98743a.tar.gz',
+                         'sha256': 'c9969e3163caa5c26691e22923af73781063f4a08336f13d7e77bfc663496056'}
+        archived = 0
         for entry in audio:
-            tree, = [source for source in entry['sources'] if 'tree' in source]
-            self.assertEqual(tree['commit'], 'ee98743a860437ad5797bf5db080c04e0128528d', 'the v0.1.0-alpha.1 tag')
+            trees = [source for source in entry['sources'] if 'tree' in source]
+            if alpha1_kernel in entry['sources']:
+                archived += 1
+                self.assertEqual(trees, [])
+            else:
+                tree, = trees
+                self.assertEqual(tree['commit'], 'ee98743a860437ad5797bf5db080c04e0128528d', 'the v0.1.0-alpha.1 tag')
+                self.assertNotEqual(tree['tree'], 'audio/j713/kernel')
+        self.assertEqual(archived, 5)
+        archive = subprocess.run(['git', '-C', str(ROOT), 'archive', '--format=tar',
+                                  'ee98743a860437ad5797bf5db080c04e0128528d', 'audio/j713/kernel'],
+                                 capture_output=True)
+        if archive.returncode == 0:
+            packed = subprocess.run(['gzip', '-n', '-9'], input=archive.stdout, capture_output=True, check=True)
+            self.assertEqual(digest(packed.stdout), alpha1_kernel['sha256'], 'git archive of the tag, gzip -n -9')
         for name in ('apple-avd.ko', 'avd-controller.ko'):
             sources = binaries['opt/m4-video/20261011/kernel/' + name]['sources']
             self.assertIn({'archive': 'source/build-inputs-final.tar.gz',

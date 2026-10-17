@@ -119,6 +119,34 @@ over `omarchy/boot.bin`. A rollback lasts until the next M4 package update
 composes the boot object again; report the problem in issue #49 before
 updating again.
 
+## Installer update 3 (test pre-release)
+
+`v0.1.0-alpha.1-update.3` is a **test pre-release** of the installer kit, for
+**new installations only**. Update 2 stays the recommended kit until a fresh
+installation from update 3 is confirmed. An Air that is already installed needs
+nothing from it: everything it adds to the system also arrives through
+`omarchy-m4-update`, except the stage 1 loader below.
+
+- **Speaker filters ship in the image**
+  ([#111](https://github.com/Kb2uka/Omarchy-M4-Native/pull/111)). The kit no
+  longer reads the Mac's AudioDSP before partitioning, so a macOS build the
+  filter step did not know (such as macOS 27 betas) is no longer refused there.
+  Other installer dependencies are not yet qualified on macOS 27.
+- **m1n1 stage 1 no longer resets ANS on an M4**
+  ([#82](https://github.com/Kb2uka/Omarchy-M4-Native/issues/82),
+  [#110](https://github.com/Kb2uka/Omarchy-M4-Native/pull/110)), which stopped
+  some Airs on the m1n1 logo at every boot. An installed Air gets this loader
+  only through the 1TR `kmutil` step in
+  [j713-m1n1-issue82-ans-reset.md](j713-m1n1-issue82-ans-reset.md).
+- **First boot connects to M4 updates by itself**
+  ([#74](https://github.com/Kb2uka/Omarchy-M4-Native/pull/74)), so the connect
+  step below is not needed, and the image carries the GPU start journal fix
+  ([#108](https://github.com/Kb2uka/Omarchy-M4-Native/pull/108)) and the
+  shutdown devicetree of update 1.
+
+The kit lands in `~/Downloads/Omarchy-M4-v0.1.0-alpha.1-update.3/installer/`;
+use that directory in place of update 2's in the installation guide.
+
 ## Installer update 2 (macOS 26.6.2)
 
 `v0.1.0-alpha.1-update.2` is a refreshed installer kit for **new installations
