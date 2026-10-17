@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 KB2UKA
-"""Apply the fixed Air GPU module (#57) on an installed alpha.1 Air.
+"""Apply the fixed Air GPU module (#57, #118) on an installed alpha.1 Air.
 
 m4-gpu-start checks /opt/m4-gpu/runtime.sha256 before it loads
 /opt/m4-gpu/asahi_m4.ko, and runs only once per boot. This tool replaces the
@@ -10,11 +10,13 @@ acts at boot, from the drop-in that runs it before m4-gpu-start, because the
 module stays loaded until the next boot.
 
 Known states: stock alpha.1 (module and pin both 80cf3669), fixed (both
-3cf47fa7, which also covers an Air that installed the #57 test module) and the
-one state a power cut between the two writes can leave (module fixed, pin
-stock). Anything else, such as a hand-patched module, is refused and left
-untouched. --rollback asks the next boot to restore the alpha.1 files and to
-stop applying the fix. Inspection is the default.
+de0337a7, the #57 power limit plus the eight-core GPU of #118), previous (both
+3cf47fa7, the #57 module of omarchy-m4-gpu 1-1 and 1-2 and its test build),
+and the states a power cut between the two writes can leave (module newer than
+its pin). Stock and previous move to fixed. Anything else, such as a
+hand-patched module, is refused and left untouched. --rollback asks the next
+boot to restore the alpha.1 files and to stop applying the fix. Inspection is
+the default.
 
 Every report also names the GPU values the module's Air gate checks (core mask,
 power limit and firmware build), so a refused GPU can be read from the journal.
@@ -35,7 +37,9 @@ STATE = 'var/lib/omarchy-m4/gpu-module'
 TEST_BACKUP = 'opt/m4-gpu/alpha1-backup'
 GPU_NODE = 'sys/firmware/devicetree/base/soc/gpu@302600000'
 STOCK = {'sha256': '80cf3669575edd09aed226a93e47aaaf132e70f1070154629c413c0b40d34578', 'size': 388216}
-FIXED = {'sha256': '3cf47fa706630ddc5fc55a3bce00ab31e8a4c5ee48e1ba563e26a0406da196f8', 'size': 390752}
+FIXED = {'sha256': 'de0337a773930c7862a99706112dd71eaaecf2021707da248fd3d07feefdc824', 'size': 390816}
+# Earlier fixes this one replaces, oldest first: #57's module (1-1, 1-2).
+PREVIOUS = ({'sha256': '3cf47fa706630ddc5fc55a3bce00ab31e8a4c5ee48e1ba563e26a0406da196f8', 'size': 390752},)
 
 
 class Refused(Exception):
@@ -119,12 +123,17 @@ def inspect(root):
     report = {'module': module_sha, 'pinned': pin, 'held': (stage / 'hold').exists(),
               'rollback_requested': (stage / 'rollback').exists(),
               'loaded': (root / 'sys/module' / NAME).exists(), 'gpu': gpu_values(root)}
-    if module_sha == FIXED['sha256'] and pin == FIXED['sha256']:
+    # Each swap writes the module first and its pin last, so a power cut can
+    # leave the module one step ahead of its pin, never behind.
+    order = [STOCK['sha256']] + [old['sha256'] for old in PREVIOUS] + [FIXED['sha256']]
+    if module_sha == pin == FIXED['sha256']:
         report['state'] = 'fixed'
-    elif module_sha == STOCK['sha256'] and pin == STOCK['sha256']:
+    elif module_sha == pin == STOCK['sha256']:
         report['state'] = 'stock'
-    elif module_sha == FIXED['sha256'] and pin == STOCK['sha256']:
-        report['state'] = 'interrupted'  # a power cut between the module and pin writes
+    elif module_sha == pin and module_sha in order:
+        report['state'] = 'previous'
+    elif module_sha in order and pin in order and order.index(pin) < order.index(module_sha):
+        report['state'] = 'interrupted'
     else:
         report['state'] = 'unknown'
     return report, sums
@@ -142,6 +151,7 @@ def apply(root, report, sums):
             backup = stage / ('alpha1-' + name)
             if not backup.exists():
                 write(backup, path.read_bytes(), 0o600)
+    if report['module'] != FIXED['sha256']:
         # Module first, pin last: an interruption leaves the 'interrupted'
         # state, which the next boot completes before m4-gpu-start runs.
         write(module, staged, module.stat().st_mode & 0o777)
@@ -177,7 +187,8 @@ def run(root, mode):
     report, sums = inspect(root)
     stage = root / STATE
     if mode == 'request-rollback':
-        require(report['state'] in ('fixed', 'interrupted'), 'Nothing to roll back: state is ' + report['state'])
+        require(report['state'] in ('fixed', 'previous', 'interrupted'),
+                'Nothing to roll back: state is ' + report['state'])
         stage.mkdir(parents=True, exist_ok=True)
         (stage / 'rollback').touch()
         report['status'] = 'rollback requested; restart to restore the alpha.1 GPU module'
@@ -186,7 +197,7 @@ def run(root, mode):
             report['status'] = rollback(root, report)
         elif report['held']:
             report['status'] = 'held after a rollback; nothing applied'
-        elif report['state'] in ('stock', 'interrupted'):
+        elif report['state'] in ('stock', 'previous', 'interrupted'):
             report['status'] = apply(root, report, sums) + '; the fixed module loads this boot'
         elif report['state'] == 'fixed':
             report['status'] = 'current'
@@ -194,6 +205,7 @@ def run(root, mode):
             raise Refused('Unknown GPU module state; nothing was changed')
     else:
         report['status'] = {'fixed': 'current', 'stock': 'staged; applies at the next boot',
+                            'previous': 'newer fix staged; applies at the next boot',
                             'interrupted': 'interrupted; completes at the next boot',
                             'unknown': 'unknown state; the fix will not be applied'}[report['state']]
     return report

@@ -148,6 +148,7 @@ once applies them:
 | Speaker protection starts reliably at boot ([#61](https://github.com/Kb2uka/Omarchy-M4-Native/pull/61)); applied at the next boot ([details](docs/j713-protection-startup.md#existing-installs)) | `omarchy-m4-speaker` 1-1 |
 | Sound in Zeus Link and other WebKitGTK and GStreamer apps ([#54](https://github.com/Kb2uka/Omarchy-M4-Native/pull/54), [#63](https://github.com/Kb2uka/Omarchy-M4-Native/pull/63)) | `omarchy-m4-gst-audio` 1.28.7-1 |
 | GPU and desktop on Airs whose GPU power limit is below 24800 mW ([#57](https://github.com/Kb2uka/Omarchy-M4-Native/issues/57)); applied at the next boot | `omarchy-m4-gpu` 1-1 |
+| GPU and desktop on base-model Airs with the eight-core GPU ([#118](https://github.com/Kb2uka/Omarchy-M4-Native/pull/118)); applied at the next boot | `omarchy-m4-gpu` 1-3 |
 | Headphone jack playback ([#88](https://github.com/Kb2uka/Omarchy-M4-Native/pull/88)); starts at the next boot ([details](docs/j713-headphones.md#existing-installs)) | `omarchy-m4-headphones` 1-1 |
 | CPU idle: idle cores power down, so the idle Air runs cooler and draws less ([#65](https://github.com/Kb2uka/Omarchy-M4-Native/issues/65)); starts at the next boot ([details](docs/j713-cpu-idle.md#existing-installs)) | `omarchy-m4-cpu` 1-1 |
 | E cores up to 2172 MHz and a CPU die thermal safety net ([#66](https://github.com/Kb2uka/Omarchy-M4-Native/issues/66)) | `omarchy-m4-boot` 1-10 |

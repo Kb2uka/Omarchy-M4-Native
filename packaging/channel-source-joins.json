@@ -3,14 +3,14 @@
   "channel": "omarchy-m4",
   "note": "Every binary downloaded from the package-inputs release for the channel packages, the source that built it, and how that was established. rebuilt-identical means a rebuild from the named sources reproduced the exact bytes; unverified names the likeliest published source by file name only. tools/check-m4-packages.py refuses any package whose downloaded binary lacks a rebuilt-identical join, with no override in CI.",
   "binaries": {
-    "asahi_m4-3cf47fa7.ko": {
-      "sha256": "3cf47fa706630ddc5fc55a3bce00ab31e8a4c5ee48e1ba563e26a0406da196f8",
+    "asahi_m4-de0337a7.ko": {
+      "sha256": "de0337a773930c7862a99706112dd71eaaecf2021707da248fd3d07feefdc824",
       "license": "GPL-2.0-only",
       "correspondence": "rebuilt-identical",
       "sources": [
         {
           "tree": "gpu/j713",
-          "commit": "45b0b64a8c40301ff83c25a18eb804d0ba8e45f2"
+          "commit": "3eb265b4dc0d8f6238ae74867fef7c7cf4cc31a3"
         },
         {
           "archive": "source/kernel-controller.tar.gz",
@@ -21,7 +21,7 @@
           "sha256": "c19a7c97184b3f954795c50dfeff857e8baf685f901524845710da839cbd2562"
         }
       ],
-      "evidence": "Issue #57: accept each M4 Air's own GPU power limit up to 24800 mW. Built by gpu/j713/build-test-module.sh from alpha.1 kernel-controller and source packet with gpu/j713/asahi/g16.rs. Rebuilt byte for byte on 2026-10-16 in homebase m4-gravity-builder:20261008 (b2069edb), run as root with --network none: the script first reproduced alpha.1's stock asahi_m4.ko (80cf3669), then built 3cf47fa7 exactly from gpu/j713/asahi/g16.rs at develop 0fac63c."
+      "evidence": "#118: the Air gate also accepts the eight-core GPU (any two of the ten core positions fused off), on top of #57's per-chip power limit. Built by gpu/j713/build-test-module.sh from alpha.1 kernel-controller and source packet with gpu/j713/asahi/g16.rs at 3eb265b, in homebase m4-gravity-builder:20261008 (b2069edb), run as root with --network none, on 2026-10-17. Each of three clean runs first reproduced alpha.1's stock asahi_m4.ko (80cf3669). Two built de0337a7 from 3eb265b's g16.rs, byte for byte; the third built the shipped 3cf47fa7 from develop's g16.rs, so the same pipeline reproduces the module this one replaces."
     },
     "gst-plugins-good-1.28.7-libgstautodetect-aarch64.so": {
       "sha256": "ffb41a1812d1ea398b567692b730df0ea6bea5620511390d8731704eae7515b7",
