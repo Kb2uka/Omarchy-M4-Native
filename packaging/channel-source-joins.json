@@ -214,7 +214,7 @@
       "sources": [
         {
           "tree": "display/evdi",
-          "commit": "ce32d391d43e77ceb8e34181aebf59d2fd2910e2"
+          "commit": "c16a6e744a0ea62767c96c9b5062ee513ddb1ec3"
         },
         {
           "archive": "package-inputs/evdi-1.15.1.tar.gz",
@@ -234,7 +234,7 @@
       "sources": [
         {
           "tree": "display/evdi",
-          "commit": "ce32d391d43e77ceb8e34181aebf59d2fd2910e2"
+          "commit": "c16a6e744a0ea62767c96c9b5062ee513ddb1ec3"
         },
         {
           "archive": "package-inputs/evdi-1.15.1.tar.gz",
