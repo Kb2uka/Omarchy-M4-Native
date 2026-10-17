@@ -114,7 +114,8 @@ class IoregAdt(unittest.TestCase):
 
     def test_names_too_long_for_the_adt_field_are_dropped(self):
         # An ADT property name is a 32-byte field ending in NUL, so 31 characters fit.
-        fits, too_long = 'a' * 31, ('b' * 32, 'bluetooth.function-bootstrap_lock')
+        # 'c' * 30 + U+FFFD (the character errors='replace' inserts) is 31 characters but 33 bytes.
+        fits, too_long = 'a' * 31, ('b' * 32, 'bluetooth.function-bootstrap_lock', 'c' * 30 + '\ufffd')
         lines = ''.join(f'      | |   "{key}" = <01000000>\n' for key in (fits,) + too_long)
         dump = DUMP.replace('|   "name" = <"aic">\n', '|   "name" = <"aic">\n' + lines)
         root, end, nodes = rebuild(dump)

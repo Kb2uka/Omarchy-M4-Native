@@ -68,7 +68,8 @@ def encode(node):
     props = []
     for key, text in node['props'].items():
         data = value(text)
-        if data is None or len(key) >= 32:
+        # The name field is 32 bytes ending in NUL; measure the encoded name, not its characters.
+        if data is None or len(key.encode()) >= 32:
             continue
         if key == 'name' and not data.strip(b'\0'):
             data = node['name'].split('@')[0].encode() + b'\0'
