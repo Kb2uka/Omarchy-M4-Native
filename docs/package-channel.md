@@ -409,9 +409,11 @@ package's contents without a new version.
   the private key as `PACKAGE_SIGNING_KEY`. It keeps already-published package
   files and verifies their signatures, then signs and uploads new ones. It
   repairs an interrupted earlier run by signing an unsigned published package.
-  The signed databases go up last, whenever they are missing, unsigned or out
-  of date. Everything is then
-  downloaded anonymously and verified again. The
+  The corresponding integration source archive (`release-integration.tar.gz`)
+  and any pinned join source archives are packaged, signed, and published
+  alongside packages and databases. The signed databases go up last, whenever
+  they are missing, unsigned or out of date. Everything is then downloaded
+  anonymously and verified again. The
   [workflow policy](../tools/ci/check-workflows.py) allows a secret or write
   access nowhere else.
 
@@ -478,6 +480,19 @@ first. Joins stay `unverified` until a byte-identical rebuild is recorded:
 - **GStreamer audio sinks (`omarchy-m4-gst-audio`):** `libgstautodetect.so` and
   `libgstpulseaudio.so`, built by `tools/m4-webkit-audio-plugins.py` from
   `gst-plugins-good-1.28.7.tar.xz` (mirrored in `package-inputs`).
+
+### Published source artifact
+
+With each channel publish, the corresponding sources matching the joins are
+packaged into the integration source archive `release-integration.tar.gz` and
+signed with the channel key (`release-integration.tar.gz.sig`). The archive
+captures the exact repository integration state at the published revision (all
+tracked files, excluding private build logs, machine credentials and workflow
+instructions), bundling the packaging recipes, tools, patch chains, overlays,
+and driver source trees matching the joins in
+[`packaging/channel-source-joins.json`](../packaging/channel-source-joins.json).
+Any companion join archives supplied with the publish are validated against
+their pinned hashes, signed, and published to the release assets as well.
 
 ## Limits
 
