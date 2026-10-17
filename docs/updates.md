@@ -119,11 +119,11 @@ over `omarchy/boot.bin`. A rollback lasts until the next M4 package update
 composes the boot object again; report the problem in issue #49 before
 updating again.
 
-## Installer update 3 (test pre-release)
+## Installer update 3
 
-`v0.1.0-alpha.1-update.3` is a **test pre-release** of the installer kit, for
-**new installations only**. Update 2 stays the recommended kit until a fresh
-installation from update 3 is confirmed. An Air that is already installed needs
+`v0.1.0-alpha.1-update.3` is the **latest installer kit**, for **new
+installations only**. No fresh installation from this exact kit has been
+confirmed yet; update 2 remains available. An Air that is already installed needs
 nothing from it: everything it adds to the system also arrives through
 `omarchy-m4-update`, except the stage 1 loader below.
 
