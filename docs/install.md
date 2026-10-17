@@ -43,7 +43,7 @@ installed image turns on the front port only after its first M4 update
 1. Connect power and the internet. Boot macOS normally and open Terminal locally.
    An administrator account is required; run from native ARM64 macOS, not Rosetta.
    The installer firmware profile requires macOS **26.5.1 or newer**. Updates 3
-   and 4 already include the approved speaker filters and does not read macOS
+   and 4 already include the approved speaker filters and do not read macOS
    AudioDSP. The update 2 kit is narrower: it recognizes exact Apple AudioDSP and
    AID37 tuning files recorded in `owner-audio/bundle/manifest.json`. macOS
    26.5.1, 26.5.2 and 26.6.2 (25G83) are qualified there; other builds may be

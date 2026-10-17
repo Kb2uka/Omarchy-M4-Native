@@ -4,6 +4,7 @@
 import hashlib
 import importlib.util
 import io
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -66,6 +67,18 @@ class GpuImageTests(unittest.TestCase):
             release.GPU_BACKUP + '/alpha1-module.ko': (OLD, 0o600),
             release.GPU_BACKUP + '/alpha1-runtime.sha256': (sums(digest(OLD)), 0o600),
         })
+        self.assertEqual((self.root / release.GPU_BACKUP).stat().st_mode & 0o777, 0o755)
+
+    def test_keeps_the_retained_modes_and_sets_the_state_directory_mode_under_any_umask(self):
+        self.module.chmod(0o640)
+        self.sums.chmod(0o660)
+        previous = os.umask(0o077)
+        try:
+            release.prepare_gpu(self.root, NEW)
+        finally:
+            os.umask(previous)
+        self.assertEqual(self.module.stat().st_mode & 0o777, 0o640)
+        self.assertEqual(self.sums.stat().st_mode & 0o777, 0o660)
         self.assertEqual((self.root / release.GPU_BACKUP).stat().st_mode & 0o777, 0o755)
 
     def test_the_image_is_what_m4_gpu_module_calls_fixed_and_rollback_restores_alpha1(self):

@@ -205,7 +205,7 @@ unrestricted. Do not substitute the older broad session-placement experiment.
 ## Release scope
 
 The download includes the installer, image, checksums, source archives and
-upstream notices. Update 3 carries the speaker filters in the image; the
+upstream notices. Updates 3 and 4 carry the speaker filters in the image; the
 update 2 kit instead prepared them from the owner's installed macOS before
 partitioning. The release assembler includes the exact approved
 [static J713 profile](audio/j713/filters/README.md) in the root image. Apple components, Widevine binaries and preset
