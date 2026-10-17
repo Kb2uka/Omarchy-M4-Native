@@ -9,6 +9,7 @@
 // total and how many differed, and the share of non-black pixels in the last
 // one, which it writes as PPM.
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -16,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 #include "evdi_lib.h"
 
 #define MAX_RECTS 16
@@ -125,10 +127,14 @@ static void on_dpms(int mode, void *data)
 static void write_ppm(const struct probe *p, const char *path)
 {
 	size_t count = (size_t)p->mode.width * p->mode.height, lit = 0;
-	FILE *f = fopen(path, "wb");
+	// Root runs this: create the image owner-writable only, not 0666 & umask.
+	int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+	FILE *f = fd < 0 ? NULL : fdopen(fd, "wb");
 
 	if (!f) {
 		perror(path);
+		if (fd >= 0)
+			close(fd);
 		return;
 	}
 	fprintf(f, "P6\n%d %d\n255\n", p->mode.width, p->mode.height);
