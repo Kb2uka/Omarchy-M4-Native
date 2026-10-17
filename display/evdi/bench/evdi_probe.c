@@ -5,8 +5,9 @@
 //
 //   evdi_probe SECONDS OUT.ppm
 //
-// Prints the mode the compositor set, the frames grabbed, how many differed,
-// and the share of non-black pixels in the last one, which it writes as PPM.
+// Prints the mode the compositor set, the frames grabbed in each second, the
+// total and how many differed, and the share of non-black pixels in the last
+// one, which it writes as PPM.
 #include <errno.h>
 #include <poll.h>
 #include <stdbool.h>
@@ -153,8 +154,9 @@ int main(int argc, char **argv)
 		.user_data = &p,
 	};
 	struct timespec start, now;
+	unsigned long counted = 0, changed = 0;
 	unsigned char sum = 0;
-	int seconds;
+	int seconds, second = 0;
 
 	if (argc != 3) {
 		fprintf(stderr, "usage: %s SECONDS OUT.ppm\n", argv[0]);
@@ -176,12 +178,25 @@ int main(int argc, char **argv)
 		struct pollfd fd = { .fd = evdi_get_event_ready(p.h), .events = POLLIN };
 
 		clock_gettime(CLOCK_MONOTONIC, &now);
-		if (now.tv_sec - start.tv_sec >= seconds)
+		if (now.tv_sec - start.tv_sec > second) {
+			printf("second %d frames %lu changed %lu\n", second,
+			       p.frames - counted, p.changed - changed);
+			fflush(stdout);
+			counted = p.frames;
+			changed = p.changed;
+			second++;
+		}
+		if (second >= seconds)
 			break;
+		// Ask for the next frame as soon as one is grabbed, and sleep only
+		// while a request waits for the compositor, as a real client does.
+		if (p.registered && !p.pending) {
+			request(&p);
+			if (!p.pending)
+				continue;
+		}
 		if (poll(&fd, 1, 100) > 0)
 			evdi_handle_events(p.h, &ctx);
-		if (p.registered && !p.pending)
-			request(&p);
 	}
 	printf("frames %lu changed %lu\n", p.frames, p.changed);
 	if (p.pixels)

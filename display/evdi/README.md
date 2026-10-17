@@ -67,6 +67,8 @@ aarch64-linux-gnu-gcc -O2 -Wall -Wextra -I evdi-1.15.1/library \
 sudo LD_LIBRARY_PATH=. ./evdi_probe 20 frame.ppm
 ```
 
-It prints the mode the compositor set, the frames it grabbed and how many
-differed, and the share of non-black pixels in the last frame, which it writes
-as a PPM image.
+It prints the mode the compositor set and, for each second, the frames it
+grabbed and how many differed from the one before; then the totals and the
+share of non-black pixels in the last frame, which it writes as a PPM image. It
+asks for the next frame as soon as it has one, as DisplayLinkManager does, so a
+compositor drawing at 60 Hz shows 60 changed frames a second.
