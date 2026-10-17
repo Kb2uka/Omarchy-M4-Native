@@ -33,25 +33,41 @@ fn gate(mask: u32, groups: usize, mhz: u32, mw: u32) -> Option<&'static str> {
     assert_eq!(gate(0x3bd, 10, 1470, 24155), None);
     for mw in [24800, 24304] { assert_eq!(gate(0x3bd, 10, 1470, mw), None, "{}", mw); }
 }
+// Any two of the ten positions may be fused off: all 45 eight-core masks.
+#[test] fn every_eight_core_mask_accepted() {
+    let masks: Vec<u32> = (0..0x400u32).filter(|m| m.count_ones() == 8).collect();
+    assert_eq!(masks.len(), 45);
+    for mask in masks { assert_eq!(gate(mask, 10, 1470, 24155), None, "{:#x}", mask); }
+}
+// Every other mask: zero, nine cores, fewer than eight, or a bit past the ten positions.
+#[test] fn other_core_masks_rejected() {
+    let other = (0..0x800u32).filter(|m| !(m & !0x3ff == 0 && matches!(m.count_ones(), 8 | 10)));
+    let mut count = 0;
+    for mask in other.chain([0x3bd | 1 << 31, 0xffff_ffff]) {
+        assert_eq!(gate(mask, 10, 1470, 24155), Some("core mask"), "{:#x}", mask);
+        count += 1;
+    }
+    assert_eq!(count, 0x800 - 46 + 2);
+    for mask in [0, 0x3fe, 0x3bf, 0x2bd, 0x7f, 0x7ff, 0x4ff] {
+        assert_eq!(gate(mask, 10, 1470, 24155), Some("core mask"), "{:#x}", mask);
+    }
+}
 #[test] fn power_above_or_at_zero_rejected() {
-    for mask in [0x3ff, 0x3bd] {
+    for mask in [0x3ff, 0x3bd, 0xff, 0x3fc] {
         for mw in [0, 24801, 30071, 37000, u32::MAX] {
             assert_eq!(gate(mask, 10, 1470, mw), Some("maximum power"), "{:#x} {}", mask, mw);
         }
     }
 }
 #[test] fn other_platform_checks_unchanged() {
-    // Eight-core masks that no Air has reported stay rejected.
-    assert_eq!(gate(0xff, 10, 1470, 24720), Some("core mask"));
-    assert_eq!(gate(0x3fc, 10, 1470, 24800), Some("core mask"));
-    assert_eq!(gate(0x2bd, 10, 1470, 24155), Some("core mask"));
-    assert_eq!(gate(0x3bf, 10, 1470, 24155), Some("core mask"));
-    assert_eq!(gate(0x3fe, 10, 1470, 24800), Some("core mask"));
-    assert_eq!(gate(0x7ff, 10, 1470, 24800), Some("core mask"));
+    // The mask is checked first, whatever the other values.
+    assert_eq!(gate(0x3fe, 11, 1469, 0), Some("core mask"));
     assert_eq!(gate(0x3ff, 11, 1470, 24800), Some("performance groups"));
     assert_eq!(gate(0x3ff, 9, 1470, 24800), Some("performance groups"));
     assert_eq!(gate(0x3bd, 8, 1470, 24155), Some("performance groups"));
+    assert_eq!(gate(0xff, 11, 1470, 24155), Some("performance groups"));
     assert_eq!(gate(0x3bd, 10, 1469, 24155), Some("maximum frequency"));
+    assert_eq!(gate(0x3fc, 10, 1471, 24155), Some("maximum frequency"));
     assert_eq!(gate(0x3ff, 10, 1469, 24800), Some("maximum frequency"));
     assert_eq!(gate(0x3ff, 10, 1471, 24800), Some("maximum frequency"));
 }
@@ -91,7 +107,7 @@ class AirGpuGateTests(unittest.TestCase):
             self.skipTest('rustc not installed')
         source = SOURCE.read_text()
         parts = [item(source, s) for s in ('fn firmware_allowed(', 'fn air_bootstrap_allowed(',
-                                           'const AIR_MAX_POWER_MW', 'const AIR_CORE_MASKS',
+                                           'const AIR_MAX_POWER_MW', 'fn air_core_mask_allowed(',
                                            'fn air_platform_rejection(')]
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary)

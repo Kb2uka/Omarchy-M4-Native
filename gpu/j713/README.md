@@ -1,11 +1,13 @@
-# Air GPU module: per-chip power limit (issue #57)
+# Air GPU module: per-chip power limit (issue #57) and eight-core GPU (#118)
 
-The fixed module (`3cf47fa706630ddc5fc55a3bce00ab31e8a4c5ee48e1ba563e26a0406da196f8`)
+The current module (`de0337a773930c7862a99706112dd71eaaecf2021707da248fd3d07feefdc824`)
 reaches installed Airs through the M4 update channel: `omarchy-m4-update`
-installs `omarchy-m4-gpu`, and the next boot swaps it in
-([package-channel.md](../../docs/package-channel.md#omarchy-m4-boot-1-6-and-omarchy-m4-gpu-1-1)).
-Before that it was a test build; `m4-gpu-test-module` below is how testers
-installed it, and an Air that did is already current.
+installs `omarchy-m4-gpu` 1-3, and the next boot swaps it in
+([package-channel.md](../../docs/package-channel.md#omarchy-m4-gpu-1-3)). It
+adds the eight-core GPU (below) to the #57 module
+(`3cf47fa706630ddc5fc55a3bce00ab31e8a4c5ee48e1ba563e26a0406da196f8`, 1-1 and
+1-2), and an Air on that module moves to it the same way. Before the channel,
+#57 was a test build; `m4-gpu-test-module` below is how testers installed it.
 
 ## What it changes
 
@@ -17,8 +19,9 @@ top state gets 24304 mW, and its probe fails with `-22` and no log line.
 
 `asahi/g16.rs` accepts each Air's own derived limit up to 24800 mW and passes
 it to the GPU firmware as its power ceiling, as before. Every other check is
-unchanged: 10-core mask `0x3ff`, ten performance groups, 1470 MHz, board
-`apple,j713` + `apple,t8132` and firmware `mBoot-18000.120.36`. A 24800 mW Air
+unchanged: ten performance groups, 1470 MHz, board `apple,j713` +
+`apple,t8132` and firmware `mBoot-18000.120.36`. The core mask check now also
+accepts the eight-core GPU (below). A 24800 mW Air
 takes exactly the alpha.1 path, apart from one extra log line. Every rejection
 now logs its reason and the measured values:
 
@@ -30,12 +33,18 @@ G16: Air platform accepted; max-power=24304 mW
 
 ## Eight-core GPU
 
-The gate also accepts core mask `0x3bd`, which the loader reports on an Air
-with the eight-core GPU: ten core positions with cores 1 and 6 fused off,
-still ten performance groups. The power, group, frequency, board and firmware
-checks are unchanged. Other eight-core masks, including `0xff`, stay rejected
-until an Air reports them. The firmware initialization graph does not carry
-the core mask; the DRM driver passes it to Mesa in `core_masks[0]`.
+The base-model Air has an eight-core GPU: the same ten core positions with two
+fused off, and still ten performance groups. The loader reports the fused-off
+positions in the core mask, and one Air reports `0x3bd` (cores 1 and 6 off).
+Which two positions are fused off can differ from chip to chip, so the gate
+accepts any mask within `0x3ff` with exactly eight or ten cores. A zero mask,
+nine cores, fewer than eight, or a bit beyond the ten positions is still
+refused. The power, group, frequency, board and firmware checks are unchanged.
+
+The mask does not reach the GPU firmware: the initialization graph the module
+builds never reads it, so the firmware is set up the same way on every Air,
+as upstream Asahi does on M1 and M2, where the firmware gets only a core
+count. The DRM driver passes the mask to Mesa in `core_masks[0]`.
 
 `asahi/g16.rs` began as an exact copy of the file in the v0.1.0-alpha.1 Air GPU
 source packet (`omarchy-j713-v0.1.0-alpha.1-gpu-air-source.tar.gz`); the git
