@@ -31,10 +31,19 @@ fn air_bootstrap_allowed(firmware: &[u8], board: &[u8], enabled: u32, probe_only
 /// each Air's own value up to that ceiling instead of one unit's exact value.
 const AIR_MAX_POWER_MW: u32 = 24800;
 
-/// Names the first Air platform value outside the qualified ten-core GPU.
+/// The Air GPU has ten core positions. The loader reports the ten-core GPU as
+/// 0x3ff and an eight-core GPU as any two positions fused off (one measured
+/// Air reports 0x3bd). Both keep ten performance groups. Only Mesa receives
+/// the mask; the firmware initialization graph does not carry it, so which
+/// two positions are fused off changes nothing this module gives the firmware.
+fn air_core_mask_allowed(core_mask: u32) -> bool {
+    core_mask & !0x3ff == 0 && matches!(core_mask.count_ones(), 8 | 10)
+}
+
+/// Names the first Air platform value outside the qualified Air GPUs.
 fn air_platform_rejection(core_mask: u32, groups: usize, max_mhz: u32, max_power: u32)
     -> Option<&'static str> {
-    if core_mask != 0x3ff {
+    if !air_core_mask_allowed(core_mask) {
         Some("core mask")
     } else if groups != 10 {
         Some("performance groups")

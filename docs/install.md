@@ -127,9 +127,12 @@ messages are only in `/tmp/m4-gpu-start.log` until the Air is connected to M4
 updates, and a restart clears that file.
 
 A fresh installation has alpha.1's GPU module. It starts the GPU only on an
-Air whose GPU power limit is exactly 24800 mW. Two of the three Airs measured so
-far are lower, and reach this login instead of the desktop
-([#57](https://github.com/Kb2uka/Omarchy-M4-Native/issues/57)).
+Air with the ten-core GPU whose GPU power limit is exactly 24800 mW. Two of the
+three ten-core Airs measured so far are lower
+([#57](https://github.com/Kb2uka/Omarchy-M4-Native/issues/57)), and the
+base-model Air's eight-core GPU is refused outright
+([#118](https://github.com/Kb2uka/Omarchy-M4-Native/pull/118)); both reach
+this login instead of the desktop.
 From the recovery login, do the [last step](#last-step-connect-to-m4-updates-required)
 now: `nmtui` works here, and so does the connect line. Then restart. The update
 brings the fixed module, which also logs why it refuses a GPU.
