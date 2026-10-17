@@ -1639,7 +1639,7 @@
 		#power-domain-cells = <0>;
 		#reset-cells = <0>;
 		label = "dispext2_cpu";
-		/* Firmware-locked on T6040: the AUTO_ENABLE write is refused (J614s). */
+		/* By analogy with dispext0/1_cpu: J614s has no dispext2, untested. */
 		apple,skip-auto-enable;
 		power-domains = <&ps_dispext2_fe>;
 	};
