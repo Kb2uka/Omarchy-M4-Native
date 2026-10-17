@@ -14,7 +14,10 @@ set -euo pipefail
 evdi_sha=b120df303d14be09062157aab17a8598746c0caf2e076ff3388b4091186cf2d9
 tree_sha=810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57
 
-check() { test "$(sha256sum < "$1" | cut -d' ' -f1)" = "$2"; }
+check() {
+  test "$(sha256sum < "$1" | cut -d' ' -f1)" = "$2" ||
+    { echo "build.sh: refusing $1: not the pinned input" >&2; exit 1; }
+}
 
 case ${1:-} in
 module)

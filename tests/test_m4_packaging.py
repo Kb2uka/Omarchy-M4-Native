@@ -133,6 +133,8 @@ class RecipeTests(unittest.TestCase):
             with tarfile.open(other, 'w:gz') as archive:  # a valid archive that is not the pin
                 archive.addfile(tarfile.TarInfo('evdi-1.15.1/README.md'), io.BytesIO(b''))
             env = {**os.environ, 'PATH': f"{shim.parent}:{os.environ['PATH']}"}
+            # Each case names the archive that must be refused; the message proves which check
+            # stopped the build, whatever state the host's /job is in.
             for name, args in (('module: unpinned tree', ['module', other, evdi]),
                                ('module: unpinned evdi', ['module', tree, other]),
                                ('library: unpinned evdi', ['library', other])):
@@ -141,6 +143,7 @@ class RecipeTests(unittest.TestCase):
                     result = subprocess.run(['bash', str(build), *map(str, args), str(out)],
                                             capture_output=True, text=True, env=env)
                     self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(f'refusing {other}: not the pinned input', result.stderr)
                     self.assertFalse(out.exists(), 'nothing is built from an unpinned archive')
 
     def test_gpu_recipe_pins_the_channel_module(self):
