@@ -165,7 +165,9 @@ groups:
 `packaging/m4-boards.json` allows only `qualified` and `refused`, and
 `tests/test_m4_boards.py` checks the gates listed in
 [m4-boards.md](m4-boards.md) against those two lists. `m4-cpu-idle` and
-`m4-notch` are not in that list, so no test covers their board checks yet.
+`m4-notch` are not in that list: their own tests check the refusal with a
+made-up board (`apple,j613` in `tests/test_m4_cpu_idle.py` and
+`tests/test_m4_notch.py`), not with every real sibling identity.
 
 **GPU.** `gpu/j713/asahi/g16.rs` admits any board on firmware
 `mBoot-18000.161.10`; the Air path needs `mBoot-18000.120.36` and
@@ -199,7 +201,8 @@ until the mini's amplifier (`ti,sn012776` on `i2c3`) has its own profile.
    gates change for testing boards, and the board tests check each one: the
    SoC-level gates admit the mini, the board-aware gates take its J773g path
    (its devicetree lineage and package set), and the J713-hardware gates keep
-   refusing it.
+   refusing it. `m4-cpu-idle` and `m4-notch` join the gate list in
+   [m4-boards.md](m4-boards.md) and its tests then.
 5. **First boot by the tester**, then SoC fixes in the Air's order: poweroff,
    CPU idle and boost, GPU, video decode.
 6. **Kernel move** to Gravity's DCP work, for native HDMI on the mini and
