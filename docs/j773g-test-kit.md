@@ -19,7 +19,7 @@ unchanged. The tool changes only the following:
 | Installer firmware | `26.5.1` (the `j713ap` profile) | `26.6.2` (the upstream `j773gap` profile, IPSW `UniversalMac_26.6.2_25G83_Restore.ipsw`) |
 | OS name and package | "…(experimental J713)", `omarchy-j713-0.1.0-alpha.1.zip` | "…(J773g tester)", `omarchy-j773g-0.1.0-alpha.1-test.1.zip` |
 | `Install.command` | Mac16,12 only | Mac16,10 only, with `--install --tester` and a typed `TEST` confirmation; Widevine off |
-| `START-HERE.md` | J713 instructions | [packaging/j773g-test/START-HERE.md](../packaging/j773g-test/START-HERE.md) |
+| `START-HERE.md`, `KNOWN-LIMITATIONS.md`, `UPDATES.md` | J713 instructions, limits and update channel | The mini versions in [packaging/j773g-test](../packaging/j773g-test/) |
 | SDDM (`/etc/sddm.conf.d/99-m4.conf`, `sddm.service.d/90-m4-staging.conf`) | Requires the J713 GPU unit and the project's GPU Mesa | Starts without the GPU unit and uses the system Mesa (`llvmpipe`) on the boot framebuffer |
 | Start links removed | — | `m4-j713-audio-register`, `speakersafetyd-j713`, `m4-video`, `j713-owner-assets`, `m4-channel-connect.timer` |
 | `KIT.json`, `IMAGE.json`, `SHA256SUMS` | — | Regenerated, with a `j773g_test` record of the source kit, revision and root changes |

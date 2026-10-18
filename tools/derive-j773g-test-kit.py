@@ -9,7 +9,7 @@ J713 kit is checked against its pins. The output kit changes only:
 - the boot devicetree (the J773g one from tools/build-j773g-dtb.py);
 - the installer definition: OS name, OS package, devicetree, and the 26.6.2
   firmware of the mini's installer profile;
-- Install.command and START-HERE.md (packaging/j773g-test);
+- Install.command, START-HERE.md, KNOWN-LIMITATIONS.md and UPDATES.md (packaging/j773g-test);
 - in the root image, the two SDDM files that tie the desktop to the J713 GPU,
   and the start links of J713-only services that refuse on a mini anyway;
 - KIT.json, IMAGE.json and SHA256SUMS, regenerated for those changes.
@@ -65,7 +65,7 @@ ROOT_LINKS = (
     '/etc/systemd/system/multi-user.target.wants/j713-owner-assets.service',
     '/etc/systemd/system/timers.target.wants/m4-channel-connect.timer',
 )
-REPLACED_DOCS = {'Install.command': 0o755, 'START-HERE.md': 0o644}
+REPLACED_DOCS = {'Install.command': 0o755, 'START-HERE.md': 0o644, 'KNOWN-LIMITATIONS.md': 0o644, 'UPDATES.md': 0o644}
 REWRITTEN = {'KIT.json', 'IMAGE.json', 'SHA256SUMS', 'installer_data.json', 'os/' + OLD_PACKAGE, *REPLACED_DOCS}
 QUALIFICATION = ('J773g tester build derived from the J713 installer update 4 kit. Nobody has booted it on '
                  'a Mac mini; it is not qualified for any Mac.')

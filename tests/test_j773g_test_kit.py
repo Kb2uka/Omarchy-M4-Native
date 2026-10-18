@@ -76,6 +76,8 @@ class Kit:
                                                  'root': {'sha256': self.root_sha}}).encode())
         put(self.kit / 'Install.command', b'#!/bin/bash\necho J713\n', 0o755)
         put(self.kit / 'START-HERE.md', b'# J713\n')
+        put(self.kit / 'KNOWN-LIMITATIONS.md', b'# J713 limits\n')
+        put(self.kit / 'UPDATES.md', b'# J713 updates\n')
         put(self.kit / 'notices/LICENSE.md', b'license\n')
         put(self.kit / 'installer-macos.tar.gz', b'installer')
         self.seal()
@@ -150,8 +152,9 @@ class Derive(unittest.TestCase):
             self.assertEqual(definition['m4_boot'][part], old['m4_boot'][part])
         self.assertEqual(definition['partitions'], old['partitions'])
         self.assertEqual(definition['expert'], True)
-        self.assertEqual((self.output / 'Install.command').read_bytes(),
-                         (ROOT / 'packaging/j773g-test/Install.command').read_bytes())
+        self.assertEqual(definition['name'], 'Omarchy M4 Native 0.1.0-alpha.1 (J773g tester)')
+        for name in ('Install.command', 'START-HERE.md', 'KNOWN-LIMITATIONS.md', 'UPDATES.md'):
+            self.assertEqual((self.output / name).read_bytes(), (ROOT / 'packaging/j773g-test' / name).read_bytes())
         self.assertEqual(os.stat(self.output / 'Install.command').st_mode & 0o777, 0o755)
         self.assertEqual((self.output / 'notices/LICENSE.md').read_bytes(), b'license\n')
         image = json.loads((self.output / 'IMAGE.json').read_bytes())
@@ -174,6 +177,19 @@ class Derive(unittest.TestCase):
             self.assertNotIn('Inode:', stat.stdout)
         self.assertEqual(read(root, '/etc/hostname'), b'omarchy\n')
         self.assertEqual(subprocess.run(['e2fsck', '-fn', str(root)], capture_output=True).returncode, 0)
+
+    def test_the_root_changes_are_exactly_the_reviewed_ones(self):
+        self.assertEqual(sorted(MODULE.ROOT_FILES), ['/etc/sddm.conf.d/99-m4.conf',
+                                                     '/etc/systemd/system/sddm.service.d/90-m4-staging.conf'])
+        self.assertEqual(list(MODULE.ROOT_LINKS), [
+            '/etc/systemd/system/multi-user.target.wants/m4-j713-audio-register.service',
+            '/etc/systemd/system/multi-user.target.wants/speakersafetyd-j713.service',
+            '/etc/systemd/system/multi-user.target.wants/m4-video.service',
+            '/etc/systemd/system/multi-user.target.wants/j713-owner-assets.service',
+            '/etc/systemd/system/timers.target.wants/m4-channel-connect.timer'])
+        self.assertEqual(MODULE.FIRMWARE, '26.6.2')
+        self.assertEqual(sorted(MODULE.REPLACED_DOCS),
+                         ['Install.command', 'KNOWN-LIMITATIONS.md', 'START-HERE.md', 'UPDATES.md'])
 
     def test_the_mini_root_files_drop_the_gpu_requirement_and_the_custom_mesa(self):
         for _, name in MODULE.ROOT_FILES.values():
@@ -241,6 +257,17 @@ class InstallCommand(unittest.TestCase):
                                     capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
         self.assertIn('add --tester', result.stderr)
+
+    def test_only_typing_test_with_the_tester_flag_continues(self):
+        lines = self.SCRIPT.read_text().splitlines()
+        start = next(i for i, line in enumerate(lines) if "read -r -p 'Type TEST" in line)
+        guard = '\n'.join(lines[start:start + 2]) + '\necho REACHED-INSTALLER\n'
+        for tester, answer, reached in (('yes', 'TEST', True), ('yes', 'test', False), ('yes', 'y', False),
+                                        ('yes', '', False), ('no', 'TEST', False)):
+            with self.subTest(tester=tester, answer=answer):
+                result = subprocess.run(['bash', '-c', f'tester={tester}\n' + guard], input=answer + '\n',
+                                        capture_output=True, text=True)
+                self.assertEqual('REACHED-INSTALLER' in result.stdout, reached)
 
     def test_it_names_the_mini_firmware_ipsw(self):
         text = self.SCRIPT.read_text()
