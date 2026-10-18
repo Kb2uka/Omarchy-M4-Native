@@ -51,7 +51,8 @@ a mini.
   with the table;
 - a shipped manifest names an unqualified board;
 - shipped code under `tools/`, `packaging/`, `audio/`, `gpu/` or the patch
-  directories names a board compatible (`apple,j…`) that is not qualified;
+  directories names a board compatible (`apple,j…`) that is neither qualified
+  nor testing;
 - the GPU module's Air bootstrap gate (`gpu/j713/asahi/g16.rs`) admits an
   unqualified board or refuses a qualified one;
 - a live-system board gate lets a real sibling M4 identity through, refuses it
