@@ -14,7 +14,11 @@ TABLE = json.loads(TABLE_PATH.read_text())
 BOARDS = TABLE['boards']
 SOCS = {soc['compatible']: soc for soc in TABLE['socs']}
 QUALIFIED = [board for board in BOARDS if board['support'] == 'qualified']
-REFUSED = [board for board in BOARDS if board['support'] == 'refused']
+TESTING = [board for board in BOARDS if board['support'] == 'testing']
+# Every board this release and its live gates must refuse. A testing board is
+# installed only from a kit built for that board, so the J713 release refuses
+# it like a refused board.
+UNQUALIFIED = [board for board in BOARDS if board['support'] != 'qualified']
 # The SoC the release's gates check: every qualified board must share it.
 (SOC,) = {board['soc'] for board in QUALIFIED}
 
@@ -34,4 +38,4 @@ def identity(board):
 
 def refused_identities():
     """(label, compatible) pairs a gate that checks both board and SoC must refuse."""
-    return [(board['target'], identity(board)) for board in REFUSED] + [FOREIGN_SOC, NEAR_MISS_BOARD, NEAR_MISS_SOC]
+    return [(board['target'], identity(board)) for board in UNQUALIFIED] + [FOREIGN_SOC, NEAR_MISS_BOARD, NEAR_MISS_SOC]

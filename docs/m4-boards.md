@@ -2,7 +2,9 @@
 
 [`packaging/m4-boards.json`](../packaging/m4-boards.json) is the one place
 that says which Apple M4-family Macs this project supports. Only the 13-inch
-M4 Air (J713) is qualified. Every other board is refused.
+M4 Air (J713) is qualified. The plain M4 Mac mini (J773g) is in testing
+([#136](https://github.com/Kb2uka/Omarchy-M4-Native/issues/136)). Every other
+board is refused.
 
 Each board names its chip. The M4 boards use the T8132; the M4 Pro Mac mini
 (J773s) uses the T6040, a different chip, and its port is starting from the
@@ -18,7 +20,7 @@ them like every other unqualified model.
 | J604 | T8132 | Mac16,1 | MacBook Pro (14-inch, M4, 2024) | refused | none |
 | J623 | T8132 | Mac16,2 | iMac (24-inch, 2024, Two ports) | refused | none |
 | J624 | T8132 | Mac16,3 | iMac (24-inch, 2024, Four ports) | refused | none |
-| J773g | T8132 | Mac16,10 | Mac mini (M4, 2024) | refused | 26.6.2 |
+| J773g | T8132 | Mac16,10 | Mac mini (M4, 2024) | testing | 26.6.2 |
 | J773s | T6040 | Mac16,11 | Mac mini (M4 Pro, 2024) | refused | none |
 <!-- m4-boards:end -->
 
@@ -28,19 +30,30 @@ comes from the upstream installer this project builds on. `Install.command`
 still refuses every model except Mac16,12, so the release does not install on
 a mini.
 
+## Support status
+
+- `qualified`: the release installs on it and every gate admits it. Moving a
+  board here needs boot evidence from that board.
+- `testing`: a board testers may install before it is qualified, from a kit
+  built for that board and only with the tester's explicit opt-in. It needs an
+  installer profile. The J713 release, its `Install.command` and every live
+  gate refuse it like a refused board; the tester kit is what admits it.
+- `refused`: nothing installs or runs on it.
+
 ## What the board tests check
 
 `tests/test_m4_boards.py` runs in the hosted Linux CI job and fails when:
 
 - `Install.command` accepts a model that the table does not qualify, or
-  refuses one that it does;
+  refuses one that it does (a testing model is refused);
+- a testing board has no installer profile;
 - the installer `DEVICES` table, or a qualified board's IPSW entry, disagrees
   with the table;
 - a shipped manifest names an unqualified board;
 - shipped code under `tools/`, `packaging/`, `audio/`, `gpu/` or the patch
   directories names a board compatible (`apple,j…`) that is not qualified;
-- the GPU module's Air bootstrap gate (`gpu/j713/asahi/g16.rs`) admits a
-  refused board or refuses a qualified one;
+- the GPU module's Air bootstrap gate (`gpu/j713/asahi/g16.rs`) admits an
+  unqualified board or refuses a qualified one;
 - a live-system board gate lets a real sibling M4 identity through, refuses it
   with a different message, or writes anything before refusing. The gates are
   `m4-boot-compose`, `m4-channel-setup`, `m4-headphones`, `m4-lid-lock`,
@@ -72,9 +85,11 @@ before the refusal; the test runs only its board and SoC lines.
 
 ## Adding a board
 
-A new board starts as `refused`. Moving it to `qualified` means changing the
-table, `Install.command`, the installer profile and every gate the tests list
-in the same pull request, with hardware evidence from that board.
+A new board starts as `refused`. It can move to `testing` once it has an
+installer profile and a survey of the real machine, so that a tester kit can be
+built for it. Moving it to `qualified` means changing the table,
+`Install.command`, the installer profile and every gate the tests list in the
+same pull request, with hardware evidence from that board.
 
 Speaker support also selects a versioned profile for that board, including its
 filter assets, routing, gains and protection settings. The static J713 files

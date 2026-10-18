@@ -56,7 +56,7 @@
       "soc": "apple,t8132",
       "models": ["Mac16,10"],
       "name": "Mac mini (M4, 2024)",
-      "support": "refused",
+      "support": "testing",
       "installer": {"stub": "26.6.2", "expert_only": false}
     },
     {
