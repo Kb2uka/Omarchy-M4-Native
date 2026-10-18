@@ -183,13 +183,22 @@ class BuildGuards(unittest.TestCase):
         self.base_refused(base, 'Wrong board')
 
     def test_moved_phandle_refused(self):
-        for node, handle in ((PMGR + ('power-controller@1e0',), '0xf'), (('soc', 'pinctrl@39a000000'), '0x3f'),
-                             (PMGR + ('power-controller@550',), '0x65'),
-                             (('soc', 'interrupt-controller@381180000'), '0xd')):
-            with self.subTest(node=node):
+        self.assertEqual(len(MODULE.HANDLES), 7)
+        for handle, path in MODULE.HANDLES.items():
+            with self.subTest(handle=hex(handle)):
                 base = base_nodes()
-                base[node]['phandle'] = U32(0x99)
-                self.base_refused(base, 'Unexpected phandle ' + handle)
+                base[key(path)]['phandle'] = U32(0x99)
+                self.base_refused(base, 'Unexpected phandle %s' % hex(handle))
+
+    def test_other_port0_wiring_refused(self):
+        changes = ((PORT0, 'reset-gpios', U32(0x99, 163, 1)),
+                   (('soc', 'iommu@490000000'), 'power-domains', U32(0x19)),
+                   (('soc', 'iommu@490000000'), 'interrupt-parent', U32(0x99)))
+        for node, prop, value in changes:
+            with self.subTest(prop=prop):
+                base = base_nodes()
+                base[node][prop] = value
+                self.base_refused(base, 'Unexpected PCIe port 0 wiring')
 
     def test_ethernet_already_wired_refused(self):
         base = base_nodes()
