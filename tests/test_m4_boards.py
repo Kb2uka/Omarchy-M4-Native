@@ -86,6 +86,15 @@ class BoardTable(unittest.TestCase):
             with self.subTest(board=board['target']):
                 self.assertIsNotNone(board['installer'], 'a testing board needs an installer profile')
 
+    def test_gates_are_fed_every_testing_board(self):
+        """The J713 release refuses a testing board, so every gate test must see it as refused."""
+        unqualified = [board['target'] for board in TABLE['boards'] if board['support'] != 'qualified']
+        self.assertEqual([board['target'] for board in UNQUALIFIED], unqualified)
+        labels = [label for label, _ in refused_identities()]
+        for board in TESTING:
+            with self.subTest(board=board['target']):
+                self.assertIn(board['target'], labels)
+
     def test_install_command_accepts_exactly_the_qualified_models(self):
         """Run Install.command's real model gate for every model, with sysctl stubbed.
 
