@@ -74,12 +74,14 @@ contributors. Their authorship and licenses remain theirs.
 
 ## Download and install
 
-**[v0.1.0-alpha.1 installer, update 3](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1-update.3)**,
-based on **Omarchy 4.0.4**. It ships the speaker filters in the image, carries
-the boot fix for Airs that stop on the m1n1 logo
-([#82](https://github.com/Kb2uka/Omarchy-M4-Native/issues/82)) and connects to M4
-updates by itself. No fresh installation from this exact kit has been confirmed
-yet; [update 2](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1-update.2)
+**[v0.1.0-alpha.1 installer, update 4](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1-update.4)**,
+based on **Omarchy 4.0.4**. Its image starts the GPU on every 13-inch M4 Air,
+including the base model's eight-core GPU
+([#118](https://github.com/Kb2uka/Omarchy-M4-Native/pull/118)). It ships the
+speaker filters in the image, carries the boot fix for Airs that stop on the
+m1n1 logo ([#82](https://github.com/Kb2uka/Omarchy-M4-Native/issues/82)) and
+connects to M4 updates by itself. No fresh installation from this exact kit has
+been confirmed yet; [update 3](https://github.com/Kb2uka/Omarchy-M4-Native/releases/tag/v0.1.0-alpha.1-update.3)
 remains available. Download the release's `download-j713.command` and run it
 from macOS Terminal:
 
@@ -96,7 +98,7 @@ installer starts in macOS; it is not a bootable PC ISO. GitHub's automatic
 
 **Every install from update 2 or earlier needs this once, whether you installed
 today or earlier.** It turns on M4 updates and, if your Air does not have it yet,
-the shutdown fix. Update 3 does it by itself after first login, once the Air is
+the shutdown fix. Updates 3 and 4 do it by themselves after first login, once the Air is
 online ([details](docs/install.md#last-step-connect-to-m4-updates-required)).
 
 1. On the Air, join Wi-Fi (`nmtui`) and open a terminal in Omarchy.
@@ -148,6 +150,7 @@ once applies them:
 | Speaker protection starts reliably at boot ([#61](https://github.com/Kb2uka/Omarchy-M4-Native/pull/61)); applied at the next boot ([details](docs/j713-protection-startup.md#existing-installs)) | `omarchy-m4-speaker` 1-1 |
 | Sound in Zeus Link and other WebKitGTK and GStreamer apps ([#54](https://github.com/Kb2uka/Omarchy-M4-Native/pull/54), [#63](https://github.com/Kb2uka/Omarchy-M4-Native/pull/63)) | `omarchy-m4-gst-audio` 1.28.7-1 |
 | GPU and desktop on Airs whose GPU power limit is below 24800 mW ([#57](https://github.com/Kb2uka/Omarchy-M4-Native/issues/57)); applied at the next boot | `omarchy-m4-gpu` 1-1 |
+| GPU and desktop on base-model Airs with the eight-core GPU ([#118](https://github.com/Kb2uka/Omarchy-M4-Native/pull/118)); applied at the next boot | `omarchy-m4-gpu` 1-3 |
 | Headphone jack playback ([#88](https://github.com/Kb2uka/Omarchy-M4-Native/pull/88)); starts at the next boot ([details](docs/j713-headphones.md#existing-installs)) | `omarchy-m4-headphones` 1-1 |
 | CPU idle: idle cores power down, so the idle Air runs cooler and draws less ([#65](https://github.com/Kb2uka/Omarchy-M4-Native/issues/65)); starts at the next boot ([details](docs/j713-cpu-idle.md#existing-installs)) | `omarchy-m4-cpu` 1-1 |
 | E cores up to 2172 MHz and a CPU die thermal safety net ([#66](https://github.com/Kb2uka/Omarchy-M4-Native/issues/66)) | `omarchy-m4-boot` 1-10 |
@@ -155,6 +158,7 @@ once applies them:
 | The boost guard's limits match macOS on the fanless Air (105 C bursts, 100 C sustained), so one busy core runs at its top boost (4.04 GHz, bursts to 4.46 GHz) for most of a 45 s job, and it estimates the die's temperature from heat measured on the Air ([#66](https://github.com/Kb2uka/Omarchy-M4-Native/issues/66), [details](docs/j713-cpu-boost.md#settled-heat-the-base-estimate)) | `omarchy-m4-cpu` 1-3 |
 | Headset microphone on the headphone jack ([#105](https://github.com/Kb2uka/Omarchy-M4-Native/pull/105)); starts at the next boot ([details](docs/j713-headphones.md#headset-microphone)) | `omarchy-m4-headphones` 1-2 |
 | Opt-in: the desktop uses the whole 2560x1664 panel, with the bar's widgets left and right of the camera ([#89](https://github.com/Kb2uka/Omarchy-M4-Native/issues/89)); `sudo m4-notch --show`, then restart; `sudo m4-notch --hide` goes back ([details](docs/j713-notch.md)) | `omarchy-m4-boot` 1-12 |
+| External monitors through DisplayLink USB adapters and docks. **One extra step, once:** `yay -S displaylink`, then `sudo systemctl enable --now displaylink.service` (Synaptics' DisplayLinkManager is closed source, so the update cannot ship it). Plain USB-C to HDMI/DisplayPort adapters, USB-C and Thunderbolt monitors, and Thunderbolt dock display ports still do not work ([#58](https://github.com/Kb2uka/Omarchy-M4-Native/issues/58), [details](docs/j713-external-displays.md)) | `omarchy-m4-evdi` 1.15.1-1, `omarchy-m4-boot` 1-13 |
 
 A devicetree you applied by hand from the guides is kept; the update never
 moves an Air back to an older one. An Air connected before
@@ -190,6 +194,7 @@ As of October 11, 2026, with the pinned experimental runtime:
 | Protected movies | A tested Widevine movie used CPU decoding and played. Hardware decoding is not promised for protected content, and no license or DRM restrictions are bypassed. |
 | Known video issue | A tested 1080p60 browser video dropped roughly 47% of frames in a normal window; the fullscreen comparison reported 1 drop in 1,804 frames. This geometry-dependent problem remains open. Fullscreen is a tested discriminator, not a universal fix. |
 | USB-C ports | The hinge-side port works in alpha.1. With `omarchy-m4-boot` 1-12 from `omarchy-m4-update`, the front port works too: the same SuperSpeed drive enumerated and read cleanly on both (October 16). Alternate modes and broad peripheral coverage are not qualified. |
+| External displays | A USB-C or Thunderbolt monitor shows nothing: the M4's display coprocessor (DCP) firmware is not supported by Linux yet. With `omarchy-m4-evdi`, Hyprland drew a virtual DisplayLink-style monitor at 60 Hz (October 17); no physical DisplayLink adapter is qualified yet ([details](docs/j713-external-displays.md)). |
 | Camera, suspend/resume, battery life | Not qualified for release. |
 
 These are observations from one machine and specific builds, not a statement
@@ -202,7 +207,7 @@ unrestricted. Do not substitute the older broad session-placement experiment.
 ## Release scope
 
 The download includes the installer, image, checksums, source archives and
-upstream notices. Update 3 carries the speaker filters in the image; the
+upstream notices. Updates 3 and 4 carry the speaker filters in the image; the
 update 2 kit instead prepared them from the owner's installed macOS before
 partitioning. The release assembler includes the exact approved
 [static J713 profile](audio/j713/filters/README.md) in the root image. Apple components, Widevine binaries and preset

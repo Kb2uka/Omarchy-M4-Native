@@ -575,7 +575,8 @@ class PackagingTests(unittest.TestCase):
 
     def test_the_boot_package_ships_the_tool_unit_and_m1n1_notices(self):
         recipe = (PACKAGE / 'PKGBUILD').read_text()
-        self.assertIn('pkgrel=12', recipe)
+        # The notch switch ships from omarchy-m4-boot 1-12 on.
+        self.assertGreaterEqual(int(re.search(r'^pkgrel=(\d+)$', recipe, re.M).group(1)), 12)
         self.assertIn('j713-m1n1-stage2-notch1.bin', recipe)
         source = re.search(r'^source=\((.*?)\)\n', recipe, re.S | re.M).group(1)
         names = [n.split('::')[0] for n in re.findall(r"['\"]([^'\"]+)['\"]", re.sub(r'#[^\n]*', '', source))]

@@ -12,7 +12,8 @@
     "omarchy-m4-speaker",
     "omarchy-m4-gpu",
     "omarchy-m4-headphones",
-    "omarchy-m4-cpu"
+    "omarchy-m4-cpu",
+    "omarchy-m4-evdi"
   ],
   "kernel": {
     "release": "7.1.9-m4-gpu-backport-20261008",
@@ -80,6 +81,11 @@
       "usr/lib/omarchy-m4/cpu/j713_pguard.ko",
       "usr/lib/systemd/system/m4-cpu-idle.service",
       "usr/share/licenses/omarchy-m4-cpu/"
+    ],
+    "omarchy-m4-evdi": [
+      "usr/lib/modules/7.1.9-m4-gpu-backport-20261008/updates/evdi.ko",
+      "usr/lib/libevdi.so",
+      "usr/share/licenses/omarchy-m4-evdi/"
     ]
   },
   "protected_paths": [
@@ -110,7 +116,7 @@
   "protected_exceptions": {
     "usr/lib/systemd/system/speakersafetyd-j713.service.d/50-realtime.conf": "real-time speaker protection required by the CPU frequency devicetree (docs/j713-cpufreq.md)",
     "usr/lib/systemd/system/m4-j713-audio-register.service.d/20-m4-speaker-module.conf": "applies the fixed speaker module (#61) before registration loads any audio module",
-    "usr/lib/systemd/system/m4-gpu.service.d/20-m4-gpu-module.conf": "applies the fixed Air GPU module (#57) before m4-gpu-start checks and loads it",
+    "usr/lib/systemd/system/m4-gpu.service.d/20-m4-gpu-module.conf": "applies the fixed Air GPU module (#57, #118) before m4-gpu-start checks and loads it",
     "usr/lib/systemd/system/m4-j713-audio-register.service.d/30-m4-headphones.conf": "loads the headphone jack modules after the speaker registration succeeds; a failure never fails it",
     "usr/share/alsa/ucm2/conf.d/J713Headphones/J713Headphones.conf": "UCM for the new J713Headphones card only; no speaker or other card file",
     "usr/share/alsa/ucm2/conf.d/J713Headphones/HiFi.conf": "UCM for the new J713Headphones card only; no speaker or other card file",
@@ -122,7 +128,7 @@
     "usr/lib/omarchy-m4/j713-audio/snd-soc-j713-group.ko": "aaad802eb136ff6cb915feaa123001b3eb848bc2f038d0a5b71c8e2ff35d2581"
   },
   "gpu_module": {
-    "usr/lib/omarchy-m4/gpu/asahi_m4.ko": "3cf47fa706630ddc5fc55a3bce00ab31e8a4c5ee48e1ba563e26a0406da196f8"
+    "usr/lib/omarchy-m4/gpu/asahi_m4.ko": "de0337a773930c7862a99706112dd71eaaecf2021707da248fd3d07feefdc824"
   },
   "headphone_modules": {
     "usr/lib/omarchy-m4/j713-headphones/j713_hp_dt.ko": "3f501c6193aeddc62031395e899909bf352851278f829458998ca1c4dbbe6149",
@@ -136,5 +142,11 @@
   },
   "notch_loader": {
     "usr/lib/omarchy-m4/m1n1-stage2-notch.bin": "f2417a74d13838004847a6fbdf946b524005301b88b5a403b1e79cb36d0ec7ca"
+  },
+  "evdi_module": {
+    "usr/lib/modules/7.1.9-m4-gpu-backport-20261008/updates/evdi.ko": "c5e65a2bcba6433ff8369fea449ccc4e6be178a392b9c4a959884415953c671a"
+  },
+  "evdi_library": {
+    "usr/lib/libevdi.so": "0f1da52db1f7cbd7e0c420d47285ddee78e22dc0a57e789305c1456b163034ce"
   }
 }

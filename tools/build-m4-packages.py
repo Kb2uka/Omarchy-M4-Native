@@ -56,6 +56,8 @@ STAGED = {
     'omarchy-m4-cpu': {'m4-cpu-idle.py': 'tools/m4-cpu-idle.py',
                        'MIT.txt': 'LICENSES/MIT.txt',
                        'GPL-2.0-only.txt': 'LICENSES/GPL-2.0-only.txt'},
+    'omarchy-m4-evdi': {'GPL-2.0-only.txt': 'LICENSES/GPL-2.0-only.txt',
+                        'LGPL-2.1-or-later.txt': 'LICENSES/LGPL-2.1-or-later.txt'},
 }
 MAKEPKG_CONF = '''\
 CARCH="aarch64"
