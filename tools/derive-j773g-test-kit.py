@@ -97,6 +97,8 @@ def check_kit(kit):
         digest, name = line.split('  ', 1)
         require(not name.startswith('/') and '..' not in Path(name).parts, 'Unsafe kit path')
         require(sha(kit / name) == digest, 'Kit file changed: ' + name)
+        # The download packager accepts only these modes, and copies keep the source's mode.
+        require((kit / name).stat().st_mode & 0o7777 in (0o644, 0o755), 'Unexpected kit file mode: ' + name)
         names.append(name)
     on_disk = {p.relative_to(kit).as_posix() for p in kit.rglob('*') if p.is_file()}
     require(on_disk == set(names) | {'SHA256SUMS'}, 'Kit has unlisted or missing files')

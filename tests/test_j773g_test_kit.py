@@ -81,6 +81,7 @@ class Kit:
         put(self.kit / 'KNOWN-LIMITATIONS.md', b'# J713 limits\n')
         put(self.kit / 'UPDATES.md', b'# J713 updates\n')
         put(self.kit / 'notices/LICENSE.md', b'license\n')
+        put(self.kit / 'source/build.sh', b'#!/bin/sh\n', 0o755)
         put(self.kit / 'installer-macos.tar.gz', b'installer')
         self.seal()
 
@@ -161,6 +162,8 @@ class Derive(unittest.TestCase):
                            ('KNOWN-LIMITATIONS.md', 0o644), ('UPDATES.md', 0o644)):
             self.assertEqual(os.stat(self.output / name).st_mode & 0o777, mode, name)
         self.assertEqual((self.output / 'notices/LICENSE.md').read_bytes(), b'license\n')
+        for name, mode in (('notices/LICENSE.md', 0o644), ('source/build.sh', 0o755)):
+            self.assertEqual(os.stat(self.output / name).st_mode & 0o7777, mode, name)
         image = json.loads((self.output / 'IMAGE.json').read_bytes())
         self.assertEqual(image['root']['sha256'], receipt['root_sha256'])
         self.assertEqual(image['j773g_test']['root_from_sha256'], self.fixture.root_sha)
@@ -207,6 +210,11 @@ class Derive(unittest.TestCase):
         (self.fixture.kit / 'START-HERE.md').unlink()
         put(self.fixture.kit / 'START-HERE.md', b'# changed\n')
         self.refused('Kit file changed: START-HERE.md')
+
+    def test_a_kit_file_with_special_mode_bits_is_refused(self):
+        (self.fixture.kit / 'notices/LICENSE.md').unlink()
+        put(self.fixture.kit / 'notices/LICENSE.md', b'license\n', 0o1644)
+        self.refused('Unexpected kit file mode: notices/LICENSE.md')
 
     def test_an_unlisted_kit_file_is_refused(self):
         put(self.fixture.kit / 'extra.txt', b'x')
