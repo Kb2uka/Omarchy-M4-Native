@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
 // Copyright (c) 2026 KB2UKA
+// Board wiring follows Gravity Linux's t8132-j773g.dts (GPL-2.0+ OR MIT,
+// Copyright The Asahi Linux Contributors).
 /dts-v1/;
 /plugin/;
 
@@ -25,8 +27,9 @@
  *
  * The base has no __symbols__, so base nodes are named by phandle number:
  * 0x0f dispext0_fe, 0x6d dptx_phy, 0x3f the AP pin controller, 0x65 the
- * apcie_gp power domain, 0x0d the interrupt controller and 0x67 the port 0
- * DART. tools/build-j773g-dtb.py checks each one.
+ * apcie_phy_sw power domain (the port 0 DART's, which keeps apcie_gp on), 0x0d
+ * the interrupt controller and 0x67 the port 0 DART. tools/build-j773g-dtb.py
+ * checks the node behind each one.
  */
 / {
 	fragment@0 {

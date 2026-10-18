@@ -35,27 +35,30 @@ HANDLES = {
     0x6c: PMGR + 'power-controller@10000',  # disp_cpu: the J713 framebuffer's first domain
     0x6d: PMGR + 'power-controller@3c8',    # dptx_phy
     0x67: PORT0_DART,
+    0x3f: '/soc/pinctrl@39a000000',            # the AP pin controller, PCIe resets
+    0x65: PMGR + 'power-controller@550',      # apcie_phy_sw, the port 0 DART's (keeps apcie_gp on)
+    0x0d: '/soc/interrupt-controller@381180000',
 }
 # The J713 keyboard and trackpad, and its keyboard backlight: not on the mini.
 J713_ONLY = ('/soc/mtp@394600000', '/soc/mbox@394608000', '/soc/iommu@394800000',
              '/soc/fifo@394b14000', '/soc/pwm@3ad044000', '/led-controller')
 PERST_PIN = 165  # PCIe port 2 reset (Gravity Linux t8132.dtsi port02)
-DART_IRQ = 1250  # dart-apcie2 in the J773g ADT (docs/j773g-macos-survey.md)
+DART_IRQ = 1250  # dart-apcie2 in the J773g ADT (the #136 survey)
 
 
 def expected_nodes(old):
     """Return the exact tree the overlay must produce."""
     expected = {path: dict(props) for path, props in old.items()}
     dart = max(phandles(old)) + 1
-    pinctrl = old[PORT0]['reset-gpios'][:4]
-    domain = old[PORT0_DART]['power-domains']
+    pinctrl = cells(0x3f)
+    domain = cells(0x65)
     expected['/'].update(compatible=J773G, model=MODEL)
     expected[FRAMEBUFFER]['power-domains'] = cells(0x0f, 0x6d)
     for radio in RADIOS:
         expected[radio]['brcm,board-type'] = b'apple,sakhalin\0'
     expected[PORT2_DART] = {
         'compatible': b'apple,t8132-dart\0apple,t8110-dart\0', 'reg': cells(4, 0x92000000, 0, 0x4000),
-        '#iommu-cells': cells(1), 'interrupt-parent': old[PORT0_DART]['interrupt-parent'],
+        '#iommu-cells': cells(1), 'interrupt-parent': cells(0x0d),
         'interrupts': cells(0, DART_IRQ, 4), 'power-domains': domain, 'status': OKAY, 'phandle': cells(dart)}
     expected[PCIE]['iommu-map'] = old[PCIE]['iommu-map'] + cells(0x200, dart, 1, 1)
     expected[PORT2].update(status=OKAY, **{'bus-range': cells(2, 2), 'reset-gpios': pinctrl + cells(PERST_PIN, 1)})
@@ -80,7 +83,9 @@ def check_base(old):
             'Ethernet is already wired')
     require(old[PORT2].get('status') == DISABLED and
             not {'reset-gpios', 'bus-range'} & set(old[PORT2]), 'Unexpected PCIe port 2')
-    require(len(old[PORT0].get('reset-gpios', b'')) == 12, 'Unexpected PCIe port 0 reset')
+    require(old[PORT0].get('reset-gpios', b'')[:4] == cells(0x3f) and
+            old[PORT0_DART].get('power-domains') == cells(0x65) and
+            old[PORT0_DART].get('interrupt-parent') == cells(0x0d), 'Unexpected PCIe port 0 wiring')
     for path in J713_ONLY:
         require(path in old and old[path].get('status', OKAY) == OKAY, 'Unexpected J713-only node: ' + path)
 

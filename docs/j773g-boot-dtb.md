@@ -23,7 +23,7 @@ reference:
 | `compatible` and `model` become `apple,j773g` / "Apple Mac mini (M4, 2024)" | The mini's identity, which the board gates read |
 | Boot framebuffer power domains become `dispext0_fe` and `dptx_phy` | The mini's picture comes out of HDMI through the external display pipe; the J713 keeps the internal panel's `disp_cpu` on |
 | Wi-Fi and Bluetooth `brcm,board-type` become `apple,sakhalin` | The mini's radio firmware (the installer already collects it for `j773g`) |
-| PCIe port 2 enabled, with its reset pin (165), bus 2 and an `ethernet@0,0` child; a DART for it at `0x492000000` (interrupt 1250); `iommu-map` entry `0x200`; alias `ethernet0` | The BCM57762 Ethernet. m1n1 fills in its MAC address from the ADT through the alias |
+| PCIe port 2 enabled, with its reset pin (165), bus 2 and an `ethernet@0,0` child; a DART for it at `0x492000000` (interrupt 1250); `iommu-map` entry `0x200`; alias `ethernet0` | The BCM57762 Ethernet. m1n1 fills in its MAC address from the ADT through the alias. The new DART uses the port 0 DART's power domain, `apcie_phy_sw`, which also keeps `apcie_gp` (Gravity's choice) on |
 | The J713 keyboard and trackpad (MTP, its mailbox, DART and DockChannel FIFO) and the keyboard backlight (PWM and `pwm-leds`) disabled | Not present on the mini |
 
 The two rear USB-C ports nearest the HDMI port use the same USB-PD
@@ -61,4 +61,7 @@ Nobody has booted this devicetree. The first tester boot should report, from
   on the Air.
 
 Native HDMI through the DCP, the speaker, the front ports and the third rear
-port need later work (see the J773g survey in #137).
+port need later work (see the J773g survey in #137). Gravity's devicetree also
+reserves a `ramoops` buffer near the top of RAM to keep the console across a
+hang. It is left out here until its placement is checked against this
+project's m1n1 allocations.

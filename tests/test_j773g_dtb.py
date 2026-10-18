@@ -4,6 +4,7 @@
 import importlib.util
 from pathlib import Path
 import shutil
+import struct
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -47,6 +48,9 @@ def base_nodes():
         PMGR + ('power-controller@1e0',): {'label': b'dispext0_fe\0', 'phandle': U32(0x0f)},
         PMGR + ('power-controller@10000',): {'label': b'disp_cpu\0', 'phandle': U32(0x6c)},
         PMGR + ('power-controller@3c8',): {'label': b'dptx_phy\0', 'phandle': U32(0x6d)},
+        PMGR + ('power-controller@550',): {'label': b'apcie_phy_sw\0', 'phandle': U32(0x65)},
+        ('soc', 'pinctrl@39a000000'): {'phandle': U32(0x3f)},
+        ('soc', 'interrupt-controller@381180000'): {'phandle': U32(0x0d)},
         ('soc', 'iommu@490000000'): {'compatible': DART, 'reg': U32(4, 0x90000000, 0, 0x4000),
                                      '#iommu-cells': U32(1), 'interrupt-parent': U32(0x0d),
                                      'interrupts': U32(0, 1232, 4), 'power-domains': U32(0x65),
@@ -62,6 +66,15 @@ def base_nodes():
         ('soc', 'fifo@394b14000'): {'status': OKAY, 'phandle': U32(0x3b)},
         ('soc', 'pwm@3ad044000'): {'status': OKAY, 'phandle': U32(0x113)},
     }
+
+
+def with_reservation(data, address, size):
+    """The same FDT with one memory reservation added ahead of the terminating entry."""
+    header = list(struct.unpack('>10I', data[:40]))
+    header[1] += 16  # totalsize
+    header[2] += 16  # off_dt_struct
+    header[3] += 16  # off_dt_strings
+    return struct.pack('>10I', *header) + struct.pack('>QQ', address, size) + data[40:]
 
 
 def expected_dtb_nodes(changes=None):
@@ -152,15 +165,31 @@ class BuildGuards(unittest.TestCase):
     def test_other_change_refused(self):
         self.refused(expected_dtb_nodes({('soc', 'iommu@490000000'): {'status': DISABLED}}))
 
+    def test_changed_boot_cpu_refused(self):
+        candidate = bytearray(dtb(expected_dtb_nodes()))
+        candidate[28:32] = U32(1)  # boot_cpuid_phys
+        with self.assertRaisesRegex(ValueError, 'beyond the J773g board wiring'):
+            self.build(bytes(candidate))
+        self.assertFalse(self.output.exists())
+
+    def test_added_memory_reservation_refused(self):
+        with self.assertRaisesRegex(ValueError, 'beyond the J773g board wiring'):
+            self.build(with_reservation(dtb(expected_dtb_nodes()), 0x10000000000, 0x4000))
+        self.assertFalse(self.output.exists())
+
     def test_wrong_board_refused(self):
         base = base_nodes()
         base[()]['compatible'] = b'apple,j415\0apple,t8132\0apple,arm-platform\0'
         self.base_refused(base, 'Wrong board')
 
     def test_moved_phandle_refused(self):
-        base = base_nodes()
-        base[PMGR + ('power-controller@1e0',)]['phandle'] = U32(0x99)
-        self.base_refused(base, 'Unexpected phandle 0xf')
+        for node, handle in ((PMGR + ('power-controller@1e0',), '0xf'), (('soc', 'pinctrl@39a000000'), '0x3f'),
+                             (PMGR + ('power-controller@550',), '0x65'),
+                             (('soc', 'interrupt-controller@381180000'), '0xd')):
+            with self.subTest(node=node):
+                base = base_nodes()
+                base[node]['phandle'] = U32(0x99)
+                self.base_refused(base, 'Unexpected phandle ' + handle)
 
     def test_ethernet_already_wired_refused(self):
         base = base_nodes()
