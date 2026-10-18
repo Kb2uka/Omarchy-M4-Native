@@ -2,6 +2,7 @@
 # Copyright (c) 2026 KB2UKA
 """J713 P-cluster guard (#66): the policy header compiled on the host, and the module's fail-closed shape."""
 import ctypes
+import itertools
 from pathlib import Path
 import re
 import shutil
@@ -41,6 +42,9 @@ SETTLED_FAST = {
     3: {5: [2.6, 3.1], 6: [5.9, 5.5], 7: [8.0], 8: [12.3, 10.8], 9: [16.7], 10: [21.4, 21.2]},
     4: {5: [3.1, 3.3], 6: [6.6, 6.1], 7: [8.7, 8.7], 8: [14.6, 11.3], 9: [18.8, 18.6]},
 }
+# Six E cores joining four busy P cores held at P4 (2026-10-18, the guard's own TCMz): about
+# 2 C over the P cores' creep, nearly all of it in the reading by 2.4 s after the join.
+E_JOIN_ARRIVAL_S = 2.4
 U32S = ctypes.c_uint32 * 21
 U64S = ctypes.c_uint64 * 6
 
@@ -65,6 +69,7 @@ class Policy(unittest.TestCase):
         lib.hold.argtypes = [ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint), ctypes.c_uint,
                              ctypes.c_uint, ctypes.c_bool]
         lib.e_heat.argtypes = [ctypes.c_uint, ctypes.c_uint32]
+        lib.e_new_heat.argtypes = [ctypes.c_uint, ctypes.c_uint32, ctypes.c_int]
         lib.float_to_mc.argtypes = [ctypes.c_uint32, ctypes.POINTER(ctypes.c_int)]
         lib.allowed.restype = ctypes.c_uint32
         lib.allowed.argtypes = [ctypes.c_int, ctypes.c_uint, ctypes.c_int, ctypes.c_int, ctypes.c_bool, U32S]
@@ -122,21 +127,19 @@ class Policy(unittest.TestCase):
         self.assertEqual(self.allowed(70, 9), self.allowed(70, 4))
 
     def test_predicted_peak_never_over_the_limit(self):
-        for limit in (90, 100, 105):
-            for busy in range(0, 5):
-                for e_busy in range(0, 7):
-                    for e_khz in (900000, 2172000, 2496000, 2808000):
-                        heat = self.lib.e_heat(e_busy, e_khz)
-                        for base_c in range(30, 111):
-                            level = self.allowed(base_c, busy, heat, limit)
-                            self.assertTrue(4 <= level <= 20)
-                            if level > 4:
-                                peak = base_c * 1000 + heat + self.lib.step(min(max(busy, 1), 4), level)
-                                self.assertLessEqual(peak, limit * 1000)
-                                above = [n for n in range(level + 1, 21)
-                                         if base_c * 1000 + heat + self.lib.step(min(max(busy, 1), 4), n)
-                                         <= limit * 1000]
-                                self.assertEqual(above, [], 'the highest fitting state is chosen')
+        for limit, busy, e_busy, e_khz, settled in itertools.product(
+                (90, 100, 105), range(0, 5), range(0, 7), (900000, 2172000, 2496000, 2808000), (0, 6000, 12000)):
+            heat = self.lib.e_new_heat(e_busy, e_khz, settled)
+            self.assertGreaterEqual(heat, 0)
+            row = min(max(busy, 1), 4)
+            for base_c in range(30, 111):
+                level = self.allowed(base_c, busy, heat, limit)
+                self.assertTrue(4 <= level <= 20)
+                if level > 4:
+                    self.assertLessEqual(base_c * 1000 + heat + self.lib.step(row, level), limit * 1000)
+                    above = [n for n in range(level + 1, 21)
+                             if base_c * 1000 + heat + self.lib.step(row, n) <= limit * 1000]
+                    self.assertEqual(above, [], 'the highest fitting state is chosen')
 
     def test_missing_states_are_skipped(self):
         levels = list(P_KHZ)
@@ -150,6 +153,29 @@ class Policy(unittest.TestCase):
         self.assertEqual(self.lib.e_heat(6, 2172000), 6000)
         self.assertEqual(self.lib.e_heat(9, 2808000), 12000, 'at most six E cores')
         self.assertLess(self.allowed(70, 4, self.lib.e_heat(6, 2808000)), self.allowed(70, 4))
+
+    def test_e_heat_already_in_the_reading_is_not_counted_again(self):
+        full = self.lib.e_heat(6, 2808000)
+        self.assertEqual(self.lib.e_new_heat(6, 2808000, 0), full, 'E cores that just woke count in full')
+        self.assertEqual(self.lib.e_new_heat(6, 2808000, full), 0, 'settled E heat is in the reading')
+        self.assertEqual(self.lib.e_new_heat(6, 2808000, self.lib.e_heat(6, 2172000)), 6000,
+                         'a clock rise counts its difference')
+        self.assertEqual(self.lib.e_new_heat(6, 2808000, self.lib.e_heat(2, 2808000)), 8000,
+                         'cores that joined since count')
+        self.assertEqual(self.lib.e_new_heat(1, 900000, full), 0, 'fewer E cores than settled never go negative')
+
+    def test_e_settle_window_covers_the_measured_arrival(self):
+        # The window is whole slow ticks plus the current one, so it is never shorter than PG_E_SETTLE_MS.
+        self.assertGreaterEqual(self.lib.e_settle_ms(), E_JOIN_ARRIVAL_S * 1000 + 500, 'margin over the measurement')
+        self.assertGreaterEqual(self.lib.e_recent_max(), -(-self.lib.e_settle_ms() // 50), 'room at the shortest period')
+
+    def test_sustained_all_core_load_boosts_once_e_heat_has_settled(self):
+        # 2026-10-18: ten busy cores at 88 C held P at P4/P5 for ten minutes because the E cluster's 12 C was
+        # added on top of a reading that already held it. Settled, the same reading allows P7 (2616 MHz).
+        full = self.lib.e_heat(6, 2808000)
+        self.assertEqual(self.allowed(88, 4, self.lib.e_new_heat(6, 2808000, 0), limit_c=105), 5)
+        self.assertEqual(self.allowed(88, 4, self.lib.e_new_heat(6, 2808000, full), limit_c=105), 7)
+        self.assertEqual(self.allowed(89, 4, self.lib.e_new_heat(6, 2808000, 0), limit_c=105), 4)
 
     def test_base_subtracts_the_fast_heat_of_a_busy_window(self):
         for busy in range(1, 5):
@@ -374,13 +400,41 @@ class ModuleSource(unittest.TestCase):
                       '\t/* This tick joins the recent ones; the next starts from the current state. */\n'
                       '\trecent_pos = pg_keep(recent_min, recent_min_busy, recent_pos, recent_ticks, tick_min, '
                       'tick_min_busy);\n\ttick_min = policy_level();\n\ttick_min_busy = PG_P_CPUS;\n'
+                      '\te_pos = pg_keep(recent_e_khz, recent_e_busy, e_pos, e_ticks, tick_e_min_khz, '
+                      'tick_e_min_busy);\n\ttick_e_min_khz = READ_ONCE(e_policy->cur);\n'
+                      '\ttick_e_min_busy = PG_E_CPUS;\n'
                       '\tspin_unlock_irqrestore(&fast_lock, flags);\n\tmutex_unlock(&lock);\n', slow)
-        self.assertEqual(slow.count('pg_keep('), 1)
+        self.assertEqual(slow.count('pg_keep('), 2)
         self.assertIn('recent_ticks = min_t(unsigned int, DIV_ROUND_UP(PG_RECENT_MS, period_ms), PG_RECENT_MAX);',
                       self.init)
         self.assertIn('recent_min[i] = PG_BASE_LEVEL;', self.init, 'until measured, the kept ticks subtract nothing')
         self.assertLess(self.init.index('recent_ticks = min_t('), self.init.index('queue_delayed_work'))
         self.assertIn('period_ms < 50', self.init)
+
+    def test_e_heat_settles_only_on_a_new_reading_over_the_e_look_back(self):
+        wanted = self.source[self.source.index('static u32 wanted_level(void)\n{'):]
+        wanted = wanted[:wanted.index('\n}\n')]
+        self.assertIn('pg_e_new_heat(e_busy_held, READ_ONCE(e_policy->cur), e_settled_mc)', wanted)
+        self.assertNotIn('pg_e_heat(', wanted)
+        slow = self.source[self.source.index('static void slow_work(struct work_struct *w)\n{'):]
+        slow = slow[:slow.index('\n}\n')]
+        fresh = slow[slow.index('if (fresh) {'):slow.index('if (mc >= (int)hot_c * 1000)')]
+        self.assertIn('e_settled_mc = pg_e_heat(pg_lowest(recent_e_busy, e_ticks, tick_e_min_busy),\n'
+                      '\t\t\t\t\t\t pg_lowest(recent_e_khz, e_ticks, tick_e_min_khz));', fresh)
+        self.assertEqual(self.source.count('e_settled_mc ='), 1, 'only a new reading settles E heat')
+        self.assertIn('static int e_settled_mc;', self.source, 'nothing settled before the first reading')
+        self.assertIn('static u32 tick_e_min_busy, tick_e_min_khz;', self.source,
+                      'the first tick and the kept ones start with no busy E core')
+        sample = self.source[self.source.index('static void sample_busy(void)\n{'):]
+        sample = sample[:sample.index('\n}\n')]
+        self.assertIn('tick_e_min_busy = min(tick_e_min_busy, e_busy);\n'
+                      '\ttick_e_min_khz = min(tick_e_min_khz, READ_ONCE(e_policy->cur));\n'
+                      '\tif (pg_hold(', sample, 'the raw count, before the hold raises it')
+        failed = sample[sample.index('if (idle == (u64)-1) {'):sample.index('return;')]
+        self.assertIn('tick_e_min_busy = 0;', failed, 'without idle accounting nothing settles')
+        self.assertIn('e_ticks = min_t(unsigned int, DIV_ROUND_UP(PG_E_SETTLE_MS, period_ms), PG_E_RECENT_MAX);',
+                      self.init)
+        self.assertLess(self.init.index('e_ticks = min_t('), self.init.index('queue_delayed_work'))
 
     def test_only_the_slow_path_raises(self):
         self.assertIn('static void apply_work(struct work_struct *w)\n{\n\tupdate_cap(false);\n}', self.source)

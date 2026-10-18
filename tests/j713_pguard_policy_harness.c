@@ -24,6 +24,21 @@ int e_heat(unsigned int e_busy, u32 e_khz)
 	return pg_e_heat(e_busy, e_khz);
 }
 
+int e_new_heat(unsigned int e_busy, u32 e_khz, int settled_mc)
+{
+	return pg_e_new_heat(e_busy, e_khz, settled_mc);
+}
+
+int e_settle_ms(void)
+{
+	return PG_E_SETTLE_MS;
+}
+
+int e_recent_max(void)
+{
+	return PG_E_RECENT_MAX;
+}
+
 int float_to_mc(u32 bits, int *mc)
 {
 	return pg_float_to_mc(bits, mc);

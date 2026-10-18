@@ -54,6 +54,26 @@ static inline int pg_e_heat(unsigned int e_busy, u32 e_khz)
 	return (int)e_busy * (e_khz >= PG_E_HIGH_KHZ ? 2000 : 1000);
 }
 
+/*
+ * E-cluster heat already in the reading. Six E cores joining four busy P
+ * cores at P4 raised the guard's TCMz about 2 C over the P cores' own creep,
+ * nearly all of it within 2.4 s of the join (docs/j713-cpu-boost.md). So the
+ * heat of the fewest busy E cores at the lowest E clock seen in the
+ * PG_E_SETTLE_MS before a new reading is in that reading (pg_lowest over a
+ * second ring), and only E cores or clock above them still add heat: without
+ * this, a sustained all-core load counted its E heat twice and held P at P4.
+ */
+#define PG_E_SETTLE_MS 3000
+#define PG_E_RECENT_MAX 60	/* ticks kept: 3000 ms at the shortest period, 50 ms */
+
+/* E heat not yet in the reading: e_heat less the settled heat, never below zero. */
+static inline int pg_e_new_heat(unsigned int e_busy, u32 e_khz, int settled_mc)
+{
+	int heat = pg_e_heat(e_busy, e_khz) - settled_mc;
+
+	return heat > 0 ? heat : 0;
+}
+
 /* IEEE-754 single to milli-degrees C, for the positive readings TCMz returns. */
 static inline int pg_float_to_mc(u32 bits, int *mc)
 {
