@@ -35,8 +35,10 @@ digest = lambda data: hashlib.sha256(data).hexdigest()
 
 def put(path, data, mode=0o644):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(data)
-    os.chmod(path, mode)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'wb') as stream:
+        os.fchmod(stream.fileno(), mode)
+        stream.write(data)
 
 
 class Kit:
@@ -202,6 +204,7 @@ class Derive(unittest.TestCase):
             self.assertIn('AQ_M4_SIMPLEDRM_GBM=1', text)
 
     def test_a_changed_kit_file_is_refused(self):
+        (self.fixture.kit / 'START-HERE.md').unlink()
         put(self.fixture.kit / 'START-HERE.md', b'# changed\n')
         self.refused('Kit file changed: START-HERE.md')
 

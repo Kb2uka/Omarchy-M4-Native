@@ -170,9 +170,11 @@ def build_zip(old_zip, root_image, dtb, output):
 
 
 def write(path, data, mode=0o644):
-    with open(path, 'xb') as stream:
+    """Create a new kit file; the kit is a public download, so its files are world-readable."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'wb') as stream:
+        os.fchmod(stream.fileno(), mode)
         stream.write(data)
-    os.chmod(path, mode)
 
 
 def canonical(value):
@@ -215,7 +217,7 @@ def assemble(kit, dtb_path, output, revision, debugfs, e2fsck):
             continue
         (output / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(kit / name, output / name)
-        os.chmod(output / name, os.stat(kit / name).st_mode & 0o777)
+        shutil.copymode(kit / name, output / name)
     for name, mode in REPLACED_DOCS.items():
         write(output / name, (FILES / name).read_bytes(), mode)
     write(output / 'installer_data.json', canonical(installer_data(json.loads((kit / 'installer_data.json').read_bytes()))))
