@@ -155,7 +155,9 @@ class Derive(unittest.TestCase):
         self.assertEqual(definition['name'], 'Omarchy M4 Native 0.1.0-alpha.1 (J773g tester)')
         for name in ('Install.command', 'START-HERE.md', 'KNOWN-LIMITATIONS.md', 'UPDATES.md'):
             self.assertEqual((self.output / name).read_bytes(), (ROOT / 'packaging/j773g-test' / name).read_bytes())
-        self.assertEqual(os.stat(self.output / 'Install.command').st_mode & 0o777, 0o755)
+        for name, mode in (('Install.command', 0o755), ('START-HERE.md', 0o644),
+                           ('KNOWN-LIMITATIONS.md', 0o644), ('UPDATES.md', 0o644)):
+            self.assertEqual(os.stat(self.output / name).st_mode & 0o777, mode, name)
         self.assertEqual((self.output / 'notices/LICENSE.md').read_bytes(), b'license\n')
         image = json.loads((self.output / 'IMAGE.json').read_bytes())
         self.assertEqual(image['root']['sha256'], receipt['root_sha256'])
@@ -262,6 +264,11 @@ class InstallCommand(unittest.TestCase):
         lines = self.SCRIPT.read_text().splitlines()
         start = next(i for i, line in enumerate(lines) if "read -r -p 'Type TEST" in line)
         guard = '\n'.join(lines[start:start + 2]) + '\necho REACHED-INSTALLER\n'
+        # The confirmation must come before the installer is unpacked or started.
+        later = [i for i, line in enumerate(lines) if line.startswith(('tar -xzf', 'exec ', 'work='))]
+        self.assertEqual(len(later), 3)
+        self.assertTrue(all(start + 1 < i for i in later))
+        self.assertEqual(lines[start + 1], '[[ "$answer" == TEST && "$tester" == yes ]] || exit 0')
         for tester, answer, reached in (('yes', 'TEST', True), ('yes', 'test', False), ('yes', 'y', False),
                                         ('yes', '', False), ('no', 'TEST', False)):
             with self.subTest(tester=tester, answer=answer):
