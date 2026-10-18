@@ -162,8 +162,10 @@ groups:
 - J713 hardware, which should stay closed: `m4-lid-lock`, `m4-notch`,
   `m4-j713-audio-ready`, `m4-j713-audio-register` and `m4-headphones` (the
   mini's headphone codec is unverified).
-`packaging/m4-boards.json` allows only `qualified` and `refused`, and the
-tests check every gate against those two lists.
+`packaging/m4-boards.json` allows only `qualified` and `refused`, and
+`tests/test_m4_boards.py` checks the gates listed in
+[m4-boards.md](m4-boards.md) against those two lists. `m4-cpu-idle` and
+`m4-notch` are not in that list, so no test covers their board checks yet.
 
 **GPU.** `gpu/j713/asahi/g16.rs` admits any board on firmware
 `mBoot-18000.161.10`; the Air path needs `mBoot-18000.120.36` and
@@ -180,22 +182,24 @@ until the mini's amplifier (`ti,sn012776` on `i2c3`) has its own profile.
 ## Plan
 
 1. **This survey.** Record the board and the audit (this page).
-2. **A `testing` board status, if the maintainer approves it.** Today a
-   board is either `qualified`, with boot evidence from that board, or
-   `refused` ([m4-boards.md](m4-boards.md)). A board that remote testers may
-   install before it has that evidence is a policy change, and the
-   maintainer decides it before any of steps 2 to 4 ships. If approved, it is
-   a third value that the installer admits only behind an explicit tester
-   opt-in, and the board tests check every gate against it: SoC-level gates
-   admit it, J713-hardware gates refuse it.
+2. **A `testing` board status.** Today a board is either `qualified`, with
+   boot evidence from that board, or `refused` ([m4-boards.md](m4-boards.md)).
+   A board that remote testers may install before it has that evidence is a
+   policy change; the maintainer approved it on 2026-10-18. The J713 release
+   and every live gate keep refusing a testing board: only a kit built for
+   that board, run with the tester's explicit opt-in, admits it.
 3. **A J773g boot devicetree**, built from the same tree and SoC patches as
    the J713 one and audited the same way, with its own lineage in
    `m4-boot-compose`. Gravity's `t8132-j773g.dts` supplies the board wiring
    (framebuffer power domain, ports, speaker pins), not the SoC nodes: the
    shipped kernel's NVMe driver expects the split NVMe and NVMMU windows of
    patch 0013, which Gravity's tree maps differently.
-4. **A mini release image**: the shipped kernel, the 26.6.2 stub, framebuffer
-   HDMI, speaker off, no J713-only packages.
+4. **A mini tester kit**: the shipped kernel, the 26.6.2 stub, framebuffer
+   HDMI, speaker off, no J713-only packages, behind the tester opt-in. Here the
+   gates change for testing boards, and the board tests check each one: the
+   SoC-level gates admit the mini, the board-aware gates take its J773g path
+   (its devicetree lineage and package set), and the J713-hardware gates keep
+   refusing it.
 5. **First boot by the tester**, then SoC fixes in the Air's order: poweroff,
    CPU idle and boost, GPU, video decode.
 6. **Kernel move** to Gravity's DCP work, for native HDMI on the mini and
