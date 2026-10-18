@@ -42,7 +42,10 @@ class Release:
             directory = Path(command[command.index('-D') + 1])
             for index, word in enumerate(command):
                 if word == '-p':
-                    (directory / command[index + 1]).write_bytes(self.assets[command[index + 1]])
+                    target = directory / command[index + 1]
+                    if target.exists():
+                        raise subprocess.CalledProcessError(1, command)
+                    target.write_bytes(self.assets[command[index + 1]])
         elif command[:3] == ['gh', 'release', 'upload']:
             clobber = '--clobber' in command
             for path in (Path(c) for c in command[3:] if c not in (MODULE.TAG, '--clobber')):
@@ -139,13 +142,8 @@ class PublishTests(unittest.TestCase):
             self.assertIn('packaging/omarchy-m4/channel.json', member_names)
             self.assertNotIn('AGENTS.md', member_names)
             self.assertNotIn('CLAUDE.md', member_names)
-            joins = json.loads(MODULE.SOURCE_JOINS.read_bytes())
-            for binary, entry in joins['binaries'].items():
-                for source in entry['sources']:
-                    if 'tree' in source:
-                        prefix = source['tree'].rstrip('/') + '/'
-                        self.assertTrue(any(m == source['tree'] or m.startswith(prefix) for m in member_names),
-                                        f"Missing joined tree {source['tree']} in source archive for {binary}")
+            self.assertEqual(archive.extractfile(MODULE.SOURCE_REVISION).read().decode().strip(),
+                             MODULE.source_revision())
 
     def test_missing_source_archive_signature_is_repaired(self):
         self.publish()
@@ -164,41 +162,16 @@ class PublishTests(unittest.TestCase):
             self.publish()
         self.assertIn('Published source archive differs', str(raised.exception))
 
-    def test_missing_joined_tree_in_integration_fails(self):
-        fake_joins = json.loads(MODULE.SOURCE_JOINS.read_bytes())
-        first_binary = next(iter(fake_joins['binaries']))
-        fake_joins['binaries'][first_binary]['sources'].append(
-            {'tree': 'nonexistent/untracked/tree', 'commit': '0' * 40}
-        )
-        with mock.patch.object(MODULE.json, 'loads', side_effect=lambda b, orig=json.loads:
-                               fake_joins if b == MODULE.SOURCE_JOINS.read_bytes() else orig(b)):
-            with self.assertRaises(SystemExit) as raised:
-                self.publish()
-        self.assertIn('Joined source tree is not in the release integration: nonexistent/untracked/tree',
-                      str(raised.exception))
-
-    def test_join_source_archive_is_uploaded_and_verified(self):
-        dummy_name = 'gst-plugins-good-1.28.7.tar.xz'
-        dummy_data = b'package-input-archive-content'
-        (self.built / dummy_name).write_bytes(dummy_data)
-        fake_joins = json.loads(MODULE.SOURCE_JOINS.read_bytes())
-        for entry in fake_joins['binaries'].values():
-            for s in entry['sources']:
-                if 'archive' in s and Path(s['archive']).name == dummy_name:
-                    s['sha256'] = hashlib.sha256(dummy_data).hexdigest()
-        with mock.patch.object(MODULE.json, 'loads', side_effect=lambda b, orig=json.loads:
-                               fake_joins if b == MODULE.SOURCE_JOINS.read_bytes() else orig(b)):
-            self.publish()
-        self.assertIn(dummy_name, self.release.assets)
-        self.assertIn(dummy_name + '.sig', self.release.assets)
-        self.assertEqual(self.release.assets[dummy_name + '.sig'], signature(dummy_data))
-
-    def test_join_source_archive_with_mismatched_sha256_fails(self):
-        dummy_name = 'gst-plugins-good-1.28.7.tar.xz'
-        (self.built / dummy_name).write_bytes(b'corrupted content')
-        with self.assertRaises(SystemExit) as raised:
-            self.publish()
-        self.assertIn('Join source is not a pinned archive any join names', str(raised.exception))
+    def test_stale_published_source_archive_is_replaced(self):
+        self.publish()
+        self.release.assets[MODULE.SOURCE_ARCHIVE] = b'outdated source archive'
+        self.release.assets[MODULE.SOURCE_ARCHIVE + '.sig'] = signature(b'outdated source archive')
+        self.release.uploads.clear()
+        self.publish()
+        self.assertIn(MODULE.SOURCE_ARCHIVE, self.release.uploads)
+        self.assertIn(MODULE.SOURCE_ARCHIVE + '.sig', self.release.uploads)
+        with tarfile.open(fileobj=io.BytesIO(self.release.assets[MODULE.SOURCE_ARCHIVE]), mode='r:gz'):
+            pass
 
     def test_connect_script_carries_the_published_setup_hash(self):
         self.publish()
@@ -341,6 +314,44 @@ class PublishTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.publish(release)
         self.assertEqual(release.assets, {})
+
+
+class SourceArchiveTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.tree = Path(self.temp.name) / 'source'
+        self.tree.mkdir()
+        subprocess.run(['git', 'init', '-q', str(self.tree)], check=True)
+        subprocess.run(['git', '-C', str(self.tree), 'config', 'user.email', 'test@example.invalid'], check=True)
+        subprocess.run(['git', '-C', str(self.tree), 'config', 'user.name', 'Test User'], check=True)
+        (self.tree / 'kept.txt').write_text('first\n')
+        (self.tree / 'AGENTS.md').write_text('excluded\n')
+        subprocess.run(['git', '-C', str(self.tree), 'add', '.'], check=True)
+        subprocess.run(['git', '-C', str(self.tree), 'commit', '-qm', 'initial'], check=True)
+
+    def archive(self, name):
+        target = self.tree / name
+        revision = MODULE.source_revision(self.tree)
+        MODULE.build_source_archive(target, revision, self.tree)
+        return target, revision
+
+    def test_archive_is_deterministic_and_committed(self):
+        first, revision = self.archive('first.tar.gz')
+        second, _ = self.archive('second.tar.gz')
+        self.assertEqual(first.read_bytes(), second.read_bytes())
+        with tarfile.open(first, 'r:gz') as archive:
+            self.assertEqual(archive.getnames(), ['kept.txt', MODULE.SOURCE_REVISION])
+            self.assertEqual(archive.extractfile(MODULE.SOURCE_REVISION).read().decode(), revision + '\n')
+        (self.tree / 'kept.txt').write_text('uncommitted\n')
+        with self.assertRaisesRegex(SystemExit, 'tracked changes'):
+            MODULE.source_revision(self.tree)
+
+    def test_git_failure_refuses_source_archive(self):
+        with mock.patch.object(MODULE.subprocess, 'check_output',
+                               side_effect=subprocess.CalledProcessError(1, ['git'])):
+            with self.assertRaisesRegex(SystemExit, 'Git source archive input failed'):
+                MODULE.source_revision(self.tree)
 
 
 if __name__ == '__main__':

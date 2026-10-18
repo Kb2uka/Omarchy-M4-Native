@@ -30,12 +30,12 @@ import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 CHANNEL = json.loads((ROOT / 'packaging/omarchy-m4/channel.json').read_text())
-SOURCE_JOINS = ROOT / 'packaging/channel-source-joins.json'
 TAG, REPO, FPR = CHANNEL['release_tag'], CHANNEL['repository'], CHANNEL['signing_fingerprint']
 SETUP = 'omarchy-m4-setup.py'
 CONNECT = 'm4-connect.sh'
 CONNECT_HASH = '@SETUP_SHA256@'
 SOURCE_ARCHIVE = 'release-integration.tar.gz'
+SOURCE_REVISION = 'release-integration-revision.txt'
 NOTES = ('Signed pacman repository for the experimental M4 build ([issue #49]'
          '(https://github.com/Kb2uka/Omarchy-M4-Native/issues/49)). Owners connect once with '
          '`m4-connect.sh` (it checks and runs `omarchy-m4-setup.py`); see docs/updates.md. Not an installer.')
@@ -163,42 +163,41 @@ def sign(package):
     verify(package.with_name(package.name + '.sig'), package)
 
 
-def git_tracked_files(tree=ROOT):
-    """Return tracked repository files in tree."""
+def git_output(tree, *args):
+    """Return Git's bytes or fail closed instead of widening the archive scope."""
     try:
-        proc = subprocess.Popen(['git', '-C', str(tree), 'ls-files', '-z'],
-                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        out, _ = proc.communicate()
-        if proc.returncode == 0 and out:
-            return [p.decode() for p in out.split(b'\0') if p]
-    except (FileNotFoundError, OSError):
-        pass
-    return [str(p.relative_to(tree)) for p in tree.rglob('*') if p.is_file() and '.git' not in p.parts]
+        return subprocess.check_output(['git', '-C', str(tree), *args])
+    except (FileNotFoundError, OSError, subprocess.CalledProcessError) as exc:
+        raise SystemExit('publish-m4-packages: Git source archive input failed: ' + str(exc)) from exc
 
 
-def build_source_archive(target_path, tracked_files, tree=ROOT):
-    """Bundle tracked repository files into a deterministic gzip tar archive."""
+def source_revision(tree=ROOT):
+    """Return a clean committed revision for the integration source archive."""
+    require(not git_output(tree, 'status', '--porcelain', '--untracked-files=no'),
+            'Refusing to publish integration sources from a tree with tracked changes')
+    return git_output(tree, 'rev-parse', '--verify', 'HEAD').decode().strip()
+
+
+def build_source_archive(target_path, revision, tree=ROOT):
+    """Bundle the committed integration source and its revision deterministically."""
+    tar = git_output(tree, 'archive', '--format=tar', revision, '--', '.',
+                     ':(exclude)AGENTS.md', ':(exclude)CLAUDE.md')
+    stream = io.BytesIO(tar)
+    with tarfile.open(fileobj=stream, mode='a:') as archive:
+        data = (revision + '\n').encode()
+        info = tarfile.TarInfo(SOURCE_REVISION)
+        info.size, info.mtime, info.uid, info.gid = len(data), 0, 0, 0
+        info.uname = info.gname = ''
+        info.mode = 0o644
+        archive.addfile(info, io.BytesIO(data))
     with open(target_path, 'wb') as raw_file:
         with gzip.GzipFile(filename='', mode='wb', fileobj=raw_file, mtime=0) as gz:
-            with tarfile.open(fileobj=gz, mode='w:') as archive:
-                for name in tracked_files:
-                    archive.add(tree / name, arcname=name, recursive=False)
+            gz.write(stream.getvalue())
 
 
-def check_join_sources(tracked, joins):
-    """Every tree source a join names is in the release integration."""
-    for name, entry in sorted(joins['binaries'].items()):
-        for source in entry['sources']:
-            if 'tree' in source:
-                prefix = source['tree'].rstrip('/') + '/'
-                require(any(path == source['tree'] or path.startswith(prefix) for path in tracked),
-                        'Joined source tree is not in the release integration: ' + source['tree'])
-
-
-def publish(directory, join_sources=None):
+def publish(directory):
     key = os.environ.get('PACKAGE_SIGNING_KEY', '')
     require(key.strip(), 'PACKAGE_SIGNING_KEY is not available')
-    joins = json.loads(SOURCE_JOINS.read_bytes())
     with tempfile.TemporaryDirectory(prefix='m4-publish-') as scratch:
         scratch = Path(scratch)
         os.environ['GNUPGHOME'] = str(scratch / 'gnupg')
@@ -211,8 +210,9 @@ def publish(directory, join_sources=None):
             run('gh', 'release', 'create', TAG, '--prerelease', '--target', 'main',
                 '--title', 'M4 package repository', '--notes', NOTES)
         assets = set(output('gh', 'release', 'view', TAG, '--json', 'assets', '-q', '.assets[].name').split())
-        repo, uploads = scratch / 'repo', []
+        repo, published, uploads = scratch / 'repo', scratch / 'published', []
         repo.mkdir()
+        published.mkdir()
         for package in sorted(directory.glob('*.pkg.tar.zst')):
             name, signature = package.name, repo / (package.name + '.sig')
             if name in assets:
@@ -232,19 +232,19 @@ def publish(directory, join_sources=None):
             sign(repo / name)
             uploads.append((repo / name, signature))
 
-        # Bundle and sign corresponding integration sources
-        tracked = git_tracked_files(ROOT)
-        integration = [name for name in tracked if Path(name).name not in ('AGENTS.md', 'CLAUDE.md')]
-        check_join_sources(integration, joins)
-        source_archive = repo / SOURCE_ARCHIVE
-        build_source_archive(source_archive, integration)
-        source_sig = repo / (SOURCE_ARCHIVE + '.sig')
+        # Bundle and sign the committed integration source. Published copies
+        # live separately so gh never has to overwrite a newly built archive.
+        revision = source_revision(ROOT)
+        source_archive = scratch / SOURCE_ARCHIVE
+        build_source_archive(source_archive, revision)
+        source_sig = scratch / (SOURCE_ARCHIVE + '.sig')
         if SOURCE_ARCHIVE in assets:
-            run('gh', 'release', 'download', TAG, '-D', repo, '-p', SOURCE_ARCHIVE)
+            run('gh', 'release', 'download', TAG, '-D', published, '-p', SOURCE_ARCHIVE)
+            published_archive = published / SOURCE_ARCHIVE
             if SOURCE_ARCHIVE + '.sig' in assets:
-                run('gh', 'release', 'download', TAG, '-D', repo, '-p', SOURCE_ARCHIVE + '.sig')
-                verify(source_sig, repo / SOURCE_ARCHIVE)
-                if (repo / SOURCE_ARCHIVE).read_bytes() == source_archive.read_bytes():
+                run('gh', 'release', 'download', TAG, '-D', published, '-p', SOURCE_ARCHIVE + '.sig')
+                verify(published / (SOURCE_ARCHIVE + '.sig'), published_archive)
+                if published_archive.read_bytes() == source_archive.read_bytes():
                     print('kept published ' + SOURCE_ARCHIVE)
                 else:
                     sign(source_archive)
@@ -252,40 +252,13 @@ def publish(directory, join_sources=None):
                     run('gh', 'release', 'upload', TAG, '--clobber', source_sig)
             else:
                 sign(source_archive)
+                if published_archive.read_bytes() != source_archive.read_bytes():
+                    run('gh', 'release', 'upload', TAG, '--clobber', source_archive)
                 run('gh', 'release', 'upload', TAG, '--clobber', source_sig)
         else:
             sign(source_archive)
             run('gh', 'release', 'upload', TAG, source_archive)
             run('gh', 'release', 'upload', TAG, '--clobber', source_sig)
-
-        # Handle any joined source archives
-        planned_archives = {Path(source['archive']).name: source.get('sha256')
-                            for entry in joins['binaries'].values()
-                            for source in entry['sources'] if 'archive' in source}
-        extra_sources = list(join_sources or [])
-        for path in sorted(directory.glob('*')):
-            if path.name in planned_archives and path not in extra_sources:
-                extra_sources.append(path)
-        for path in extra_sources:
-            name, signature = path.name, repo / (path.name + '.sig')
-            require(path.is_file() and not path.is_symlink(), 'Missing join source archive: ' + str(path))
-            require(planned_archives.get(name) and sha(path) == planned_archives[name],
-                    'Join source is not a pinned archive any join names: ' + str(path))
-            if name in assets:
-                run('gh', 'release', 'download', TAG, '-D', repo, '-p', name)
-                if name + '.sig' in assets:
-                    run('gh', 'release', 'download', TAG, '-D', repo, '-p', name + '.sig')
-                    verify(signature, repo / name)
-                    print('kept published ' + name)
-                    continue
-                sign(repo / name)
-                run('gh', 'release', 'upload', TAG, '--clobber', signature)
-                print('signed published ' + name)
-                continue
-            shutil.copyfile(path, repo / name)
-            sign(repo / name)
-            run('gh', 'release', 'upload', TAG, repo / name)
-            run('gh', 'release', 'upload', TAG, '--clobber', signature)
 
         packages = sorted(repo.glob('*.pkg.tar.zst'))
         run('repo-add', '--sign', '--key', FPR, repo / f'{REPO}.db.tar.gz', *packages)
@@ -335,23 +308,14 @@ def publish(directory, join_sources=None):
         served(SOURCE_ARCHIVE + '.sig', signs(check / (SOURCE_ARCHIVE + '.sig'), check / SOURCE_ARCHIVE),
                'Bad or foreign signature on ' + SOURCE_ARCHIVE)
         print('verified ' + SOURCE_ARCHIVE)
-        for path in extra_sources:
-            name = path.name
-            (check / name).write_bytes(served(name, lambda d, p=path: d == p.read_bytes(),
-                                              'Published join source differs: ' + name))
-            served(name + '.sig', signs(check / (name + '.sig'), check / name),
-                   'Bad or foreign signature on ' + name)
-            print('verified ' + name)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('directory', type=Path, help='checked packages from build-m4-packages.py')
-    parser.add_argument('--join-source', type=Path, action='append', default=[],
-                        help='A source archive that packaging/channel-source-joins.json names and pins')
     args = parser.parse_args()
-    publish(args.directory.resolve(), join_sources=args.join_source)
+    publish(args.directory.resolve())
 
 
 if __name__ == '__main__':

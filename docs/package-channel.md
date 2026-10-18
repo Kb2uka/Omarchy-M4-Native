@@ -483,16 +483,15 @@ first. Joins stay `unverified` until a byte-identical rebuild is recorded:
 
 ### Published source artifact
 
-With each channel publish, the corresponding sources matching the joins are
-packaged into the integration source archive `release-integration.tar.gz` and
-signed with the channel key (`release-integration.tar.gz.sig`). The archive
-captures the exact repository integration state at the published revision (all
-tracked files, excluding private build logs, machine credentials and workflow
-instructions), bundling the packaging recipes, tools, patch chains, overlays,
-and driver source trees matching the joins in
+With each channel publish, the committed repository integration source is
+packaged into `release-integration.tar.gz` and signed with the channel key
+(`release-integration.tar.gz.sig`). The publisher refuses tracked local edits,
+uses `git archive` at `HEAD`, and records that revision in
+`release-integration-revision.txt` inside the archive. It includes tracked
+integration files except `AGENTS.md` and `CLAUDE.md`; it does not claim to
+contain the separately pinned source archives named by every package join.
+Those archives remain individually named and hash-pinned in
 [`packaging/channel-source-joins.json`](../packaging/channel-source-joins.json).
-Any companion join archives supplied with the publish are validated against
-their pinned hashes, signed, and published to the release assets as well.
 
 ## Limits
 
