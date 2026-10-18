@@ -376,13 +376,18 @@ class LiveBoardGates(unittest.TestCase):
             return error, attempts
 
     def test_refused_boards_stop_at_the_board_gate(self):
+        seen = set()
         for name, call, kind, message, _ in GATES:
             for board in UNQUALIFIED:
+                seen.add((name, board['target']))
                 with self.subTest(gate=name, board=board['target']):
                     error, attempts = self.outcome(call, identity(board))
                     self.assertIsInstance(error, kind)
                     self.assertIn(message, str(error))
                     self.assertEqual(attempts, [], 'a refused board reached a filesystem write')
+        # Every gate must have met every board this release refuses, testing boards included.
+        unqualified = [board['target'] for board in TABLE['boards'] if board['support'] != 'qualified']
+        self.assertEqual(seen, {(gate[0], target) for gate in GATES for target in unqualified})
 
     def test_near_miss_names_are_refused(self):
         """Gates match whole names: apple,j713-x is not the J713, and apple,t8132-x is not the T8132."""
