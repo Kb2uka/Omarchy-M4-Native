@@ -44,10 +44,10 @@ the iBoot version string) is not in this capture; see below.
 | PCIe | `apcie,t8132` (internal: Wi-Fi, Bluetooth, Ethernet) |
 | Display | 3 DCPs (`dcp0`, `dcpext0`, `dcpext1`, all `dcp-expert-v1`), `disp0`/`dispext0`/`dispext1` `t8132`, `dptx-phy,t8122`, `atc-dpxbar,t602x`; HDMI monitor in use |
 | Audio | built-in "Mac mini Speakers" plus HDMI audio |
-| Security | SIP enabled, FileVault on |
+| Security | SIP enabled (`csrutil status`), FileVault on (`diskutil apfs list`) |
 
 Install headroom: the internal APFS container `disk0s2` is 994.7 GB with
-821 GB not allocated.
+821 GB not allocated (`diskutil list`, `diskutil apfs list`).
 
 ## How the device tree was recovered
 
@@ -79,8 +79,11 @@ kept in this project's `DEVICES` table, see
 (2026-09-18, a Fedora remix) reports DCP and GPU working (OpenGL ES 3.0 and
 OpenGL 3.3) and HDMI output. It lists as not working: suspend, display output
 over USB-C, Thunderbolt/USB4, reliable shutdown and reboot, normal power use,
-and full speaker volume. The 13-inch Air had the same gaps before this
-project's fixes, except USB-C displays.
+and full speaker volume. The 13-inch Air shared most of these. This project
+has since fixed shutdown ([j713-poweroff.md](j713-poweroff.md)) and speaker
+protection on the Air; suspend, idle power (#92), Thunderbolt and USB-C
+displays are still open there too
+([release-limitations.md](release-limitations.md)).
 
 Gravity's kernel (GravityLinux/linux, branch `gravity-m4`) carries the J773g
 work. Revision `af73769`, the revision [audio/j713/README.md](../audio/j713/README.md)
@@ -114,12 +117,12 @@ from `af73769` (`dtc` 1.8.1, SHA-256 `cf988d8c…`): 54 `MATCH`, 7 `MISMATCH`,
 |---|---|
 | 4 × `usb@…` `MISMATCH` | The DT lists one of the ADT's four interrupts and DART streams 0/1 where the ADT says 1/14. On the Air, hardware proved 0/1 right and the ADT's 1/14 wrong ([j713-front-usb.md](j713-front-usb.md)). Not a defect. |
 | `iommu@491000000` `MISMATCH` | The second PCIe port's DART. This ADT has `dart-apcie0` and `dart-apcie2` but no `dart-apcie1`, so the address only lands inside the `apcie` window. Disabled in the DT, so harmless. |
-| `iommu@390f00000`, `dma-controller@393800000` `MISMATCH` | Register windows and interrupts match. The flag is the power-domain name lookup: `AUDIO_A` and `AUDIO_BASE_NS_A` are both in this mini's PMGR table. A tool limitation, not a defect. |
+| `iommu@390f00000`, `dma-controller@393800000` `MISMATCH` | Register windows and interrupts match. Their power domains point at the PMGR records `AUDIO_A` and `AUDIO_BASE_NS_A`, which this ADT marks virtual (flags `0x30`, virtual bit `0x10`); the audit matches only physical providers. Gravity's J773g speaker uses these nodes. Check their power-up in the first boot log. |
 | `nvme@4c5cc0000` `DT-ONLY` | Mapped 0x60000 wide at the controller's secure BAR, where the ADT declares 0x10000 and the Air maps 0x28000 (`T8132_NVME_DT_WINDOW`). Over-mapped, not misplaced. |
 | `sart@485c50000` `DT-ONLY` | 0x10000 wide; the ADT's `sart-ans` is 0xc000 at the same address. |
 | `spmi@388a08000` `DT-ONLY`, enabled | `nub_spmi_a1` comes from `t8132.dtsi` with no status. This capture has no `nub-spmi-a1` node, but `NUB_SPMI_A1` is in the PMGR table. Check its probe in the first boot log. |
 | `i2s@393600000` `DT-ONLY`, enabled | `&mca`, which Gravity's protected J773g speaker (`apple,j773g-speaker`, amplifier `ti,sn012776` on `i2c3`) uses. No ADT node sits at that address in this capture. Check its probe in the first boot log. |
-| 8 other `DT-ONLY` | Disabled (MTP keyboard and trackpad, its DART and mailbox, `i2c@3ad020000`, `pwm@3ad044000`). |
+| 7 other `DT-ONLY` | Disabled: the MTP keyboard and trackpad controller, its mailbox, its DART, its FIFO and the FIFO's input node, `i2c@3ad020000` and `pwm@3ad044000`. |
 
 The audit compares addresses, interrupts, DART streams and power domains. It
 does not show that a node works. Gravity's alpha booting this board is the
@@ -149,11 +152,16 @@ already has the mini's profile (`j773gap`, stub 26.6.2, its IPSW entry and
 recovery key; mini radios select Sakhalin firmware), so the installer side
 needs the least work.
 
-**Gates.** `m4-boot-compose`, `m4-channel-setup`, `m4-video-start`,
-`m4-session-placement`, `m4-j713-owner-assets` and `m4-cpu-idle` refuse the
-mini. Some guard SoC-level features and should admit it. Others guard J713
-hardware the mini does not have (lid, notch, internal keyboard and trackpad,
-the J713 speaker profile) and should stay closed.
+**Gates.** Every live gate refuses the mini today. They fall into three
+groups:
+
+- SoC-level, which should admit it: `m4-session-placement` (CPU layout),
+  `m4-video-start`, `m4-cpu-idle` and `m4-j713-owner-assets` (Widevine).
+- Board-aware, which need a J773g path: `m4-boot-compose` (devicetree
+  lineage) and `m4-channel-setup` (which packages to install).
+- J713 hardware, which should stay closed: `m4-lid-lock`, `m4-notch`,
+  `m4-j713-audio-ready`, `m4-j713-audio-register` and `m4-headphones` (the
+  mini's headphone codec is unverified).
 `packaging/m4-boards.json` allows only `qualified` and `refused`, and the
 tests check every gate against those two lists.
 
@@ -172,10 +180,14 @@ until the mini's amplifier (`ti,sn012776` on `i2c3`) has its own profile.
 ## Plan
 
 1. **This survey.** Record the board and the audit (this page).
-2. **A `testing` board status.** A third value in `m4-boards.json` that the
-   installer admits only behind an explicit tester opt-in. The board tests
-   check that every gate treats it as designed: SoC-level gates admit it,
-   J713-hardware gates refuse it.
+2. **A `testing` board status, if the maintainer approves it.** Today a
+   board is either `qualified`, with boot evidence from that board, or
+   `refused` ([m4-boards.md](m4-boards.md)). A board that remote testers may
+   install before it has that evidence is a policy change, and the
+   maintainer decides it before any of steps 2 to 4 ships. If approved, it is
+   a third value that the installer admits only behind an explicit tester
+   opt-in, and the board tests check every gate against it: SoC-level gates
+   admit it, J713-hardware gates refuse it.
 3. **A J773g boot devicetree**, built from the same tree and SoC patches as
    the J713 one and audited the same way, with its own lineage in
    `m4-boot-compose`. Gravity's `t8132-j773g.dts` supplies the board wiring
