@@ -86,8 +86,8 @@ class Release:
             return '\n'.join(self.assets)
         raise AssertionError('unexpected output command: ' + ' '.join(command))
 
-    def view(self, command, capture_output=False):
-        return types.SimpleNamespace(returncode=0 if self.exists else 1)
+    def view(self):
+        return self.exists
 
     def fetch(self, name, attempts=4):
         if name not in self.assets:
@@ -120,7 +120,7 @@ class PublishTests(unittest.TestCase):
              mock.patch.object(MODULE, 'output', release.output), \
              mock.patch.object(MODULE, 'fetch', release.fetch), \
              mock.patch.object(MODULE, 'signed', signed), \
-             mock.patch.object(MODULE.subprocess, 'run', release.view), \
+             mock.patch.object(MODULE, 'release_exists', release.view), \
              mock.patch.dict(os.environ, {'PACKAGE_SIGNING_KEY': 'private key'}), \
              mock.patch('builtins.print'):
             MODULE.publish(self.built, **kwargs)

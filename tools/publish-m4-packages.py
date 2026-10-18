@@ -54,6 +54,10 @@ def output(*command):
     return run(*command, capture_output=True, text=True).stdout
 
 
+def release_exists():
+    return subprocess.run(['gh', 'release', 'view', TAG], capture_output=True).returncode == 0
+
+
 def sha(data_or_path):
     if isinstance(data_or_path, (bytes, bytearray)):
         return hashlib.sha256(data_or_path).hexdigest()
@@ -206,7 +210,7 @@ def publish(directory):
         secret = [line.split(':')[9] for line in output('gpg', '--list-secret-keys', '--with-colons').splitlines()
                   if line.startswith('fpr:')]
         require(secret[:1] == [FPR], 'The signing key is not the channel key ' + FPR)
-        if subprocess.run(['gh', 'release', 'view', TAG], capture_output=True).returncode != 0:
+        if not release_exists():
             run('gh', 'release', 'create', TAG, '--prerelease', '--target', 'main',
                 '--title', 'M4 package repository', '--notes', NOTES)
         assets = set(output('gh', 'release', 'view', TAG, '--json', 'assets', '-q', '.assets[].name').split())
