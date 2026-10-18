@@ -213,7 +213,7 @@ file.
   #66): the guard adds E-core heat only until it has reached the CPU die
   reading (3 s), instead of on every tick. A sustained all-core load no longer
   holds the P cores at 1800 MHz while the die has headroom. Guard
-  `j713_pguard.ko` `de5e8ef4…`, pinned in `package-inputs` and
+  `j713_pguard.ko` `3706cc1d…`, pinned in `package-inputs` and
   `cpu_guard_module`.
 
 ### omarchy-m4-headphones 1-2

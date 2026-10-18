@@ -96,8 +96,8 @@ stays at or below 105 C:
   enough.
 - **E-cluster heat counts until it is in the reading:** each busy E core adds
   2 C to the prediction at E6 and above (1 C below), but only above the
-  fewest busy E cores at the lowest E clock seen in the 3 s before the newest
-  reading ([E heat settles](#e-heat-settles-in-the-reading)). Heat from E
+  fewest E cores loaded through each 250 ms tick (at least 90% busy), at the
+  lowest E clock, in the 3 s before the newest reading ([E heat settles](#e-heat-settles-in-the-reading)). Heat from E
   cores held that long is already in `TCMz`; until `omarchy-m4-cpu` 1-4 the
   guard added it again on every tick, so a sustained all-core load held P at
   1800-2088 MHz with the die near 88 C.
@@ -124,7 +124,7 @@ core count and E-cluster load.
 ### Loading it: `omarchy-m4-cpu` 1-4
 
 `m4-cpu-idle --boot` loads the idle driver and then the pinned guard
-(`de5e8ef4…`) inside the same one-strike window: a boot that dies while either
+(`3706cc1d…`) inside the same one-strike window: a boot that dies while either
 loads or settles makes the next boot load neither. A guard that is missing,
 differs from its pin or fails to load leaves the gate closed and P at
 1800 MHz, while CPU idle still loads. Without the boost devicetree, the guard
