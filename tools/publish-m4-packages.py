@@ -58,12 +58,6 @@ def release_exists():
     return subprocess.run(['gh', 'release', 'view', TAG], capture_output=True).returncode == 0
 
 
-def sha(data_or_path):
-    if isinstance(data_or_path, (bytes, bytearray)):
-        return hashlib.sha256(data_or_path).hexdigest()
-    return hashlib.sha256(Path(data_or_path).read_bytes()).hexdigest()
-
-
 def signed(signature, data_file):
     """Return whether data_file has a good signature by the channel key, by fingerprint."""
     status = subprocess.run(['gpg', '--batch', '--status-fd', '1', '--verify', str(signature), str(data_file)],
