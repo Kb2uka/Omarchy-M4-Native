@@ -62,14 +62,14 @@
       "sources": [
         {
           "tree": "cpu/j713",
-          "commit": "76190cb55c8251a76f726f5e7b7e67fa2da6883d"
+          "commit": "010e7598d266dd0758ed6daccf2ced0b64b11bad"
         },
         {
           "archive": "source/kernel-controller.tar.gz",
           "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
         }
       ],
-      "evidence": "J713 CPU idle driver. Built with cpu/j713/build-module.sh from cpu/j713/ on the alpha.1 kernel-controller tree (clang 21.1.8) in m4-gravity-builder:20261008, --network none; rebuilt byte for byte from 76190cb, and from 48a0aa9 beside the guard 91fe247e it shipped with (2026-10-18)."
+      "evidence": "J713 CPU idle driver. Built with cpu/j713/build-module.sh from cpu/j713/ on the alpha.1 kernel-controller tree (clang 21.1.8) in m4-gravity-builder:20261008, --network none; rebuilt byte for byte from 010e759, and from 48a0aa9 beside the guard 91fe247e it shipped with (2026-10-18)."
     },
     "j713_hp_dt-3f501c61.ko": {
       "sha256": "3f501c6193aeddc62031395e899909bf352851278f829458998ca1c4dbbe6149",
@@ -95,21 +95,21 @@
       ],
       "evidence": "J713 headphone jack device tree module (omarchy-m4-headphones 1-2). Built with tools/build-j713-headphones.sh from audio/j713/headphones/kernel/ on the alpha.1 kernel-controller tree (clang 21.1.8)."
     },
-    "j713_pguard-de5e8ef4.ko": {
-      "sha256": "de5e8ef4ff57c26541754577624ee6f1f9b921bb832241d48a9058fba03684c1",
+    "j713_pguard-3706cc1d.ko": {
+      "sha256": "3706cc1ddfe3c9110697354b46bfe4c93893ae333b9df43f7b0aeac6c5c9fc83",
       "license": "GPL-2.0-only",
       "correspondence": "rebuilt-identical",
       "sources": [
         {
           "tree": "cpu/j713",
-          "commit": "76190cb55c8251a76f726f5e7b7e67fa2da6883d"
+          "commit": "010e7598d266dd0758ed6daccf2ced0b64b11bad"
         },
         {
           "archive": "source/kernel-controller.tar.gz",
           "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
         }
       ],
-      "evidence": "J713 P-cluster boost guard counting E-cluster heat until it reaches the reading (omarchy-m4-cpu 1-4). cpu/j713/build-module.sh in m4-gravity-builder:20261008 (clang 21.1.8), --network none: the same recipe first rebuilt the shipped guard 91fe247e byte for byte from 48a0aa9, then built de5e8ef4 from 8147a0c and again, identical, from 76190cb (2026-10-18)."
+      "evidence": "J713 P-cluster boost guard counting E-cluster heat until it reaches the reading (omarchy-m4-cpu 1-4). cpu/j713/build-module.sh in m4-gravity-builder:20261008 (clang 21.1.8), --network none: the same recipe first rebuilt the shipped guard 91fe247e byte for byte from 48a0aa9, then built 3706cc1d from f37e5ad and again, identical, from 010e759 (2026-10-18)."
     },
     "linux-m4-omarchy-7.1.9.m4.20261008-payload.tar.zst": {
       "sha256": "b160686fa06c437343f85aab10be41a669f2a23106b7e4e83e0911c921e6388f",
