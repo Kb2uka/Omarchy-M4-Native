@@ -55,7 +55,7 @@ NAME, DRIVER = 'j713_cpuidle', 'j713_idle'
 PIN = {'sha256': 'a2a7947a1d2260abcfc6eb10d7d63643ad2e191e73e93fedddf605116cdfd5a9', 'size': 12680}
 GUARD_STAGED = 'usr/lib/omarchy-m4/cpu/j713_pguard.ko'
 GUARD_NAME = 'j713_pguard'
-GUARD_PIN = {'sha256': '91fe247e7e83d30f62f35bcf64ddbcb42faa3a1c109881d5aefcb64dc7e5e691', 'size': 39696}
+GUARD_PIN = {'sha256': 'de5e8ef4ff57c26541754577624ee6f1f9b921bb832241d48a9058fba03684c1', 'size': 41656}
 # The boost gate: the passive trip on the CPU die zone that the boost devicetree
 # sets to 20 C (closed) and j713_pguard raises to 150 C (open).
 THERMAL = 'sys/class/thermal'

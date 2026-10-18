@@ -94,6 +94,13 @@ stays at or below 105 C:
   heat that stays after the drop and is rightly part of the base. The fast
   heat leaves with a time constant of about 0.25 s, so looking back 750 ms is
   enough.
+- **E-cluster heat counts until it is in the reading:** each busy E core adds
+  2 C to the prediction at E6 and above (1 C below), but only above the
+  fewest busy E cores at the lowest E clock seen in the 3 s before the newest
+  reading ([E heat settles](#e-heat-settles-in-the-reading)). Heat from E
+  cores held that long is already in `TCMz`; until `omarchy-m4-cpu` 1-4 the
+  guard added it again on every tick, so a sustained all-core load held P at
+  1800-2088 MHz with the die near 88 C.
 - **Limits at parity with macOS:** macOS lets the fanless Airs' CPU die burst
   past 105 C (an M3 Air was measured at 114 C) and run near 100 C under
   sustained load. The guard's defaults follow it: a predicted peak of 105 C, a
@@ -114,10 +121,10 @@ The math is a pure header that the tests compile on the host, including the
 property that no state it allows predicts a peak over the limit for any base,
 core count and E-cluster load.
 
-### Loading it: `omarchy-m4-cpu` 1-3
+### Loading it: `omarchy-m4-cpu` 1-4
 
 `m4-cpu-idle --boot` loads the idle driver and then the pinned guard
-(`91fe247e…`) inside the same one-strike window: a boot that dies while either
+(`de5e8ef4…`) inside the same one-strike window: a boot that dies while either
 loads or settles makes the next boot load neither. A guard that is missing,
 differs from its pin or fails to load leaves the gate closed and P at
 1800 MHz, while CPU idle still loads. Without the boost devicetree, the guard
@@ -181,6 +188,25 @@ about 4 C high and one core backed off early; for four cores at P7 it is 62%,
 so the base read about 1 C low. One core held at P17 rose from about 61 C to
 94-95 C in 15 s and was still creeping 0.3-0.5 C/s.
 
+### E heat settles in the reading
+
+On 2026-10-18, with four P cores busy and held at P4 by a user frequency cap,
+six E cores joined at 2808 MHz while a script logged the guard's own `TCMz`
+(`/proc/j713_pguard`, about once a second):
+
+| Seconds after the join | `TCMz` | Above the P cores' creep (0.24 C/s) |
+| --- | --- | --- |
+| 0 | 65.05 C | 0 |
+| 1.4 | 66.97 C | 1.6 C |
+| 2.4 | 67.44 C | 1.8 C |
+| 3.4 | 67.83 C | 2.0 C |
+| 14.4 | 70.30 C | 1.8 C |
+
+So the E cluster adds about 2 C on top of a busy P cluster, and nearly all of
+it is in the reading 2.4 s after the join. The guard's 2 C per E core (12 C for
+six) stays as the bound for E cores that have just woken; the 3 s look-back
+adds 0.6 s of margin to the measured arrival.
+
 ### Guarded runs
 
 With the parity limits (105 C predicted peak, 108 C pin, 100 C sustained
@@ -236,7 +262,7 @@ spends half the time there (5.31 W).
 ## Existing installs
 
 **Connected to M4 updates? You get this automatically.** `omarchy-m4-update`
-installs `omarchy-m4-boot` 1-11 and `omarchy-m4-cpu` 1-3; restart once. Check:
+installs `omarchy-m4-boot` 1-11 and `omarchy-m4-cpu` 1-4; restart once. Check:
 
 ```bash
 m4-cpu-idle          # "boost": "on", "gate": "open", "rt_floor": "412"

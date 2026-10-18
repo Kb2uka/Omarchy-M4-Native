@@ -207,6 +207,15 @@ file.
   lowest state. Guard `j713_pguard.ko` `91fe247e…`, pinned in
   `package-inputs` and `cpu_guard_module`.
 
+### omarchy-m4-cpu 1-4
+
+- **E-cluster heat counted once** ([E heat settles](j713-cpu-boost.md#e-heat-settles-in-the-reading),
+  #66): the guard adds E-core heat only until it has reached the CPU die
+  reading (3 s), instead of on every tick. A sustained all-core load no longer
+  holds the P cores at 1800 MHz while the die has headroom. Guard
+  `j713_pguard.ko` `de5e8ef4…`, pinned in `package-inputs` and
+  `cpu_guard_module`.
+
 ### omarchy-m4-headphones 1-2
 
 - **The headset microphone on the headphone jack**
