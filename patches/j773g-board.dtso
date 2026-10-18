@@ -1,0 +1,146 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
+// Copyright (c) 2026 KB2UKA
+/dts-v1/;
+/plugin/;
+
+/*
+ * Plain M4 Mac mini (J773g) board wiring on top of the J713 devicetree
+ * (tools/build-j773g-dtb.py, docs/j773g-boot-dtb.md).
+ *
+ * Both Macs use the T8132, so the SoC nodes and this project's SoC fixes
+ * (NVMe windows, CPU frequency and idle, poweroff through the Abbey PMU at
+ * SPMI 0xe) carry over unchanged. This overlay changes only what the boards
+ * wire differently, following Gravity Linux's t8132-j773g.dts:
+ *
+ * - the boot framebuffer stays on the HDMI port's power domains
+ *   (dispext0_fe and dptx_phy) instead of the internal panel's;
+ * - Wi-Fi and Bluetooth use the mini's "sakhalin" firmware;
+ * - Ethernet (BCM57762) sits on PCIe port 2, behind its own DART;
+ * - the J713's keyboard and trackpad (MTP, its mailbox, DART and
+ *   DockChannel) and the keyboard backlight do not exist on the mini.
+ *
+ * The rear USB-C ports nearest the HDMI port use the same PD controllers
+ * (SPMI 0xc and 0xa) and controllers as the J713's two ports, so they work
+ * unchanged. The front ports and the third rear port are not wired here.
+ *
+ * The base has no __symbols__, so base nodes are named by phandle number:
+ * 0x0f dispext0_fe, 0x6d dptx_phy, 0x3f the AP pin controller, 0x65 the
+ * apcie_gp power domain, 0x0d the interrupt controller and 0x67 the port 0
+ * DART. tools/build-j773g-dtb.py checks each one.
+ */
+/ {
+	fragment@0 {
+		target-path = "/";
+		__overlay__ {
+			compatible = "apple,j773g", "apple,t8132", "apple,arm-platform";
+			model = "Apple Mac mini (M4, 2024)";
+		};
+	};
+
+	fragment@1 {
+		target-path = "/chosen/framebuffer@0";
+		__overlay__ {
+			power-domains = <0x0f>, <0x6d>;
+		};
+	};
+
+	fragment@2 {
+		target-path = "/soc/pcie@1cb0000000/pci@0,0/wifi@0,0";
+		__overlay__ {
+			brcm,board-type = "apple,sakhalin";
+		};
+	};
+
+	fragment@3 {
+		target-path = "/soc/pcie@1cb0000000/pci@0,0/bluetooth@0,1";
+		__overlay__ {
+			brcm,board-type = "apple,sakhalin";
+		};
+	};
+
+	fragment@4 {
+		target-path = "/soc";
+		__overlay__ {
+			pcie2_dart: iommu@492000000 {
+				compatible = "apple,t8132-dart", "apple,t8110-dart";
+				reg = <0x4 0x92000000 0x0 0x4000>;
+				#iommu-cells = <1>;
+				interrupt-parent = <0x0d>;
+				interrupts = <0 1250 4>;
+				power-domains = <0x65>;
+				status = "okay";
+			};
+		};
+	};
+
+	fragment@5 {
+		target-path = "/soc/pcie@1cb0000000";
+		__overlay__ {
+			iommu-map = <0x100 0x67 1 1>, <0x101 0x67 2 1>, <0x200 &pcie2_dart 1 1>;
+		};
+	};
+
+	fragment@6 {
+		target-path = "/soc/pcie@1cb0000000/pci@2,0";
+		__overlay__ {
+			status = "okay";
+			bus-range = <2 2>;
+			reset-gpios = <0x3f 165 1>;
+
+			ethernet@0,0 {
+				reg = <0x20000 0x0 0x0 0x0 0x0>;
+				/* m1n1 fills in the address from the ADT. */
+				local-mac-address = [00 10 18 00 00 00];
+			};
+		};
+	};
+
+	fragment@7 {
+		target-path = "/aliases";
+		__overlay__ {
+			ethernet0 = "/soc/pcie@1cb0000000/pci@2,0/ethernet@0,0";
+		};
+	};
+
+	fragment@8 {
+		target-path = "/soc/mtp@394600000";
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+
+	fragment@9 {
+		target-path = "/soc/mbox@394608000";
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+
+	fragment@10 {
+		target-path = "/soc/iommu@394800000";
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+
+	fragment@11 {
+		target-path = "/soc/fifo@394b14000";
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+
+	fragment@12 {
+		target-path = "/soc/pwm@3ad044000";
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+
+	fragment@13 {
+		target-path = "/led-controller";
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+};

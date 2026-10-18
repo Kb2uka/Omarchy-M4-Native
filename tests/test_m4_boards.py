@@ -140,9 +140,13 @@ class BoardTable(unittest.TestCase):
         owner = json.loads((ROOT / 'audio/j713/owner-fir/manifest.json').read_text())
         self.assertIn(owner['board'], boards)
 
-    def test_shipped_code_names_only_qualified_boards(self):
-        """Code accepts a board by naming it, so it may name only qualified boards."""
-        boards = {board['compatible'].split(',', 1)[1] for board in QUALIFIED}
+    def test_shipped_code_names_only_qualified_or_testing_boards(self):
+        """Code accepts a board by naming it, so it may name only qualified or testing boards.
+
+        A testing board's tester kit needs its own devicetree tooling; the gate tests still
+        require every live gate to refuse it.
+        """
+        boards = {board['compatible'].split(',', 1)[1] for board in QUALIFIED + TESTING}
         found = {}
         for top in SHIPPED:
             if not (ROOT / top).is_dir():
