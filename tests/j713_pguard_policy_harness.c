@@ -69,6 +69,11 @@ int recent_max(void)
 	return PG_RECENT_MAX;
 }
 
+unsigned int full_count(const u64 *d_idle, const u64 *d_wall, unsigned int n)
+{
+	return pg_full_count(d_idle, d_wall, n);
+}
+
 bool window_busy(const u64 *d_idle, const u64 *d_wall, unsigned int n)
 {
 	return pg_window_busy(d_idle, d_wall, n);

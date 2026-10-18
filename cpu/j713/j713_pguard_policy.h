@@ -58,10 +58,11 @@ static inline int pg_e_heat(unsigned int e_busy, u32 e_khz)
  * E-cluster heat already in the reading. Six E cores joining four busy P
  * cores at P4 raised the guard's TCMz about 2 C over the P cores' own creep,
  * nearly all of it within 2.4 s of the join (docs/j713-cpu-boost.md). So the
- * heat of the fewest busy E cores at the lowest E clock seen in the
- * PG_E_SETTLE_MS before a new reading is in that reading (pg_lowest over a
- * second ring), and only E cores or clock above them still add heat: without
- * this, a sustained all-core load counted its E heat twice and held P at P4.
+ * heat of the fewest E cores busy through each slow tick (pg_full_count),
+ * at the lowest E clock, over the PG_E_SETTLE_MS before a new reading is in
+ * that reading (pg_lowest over a second ring), and only E cores or clock above
+ * them still add heat: without this, a sustained all-core load counted its E
+ * heat twice and held P at P4.
  */
 #define PG_E_SETTLE_MS 3000
 #define PG_E_RECENT_MAX 60	/* ticks kept: 3000 ms at the shortest period, 50 ms */
@@ -166,15 +167,21 @@ static inline int pg_base(int reading_mc, bool window_busy, unsigned int min_bus
 	return reading_mc - (int)pg_fast[min_busy][recent_level];
 }
 
-/* A P core not idle for at least 90% of the window: the cluster ran loaded throughout. */
-static inline bool pg_window_busy(const u64 *d_idle, const u64 *d_wall, unsigned int n)
+/* Cores not idle for at least 90% of the window: they ran loaded throughout. */
+static inline unsigned int pg_full_count(const u64 *d_idle, const u64 *d_wall, unsigned int n)
 {
-	unsigned int i;
+	unsigned int i, full = 0;
 
 	for (i = 0; i < n; i++)
 		if (d_wall[i] && d_idle[i] * 10 <= d_wall[i])
-			return true;
-	return false;
+			full++;
+	return full;
+}
+
+/* A P core loaded through the window: the cluster ran loaded throughout. */
+static inline bool pg_window_busy(const u64 *d_idle, const u64 *d_wall, unsigned int n)
+{
+	return pg_full_count(d_idle, d_wall, n) > 0;
 }
 
 /*

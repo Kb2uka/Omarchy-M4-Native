@@ -273,6 +273,12 @@ class Policy(unittest.TestCase):
         self.assertEqual(self.hold(4, 0, 2, 3, False), (4, 3, True), 'P rose, E fell: P counts, E is held')
         self.assertEqual(self.hold(2, 3, 2, 3, False), (2, 3, True), 'unchanged keeps the hold running')
 
+    def test_full_count_is_at_least_90_percent_busy(self):
+        wall = U64S(*[1000] * 6)
+        self.assertEqual(self.lib.full_count(U64S(0, 100, 101, 1000, 0, 0), wall, 6), 4)
+        self.assertEqual(self.lib.full_count(U64S(*[0] * 6), U64S(*[0] * 6), 6), 0, 'no time, no evidence')
+        self.assertEqual(self.lib.full_count(U64S(*[0] * 6), wall, 4), 4, 'only the cores asked about')
+
     def test_busy_count_is_more_than_half_busy(self):
         wall = U64S(*[1000] * 6)
         self.assertEqual(self.lib.busy_count(U64S(0, 499, 500, 1000, 0, 0), wall, 4), 2)
@@ -400,9 +406,8 @@ class ModuleSource(unittest.TestCase):
                       '\t/* This tick joins the recent ones; the next starts from the current state. */\n'
                       '\trecent_pos = pg_keep(recent_min, recent_min_busy, recent_pos, recent_ticks, tick_min, '
                       'tick_min_busy);\n\ttick_min = policy_level();\n\ttick_min_busy = PG_P_CPUS;\n'
-                      '\te_pos = pg_keep(recent_e_khz, recent_e_busy, e_pos, e_ticks, tick_e_min_khz, '
-                      'tick_e_min_busy);\n\ttick_e_min_khz = READ_ONCE(e_policy->cur);\n'
-                      '\ttick_e_min_busy = PG_E_CPUS;\n'
+                      '\te_pos = pg_keep(recent_e_khz, recent_e_full, e_pos, e_ticks, tick_e_min_khz, '
+                      'tick_e_full);\n\ttick_e_min_khz = READ_ONCE(e_policy->cur);\n'
                       '\tspin_unlock_irqrestore(&fast_lock, flags);\n\tmutex_unlock(&lock);\n', slow)
         self.assertEqual(slow.count('pg_keep('), 2)
         self.assertIn('recent_ticks = min_t(unsigned int, DIV_ROUND_UP(PG_RECENT_MS, period_ms), PG_RECENT_MAX);',
@@ -419,22 +424,32 @@ class ModuleSource(unittest.TestCase):
         slow = self.source[self.source.index('static void slow_work(struct work_struct *w)\n{'):]
         slow = slow[:slow.index('\n}\n')]
         fresh = slow[slow.index('if (fresh) {'):slow.index('if (mc >= (int)hot_c * 1000)')]
-        self.assertIn('e_settled_mc = pg_e_heat(pg_lowest(recent_e_busy, e_ticks, tick_e_min_busy),\n'
+        self.assertIn('e_settled_mc = pg_e_heat(pg_lowest(recent_e_full, e_ticks, tick_e_full),\n'
                       '\t\t\t\t\t\t pg_lowest(recent_e_khz, e_ticks, tick_e_min_khz));', fresh)
         self.assertEqual(self.source.count('e_settled_mc ='), 1, 'only a new reading settles E heat')
         self.assertIn('static int e_settled_mc;', self.source, 'nothing settled before the first reading')
-        self.assertIn('static u32 tick_e_min_busy, tick_e_min_khz;', self.source,
-                      'the first tick and the kept ones start with no busy E core')
+        self.assertIn('static u32 tick_e_min_khz, tick_e_full;', self.source)
+        self.assertIn('static u32 recent_e_full[PG_E_RECENT_MAX], recent_e_khz[PG_E_RECENT_MAX];', self.source,
+                      'the kept ticks start with no loaded E core')
         sample = self.source[self.source.index('static void sample_busy(void)\n{'):]
         sample = sample[:sample.index('\n}\n')]
-        self.assertIn('tick_e_min_busy = min(tick_e_min_busy, e_busy);\n'
-                      '\ttick_e_min_khz = min(tick_e_min_khz, READ_ONCE(e_policy->cur));\n'
-                      '\tif (pg_hold(', sample, 'the raw count, before the hold raises it')
-        failed = sample[sample.index('if (idle == (u64)-1) {'):sample.index('return;')]
-        self.assertIn('tick_e_min_busy = 0;', failed, 'without idle accounting nothing settles')
+        self.assertIn('tick_e_min_khz = min(tick_e_min_khz, READ_ONCE(e_policy->cur));', sample)
+        self.assertNotIn('tick_e_full', sample, 'fast samples microseconds apart never decide what settled')
+        # Every tick, from the whole tick's window, before the reading is used.
+        order = [slow.index(s) for s in ('e_full = e_window_full();', 'tick_e_full = e_full;', 'if (fresh) {')]
+        self.assertEqual(order, sorted(order))
+        self.assertEqual(slow.count('e_window_full()'), 1)
+        full = self.source[self.source.index('static u32 e_window_full(void)\n{'):]
+        full = full[:full.index('\n}\n')]
+        self.assertIn('get_cpu_idle_time_us(e_cpus[i], &wall)', full)
+        self.assertIn('win_e_idle[i] = idle;', full)
+        self.assertIn('return accounted ? pg_full_count(d_idle, d_wall, PG_E_CPUS) : 0;', full,
+                      'without idle accounting nothing settles')
+        self.assertIn('win_e_idle[i] = get_cpu_idle_time_us(e_cpus[i], &win_e_wall[i]);', self.init)
         self.assertIn('e_ticks = min_t(unsigned int, DIV_ROUND_UP(PG_E_SETTLE_MS, period_ms), PG_E_RECENT_MAX);',
                       self.init)
         self.assertLess(self.init.index('e_ticks = min_t('), self.init.index('queue_delayed_work'))
+        self.assertLess(self.init.index('win_e_idle[i] = '), self.init.index('queue_delayed_work'))
 
     def test_only_the_slow_path_raises(self):
         self.assertIn('static void apply_work(struct work_struct *w)\n{\n\tupdate_cap(false);\n}', self.source)

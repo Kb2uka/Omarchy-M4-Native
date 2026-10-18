@@ -25,9 +25,10 @@
  *   backstop. A higher count is held for 300 ms (pg_hold). When it
  *   lowers the allowed state, the cap drops within about 20 ms, long before
  *   the extra heat builds up. It also records the fewest busy P cores and
- *   the lowest P state it sees, and the fewest busy E cores and lowest E
- *   clock: the E heat of those, held through the 3 s before a new reading,
- *   is already in that reading (pg_e_new_heat).
+ *   the lowest P state it sees, and the lowest E clock. The slow path counts
+ *   the E cores loaded through each tick: the E heat of the fewest of those,
+ *   held through the 3 s before a new reading, is already in that reading
+ *   (pg_e_new_heat).
  *
  * The cap is the highest P state whose measured rise for that many busy P
  * cores, plus the heat of busy E cores not yet in the reading, keeps base +
@@ -127,12 +128,13 @@ static u32 tick_min = PG_TOP_LEVEL, tick_min_busy = PG_P_CPUS;
 static u32 recent_min[PG_RECENT_MAX], recent_min_busy[PG_RECENT_MAX];
 static unsigned int recent_ticks, recent_pos;
 /*
- * The same for the E cluster's fewest busy cores and lowest clock, over
- * PG_E_SETTLE_MS, and the E heat they put in the last new reading. Until they
- * are measured, the kept ticks read no busy E core, which settles nothing.
+ * The same for the E cluster over PG_E_SETTLE_MS: the E cores loaded through
+ * each slow tick, the lowest E clock, and the E heat they put in the last new
+ * reading. Until they are measured, the kept ticks read no loaded E core,
+ * which settles nothing.
  */
-static u32 tick_e_min_busy, tick_e_min_khz;
-static u32 recent_e_busy[PG_E_RECENT_MAX], recent_e_khz[PG_E_RECENT_MAX];
+static u32 tick_e_min_khz, tick_e_full;
+static u32 recent_e_full[PG_E_RECENT_MAX], recent_e_khz[PG_E_RECENT_MAX];
 static unsigned int e_ticks, e_pos;
 static int e_settled_mc;
 
@@ -141,6 +143,7 @@ static DEFINE_MUTEX(lock);
 static int last_mc;
 static u32 last_bits;
 static u64 win_idle[PG_P_CPUS], win_wall[PG_P_CPUS];
+static u64 win_e_idle[PG_E_CPUS], win_e_wall[PG_E_CPUS];
 static unsigned long reads, errors, raises, fast_drops;
 
 static void slow_work(struct work_struct *w);
@@ -179,7 +182,6 @@ static void sample_busy(void)
 			busy_held = PG_P_CPUS;
 			e_busy_held = PG_E_CPUS;
 			held_until = jiffies + msecs_to_jiffies(HOLD_MS);
-			tick_e_min_busy = 0;	/* no evidence that any E heat has settled */
 			return;
 		}
 		d_idle[i] = idle - last_idle[i];
@@ -190,7 +192,6 @@ static void sample_busy(void)
 	busy = pg_busy_count(d_idle, d_wall, PG_P_CPUS);
 	e_busy = pg_busy_count(d_idle + PG_P_CPUS, d_wall + PG_P_CPUS, PG_E_CPUS);
 	tick_min_busy = min(tick_min_busy, busy);
-	tick_e_min_busy = min(tick_e_min_busy, e_busy);
 	tick_e_min_khz = min(tick_e_min_khz, READ_ONCE(e_policy->cur));
 	if (pg_hold(&busy, &e_busy, busy_held, e_busy_held, time_after(jiffies, held_until)))
 		held_until = jiffies + msecs_to_jiffies(HOLD_MS);
@@ -307,15 +308,42 @@ static bool p_window_busy(void)
 	return accounted && pg_window_busy(d_idle, d_wall, PG_P_CPUS);
 }
 
+/*
+ * lock held. The E cores loaded through the slow tick that just ended: a
+ * whole tick, so two fast samples microseconds apart cannot read a busy core
+ * as idle. Without idle accounting none counts, so no E heat settles.
+ */
+static u32 e_window_full(void)
+{
+	u64 d_idle[PG_E_CPUS] = { 0 }, d_wall[PG_E_CPUS] = { 0 };
+	bool accounted = true;
+	unsigned int i;
+
+	for (i = 0; i < PG_E_CPUS; i++) {
+		u64 wall, idle = get_cpu_idle_time_us(e_cpus[i], &wall);
+
+		if (idle == (u64)-1) {
+			accounted = false;
+			continue;
+		}
+		d_idle[i] = idle - win_e_idle[i];
+		d_wall[i] = wall - win_e_wall[i];
+		win_e_idle[i] = idle;
+		win_e_wall[i] = wall;
+	}
+	return accounted ? pg_full_count(d_idle, d_wall, PG_E_CPUS) : 0;
+}
+
 static void slow_work(struct work_struct *w)
 {
 	unsigned long flags;
-	u32 bits;
+	u32 bits, e_full;
 	int ret, mc = 0;
 	bool fresh, busy = false;
 
 	mutex_lock(&lock);
 	reads++;
+	e_full = e_window_full();
 	ret = apple_smc_read(smc, SMC_KEY(TCMz), &bits, sizeof(bits));
 	if (ret == sizeof(bits))
 		ret = pg_float_to_mc(bits, &mc) ? -ERANGE : 0;
@@ -329,6 +357,7 @@ static void slow_work(struct work_struct *w)
 	/* The fast timers' backstop: a busy core that its own timer missed still counts. */
 	sample_busy();
 	tick_min = min(tick_min, policy_level());
+	tick_e_full = e_full;
 	if (ret) {
 		errors++;
 		smc_ok = false;
@@ -339,7 +368,7 @@ static void slow_work(struct work_struct *w)
 			last_mc = mc;
 			base_mc = pg_base(mc, busy, pg_lowest(recent_min_busy, recent_ticks, tick_min_busy),
 					  pg_lowest(recent_min, recent_ticks, tick_min));
-			e_settled_mc = pg_e_heat(pg_lowest(recent_e_busy, e_ticks, tick_e_min_busy),
+			e_settled_mc = pg_e_heat(pg_lowest(recent_e_full, e_ticks, tick_e_full),
 						 pg_lowest(recent_e_khz, e_ticks, tick_e_min_khz));
 		}
 		if (mc >= (int)hot_c * 1000)
@@ -352,9 +381,8 @@ static void slow_work(struct work_struct *w)
 	recent_pos = pg_keep(recent_min, recent_min_busy, recent_pos, recent_ticks, tick_min, tick_min_busy);
 	tick_min = policy_level();
 	tick_min_busy = PG_P_CPUS;
-	e_pos = pg_keep(recent_e_khz, recent_e_busy, e_pos, e_ticks, tick_e_min_khz, tick_e_min_busy);
+	e_pos = pg_keep(recent_e_khz, recent_e_full, e_pos, e_ticks, tick_e_min_khz, tick_e_full);
 	tick_e_min_khz = READ_ONCE(e_policy->cur);
-	tick_e_min_busy = PG_E_CPUS;
 	spin_unlock_irqrestore(&fast_lock, flags);
 	mutex_unlock(&lock);
 	update_cap(true);
@@ -369,8 +397,8 @@ static int guard_show(struct seq_file *m, void *v)
 	spin_lock_irqsave(&fast_lock, flags);
 	seq_printf(m, "limit_c %u hot_c %u release_c %u period_ms %u\n", limit_c, hot_c, release_c, period_ms);
 	seq_printf(m, "tcmz_mc %d base_mc %d hot %d smc_ok %d busy %u e_busy %u cap_level %u cap_khz %u "
-		   "e_settled_mc %d\n", last_mc, base_mc, hot, smc_ok, busy_held, e_busy_held, applied_level,
-		   level_khz[applied_level], e_settled_mc);
+		   "e_full %u e_settled_mc %d\n", last_mc, base_mc, hot, smc_ok, busy_held, e_busy_held,
+		   applied_level, level_khz[applied_level], tick_e_full, e_settled_mc);
 	seq_printf(m, "reads %lu errors %lu raises %lu fast_drops %lu\n", reads, errors, raises, fast_drops);
 	spin_unlock_irqrestore(&fast_lock, flags);
 	mutex_unlock(&lock);
@@ -492,6 +520,8 @@ static int __init guard_init(void)
 	e_ticks = min_t(unsigned int, DIV_ROUND_UP(PG_E_SETTLE_MS, period_ms), PG_E_RECENT_MAX);
 	for (i = 0; i < PG_P_CPUS; i++)
 		win_idle[i] = get_cpu_idle_time_us(p_cpus[i], &win_wall[i]);
+	for (i = 0; i < PG_E_CPUS; i++)
+		win_e_idle[i] = get_cpu_idle_time_us(e_cpus[i], &win_e_wall[i]);
 	/* Arms the timer on every online P core now, and on any that comes online later. */
 	ret = cpuhp_setup_state(CPUHP_AP_ONLINE_DYN, "j713_pguard:online", fast_timer_online, fast_timer_offline);
 	if (ret < 0)
