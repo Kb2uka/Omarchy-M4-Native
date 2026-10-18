@@ -35,7 +35,7 @@ printf '%s\n' 'Verifying installer and source files. The system image takes long
 printf '%s\n' 'TESTER BUILD: nobody has booted this build on an M4 Mac mini yet.' \
   'Installation can cause data loss, boot failures and hardware problems.' \
   'Keep macOS and recovery, back up first, and read START-HERE.md.'
-read -r -p 'Type TEST to install this untested tester build: ' answer
+read -r -p 'Type TEST to confirm you have a current backup and want this untested build: ' answer
 [[ "$answer" == TEST && "$tester" == yes ]] || exit 0
 work=$(mktemp -d /private/tmp/omarchy-m4-install.XXXXXXXX)
 chmod 700 "$work"
