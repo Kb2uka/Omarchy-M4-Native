@@ -1,0 +1,22 @@
+J713 native DCP backlight
+
+The AFK transport in afk.c and afk.h derives from
+  drivers/gpu/drm/apple/afk.c
+  drivers/gpu/drm/apple/afk.h
+in the project's prepared J713 kernel-controller source archive:
+  source/kernel-controller.tar.gz
+  SHA-256 810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57
+
+Original copyright: 2022 Sven Peter <sven@svenpeter.dev>
+Original license: GPL-2.0-only OR MIT
+
+Modified 2026-10-18 for native J713 brightness-only transport: the generic
+DRM, audio, property parser, service-call, trace and debug scratch paths were
+removed. Ring metadata spacing and entry alignment follow the firmware's
+variable block size. Native envelopes use byte transaction tags. Incoming
+entries are consumed before releasing their slots, and timed-out command DMA
+remains owned by the transport until an acknowledgement or reboot.
+
+client.c, native-wire.h and Kbuild are GPL-2.0-only. The combined kernel module
+is distributed under GPL-2.0-only. tools/build-j713-backlight.sh is MIT.
+Complete GPL-2.0 and MIT license texts accompany this source in LICENSES/.
