@@ -343,10 +343,11 @@ file.
   bindings and removes only its own block when the package is removed.
 - **Verification boundary:** J713/T8132 native service/status and 100/300-nit
   physical panel changes passed on kernel `7.1.9-m4-gpu-backport-20261008`.
-  The standalone module and both loaders reproduced byte for byte. The user
-  confirmed automatic startup on a fresh production boot; repeat-boot
-  qualification remains pending. No suspend, other-board or native
-  external-display support is claimed.
+  The standalone module and both loaders reproduced byte for byte. Automatic
+  startup passed on two successive production boots; the saved 26-nit setting
+  was restored before later brightness-key changes. Physical keys and OSD
+  were confirmed. No suspend, other-board or native external-display support
+  is claimed.
 
 
 ## Connecting new installs
