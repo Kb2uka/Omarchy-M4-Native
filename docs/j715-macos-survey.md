@@ -107,7 +107,7 @@ re-prove from this repository's own sources.
 | Speakers | Six amplifiers play protected through a six-lane FIR from the AID38 `_3` strip, with the J713 speaker stack adapted to six amps and `i2c3` at 400 kHz. |
 | Poweroff | Powers off with the PMU scratchpad cells; reboots without them, as on the J713 before its fix. |
 | Front USB-C | Works with the J713 front-port fix. |
-| CPU | cpufreq, CPU temperature, the E-cluster states and CPU idle work with the J713 overlays and module unchanged. A ten-core, ten-minute load reached 86 °C (CPU Die Max) on battery at 1800 / 2172 MHz, warmer than the J713's 78.6 °C. |
+| CPU | cpufreq, CPU temperature, the E-cluster states and CPU idle work with the J713 overlays and module unchanged. A ten-core, ten-minute load reached 86 °C (CPU Die Max) at 1800 / 2172 MHz, on battery with the display at full brightness. The J713's run of the same load in [j713-cpu-idle.md](j713-cpu-idle.md) peaked at 78.6 °C; its power source and brightness are not recorded, so the 7 °C gap is not a like-for-like comparison. |
 | Suspend | s2idle resumes, but the internal display stays black unless `dptx_phy` and `disp_cpu` stay on; USB-C and Bluetooth need rebinding after resume. |
 
 ## What stands between this board and an installer
