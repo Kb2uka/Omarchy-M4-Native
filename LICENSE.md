@@ -27,6 +27,7 @@ Existing file-level notices using KB2UKA remain valid and are preserved.
 | `audio/j713/speakersafetyd/` | GPL-2.0-only application; vendored ALSA has its own Apache-2.0 OR MIT licenses |
 | `patches-kernel/brcmfmac-bcm4388-rev6-c2-v116.patch`: Broadcom `fwil_types.h` and `pcie.c` hunks | ISC |
 | `patches-kernel/j713-input/dockchannel-power-v2.patch`: Asahi DockChannel HID hunks | GPL-2.0-only OR MIT |
+| `patches-m1n1/j773s/`: CJ Damsleth's T6040 m1n1 changes from damsleth/wallace, one ported to a newer upstream | MIT, as published by wallace for its m1n1 patches, retaining each patch's authorship |
 | `patches/installer/`: changes to the Gravity/Asahi installer and original added helpers/tests | MIT, retaining the upstream Asahi notice |
 | `patches/omarchy/offline-node-arm64.patch`, `tests/fixtures/mise-work-v4.0.4.sh` | Omarchy MIT terms, retaining its upstream notice in `tests/fixtures/omarchy-LICENSE` |
 | `audio/j713/headphones/kernel/` | GPL-2.0-only |
