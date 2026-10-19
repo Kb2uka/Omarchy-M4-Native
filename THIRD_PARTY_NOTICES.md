@@ -47,6 +47,24 @@ The abbreviated reference is preserved as historical attribution, not a
 claim that its original upstream object is included or publicly resolvable
 from this snapshot.
 
+### T6040 devicetree sources
+
+`dts/t6040/t6040.dtsi` and `dts/t6040/t6040-j773s.dts` start from the T6040
+devicetree in [damsleth/wallace](https://github.com/damsleth/wallace)
+(commit `55f116d`), a J614s MacBook Pro bring-up whose devicetree sources carry
+`SPDX-License-Identifier: GPL-2.0+ OR MIT` and "Copyright The Asahi Linux
+Contributors". That notice and expression are kept in each file, next to
+KB2UKA's notice for the J773s changes. `dts/t6040/t6040-pmgr.dtsi` is output of
+m1n1's `proxyclient/tools/pmgr_adt2dt.py` (MIT) for the J773s ADT; as with the
+J713 PMGR description, the hardware data does not originate with either
+contributor.
+The `apple,preserve-active` and `apple,skip-auto-enable` PMGR policy, and the
+list of display domains that need it, come from CJ Damsleth's
+[damsleth/linux](https://github.com/damsleth/linux) branch
+`wallace/t6040-bringup` (commit `cf08fa5`, GPL-2.0). Florian Klink's earlier
+J773s devicetree on [flokli/linux](https://github.com/flokli/linux) branch
+`j773s` was consulted for comparison; no text from it is copied.
+
 ### Derived PMGR description
 
 `recon/pmgr-j713-generated-from-live-adt.dtsi` is a hardware description
