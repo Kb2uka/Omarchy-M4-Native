@@ -31,6 +31,7 @@ class Release:
 
     def __init__(self, fingerprint=MODULE.FPR):
         self.exists, self.assets, self.uploads, self.fingerprint = False, {}, [], fingerprint
+        self.fail_upload = {}
 
     def run(self, *command, **options):
         command = [str(part) for part in command]
@@ -49,6 +50,9 @@ class Release:
         elif command[:3] == ['gh', 'release', 'upload']:
             clobber = '--clobber' in command
             for path in (Path(c) for c in command[3:] if c not in (MODULE.TAG, '--clobber')):
+                if self.fail_upload.get(path.name, 0):
+                    self.fail_upload[path.name] -= 1
+                    raise subprocess.CalledProcessError(1, command)
                 if path.name in self.assets and not clobber:
                     raise subprocess.CalledProcessError(1, command)
                 self.assets[path.name] = path.read_bytes()
@@ -113,6 +117,7 @@ class PublishTests(unittest.TestCase):
                            ('omarchy-m4-keyring-20261012-1-any.pkg.tar.zst', b'keyring')):
             (self.built / name).write_bytes(data)
         self.release = Release()
+        self.source_revision = subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip()
 
     def publish(self, release=None, **kwargs):
         release = release or self.release
@@ -121,6 +126,7 @@ class PublishTests(unittest.TestCase):
              mock.patch.object(MODULE, 'fetch', release.fetch), \
              mock.patch.object(MODULE, 'signed', signed), \
              mock.patch.object(MODULE, 'release_exists', release.view), \
+             mock.patch.object(MODULE, 'source_revision', return_value=self.source_revision), \
              mock.patch.dict(os.environ, {'PACKAGE_SIGNING_KEY': 'private key'}), \
              mock.patch('builtins.print'):
             MODULE.publish(self.built, **kwargs)
@@ -143,7 +149,7 @@ class PublishTests(unittest.TestCase):
             self.assertNotIn('AGENTS.md', member_names)
             self.assertNotIn('CLAUDE.md', member_names)
             self.assertEqual(archive.extractfile(MODULE.SOURCE_REVISION).read().decode().strip(),
-                             MODULE.source_revision())
+                             self.source_revision)
 
     def test_missing_source_archive_signature_is_repaired(self):
         self.publish()
@@ -172,6 +178,35 @@ class PublishTests(unittest.TestCase):
         self.assertIn(MODULE.SOURCE_ARCHIVE + '.sig', self.release.uploads)
         with tarfile.open(fileobj=io.BytesIO(self.release.assets[MODULE.SOURCE_ARCHIVE]), mode='r:gz'):
             pass
+
+    def test_interrupted_source_replacement_is_repaired_on_retry(self):
+        self.publish()
+        old_source = b'outdated source archive'
+        self.release.assets[MODULE.SOURCE_ARCHIVE] = old_source
+        self.release.assets[MODULE.SOURCE_ARCHIVE + '.sig'] = signature(old_source)
+        self.release.fail_upload[MODULE.SOURCE_ARCHIVE + '.sig'] = 1
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.publish()
+        self.assertNotEqual(self.release.assets[MODULE.SOURCE_ARCHIVE], old_source)
+        self.assertEqual(self.release.assets[MODULE.SOURCE_ARCHIVE + '.sig'], signature(old_source))
+        self.release.uploads.clear()
+        self.publish()
+        self.assertEqual(self.release.assets[MODULE.SOURCE_ARCHIVE + '.sig'],
+                         signature(self.release.assets[MODULE.SOURCE_ARCHIVE]))
+        self.assertEqual(self.release.uploads, [MODULE.SOURCE_ARCHIVE + '.sig', MODULE.SETUP,
+                                                'SETUP-SHA256SUMS', MODULE.CONNECT])
+
+    def test_foreign_source_signature_for_untrusted_archive_refuses_without_uploading(self):
+        self.publish()
+        self.release.assets[MODULE.SOURCE_ARCHIVE] = b'untrusted archive'
+        self.release.assets[MODULE.SOURCE_ARCHIVE + '.sig'] = b'foreign signature'
+        assets = self.release.assets.copy()
+        self.release.uploads.clear()
+        with self.assertRaises(SystemExit) as raised:
+            self.publish()
+        self.assertIn('Bad or foreign signature', str(raised.exception))
+        self.assertEqual(self.release.assets, assets)
+        self.assertEqual(self.release.uploads, [])
 
     def test_connect_script_carries_the_published_setup_hash(self):
         self.publish()

@@ -8,9 +8,9 @@ PACKAGE_SIGNING_KEY and lives in a temporary keyring. A package file that is
 already published is never replaced: its published signature is verified and
 the published bytes stay in the database. New packages and signatures are
 uploaded first; the signed database is replaced last, and only when its
-package set changed. The corresponding integration sources and any pinned
-join source archives are packaged, signed, and uploaded alongside the channel
-assets. The result is then downloaded anonymously and verified.
+package set changed. The corresponding integration source archive is packaged,
+signed, and uploaded alongside the channel assets. The result is then
+downloaded anonymously and verified.
 """
 import argparse
 import gzip
@@ -239,18 +239,30 @@ def publish(directory):
         if SOURCE_ARCHIVE in assets:
             run('gh', 'release', 'download', TAG, '-D', published, '-p', SOURCE_ARCHIVE)
             published_archive = published / SOURCE_ARCHIVE
+            matches_source = published_archive.read_bytes() == source_archive.read_bytes()
             if SOURCE_ARCHIVE + '.sig' in assets:
                 run('gh', 'release', 'download', TAG, '-D', published, '-p', SOURCE_ARCHIVE + '.sig')
-                verify(published / (SOURCE_ARCHIVE + '.sig'), published_archive)
-                if published_archive.read_bytes() == source_archive.read_bytes():
-                    print('kept published ' + SOURCE_ARCHIVE)
-                else:
+                published_sig = published / (SOURCE_ARCHIVE + '.sig')
+                if signed(published_sig, published_archive):
+                    if matches_source:
+                        print('kept published ' + SOURCE_ARCHIVE)
+                    else:
+                        sign(source_archive)
+                        run('gh', 'release', 'upload', TAG, '--clobber', source_archive)
+                        run('gh', 'release', 'upload', TAG, '--clobber', source_sig)
+                elif matches_source:
+                    # The archive is the trusted clean revision, so an interrupted
+                    # replacement can safely resume by replacing only its signature.
                     sign(source_archive)
-                    run('gh', 'release', 'upload', TAG, '--clobber', source_archive)
                     run('gh', 'release', 'upload', TAG, '--clobber', source_sig)
+                    print('repaired published ' + SOURCE_ARCHIVE + ' signature')
+                else:
+                    # Never replace an invalid archive: it is not proven to be the
+                    # committed source that this run is authorised to publish.
+                    verify(published_sig, published_archive)
             else:
                 sign(source_archive)
-                if published_archive.read_bytes() != source_archive.read_bytes():
+                if not matches_source:
                     run('gh', 'release', 'upload', TAG, '--clobber', source_archive)
                 run('gh', 'release', 'upload', TAG, '--clobber', source_sig)
         else:

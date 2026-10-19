@@ -410,12 +410,12 @@ package's contents without a new version.
   files and verifies their signatures, then signs and uploads new ones. It
   repairs an interrupted earlier run by signing an unsigned published package.
   The corresponding integration source archive (`release-integration.tar.gz`)
-  and any pinned join source archives are packaged, signed, and published
-  alongside packages and databases. The signed databases go up last, whenever
-  they are missing, unsigned or out of date. Everything is then downloaded
-  anonymously and verified again. The
-  [workflow policy](../tools/ci/check-workflows.py) allows a secret or write
-  access nowhere else.
+  is packaged, signed, and published alongside packages and databases. The
+  separately pinned source archives named by package joins are not yet channel
+  assets. The signed databases go up last, whenever they are missing, unsigned
+  or out of date. Everything is then downloaded anonymously and verified
+  again. The [workflow policy](../tools/ci/check-workflows.py) allows a secret
+  or write access nowhere else.
 
 ### Maintainer setup (once)
 
