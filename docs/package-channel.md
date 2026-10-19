@@ -12,11 +12,12 @@ reviewers.
 | Package | Installs | Version at launch |
 | --- | --- | --- |
 | `omarchy-m4-keyring` | The channel's public signing key for `pacman-key` | `20261012-1` |
-| `omarchy-m4-boot` | `m4-boot-compose`, its pacman hook, the J713 devicetree, the daily update notifier and, from 1-4, the real-time speaker protection drop-in | `1-1`; `1-4` adds CPU frequency scaling and CPU temperature; `1-12` adds the opt-in notch switch and turns on the front USB-C port |
+| `omarchy-m4-boot` | `m4-boot-compose`, its pacman hook, the J713 devicetree, the daily update notifier and, from 1-4, the real-time speaker protection drop-in | `1-1`; `1-4` adds CPU frequency scaling and CPU temperature; `1-12` adds the opt-in notch switch and turns on the front USB-C port; `1-13` brings `omarchy-m4-evdi` |
 | `linux-m4-omarchy` | The J713 kernel image and its modules | `7.1.9.m4.20261008-2` |
 | `omarchy-m4-gst-audio` | GStreamer's `autodetect` and `pulse` sinks in `/usr/lib/gstreamer-1.0`, for WebKitGTK and GStreamer apps | `1.28.7-1` |
 | `omarchy-m4-headphones` | The headphone jack card: two pinned modules, `m4-headphones`, its registration drop-in, UCM and WirePlumber files | `1-1`; `1-2` adds the headset microphone |
 | `omarchy-m4-cpu` | The CPU idle driver: one pinned module, `m4-cpu-idle` and its boot unit | `1-1` |
+| `omarchy-m4-evdi` | DisplayLink's evdi module and `libevdi`, for USB display adapters | `1.15.1-1` |
 
 ### omarchy-m4-boot 1-4 and omarchy-m4-gst-audio 1.28.7-1
 
@@ -267,6 +268,48 @@ file.
   and pinned in `package-inputs`. The composer and updater accept it only after
   the boost-state devicetree.
 
+### omarchy-m4-gpu 1-3
+
+- **GPU and desktop on the eight-core GPU**
+  ([#118](https://github.com/Kb2uka/Omarchy-M4-Native/pull/118), by Jeff
+  Hollis). The base-model Air's GPU has the same ten core positions with two
+  fused off. The #57 module accepted only the ten-core mask `0x3ff`, so an
+  eight-core Air (one reports `0x3bd`) got no GPU and no desktop. The module
+  (`de0337a7…`, 390,816 bytes, built from [`gpu/j713/`](../gpu/j713/README.md)
+  on the alpha.1 kernel tree and pinned in `package-inputs`) accepts any mask
+  within `0x3ff` with eight or ten cores. Every other check is unchanged. The
+  mask never reaches the GPU firmware, only Mesa, so a ten-core Air runs exactly
+  as before.
+- **`m4-gpu-module`** moves an Air from #57's module (`3cf47fa7…`, 1-1 and
+  1-2, state `previous`) to the new one at the next boot, the same way it moves
+  one from alpha.1. Its swap still writes the module before the pin, and a
+  module ahead of its pin is completed the next boot, including one that 1-1 or
+  1-2 left. A pin ahead of its module, or any other module, is refused and left
+  untouched. `sudo m4-gpu-module --rollback` still restores alpha.1.
+- The setup script's restart notice (`gpu_pending` in `m4-channel-setup.py`,
+  shipped in `omarchy-m4-boot`) counts only a swap from alpha.1, so an Air
+  moving from 1-2 is told to restart by pacman's install message instead.
+
+### omarchy-m4-evdi 1.15.1-1 and omarchy-m4-boot 1-13
+
+- **USB external displays** ([J713 external displays](j713-external-displays.md),
+  #58): DisplayLink's evdi 1.15.1, the kernel half of DisplayLink adapters and
+  docks. USB-C and Thunderbolt monitors still need DCP support and do not work.
+- **Files:** `evdi.ko` (`c5e65a2b…`) in
+  `/usr/lib/modules/7.1.9-m4-gpu-backport-20261008/updates/`, where pacman's
+  depmod hook indexes it, and `libevdi` (`0f1da52d…`) as `/usr/lib/libevdi.so`,
+  the layout of Arch's `evdi` package. Both are built by `display/evdi/build.sh`
+  from the upstream `v1.15.1` archive (mirrored in `package-inputs`) and pinned
+  in `evdi_module` and `evdi_library`.
+- **Relations:** `provides=evdi=1.15.1` and conflicts with `evdi`, `evdi-dkms`
+  and `evdi-git`, so the AUR `displaylink` package (which needs `evdi<1.16`)
+  installs on top. Nothing loads evdi until its service runs `modprobe evdi`;
+  no restart is needed.
+- **Not shipped:** Synaptics' DisplayLinkManager is closed source; owners
+  install it from the AUR.
+- **`omarchy-m4-boot` 1-13** depends on `omarchy-m4-evdi`, as 1-6, 1-7 and 1-10
+  do for the GPU, headphone and CPU packages. Nothing else in it changes.
+
 ## Connecting new installs
 
 The release root builder (`tools/prepare-j713-release.py`) adds
@@ -477,6 +520,11 @@ first. Joins stay `unverified` until a byte-identical rebuild is recorded:
   alpha.1's `source/m1n1-stage2-source.tar.gz` plus `display/j713/m1n1-show-notch.patch`,
   built by `display/j713/build-notch-loader.sh`. Rebuilt byte for byte
   (`rebuilt-identical`).
+- **USB display support (`omarchy-m4-evdi`):** `evdi.ko` (`c5e65a2b…`), built
+  on the alpha.1 kernel tree, and `libevdi` (`0f1da52d…`), built for aarch64,
+  both from DisplayLink's unchanged `evdi-1.15.1.tar.gz` (`b120df30…`, mirrored
+  in `package-inputs`) with `display/evdi/build.sh`. Each was rebuilt byte for
+  byte (`rebuilt-identical`).
 - **GStreamer audio sinks (`omarchy-m4-gst-audio`):** `libgstautodetect.so` and
   `libgstpulseaudio.so`, built by `tools/m4-webkit-audio-plugins.py` from
   `gst-plugins-good-1.28.7.tar.xz` (mirrored in `package-inputs`).

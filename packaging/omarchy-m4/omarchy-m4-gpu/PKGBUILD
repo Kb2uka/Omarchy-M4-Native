@@ -5,8 +5,8 @@
 # on the v0.1.0-alpha.1 kernel tree; gpu/j713/build-test-module.sh reproduces it.
 pkgname=omarchy-m4-gpu
 pkgver=1
-pkgrel=2
-pkgdesc='Applies the fixed Air GPU module (#57) at the next boot'
+pkgrel=3
+pkgdesc='Applies the fixed Air GPU module (#57, #118) at the next boot'
 arch=('aarch64')
 url='https://github.com/Kb2uka/Omarchy-M4-Native'
 license=('GPL-2.0-only' 'MIT')
@@ -14,12 +14,12 @@ depends=('python')
 install=omarchy-m4-gpu.install
 options=('!strip' '!debug')
 source=('m4-gpu-module.py' '20-m4-gpu-module.conf' 'MIT.txt' 'GPL-2.0-only.txt'
-        "asahi_m4.ko::${url}/releases/download/package-inputs/asahi_m4-3cf47fa7.ko")
-sha256sums=('85ebf33558a244e1bdf12ce1d746d89cdf131abf7fc81ac413341613c89db543'
-            '5df35ba959a63a7581d5020d99db96b1e7d9ebc1ebe857e4aac0a2914502455a'
+        "asahi_m4.ko::${url}/releases/download/package-inputs/asahi_m4-de0337a7.ko")
+sha256sums=('8087a4f2524c095179c8612d5275cdd41996dd0a90a052a9650ba8a8d8e48230'
+            '03b6f6d8078f102a3eae5811dec7d4c24b3fb55d06c134db4eeef7ab1be03777'
             'b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5'
             'aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3'
-            '3cf47fa706630ddc5fc55a3bce00ab31e8a4c5ee48e1ba563e26a0406da196f8')
+            'de0337a773930c7862a99706112dd71eaaecf2021707da248fd3d07feefdc824')
 
 package() {
   install -Dm755 m4-gpu-module.py "$pkgdir/usr/bin/m4-gpu-module"
