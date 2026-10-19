@@ -1,0 +1,53 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
+// Copyright (c) 2026 Kazuhide Takahashi
+/dts-v1/;
+/plugin/;
+
+/*
+ * 15-inch M4 MacBook Air (J715) board identity on top of the J713 devicetree
+ * (tools/build-j715-dtb.py, docs/j715-boot-dtb.md).
+ *
+ * Both Airs use the T8132 with the same register map, and the J715's ADT wires
+ * the trackpad, the radios' power and reset, the speaker reset, the headphone
+ * codec and both USB-C ports like the J713's (docs/j715-macos-survey.md). So
+ * the SoC nodes and this project's SoC fixes (NVMe windows, CPU frequency,
+ * idle and the boost gate, CPU temperature, poweroff through the Abbey PMU at
+ * SPMI 0xe, the front USB port) carry over unchanged. This overlay changes
+ * only what differs:
+ *
+ * - the board identity, which the board gates read;
+ * - Wi-Fi and Bluetooth use the J715's "kos" radio module firmware;
+ * - the trackpad loads its J715 firmware.
+ *
+ * Every node is named by path, so the overlay needs no base phandle.
+ */
+/ {
+	fragment@0 {
+		target-path = "/";
+		__overlay__ {
+			compatible = "apple,j715", "apple,t8132", "apple,arm-platform";
+			model = "Apple MacBook Air (15-inch, M4, 2025)";
+		};
+	};
+
+	fragment@1 {
+		target-path = "/soc/pcie@1cb0000000/pci@0,0/wifi@0,0";
+		__overlay__ {
+			brcm,board-type = "apple,kos";
+		};
+	};
+
+	fragment@2 {
+		target-path = "/soc/pcie@1cb0000000/pci@0,0/bluetooth@0,1";
+		__overlay__ {
+			brcm,board-type = "apple,kos";
+		};
+	};
+
+	fragment@3 {
+		target-path = "/soc/fifo@394b14000/input@8000/multi-touch";
+		__overlay__ {
+			firmware-name = "apple/tpmtfw-j715.bin";
+		};
+	};
+};
