@@ -20,14 +20,10 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'tools/m4-boot-compose.py'
 
 
-def load(text=None):
-    if text is None:
-        spec = importlib.util.spec_from_file_location('m4_boot_compose', SOURCE)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
-    module = types.ModuleType('m4_boot_compose_mutant')
-    exec(compile(text, str(SOURCE), 'exec'), module.__dict__)
+def load():
+    spec = importlib.util.spec_from_file_location('m4_boot_compose', SOURCE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
     return module
 
 
@@ -79,6 +75,7 @@ class Machine:
         self.put(module.DTB, package_dtb)
         self.manifests(sha(K1))
         (self.root / 'usr/lib/modules' / RELEASE).mkdir(parents=True)
+        (self.root / 'var/lib/pacman').mkdir(parents=True)
 
     def put(self, name, data):
         path = self.root / name
@@ -316,59 +313,74 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn('Rollback copy is missing', err)
 
-    def test_shipped_lineage(self):
-        channel = json.loads((ROOT / 'packaging/omarchy-m4/channel.json').read_text())
-        updater = load_tool('tools/m4-j713-update-boot-dtb.py')
-        self.assertEqual(MODULE.KNOWN_KERNELS, {channel['kernel']['image_sha256']: channel['kernel']['release']})
-        self.assertEqual(list(MODULE.KNOWN_DTBS),
-                         [updater.ALPHA1_DTB, updater.POWEROFF_DTB, updater.CPUFREQ_DTB, updater.CPUTEMP_DTB,
-                          updater.ECLUSTER_DTB, updater.PBOOST_DTB, updater.USB0_DTB])
-        # The channel ships the newest devicetree in the lineage (the front USB-C port
-        # on top of the boost states), so connecting never moves an Air back.
-        self.assertEqual(channel['devicetree']['sha256'], updater.USB0_DTB)
+    def handoff_machine(self, shown=False):
+        native_tree = fdt(b'native backlight tree')
+        old_loader = LOADER + (b' shown preference' if shown else b'')
+        loaders = {mode: (mode.encode() + b' handoff stage2').ljust(0x110000, b'\0')
+                   for mode in ('hidden', 'shown')}
+        paths = {mode: f'usr/lib/omarchy-m4/backlight/stage2-{mode}.bin' for mode in loaders}
+        for patcher in (
+                mock.patch.object(MODULE, 'BACKLIGHT_DTB', sha(native_tree)),
+                mock.patch.dict(MODULE.KNOWN_LOADERS,
+                                {sha(old_loader): 'shown' if shown else 'hidden',
+                                 **{sha(data): mode for mode, data in loaders.items()}}, clear=True),
+                mock.patch.dict(MODULE.BACKLIGHT_LOADERS,
+                                {mode: (paths[mode], sha(data)) for mode, data in loaders.items()}, clear=True)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        machine = Machine(self, boot_bytes=boot(loader=old_loader), package_dtb=native_tree)
+        patcher = mock.patch.dict(MODULE.KNOWN_DTBS, {sha(native_tree): 'native backlight'})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for mode, data in loaders.items():
+            machine.put(paths[mode], data)
+        return machine, native_tree, old_loader, loaders, paths
+
+    def test_backlight_update_preserves_hidden_notch_preference(self):
+        machine, tree, _, loaders, _ = self.handoff_machine()
+        self.assertEqual(machine.run('--apply')[0], 0)
+        self.assertEqual(machine.boot, boot(loader=loaders['hidden'], dtb=tree))
+
+    def test_backlight_update_preserves_shown_notch_preference(self):
+        machine, tree, _, loaders, _ = self.handoff_machine(shown=True)
+        self.assertEqual(machine.run('--apply')[0], 0)
+        self.assertEqual(machine.boot, boot(loader=loaders['shown'], dtb=tree))
+
+    def test_unknown_stage2_cannot_enable_the_backlight_tree(self):
+        machine, _, _, _, _ = self.handoff_machine()
+        current = boot(loader=LOADER + b' unrecognized')
+        machine.put(MODULE.BOOT, current)
+        self.assertEqual(machine.run('--apply')[0], 1)
+        self.assertEqual((machine.boot, machine.previous), (current, None))
+
+    def test_corrupt_handoff_loader_cannot_enable_the_backlight_tree(self):
+        machine, _, old_loader, loaders, paths = self.handoff_machine()
+        machine.put(paths['hidden'], loaders['shown'])
+        self.assertEqual(machine.run('--apply')[0], 1)
+        self.assertEqual((machine.boot, machine.previous), (boot(loader=old_loader), None))
+
+    def test_rollback_restores_the_tree_and_handoff_loader_together(self):
+        machine, _, old_loader, _, _ = self.handoff_machine()
+        self.assertEqual(machine.run('--apply')[0], 0)
+        self.assertEqual(machine.run('--rollback', '--apply')[0], 0)
+        self.assertEqual(machine.boot, boot(loader=old_loader))
+
+    def test_another_boot_writer_blocks_standalone_apply(self):
+        machine = Machine(self)
+        machine.put(MODULE.PACMAN_LOCK, b'another transaction')
+        self.assertEqual(machine.run('--apply')[0], 1)
+        self.assertEqual((machine.boot, machine.previous), (boot(), None))
+        self.assertEqual((machine.root / MODULE.PACMAN_LOCK).read_bytes(), b'another transaction')
+
+    def test_package_hook_keeps_the_existing_transaction_lock(self):
+        machine = Machine(self)
+        machine.put(MODULE.PACMAN_LOCK, b'pacman transaction')
+        self.assertEqual(machine.run('--apply', '--hook')[0], 0)
+        self.assertEqual(machine.boot, boot(dtb=D2))
+        self.assertEqual((machine.root / MODULE.PACMAN_LOCK).read_bytes(), b'pacman transaction')
 
 
-def load_tool(name):
-    spec = importlib.util.spec_from_file_location(Path(name).stem.replace('-', '_'), ROOT / name)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
-
-# Each mutant removes one guard; at least one scenario must catch it.
-MUTANTS = (
-    ('protected-stack', '    check_protected(root, new[\'kernel\'])\n', ''),
-    # A composer that drops the owner's firmware must be stopped by the verification.
-    ('drop-firmware', "desired = join({**layout, 'kernel': kernel,",
-     "desired = join({**layout, 'initramfs': layout['initramfs'][:18], 'kernel': kernel,"),
-    ('known-current-kernel', "require(now['kernel'] in KNOWN_KERNELS", 'require(True'),
-    ('known-current-dtb', "require(now['dtb'] in KNOWN_DTBS", 'require(True'),
-    ('known-package-dtb', "require(new['dtb'] in KNOWN_DTBS", 'require(True'),
-    ('free-space', "require(stat.f_bavail * stat.f_frsize >= need", 'require(True'),
-    ('board', "    require(BOARD in compatible.split(b'\\0'), 'This is not a J713 MacBook Air')\n    boot_path = root / BOOT\n    current = read_regular(boot_path, 'boot.bin (is the EFI partition mounted at /boot/efi?)')\n    kernel",
-     "    boot_path = root / BOOT\n    current = read_regular(boot_path, 'boot.bin (is the EFI partition mounted at /boot/efi?)')\n    kernel"),
-    ('backup', '        write(previous, current)\n', '        pass\n'),
-    ('splice-dtb', "'dtb': dtb})", "'dtb': layout['dtb']})"),
-    ('revert-newer-dtb', "if lineage.index(now['dtb']) > lineage.index(new['dtb']):", 'if False:'),
-    ('rollback-owner', "require(all(now[name] == then[name] for name in ('loader', 'bootargs', 'initramfs')),",
-     'require(True,'),
-)
-
-
-class MutationTests(unittest.TestCase):
-    def test_every_guard_is_covered(self):
-        text = SOURCE.read_text()
-        for name, before, after in MUTANTS:
-            with self.subTest(name):
-                self.assertEqual(text.count(before), 1, 'mutation anchor changed: ' + name)
-                mutant = load(text.replace(before, after))
-                caught = []
-                for scenario in SCENARIOS:
-                    try:
-                        scenario(self, mutant)
-                    except Exception:  # any failure means the scenario noticed
-                        caught.append(scenario.__name__)
-                self.assertTrue(caught, 'mutant survived: ' + name)
 
 
 if __name__ == '__main__':

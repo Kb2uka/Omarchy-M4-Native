@@ -27,12 +27,13 @@ ROOT = Path(__file__).resolve().parents[2]
 CHANNEL = json.loads((ROOT / 'packaging/omarchy-m4/channel.json').read_text())
 RELEASE = CHANNEL['kernel']['release']
 # Packages an Air's 1-5 setup script does not list; omarchy-m4-boot's dependencies bring them.
-BROUGHT_BY_BOOT = ('omarchy-m4-gpu', 'omarchy-m4-headphones', 'omarchy-m4-cpu', 'omarchy-m4-evdi')
+BROUGHT_BY_BOOT = ('omarchy-m4-gpu', 'omarchy-m4-headphones', 'omarchy-m4-cpu', 'omarchy-m4-evdi',
+                   'omarchy-m4-backlight')
 STUB = '''pkgname=e2e-system
 pkgver=1
 pkgrel=1
 arch=(any)
-provides=(python coreutils kmod pacman gstreamer=1.28.7 gst-plugins-base-libs=1.28.7 libpulse)
+provides=(python coreutils kmod pacman brightnessctl gstreamer=1.28.7 gst-plugins-base-libs=1.28.7 libpulse)
 package() { mkdir -p "$pkgdir/usr/share/e2e-system"; }
 '''
 OLD_KERNEL = '''pkgname=linux-m4-omarchy
@@ -113,8 +114,7 @@ def signed_repository(directory, packages, env, fingerprint):
         *sorted(directory.glob('*.pkg.tar.zst')), env=env)
 
 
-def boot_bin(kernel, dtb):
-    loader = b'm1n1 sandbox loader\0' + bytes(44) + b'STACKBOT'
+def boot_bin(kernel, dtb, loader):
     args = b'chosen.bootargs=dockchannel_hid.m4_power_v2=1 dockchannel_hid.m4_afe_action=1\n'
     initramfs = b'\x1f\x8bsandbox base cpio' + b'070701 sandbox owner firmware'
     return loader + args + kernel + dtb + b'm1n1_initramfs' + struct.pack('<I', len(initramfs)) + initramfs
@@ -122,7 +122,7 @@ def boot_bin(kernel, dtb):
 
 def sandbox(root, old, stub):
     for name in ('var/lib/pacman', 'var/cache/pacman/pkg', 'var/log', 'etc/pacman.d/hooks',
-                 'srv/core', 'boot/efi/omarchy', 'sys/firmware/devicetree/base'):
+                 'etc/pacman.d/gnupg', 'srv/core', 'boot/efi/omarchy', 'sys/firmware/devicetree/base'):
         (root / name).mkdir(parents=True, exist_ok=True)
     with tarfile.open(root / 'srv/core/core.db', 'w:gz'):
         pass
@@ -179,7 +179,8 @@ def main():
             kernel = member(by_name['linux-m4-omarchy'], 'usr/lib/omarchy-m4/Image.gz')
             dtb = member(by_name['omarchy-m4-boot'], 'usr/lib/omarchy-m4/j713.dtb')
             (root / 'boot/efi/omarchy').mkdir(parents=True)
-            (root / 'boot/efi/omarchy/boot.bin').write_bytes(boot_bin(kernel, dtb))
+            loader = member(by_name['omarchy-m4-boot'], 'usr/lib/omarchy-m4/backlight/stage2-hidden.bin')
+            (root / 'boot/efi/omarchy/boot.bin').write_bytes(boot_bin(kernel, dtb, loader))
             old, = local.glob('linux-m4-omarchy-*.pkg.tar.zst')
             stub, = local.glob('e2e-system-*.pkg.tar.zst')
             pacman = sandbox(root, old, stub)
@@ -192,9 +193,8 @@ def main():
             require(plan['applied'] is False and plan['pacman_conf_changes'], 'Inspection did not plan the change')
             require(snapshot(root) == before, 'Inspection changed files')
             # The first run is the setup script an Air already has from omarchy-m4-boot 1-5,
-            # which lists none of omarchy-m4-gpu, omarchy-m4-headphones, omarchy-m4-cpu and
-            # omarchy-m4-evdi; the dependencies of boot 1-6 (GPU), 1-7 (headphone jack), 1-10 (CPU
-            # idle and boost guard) and 1-13 (USB displays) must bring them.
+            # which lists none of the GPU, headphone, CPU, USB-display or backlight
+            # packages. The boot package's dependencies must install all of them.
             source = (ROOT / 'tools/m4-channel-setup.py').read_text()
             listed = source[source.index('PACKAGES = ('):source.index(')', source.index('PACKAGES = (')) + 1]
             older = scratch / 'm4-channel-setup-1-5.py'
@@ -254,10 +254,14 @@ def main():
                 require(sha((root / path).read_bytes()) == digest, 'USB display (evdi) file missing or wrong: ' + path)
             require(run(*pacman, '-T', 'evdi<1.16', check=False).returncode == 0,
                     'The evdi package does not satisfy the displaylink package\'s dependency')
-            for path, digest in CHANNEL['notch_loader'].items():
-                require(sha((root / path).read_bytes()) == digest, 'Staged notch stage 2 missing or wrong: ' + path)
+            for path, digest in CHANNEL['backlight_loaders'].items():
+                require(sha((root / path).read_bytes()) == digest, 'Display handoff stage2 missing or wrong: ' + path)
             require((root / 'usr/lib/systemd/user/omarchy-m4-notch.service').is_file()
                     and os.access(root / 'usr/bin/m4-notch', os.X_OK), 'The notch switch is missing')
+            for path, digest in CHANNEL['backlight_module'].items():
+                require(sha((root / path).read_bytes()) == digest, 'Native backlight module missing or wrong: ' + path)
+            require((root / 'usr/lib/systemd/system/m4-backlight.service').is_file() and
+                    os.access(root / 'usr/bin/m4-backlight', os.X_OK), 'Native backlight startup helper is missing')
             require(os.access(root / 'usr/bin/omarchy-m4-update', os.X_OK) and
                     (root / 'usr/lib/omarchy-m4/m4-channel-setup.py').is_file(), 'omarchy-m4-update is missing')
             require((root / 'usr/lib/systemd/user/omarchy-m4-update-check.timer').is_file() and

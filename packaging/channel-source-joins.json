@@ -171,41 +171,89 @@
       ],
       "evidence": "J713 headphone codec driver (omarchy-m4-headphones 1-2). Built with tools/build-j713-headphones.sh from audio/j713/headphones/kernel/ on the alpha.1 kernel-controller tree (clang 21.1.8)."
     },
-    "j713-m1n1-stage2-notch1.bin": {
-      "sha256": "f2417a74d13838004847a6fbdf946b524005301b88b5a403b1e79cb36d0ec7ca",
+    "j713-dcp-backlight-2186b280.ko": {
+      "sha256": "2186b280cce0c321b204cfda0cf65d221e42cc63b97b7b884ac31b5999a8e390",
+      "license": "GPL-2.0-only",
+      "correspondence": "rebuilt-identical",
+      "sources": [
+        {
+          "tree": "display/j713/backlight",
+          "commit": "46760b2eb7d1d2ebb9d011f2149d4a935477e5d0"
+        },
+        {
+          "tree": "tools/build-j713-backlight.sh",
+          "commit": "46760b2eb7d1d2ebb9d011f2149d4a935477e5d0"
+        },
+        {
+          "archive": "source/kernel-controller.tar.gz",
+          "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        }
+      ],
+      "evidence": "Two clean builds with tools/build-j713-backlight.sh on the prepared kernel-controller tree in m4-dev-builder:clang21 (Ubuntu clang 21.1.8) produced identical bytes, compared with cmp. Native AFK status-only brightness was verified on J713 at 100 and 300 nits; automatic startup of this standalone production module requires the release boot verification."
+    },
+    "j713-m1n1-stage2-backlight-b86aee68.bin": {
+      "sha256": "b86aee6840fe670b592271ec2816d42c5515cddc20a14e08bdc5bcbce547e6fd",
       "license": "MIT",
       "correspondence": "rebuilt-identical",
       "sources": [
         {
-          "tree": "display/j713",
-          "commit": "962940db22754266008856b1ae48238146489e5a"
+          "tree": "display/j713/m1n1-base",
+          "commit": "46760b2eb7d1d2ebb9d011f2149d4a935477e5d0"
+        },
+        {
+          "tree": "display/j713/build-backlight-loader.sh",
+          "commit": "46760b2eb7d1d2ebb9d011f2149d4a935477e5d0"
         },
         {
           "archive": "source/m1n1-stage2-source.tar.gz",
           "sha256": "c394517941a5700b227718bb02e3df3dd43c9ad5a8e53c9447a55d3c36846c44"
         }
       ],
-      "evidence": "Opt-in J713 notch stage 2 (omarchy-m4-boot 1-12, issue #89). display/j713/build-notch-loader.sh in m4-gravity-builder:20261008 (clang 21.1.8, rustc 1.93.1), run as root, first rebuilt alpha.1's stage 2 byte for byte (3a3f7a64) from the alpha.1 companion's source/m1n1-stage2-source.tar.gz, then applied display/j713/m1n1-show-notch.patch and reproduced f2417a74 exactly (2026-10-16). m1n1 is MIT; its embedded third-party licenses are in display/j713/m1n1-base/3rdparty_licenses/."
+      "evidence": "Two clean x86-64 builds with build-backlight-loader.sh in m4-handoff-builder:amd64-rust93 (Ubuntu clang/lld 21.1.8, rustc 1.93.1 with rust-src and cached Cargo inputs), compared with cmp. Each pipeline first reproduced stock alpha.1 stage2 3a3f7a64 before adding the bounded current-boot T8132 DCP mapping handoff. Notch remains hidden; scanout/PIODMA ownership is unchanged."
     },
-    "j713-usb0.dtb": {
-      "sha256": "352bfa74351ad7d12d993f752fe9c09d682511bca0d4a60177cda0d716d1d614",
+    "j713-m1n1-stage2-backlight-notch-692f656c.bin": {
+      "sha256": "692f656cd8f6dfb2530172da518f9e2e18e6c5032df3062cd603eb4539e4c405",
+      "license": "MIT",
+      "correspondence": "rebuilt-identical",
+      "sources": [
+        {
+          "tree": "display/j713/m1n1-base",
+          "commit": "46760b2eb7d1d2ebb9d011f2149d4a935477e5d0"
+        },
+        {
+          "tree": "display/j713/build-backlight-loader.sh",
+          "commit": "46760b2eb7d1d2ebb9d011f2149d4a935477e5d0"
+        },
+        {
+          "tree": "display/j713/m1n1-show-notch.patch",
+          "commit": "46760b2eb7d1d2ebb9d011f2149d4a935477e5d0"
+        },
+        {
+          "archive": "source/m1n1-stage2-source.tar.gz",
+          "sha256": "c394517941a5700b227718bb02e3df3dd43c9ad5a8e53c9447a55d3c36846c44"
+        }
+      ],
+      "evidence": "The same two clean x86-64 handoff builds, with m1n1-show-notch.patch, produced identical bytes, compared with cmp. Both retain per-boot DCP reservations; this variant exposes the camera-notch rows. Embedded upstream license notices remain in m1n1-base/3rdparty_licenses."
+    },
+    "j713-backlight-afb025a8.dtb": {
+      "sha256": "afb025a8f1c946d164fe962f20b2e9d5cd987cfc668985eee62e41767722b2aa",
       "license": "GPL-2.0-only",
       "correspondence": "rebuilt-identical",
       "sources": [
         {
-          "tree": "patches/j713-usb0.dtso",
-          "commit": "c1f3f8088b160b3058af5c0cb95ca17f6cebd724"
+          "tree": "tools/build-j713-backlight-dt.py",
+          "commit": "46760b2eb7d1d2ebb9d011f2149d4a935477e5d0"
         },
         {
-          "tree": "tools/build-j713-usb0-dtb.py",
-          "commit": "c1f3f8088b160b3058af5c0cb95ca17f6cebd724"
+          "tree": "tools/build-j713-ecluster-dtb.py",
+          "commit": "46760b2eb7d1d2ebb9d011f2149d4a935477e5d0"
         },
         {
-          "archive": "package-inputs/j713-pboost.dtb",
-          "sha256": "c4f036b819ce757ce790b01779a3f7532eacd5cb1c1097fa20286d1a9c9ec6ca"
+          "archive": "package-inputs/j713-usb0.dtb",
+          "sha256": "352bfa74351ad7d12d993f752fe9c09d682511bca0d4a60177cda0d716d1d614"
         }
       ],
-      "evidence": "J713 front USB-C port devicetree (omarchy-m4-boot 1-12). tools/build-j713-usb0-dtb.py applied patches/j713-usb0.dtso to the boost-state devicetree (c4f036b8...) and produced 352bfa74 with DTC 1.8.1 on two hosts: Arch dtc 1.8.1 on the OptiPlex and the m4-dtc:66 builder image on homebase (2026-10-16)."
+      "evidence": "Repeated builds with dtc/fdtoverlay produced the same SHA-256. The builder compares every node/property plus reservations and boot CPU against the pinned USB0 base with exactly the added brightness resources. SID23 and mailbox interrupt roles match the verified J713 handoff; firmware DRAM reservations and handoff verification marker are populated by stage2 per boot."
     },
     "evdi-1.15.1-c5e65a2b.ko": {
       "sha256": "c5e65a2bcba6433ff8369fea449ccc4e6be178a392b9c4a959884415953c671a",

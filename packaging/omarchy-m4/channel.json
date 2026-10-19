@@ -13,7 +13,8 @@
     "omarchy-m4-gpu",
     "omarchy-m4-headphones",
     "omarchy-m4-cpu",
-    "omarchy-m4-evdi"
+    "omarchy-m4-evdi",
+    "omarchy-m4-backlight"
   ],
   "kernel": {
     "release": "7.1.9-m4-gpu-backport-20261008",
@@ -21,7 +22,7 @@
     "image_bytes": 18901266
   },
   "devicetree": {
-    "sha256": "352bfa74351ad7d12d993f752fe9c09d682511bca0d4a60177cda0d716d1d614"
+    "sha256": "afb025a8f1c946d164fe962f20b2e9d5cd987cfc668985eee62e41767722b2aa"
   },
   "allowed_paths": {
     "omarchy-m4-keyring": [
@@ -40,7 +41,8 @@
       "usr/share/licenses/omarchy-m4-boot/",
       "usr/bin/omarchy-m4-update",
       "usr/lib/omarchy-m4/m4-channel-setup.py", "usr/lib/omarchy-m4/m4-lid-lock.py",
-      "usr/bin/m4-notch", "usr/lib/omarchy-m4/m1n1-stage2-notch.bin", "usr/lib/systemd/user/omarchy-m4-notch.service"
+      "usr/bin/m4-notch", "usr/lib/omarchy-m4/backlight/stage2-hidden.bin",
+      "usr/lib/omarchy-m4/backlight/stage2-shown.bin", "usr/lib/systemd/user/omarchy-m4-notch.service"
     ],
     "linux-m4-omarchy": [
       "usr/lib/modules/7.1.9-m4-gpu-backport-20261008/",
@@ -86,6 +88,13 @@
       "usr/lib/modules/7.1.9-m4-gpu-backport-20261008/updates/evdi.ko",
       "usr/lib/libevdi.so",
       "usr/share/licenses/omarchy-m4-evdi/"
+    ],
+    "omarchy-m4-backlight": [
+      "usr/bin/m4-backlight",
+      "usr/lib/omarchy-m4/backlight/j713_dcp_backlight.ko",
+      "usr/lib/omarchy-m4/backlight/module.json",
+      "usr/lib/systemd/system/m4-backlight.service",
+      "usr/share/licenses/omarchy-m4-backlight/"
     ]
   },
   "protected_paths": [
@@ -122,7 +131,8 @@
     "usr/share/alsa/ucm2/conf.d/J713Headphones/HiFi.conf": "UCM for the new J713Headphones card only; no speaker or other card file",
     "usr/share/wireplumber/wireplumber.conf.d/83-j713-headphones.conf": "names the headphone sink and the headset mic source and adds their default-node hook as an optional component",
     "usr/share/wireplumber/scripts/default-nodes/j713-headphones.lua": "the headphone default-node hook; it only selects the headphone sink and the headset mic while they are available",
-    "usr/lib/systemd/system/m4-cpu-idle.service": "loads the J713 CPU idle driver (#65) at boot, with a one-strike guard"
+    "usr/lib/systemd/system/m4-cpu-idle.service": "loads the J713 CPU idle driver (#65) at boot, with a one-strike guard",
+    "usr/lib/systemd/system/m4-backlight.service": "loads the verified J713 native backlight after the per-boot display handoff; a one-strike guard prevents repeated failed startup"
   },
   "speaker_module": {
     "usr/lib/omarchy-m4/j713-audio/snd-soc-j713-group.ko": "aaad802eb136ff6cb915feaa123001b3eb848bc2f038d0a5b71c8e2ff35d2581"
@@ -140,8 +150,12 @@
   "cpu_guard_module": {
     "usr/lib/omarchy-m4/cpu/j713_pguard.ko": "91fe247e7e83d30f62f35bcf64ddbcb42faa3a1c109881d5aefcb64dc7e5e691"
   },
-  "notch_loader": {
-    "usr/lib/omarchy-m4/m1n1-stage2-notch.bin": "f2417a74d13838004847a6fbdf946b524005301b88b5a403b1e79cb36d0ec7ca"
+  "backlight_loaders": {
+    "usr/lib/omarchy-m4/backlight/stage2-hidden.bin": "b86aee6840fe670b592271ec2816d42c5515cddc20a14e08bdc5bcbce547e6fd",
+    "usr/lib/omarchy-m4/backlight/stage2-shown.bin": "692f656cd8f6dfb2530172da518f9e2e18e6c5032df3062cd603eb4539e4c405"
+  },
+  "backlight_module": {
+    "usr/lib/omarchy-m4/backlight/j713_dcp_backlight.ko": "2186b280cce0c321b204cfda0cf65d221e42cc63b97b7b884ac31b5999a8e390"
   },
   "evdi_module": {
     "usr/lib/modules/7.1.9-m4-gpu-backport-20261008/updates/evdi.ko": "c5e65a2bcba6433ff8369fea449ccc4e6be178a392b9c4a959884415953c671a"

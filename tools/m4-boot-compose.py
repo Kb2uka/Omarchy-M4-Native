@@ -3,13 +3,15 @@
 # Copyright (c) 2026 KB2UKA
 """Compose the installed J713 boot.bin from the packaged kernel and devicetree.
 
-boot.bin is per machine: the m1n1 loader, the boot arguments and the initramfs
-(which carries this owner's Apple firmware) are written once by the installer.
-Only the kernel and devicetree segments are replaced from package files; every
-other byte is kept. Any failed check leaves boot.bin untouched. Inspection is
-the default; --apply writes, keeping the replaced file as boot.bin.previous.
+boot.bin is per machine: its boot arguments and initramfs carry this owner's
+root partition and Apple firmware. Kernel/devicetree updates preserve both.
+The native backlight additionally replaces only a known stage2, preserving the
+owner's notch preference, because its per-boot display reservations are required
+by the enabled backlight tree. Failed checks leave boot.bin untouched.
+Inspection is the default; --apply keeps the replaced file as boot.bin.previous.
 """
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -34,6 +36,7 @@ KNOWN_DTBS = {
     'fdedc09f2fe8ed681a61208589024e01fb5efa77beebbd0eb4ad267c08e77f7c': 'j713-ecluster-thermal',
     'c4f036b819ce757ce790b01779a3f7532eacd5cb1c1097fa20286d1a9c9ec6ca': 'j713-pboost',
     '352bfa74351ad7d12d993f752fe9c09d682511bca0d4a60177cda0d716d1d614': 'j713-usb0',
+    'afb025a8f1c946d164fe962f20b2e9d5cd987cfc668985eee62e41767722b2aa': 'j713-backlight',
 }
 BOARD = b'apple,j713'
 BOOT = 'boot/efi/omarchy/boot.bin'
@@ -48,6 +51,21 @@ GZIP = b'\x1f\x8b\x08'
 FDT_MAGIC = b'\xd0\x0d\xfe\xed'
 INITRAMFS = b'm1n1_initramfs'
 MARGIN = 1 << 20
+BACKLIGHT_DTB = 'afb025a8f1c946d164fe962f20b2e9d5cd987cfc668985eee62e41767722b2aa'
+KNOWN_LOADERS = {
+    '3a3f7a64c65fc366d5ac9aece3e1bee64119be012aa1ec5b15d2743c6f91fce4': 'hidden',
+    '7bc78b9138ae449eeab08d0a713c96f25e0d7477b7a48f2804da2c17509a9609': 'hidden',
+    'f2417a74d13838004847a6fbdf946b524005301b88b5a403b1e79cb36d0ec7ca': 'shown',
+    'b86aee6840fe670b592271ec2816d42c5515cddc20a14e08bdc5bcbce547e6fd': 'hidden',
+    '692f656cd8f6dfb2530172da518f9e2e18e6c5032df3062cd603eb4539e4c405': 'shown',
+}
+BACKLIGHT_LOADERS = {
+    'hidden': ('usr/lib/omarchy-m4/backlight/stage2-hidden.bin',
+               'b86aee6840fe670b592271ec2816d42c5515cddc20a14e08bdc5bcbce547e6fd'),
+    'shown': ('usr/lib/omarchy-m4/backlight/stage2-shown.bin',
+              '692f656cd8f6dfb2530172da518f9e2e18e6c5032df3062cd603eb4539e4c405'),
+}
+PACMAN_LOCK = 'var/lib/pacman/db.lck'
 
 
 class Refused(Exception):
@@ -177,10 +195,21 @@ def plan(root):
     if lineage.index(now['dtb']) > lineage.index(new['dtb']):
         dtb, new['dtb'] = layout['dtb'], now['dtb']
     check_protected(root, new['kernel'])
-    desired = join({**layout, 'kernel': kernel, 'dtb': dtb})
+    loader = layout['loader']
+    if BACKLIGHT_DTB in lineage and lineage.index(new['dtb']) >= lineage.index(BACKLIGHT_DTB):
+        current_loader = sha(loader)
+        require(current_loader in KNOWN_LOADERS,
+                'Display handoff cannot replace an unknown stage2 ' + current_loader)
+        path, digest = BACKLIGHT_LOADERS[KNOWN_LOADERS[current_loader]]
+        loader = read_regular(root / path, 'Packaged display handoff stage2')
+        require(len(loader) == 0x110000 and sha(loader) == digest,
+                'Packaged display handoff stage2 differs from its pin')
+        now['loader'], new['loader'] = current_loader, digest
+    desired = join({**layout, 'kernel': kernel, 'dtb': dtb, 'loader': loader})
     result = parse(desired)
-    require(all(result[name] == layout[name] for name in ('loader', 'bootargs', 'initramfs')) and
-            result['kernel'] == kernel and result['dtb'] == dtb, 'Composed boot.bin verification failed')
+    require(all(result[name] == layout[name] for name in ('bootargs', 'initramfs')) and
+            result['loader'] == loader and result['kernel'] == kernel and result['dtb'] == dtb,
+            'Composed boot.bin verification failed')
     receipt = {'boot': str(boot_path), 'boot_sha256': sha(current), 'kernel_sha256': new['kernel'],
                'kernel_release': KNOWN_KERNELS[new['kernel']], 'devicetree_sha256': new['dtb'],
                'devicetree_release': KNOWN_DTBS[new['dtb']], 'applied': False}
@@ -245,8 +274,14 @@ def rollback(root, apply=False):
     current = read_regular(boot_path, 'boot.bin (is the EFI partition mounted at /boot/efi?)')
     older = read_regular(previous, 'Rollback copy')
     now, then = parse(current), parse(older)
-    require(all(now[name] == then[name] for name in ('loader', 'bootargs', 'initramfs')),
-            'The rollback copy was not made from this boot.bin')
+    require(all(now[name] == then[name] for name in ('bootargs', 'initramfs')) and
+            (now['loader'] == then['loader'] or
+             (sha(now['loader']) in KNOWN_LOADERS and sha(then['loader']) in KNOWN_LOADERS and
+              KNOWN_LOADERS[sha(now['loader'])] == KNOWN_LOADERS[sha(then['loader'])])),
+            'The rollback copy was not made from this boot.bin or changes notch preference')
+    if sha(then['dtb']) == BACKLIGHT_DTB:
+        require(sha(then['loader']) in {entry[1] for entry in BACKLIGHT_LOADERS.values()},
+                'Rollback backlight tree lacks its display handoff stage2')
     receipt = {'boot': str(boot_path), 'boot_sha256': sha(current), 'restore_sha256': sha(older),
                'applied': False, 'status': 'rollback available' if older != current else 'current'}
     if older == current or not apply:
@@ -258,15 +293,38 @@ def rollback(root, apply=False):
     return receipt
 
 
+@contextlib.contextmanager
+def transaction_guard(root, package_hook=False):
+    path = root / PACMAN_LOCK
+    if package_hook:
+        require(path.is_file() and not path.is_symlink(), 'Package hook lacks its pacman transaction lock')
+        yield
+        return
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o000)
+    except FileExistsError:
+        raise Refused('A package transaction or another boot writer is running') from None
+    os.close(fd)
+    try:
+        yield
+    finally:
+        path.unlink()
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--apply', action='store_true', help='write boot.bin (default: inspect only)')
     parser.add_argument('--rollback', action='store_true', help='restore boot.bin.previous')
     parser.add_argument('--root', type=Path, default=Path('/'), help=argparse.SUPPRESS)
+    parser.add_argument('--hook', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     try:
-        receipt = (rollback if args.rollback else compose)(args.root, args.apply)
+        if args.apply:
+            with transaction_guard(args.root, args.hook):
+                receipt = (rollback if args.rollback else compose)(args.root, True)
+        else:
+            receipt = (rollback if args.rollback else compose)(args.root, False)
     except (Refused, OSError) as error:
         print('m4-boot-compose: refused: ' + str(error) + '. boot.bin was not changed.', file=sys.stderr)
         return 1
