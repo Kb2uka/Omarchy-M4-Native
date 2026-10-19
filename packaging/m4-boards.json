@@ -20,8 +20,8 @@
       "soc": "apple,t8132",
       "models": ["Mac16,13"],
       "name": "MacBook Air (15-inch, M4, 2025)",
-      "support": "refused",
-      "installer": null
+      "support": "testing",
+      "installer": {"stub": "26.5.1", "expert_only": true}
     },
     {
       "target": "J604",

@@ -2,9 +2,10 @@
 
 [`packaging/m4-boards.json`](../packaging/m4-boards.json) is the one place
 that says which Apple M4-family Macs this project supports. Only the 13-inch
-M4 Air (J713) is qualified. The plain M4 Mac mini (J773g) is in testing
-([#136](https://github.com/Kb2uka/Omarchy-M4-Native/issues/136)). Every other
-board is refused.
+M4 Air (J713) is qualified. The plain M4 Mac mini (J773g,
+[#136](https://github.com/Kb2uka/Omarchy-M4-Native/issues/136)) and the
+15-inch M4 Air (J715, [#142](https://github.com/Kb2uka/Omarchy-M4-Native/issues/142))
+are in testing. Every other board is refused.
 
 Each board names its chip. The M4 boards use the T8132; the M4 Pro Mac mini
 (J773s) uses the T6040, a different chip, and its port is starting from the
@@ -16,7 +17,7 @@ them like every other unqualified model.
 | Board | Chip | Model identifiers | Mac | Support | Installer profile |
 |---|---|---|---|---|---|
 | J713 | T8132 | Mac16,12 | MacBook Air (13-inch, M4, 2025) | qualified | 26.5.1, expert mode only |
-| J715 | T8132 | Mac16,13 | MacBook Air (15-inch, M4, 2025) | refused | none |
+| J715 | T8132 | Mac16,13 | MacBook Air (15-inch, M4, 2025) | testing | 26.5.1, expert mode only |
 | J604 | T8132 | Mac16,1 | MacBook Pro (14-inch, M4, 2024) | refused | none |
 | J623 | T8132 | Mac16,2 | iMac (24-inch, 2024, Two ports) | refused | none |
 | J624 | T8132 | Mac16,3 | iMac (24-inch, 2024, Four ports) | refused | none |
@@ -26,7 +27,9 @@ them like every other unqualified model.
 
 The installer profile is the macOS stub version that the bundled
 asahi-installer `DEVICES` table selects for that board. The Mac mini profile
-comes from the upstream installer this project builds on. `Install.command`
+comes from the upstream installer this project builds on. The 15-inch Air uses
+the J713's 26.5.1 recovery image and the `kos` radio firmware
+([j713-installer-profile.md](j713-installer-profile.md)). `Install.command`
 still refuses every model except Mac16,12, so the release does not install on
 a mini.
 
