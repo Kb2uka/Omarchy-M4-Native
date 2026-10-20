@@ -1,0 +1,561 @@
+# SPDX-License-Identifier: MIT
+"""Contract for tools/build-j713-hardened.py.
+
+The tool builds a candidate kernel and the current audio/j713/kernel modules.
+It does not qualify a native install. Import with importlib, as the other
+release helpers do. Expected production API:
+
+    KERNEL_ARCHIVE = '810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57'
+    SOUND_EXPORTS = '9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362'
+    BUILDER_IMAGE = 'b2069edb8a23761d9211559fe632f5464aebc4cdfa9558d0f4c93211890fd7b1'
+    KERNEL_RELEASE = '7.1.9-m4-gpu-backport-20261008'
+    KERNEL_INPUTS = {relative path: sha256}  # the six audio/j713/kernel-inputs.sha256 rows
+    DOCKCHANNEL = 'drivers/hid/dockchannel-hid/dockchannel-hid.c'
+    MACSMC = 'drivers/mfd/macsmc.c'
+    DOCKCHANNEL_BASE = '77ef81abc66a61d08818142895bc02bec2b01abe9461195c3c575799da91d1eb'
+    DOCKCHANNEL_HISTORICAL = 'e4eebbee612eee32bd51ce370d412afc8cf62a9a7e087a3797c2c29306cedfb4'
+    MACSMC_HISTORICAL = '0cbe1eaf11e473336bfc24d5036a4a15586f21c868e8fedd21aeb1ce8bcaa9d6'
+    HISTORICAL_PATCHES = (
+        'patches-kernel/j713-input/dockchannel-start-retry.patch',
+        'patches-kernel/j713-input/macsmc-key-info-lock.patch',
+        'patches-kernel/j713-input/dockchannel-afe-action.patch',
+    )
+    HISTORICAL_PATCH_SHA256 = {those paths: published sha256}
+    RETAINED_PATCH = 'patches-kernel/retained-hardening/dockchannel-packet-bounds.patch'
+    RETAINED_PATCH_SHA256 = sha256 of that file
+    IMPORTED_MANIFEST = ROOT / 'audio/j713/imported-source.sha256'
+    KBUILD_ENV = {
+        'KBUILD_BUILD_TIMESTAMP': '2026-10-08 00:00:00',
+        'KBUILD_BUILD_USER': 'kb2uka',
+        'KBUILD_BUILD_HOST': 'm4-gravity-builder',
+        'KBUILD_BUILD_VERSION': '18',
+    }
+    AUDIO_MODULES = (
+        'snd-soc-j713-group.ko', 'snd-soc-tas2764.ko', 'snd-soc-macaudio.ko',
+        'snd-soc-apple-mca.ko', 'apple-admac.ko',
+    )
+
+    prepare(archive, exports, image, output) -> None
+    build(archive, exports, image, output) -> receipt dict
+    main(argv) -> None
+
+There is no CLI flag that replaces a pin. main() accepts only:
+
+    --kernel-archive ARCHIVE --sound-exports FILE --image sha256:HEX --output NEW_DIRECTORY
+
+prepare() and build() accept the image only as 'sha256:' plus BUILDER_IMAGE.
+Relative patch paths are resolved from the repo root; tests may substitute
+absolute paths. An absolute archive member, a path that escapes the tree
+after stripping one leading component, or a symlink or hard link is refused.
+
+Order, and nothing is written to output before the input checks:
+
+1. Refuse an image that is not the pinned sha256 identity.
+2. Hash the archive and supplemental exports, and hash the historical and
+   retained patch files. Verify every imported-source.sha256 row against
+   audio/j713. Refuse an output path that already exists.
+3. Extract the gzip archive into output/kernel with one leading component
+   removed. Verify KERNEL_INPUTS and DOCKCHANNEL_BASE.
+4. Apply HISTORICAL_PATCHES with patch -p1 --fuzz=0 --forward, in order,
+   then require DOCKCHANNEL_HISTORICAL and MACSMC_HISTORICAL.
+5. Apply RETAINED_PATCH once, to that copied tree only.
+6. Copy audio/j713/kernel to output/mca. Do not apply the bclk patch.
+
+build() calls prepare(), then one docker run:
+
+    docker run --rm --network none --pull never --entrypoint /bin/bash
+      -e KBUILD_BUILD_*=... 
+      -v output/kernel:/kernel
+      -v EXPORTS:/reference-sound-exports.symvers:ro
+      -v output/mca:/job
+      sha256:BUILDER_IMAGE -c SCRIPT
+
+SCRIPT runs make Image.gz, then make modules for M=/job, both with
+ARCH=arm64 LLVM=1 LOCALVERSION=. The module make also passes
+KCFLAGS=-Werror, J713_PROFILE=conservative-v1, and
+KBUILD_EXTRA_SYMBOLS=/reference-sound-exports.symvers. No daemon, Cargo,
+or speakersafetyd build is invoked.
+
+After docker, Module.symvers, .config, and include/config/kernel.release
+must still match KERNEL_INPUTS, and the supplemental file must still match
+SOUND_EXPORTS. Drift raises and does not write a receipt. Success copies
+arch/arm64/boot/Image.gz to output/Image.gz and each module to
+output/modules/<name>.ko, and writes output/receipt.json. The receipt is
+also build()'s return value:
+
+    schema 1, kind 'j713-hardened-kernel-candidate',
+    native_qualified false, fresh_install_qualified false,
+    image, kernel_archive, sound_exports,
+    kernel {path, sha256, bytes}, modules {name: {sha256, bytes}},
+    exports {module_symvers_before, module_symvers_after,
+             supplemental_before, supplemental_after},
+    kernel_release, config_sha256, profile 'conservative-v1'
+
+Patch and docker go through this module's subprocess.run.
+"""
+import hashlib
+import importlib.util
+import io
+import json
+from pathlib import Path
+import subprocess
+import tarfile
+import tempfile
+import unittest
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parents[1]
+SPEC = importlib.util.spec_from_file_location(
+    'j713_hardened_build', ROOT / 'tools/build-j713-hardened.py')
+tool = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(tool)
+
+PUBLISHED_ARCHIVE = '810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57'
+PUBLISHED_EXPORTS = '9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362'
+PUBLISHED_IMAGE = 'b2069edb8a23761d9211559fe632f5464aebc4cdfa9558d0f4c93211890fd7b1'
+PUBLISHED_PATCHES = {
+    'patches-kernel/j713-input/dockchannel-start-retry.patch':
+        'f3b1cacd0f1704e60edbadba714ac052959356446e5e059ad345fddc1d501967',
+    'patches-kernel/j713-input/macsmc-key-info-lock.patch':
+        '47a09e2b804b156c8ee5e26a025980caca7a10c4f0c0ef0bcdd8baf8b3b912f4',
+    'patches-kernel/j713-input/dockchannel-afe-action.patch':
+        '8f9ab49462a5076b7345aa465cef99696f29cbf4d23ab5bfa629acfebee8ed89',
+}
+PINNED_DRIVER = ROOT / 'tests/fixtures/dockchannel/dockchannel-hid.c'
+PINNED_DRIVER_SHA256 = 'e4eebbee612eee32bd51ce370d412afc8cf62a9a7e087a3797c2c29306cedfb4'
+RETAINED_PATCH = ROOT / 'patches-kernel/retained-hardening/dockchannel-packet-bounds.patch'
+KERNEL_RELEASE = '7.1.9-m4-gpu-backport-20261008'
+EXPECTED_ENV = {
+    'KBUILD_BUILD_TIMESTAMP': '2026-10-08 00:00:00',
+    'KBUILD_BUILD_USER': 'kb2uka',
+    'KBUILD_BUILD_HOST': 'm4-gravity-builder',
+    'KBUILD_BUILD_VERSION': '18',
+}
+
+
+def digest(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def text_digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+class HardenedBuildTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name)
+        self.repo_mca = digest(ROOT / 'audio/j713/kernel/mca.c')
+        self.repo_retained = digest(RETAINED_PATCH)
+        self.repo_driver = digest(PINNED_DRIVER)
+
+    def write_archive(self, files):
+        """files maps paths below the stripped top-level directory to bytes."""
+        archive = self.base / ('archive-%d.tar.gz' % len(list(self.base.iterdir())))
+        with tarfile.open(archive, 'w:gz') as packed:
+            for name, data in files.items():
+                info = tarfile.TarInfo('linux/' + name)
+                info.size = len(data)
+                packed.addfile(info, io.BytesIO(data))
+        return archive
+
+    def kernel_files(self, dockchannel, macsmc=b'smc\n'):
+        release = (KERNEL_RELEASE + '\n').encode()
+        files = {
+            '.config': b'config\n',
+            'Module.symvers': b'exports\n',
+            'include/generated/autoconf.h': b'autoconf\n',
+            'include/config/auto.conf': b'auto\n',
+            'include/generated/utsrelease.h': b'uts\n',
+            'include/config/kernel.release': release,
+            tool.DOCKCHANNEL: dockchannel,
+            tool.MACSMC: macsmc,
+        }
+        return files
+
+    def pins_for(self, files, archive, exports):
+        inputs = {name: text_digest(files[name]) for name in tool.KERNEL_INPUTS}
+        return {
+            'KERNEL_ARCHIVE': digest(archive),
+            'SOUND_EXPORTS': digest(exports),
+            'KERNEL_INPUTS': inputs,
+            'DOCKCHANNEL_BASE': text_digest(files[tool.DOCKCHANNEL]),
+            'DOCKCHANNEL_HISTORICAL': text_digest(files[tool.DOCKCHANNEL]),
+            'MACSMC_HISTORICAL': text_digest(files[tool.MACSMC]),
+        }
+
+    def patch_file(self, name, body):
+        path = self.base / name
+        path.write_text(body)
+        return path
+
+    def historical_patches(self):
+        first = self.patch_file('hist1.patch', """--- a/drivers/hid/dockchannel-hid/dockchannel-hid.c
++++ b/drivers/hid/dockchannel-hid/dockchannel-hid.c
+@@ -1 +1,2 @@
+ alpha
++beta
+""")
+        second = self.patch_file('hist2.patch', """--- a/drivers/mfd/macsmc.c
++++ b/drivers/mfd/macsmc.c
+@@ -1 +1,2 @@
+ smc
++locked
+""")
+        third = self.patch_file('hist3.patch', """--- a/drivers/hid/dockchannel-hid/dockchannel-hid.c
++++ b/drivers/hid/dockchannel-hid/dockchannel-hid.c
+@@ -1,2 +1,3 @@
+ alpha
+ beta
++gamma
+""")
+        retained = self.patch_file('bounds.patch', """--- a/drivers/hid/dockchannel-hid/dockchannel-hid.c
++++ b/drivers/hid/dockchannel-hid/dockchannel-hid.c
+@@ -1,3 +1,4 @@
+ alpha
+ beta
+ gamma
++bounds
+""")
+        paths = (str(first), str(second), str(third))
+        return paths, {path: digest(Path(path)) for path in paths}, retained
+
+    def apply_pins(self, overrides, historical=None, retained=None):
+        historical = historical or ((), {})
+        stack = [
+            mock.patch.object(tool, 'KERNEL_ARCHIVE', overrides['KERNEL_ARCHIVE']),
+            mock.patch.object(tool, 'SOUND_EXPORTS', overrides['SOUND_EXPORTS']),
+            mock.patch.object(tool, 'KERNEL_INPUTS', overrides['KERNEL_INPUTS']),
+            mock.patch.object(tool, 'DOCKCHANNEL_BASE', overrides['DOCKCHANNEL_BASE']),
+            mock.patch.object(tool, 'DOCKCHANNEL_HISTORICAL', overrides['DOCKCHANNEL_HISTORICAL']),
+            mock.patch.object(tool, 'MACSMC_HISTORICAL', overrides['MACSMC_HISTORICAL']),
+            mock.patch.object(tool, 'HISTORICAL_PATCHES', historical[0]),
+            mock.patch.object(tool, 'HISTORICAL_PATCH_SHA256', historical[1]),
+        ]
+        if retained is not None:
+            stack.append(mock.patch.object(tool, 'RETAINED_PATCH', str(retained)))
+            stack.append(mock.patch.object(tool, 'RETAINED_PATCH_SHA256', digest(retained)))
+        for item in stack:
+            item.start()
+            self.addCleanup(item.stop)
+
+    def image(self):
+        return 'sha256:' + tool.BUILDER_IMAGE
+
+    def test_default_pins_match_published_inputs_and_repo_artifacts(self):
+        self.assertEqual(tool.KERNEL_ARCHIVE, PUBLISHED_ARCHIVE)
+        self.assertEqual(tool.SOUND_EXPORTS, PUBLISHED_EXPORTS)
+        self.assertEqual(tool.BUILDER_IMAGE, PUBLISHED_IMAGE)
+        self.assertEqual(tool.KERNEL_RELEASE, KERNEL_RELEASE)
+        self.assertEqual(tool.KBUILD_ENV, EXPECTED_ENV)
+        self.assertEqual(tool.HISTORICAL_PATCHES, tuple(PUBLISHED_PATCHES))
+        self.assertEqual(tool.HISTORICAL_PATCH_SHA256, PUBLISHED_PATCHES)
+        for path, pin in PUBLISHED_PATCHES.items():
+            self.assertEqual(digest(ROOT / path), pin)
+        self.assertEqual(tool.RETAINED_PATCH, 'patches-kernel/retained-hardening/dockchannel-packet-bounds.patch')
+        self.assertEqual(tool.RETAINED_PATCH_SHA256, digest(RETAINED_PATCH))
+        self.assertEqual(tool.DOCKCHANNEL_BASE,
+                         '77ef81abc66a61d08818142895bc02bec2b01abe9461195c3c575799da91d1eb')
+        self.assertEqual(tool.DOCKCHANNEL_HISTORICAL, PINNED_DRIVER_SHA256)
+        self.assertEqual(tool.MACSMC_HISTORICAL,
+                         '0cbe1eaf11e473336bfc24d5036a4a15586f21c868e8fedd21aeb1ce8bcaa9d6')
+        rows = (ROOT / 'audio/j713/kernel-inputs.sha256').read_text().splitlines()
+        self.assertEqual(tool.KERNEL_INPUTS, {
+            line.split()[1]: line.split()[0] for line in rows if line.strip()})
+        manifest = (ROOT / 'audio/j713/imported-source.sha256').read_text().splitlines()
+        pinned = {line.split()[1]: line.split()[0] for line in manifest if line.strip()}
+        self.assertEqual(pinned['kernel/mca.c'], self.repo_mca)
+        self.assertEqual(tool.AUDIO_MODULES, (
+            'snd-soc-j713-group.ko', 'snd-soc-tas2764.ko', 'snd-soc-macaudio.ko',
+            'snd-soc-apple-mca.ko', 'apple-admac.ko'))
+        with self.assertRaises(SystemExit):
+            tool.main(['--kernel-archive', 'a', '--sound-exports', 'b',
+                       '--image', self.image(), '--output', 'c',
+                       '--kernel-archive-sha256', 'ff' * 32])
+
+    def test_prepare_applies_synthetic_patches_and_copies_current_mca(self):
+        files = self.kernel_files(b'alpha\n')
+        archive = self.write_archive(files)
+        exports = self.base / 'exports'
+        exports.write_bytes(b'supplemental\n')
+        historical = self.historical_patches()
+        self.apply_pins(self.pins_for(files, archive, exports), historical[:2], historical[2])
+        output = self.base / 'out'
+        before = {path: digest(path) for path in (archive, exports, RETAINED_PATCH, PINNED_DRIVER)}
+        tool.prepare(archive, exports, self.image(), output)
+        driver = (output / 'kernel' / tool.DOCKCHANNEL).read_text()
+        self.assertEqual(driver, 'alpha\nbeta\ngamma\nbounds\n')
+        self.assertEqual((output / 'kernel' / tool.MACSMC).read_text(), 'smc\nlocked\n')
+        source = ROOT / 'audio/j713/kernel'
+        copied = output / 'mca'
+        names = sorted(path.relative_to(source).as_posix() for path in source.rglob('*') if path.is_file())
+        self.assertEqual(names, sorted(path.relative_to(copied).as_posix()
+                                       for path in copied.rglob('*') if path.is_file()))
+        self.assertEqual((copied / 'mca.c').read_bytes(), (source / 'mca.c').read_bytes())
+        self.assertIn('bclk_ratio = tdm_slot_width * tdm_slots;', (copied / 'mca.c').read_text())
+        self.assertNotIn('(unsigned long)tdm_slot_width', (copied / 'mca.c').read_text())
+        for path, pin in before.items():
+            self.assertEqual(digest(path), pin)
+        self.assertFalse((output / 'receipt.json').exists())
+
+    def test_wrong_pins_bad_image_and_collision_do_not_mutate_inputs(self):
+        files = self.kernel_files(b'alpha\n')
+        archive = self.write_archive(files)
+        exports = self.base / 'exports'
+        exports.write_bytes(b'supplemental\n')
+        archive_pin = digest(archive)
+        exports_pin = digest(exports)
+
+        missing = self.base / 'missing-out'
+        with self.assertRaises(RuntimeError):
+            tool.prepare(archive, exports, self.image(), missing)
+        self.assertFalse(missing.exists())
+        self.assertEqual(digest(archive), archive_pin)
+
+        historical = self.historical_patches()
+        pinned = self.pins_for(files, archive, exports)
+        self.apply_pins(pinned, historical[:2], historical[2])
+        occupied = self.base / 'occupied'
+        occupied.mkdir()
+        (occupied / 'sentinel').write_text('keep')
+        with self.assertRaises(RuntimeError):
+            tool.prepare(archive, exports, self.image(), occupied)
+        self.assertEqual((occupied / 'sentinel').read_text(), 'keep')
+        self.assertFalse((occupied / 'kernel').exists())
+
+        for image in ('m4-gravity-builder:20261008', PUBLISHED_IMAGE,
+                      'sha256:' + 'ab' * 32, 'sha256:' + PUBLISHED_IMAGE.upper()):
+            destination = self.base / ('image-' + str(len(image)))
+            with self.subTest(image=image):
+                with self.assertRaises(RuntimeError):
+                    tool.prepare(archive, exports, image, destination)
+                self.assertFalse(destination.exists())
+        self.assertEqual(digest(exports), exports_pin)
+
+    def test_unsafe_archive_members_are_refused(self):
+        def pack(member):
+            archive = self.base / ('unsafe-%s.tar.gz' % member.name.replace('/', '_'))
+            with tarfile.open(archive, 'w:gz') as packed:
+                if member.isfile():
+                    payload = b'outside\n'
+                    member.size = len(payload)
+                    packed.addfile(member, io.BytesIO(payload))
+                else:
+                    packed.addfile(member)
+            return archive
+
+        cases = {
+            'symlink': tarfile.TarInfo('linux/link'),
+            'hardlink': tarfile.TarInfo('linux/hard'),
+            'escape': tarfile.TarInfo('linux/../../outside'),
+            'absolute': tarfile.TarInfo('/etc/passwd'),
+        }
+        cases['symlink'].type = tarfile.SYMTYPE
+        cases['symlink'].linkname = '/tmp/outside'
+        cases['hardlink'].type = tarfile.LNKTYPE
+        cases['hardlink'].linkname = 'linux/.config'
+        exports = self.base / 'exports'
+        exports.write_bytes(b'supplemental\n')
+        for name, member in cases.items():
+            archive = pack(member)
+            destination = self.base / name
+            with self.subTest(member=name):
+                with mock.patch.object(tool, 'KERNEL_ARCHIVE', digest(archive)), \
+                     mock.patch.object(tool, 'SOUND_EXPORTS', digest(exports)):
+                    with self.assertRaises(RuntimeError):
+                        tool.prepare(archive, exports, self.image(), destination)
+                self.assertFalse(destination.exists())
+                self.assertFalse((self.base / 'outside').exists())
+
+    def test_patch_failure_leaves_no_receipt(self):
+        files = self.kernel_files(b'alpha\n')
+        archive = self.write_archive(files)
+        exports = self.base / 'exports'
+        exports.write_bytes(b'supplemental\n')
+        broken = self.patch_file('broken.patch', 'this is not a unified diff\n')
+        retained = self.patch_file('unused.patch', 'neither is this\n')
+        historical = ((str(broken),), {str(broken): digest(broken)})
+        self.apply_pins(self.pins_for(files, archive, exports), historical, retained)
+        output = self.base / 'patched'
+        with self.assertRaises(Exception) as caught:
+            tool.prepare(archive, exports, self.image(), output)
+        self.assertNotIsInstance(caught.exception, AssertionError)
+        self.assertFalse((output / 'receipt.json').exists())
+        driver = output / 'kernel' / tool.DOCKCHANNEL
+        if driver.exists():
+            self.assertNotIn('bounds', driver.read_text())
+
+    def test_imported_source_mismatch_is_rejected_before_output(self):
+        files = self.kernel_files(b'alpha\n')
+        archive = self.write_archive(files)
+        exports = self.base / 'exports'
+        exports.write_bytes(b'supplemental\n')
+        manifest = self.base / 'imported-source.sha256'
+        manifest.write_text('ff' * 32 + '  kernel/mca.c\n')
+        historical = self.historical_patches()
+        self.apply_pins(self.pins_for(files, archive, exports), historical[:2], historical[2])
+        output = self.base / 'manifest-out'
+        with mock.patch.object(tool, 'IMPORTED_MANIFEST', manifest):
+            with self.assertRaises(RuntimeError):
+                tool.prepare(archive, exports, self.image(), output)
+        self.assertFalse(output.exists())
+
+    def test_prepare_applies_retained_bounds_patch_to_pinned_driver(self):
+        """The fixture is the post-historical driver. Historical patches are not reapplied."""
+        self.assertEqual(self.repo_driver, PINNED_DRIVER_SHA256)
+        macsmc = b'smc-historical\n'
+        files = self.kernel_files(PINNED_DRIVER.read_bytes(), macsmc)
+        archive = self.write_archive(files)
+        exports = self.base / 'exports'
+        exports.write_bytes(b'supplemental\n')
+        overrides = self.pins_for(files, archive, exports)
+        self.apply_pins(overrides, ((), {}))
+        output = self.base / 'real-driver'
+        tool.prepare(archive, exports, self.image(), output)
+        patched = (output / 'kernel' / tool.DOCKCHANNEL).read_text()
+        self.assertIn('Packet shorter than subheader', patched)
+        self.assertIn('Received zero-length input report', patched)
+        self.assertIn('goto cleanup;', patched)
+        self.assertNotEqual(text_digest(patched.encode()), PINNED_DRIVER_SHA256)
+        self.assertEqual(digest(PINNED_DRIVER), PINNED_DRIVER_SHA256)
+        self.assertEqual(digest(RETAINED_PATCH), self.repo_retained)
+        self.assertEqual((output / 'mca/mca.c').read_bytes(), (ROOT / 'audio/j713/kernel/mca.c').read_bytes())
+        self.assertEqual(digest(ROOT / 'audio/j713/kernel/mca.c'), self.repo_mca)
+
+    def docker_runner(self, mutate=None, fail=False):
+        real = subprocess.run
+        calls = []
+
+        def run(argv, **kwargs):
+            argv = [str(part) for part in argv]
+            if argv and argv[0] == 'patch':
+                return real(argv, **kwargs)
+            if not argv or argv[0] != 'docker':
+                raise AssertionError('unexpected command ' + repr(argv))
+            calls.append(argv)
+            if fail:
+                return subprocess.CompletedProcess(argv, 1, '', 'build failed')
+            mounts = {}
+            index = 0
+            while index < len(argv):
+                if argv[index] == '-v':
+                    host, guest = argv[index + 1].split(':', 1)
+                    guest = guest.split(':', 1)[0]
+                    mounts[guest] = Path(host)
+                index += 1
+            if mutate:
+                mutate(mounts)
+            else:
+                image = mounts['/kernel'] / 'arch/arm64/boot/Image.gz'
+                image.parent.mkdir(parents=True, exist_ok=True)
+                image.write_bytes(b'candidate-image')
+                for name in tool.AUDIO_MODULES:
+                    (mounts['/job'] / name).write_bytes(b'module:' + name.encode())
+            return subprocess.CompletedProcess(argv, 0, '', '')
+
+        return calls, run
+
+    def prepared_inputs(self):
+        files = self.kernel_files(b'alpha\n')
+        archive = self.write_archive(files)
+        exports = self.base / 'exports'
+        exports.write_bytes(b'supplemental\n')
+        historical = self.historical_patches()
+        self.apply_pins(self.pins_for(files, archive, exports), historical[:2], historical[2])
+        return archive, exports, files
+
+    def test_build_records_artifact_hashes_and_immutable_docker_command(self):
+        archive, exports, files = self.prepared_inputs()
+        output = self.base / 'built'
+        calls, run = self.docker_runner()
+        with mock.patch.object(tool.subprocess, 'run', side_effect=run):
+            receipt = tool.build(archive, exports, self.image(), output)
+        self.assertEqual(len(calls), 1)
+        command = ' '.join(calls[0])
+        self.assertIn('--network none', command)
+        self.assertIn('--pull never', command)
+        self.assertNotIn('--privileged', command)
+        self.assertIn('sha256:' + PUBLISHED_IMAGE, command)
+        self.assertNotIn('m4-gravity-builder', command)
+        script = calls[0][-1]
+        self.assertLess(script.index('Image.gz'), script.index('M=/job'))
+        for token in ('ARCH=arm64', 'LLVM=1', 'LOCALVERSION=', 'KCFLAGS=-Werror',
+                      'J713_PROFILE=conservative-v1',
+                      'KBUILD_EXTRA_SYMBOLS=/reference-sound-exports.symvers'):
+            self.assertIn(token, script)
+        for key, value in EXPECTED_ENV.items():
+            self.assertIn(key + '=' + value, command)
+        self.assertNotIn('speakersafetyd', command)
+        self.assertNotIn('cargo', command.lower())
+        saved = json.loads((output / 'receipt.json').read_text())
+        self.assertEqual(saved, receipt)
+        self.assertEqual(receipt['schema'], 1)
+        self.assertEqual(receipt['kind'], 'j713-hardened-kernel-candidate')
+        self.assertFalse(receipt['native_qualified'])
+        self.assertFalse(receipt['fresh_install_qualified'])
+        self.assertEqual(receipt['profile'], 'conservative-v1')
+        self.assertEqual(receipt['image'], 'sha256:' + PUBLISHED_IMAGE)
+        self.assertEqual(receipt['kernel_archive'], digest(archive))
+        self.assertEqual(receipt['sound_exports'], digest(exports))
+        self.assertEqual(receipt['kernel_release'], KERNEL_RELEASE)
+        self.assertEqual(receipt['config_sha256'], text_digest(files['.config']))
+        image = output / 'Image.gz'
+        self.assertEqual(receipt['kernel'], {
+            'path': 'Image.gz', 'sha256': digest(image), 'bytes': image.stat().st_size})
+        self.assertEqual(set(receipt['modules']), set(tool.AUDIO_MODULES))
+        for name in tool.AUDIO_MODULES:
+            module = output / 'modules' / name
+            self.assertEqual(receipt['modules'][name], {
+                'sha256': digest(module), 'bytes': module.stat().st_size})
+        symvers = text_digest(files['Module.symvers'])
+        self.assertEqual(receipt['exports'], {
+            'module_symvers_before': symvers,
+            'module_symvers_after': symvers,
+            'supplemental_before': digest(exports),
+            'supplemental_after': digest(exports),
+        })
+        self.assertEqual((output / 'kernel/include/config/kernel.release').read_text(),
+                         KERNEL_RELEASE + '\n')
+        self.assertEqual(digest(output / 'kernel/.config'), text_digest(files['.config']))
+
+    def test_subprocess_build_failure_writes_no_receipt(self):
+        archive, exports, _files = self.prepared_inputs()
+        output = self.base / 'failed-build'
+        _calls, run = self.docker_runner(fail=True)
+        with mock.patch.object(tool.subprocess, 'run', side_effect=run):
+            with self.assertRaises(Exception) as caught:
+                tool.build(archive, exports, self.image(), output)
+        self.assertNotIsInstance(caught.exception, AssertionError)
+        self.assertFalse((output / 'receipt.json').exists())
+        self.assertFalse((output / 'Image.gz').exists())
+
+    def test_export_and_release_drift_are_rejected(self):
+        def cases():
+            def exports(mounts):
+                path = mounts['/kernel'] / 'Module.symvers'
+                path.write_bytes(path.read_bytes() + b'drift\n')
+
+            def release(mounts):
+                (mounts['/kernel'] / 'include/config/kernel.release').write_text('other\n')
+
+            def config(mounts):
+                (mounts['/kernel'] / '.config').write_bytes(b'changed\n')
+
+            return {'exports': exports, 'release': release, 'config': config}
+
+        archive, exports, _files = self.prepared_inputs()
+        export_before = digest(exports)
+        for name, mutate in cases().items():
+            output = self.base / ('drift-' + name)
+            _calls, run = self.docker_runner(mutate=mutate)
+            with self.subTest(drift=name):
+                with mock.patch.object(tool.subprocess, 'run', side_effect=run):
+                    with self.assertRaises(RuntimeError):
+                        tool.build(archive, exports, self.image(), output)
+                self.assertFalse((output / 'receipt.json').exists())
+                self.assertEqual(digest(exports), export_before)
+
+
+if __name__ == '__main__':
+    unittest.main()
