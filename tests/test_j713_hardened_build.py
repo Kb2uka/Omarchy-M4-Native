@@ -71,7 +71,7 @@ paths to the prepared kernel tree, the supplemental exports file, and
 output/mca, including when archive, exports, and output were relative:
 
     docker run --rm --network none --pull never --entrypoint /bin/bash
-      -e KBUILD_BUILD_*=... 
+      -e KBUILD_BUILD_*=...
       -v /ABS/output/kernel:/kernel
       -v /ABS/EXPORTS:/reference-sound-exports.symvers:ro
       -v /ABS/output/mca:/job
