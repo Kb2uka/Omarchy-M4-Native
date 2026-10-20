@@ -102,7 +102,7 @@ re-prove from this repository's own sources.
 |---|---|
 | Boot | Boots to the desktop with the J715 board devicetree and the alpha.1 kernel (dockchannel HID gate extended to `apple,j715`). Repeat boots and a fresh install worked. |
 | Wi-Fi / Bluetooth | Work with the `kos` firmware the installer collects. |
-| GPU | Works after the `g16.rs` board gate admitted `apple,j715` and the power gate accepted this unit's 24552 mW. |
+| GPU | Works with the kit's alpha.1 module patched to admit `apple,j715` and this unit's 24552 mW (alpha.1 accepted exactly 24800 mW), and with a module built from `develop`'s `g16.rs` with `apple,j715` added to its board check. |
 | Keyboard, trackpad, battery | Work. Brightness keys do nothing (no backlight device, as on the J713 alpha.1). |
 | Speakers | Six amplifiers play protected through a six-lane FIR from the AID38 `_3` strip, with the J713 speaker stack adapted to six amps and `i2c3` at 400 kHz. |
 | Poweroff | Powers off with the PMU scratchpad cells; reboots without them, as on the J713 before its fix. |
@@ -121,7 +121,9 @@ Checked on `develop` at `75a725d`.
   newest J713 devicetree. `m4-boot-compose` needs a J715 lineage.
 - **Installer.** A `j715ap` profile (stub 26.5.1, the J713's IPSW) and the
   `kos` Wi-Fi and Bluetooth firmware maps.
-- **GPU.** `g16.rs` admits only `apple,j713` and pins 24800 mW.
+- **GPU.** `g16.rs` admits only `apple,j713`. Its power check is a ceiling: it
+  refuses zero or more than 24800 mW, so this unit's 24552 mW already passes
+  and only the board check needs the J715.
 - **Speakers.** A versioned J715 profile ([m4-boards.md](m4-boards.md)): six
   amps, AID38 filters, protection settings and routing.
 - **CPU boost.** The P-boost guard's tables were measured in the J713 chassis;
