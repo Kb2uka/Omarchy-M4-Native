@@ -3,6 +3,8 @@
 import hashlib
 import importlib.util
 import json
+import io
+import contextlib
 import os
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -99,6 +101,25 @@ class BacklightGuards(unittest.TestCase):
         self.assertEqual((self.root / BACKLIGHT.DEBUG / 'start').read_text(), '1\n')
         self.assertEqual((self.root / BACKLIGHT.DEBUG / 'brightness_nits').read_text(), '300\n')
 
+    def test_cli_disable_holds_boot_and_enable_clears_both_markers(self):
+        with patch.object(BACKLIGHT.os, 'geteuid', return_value=0), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(BACKLIGHT.main(['--disable', '--root', str(self.root)]), 0)
+            self.assertTrue(BACKLIGHT.status(self.root)['held'])
+            with self.assertRaisesRegex(BACKLIGHT.Refused, 'disabled until --enable'):
+                BACKLIGHT.start(self.root, lambda *args, **kwargs: self.fail('disabled module loaded'))
+            self.assertFalse((self.root / BACKLIGHT.STATE / 'attempt').exists())
+            self.put(BACKLIGHT.STATE + '/attempt', b'interrupted\n')
+            self.assertEqual(BACKLIGHT.main(['--enable', '--root', str(self.root)]), 0)
+        self.assertFalse(BACKLIGHT.status(self.root)['held'])
+        self.assertFalse(BACKLIGHT.status(self.root)['failed_attempt'])
+
+    def test_startup_actions_require_root_even_with_an_alternate_root(self):
+        with patch.object(BACKLIGHT.os, 'geteuid', return_value=1000), contextlib.redirect_stderr(io.StringIO()):
+            for action in ['--boot', '--enable', '--disable', '--keys-hook', '--keys-remove-hook']:
+                with self.subTest(action=action):
+                    self.assertEqual(BACKLIGHT.main([action, '--root', str(self.root)]), 1)
+        self.assertFalse((self.root / BACKLIGHT.STATE).exists())
+
     def test_state_change_cannot_clear_an_inflight_marker(self):
         with BACKLIGHT.locked_state(self.root) as state:
             BACKLIGHT.write_state(state, 'attempt', 'inflight\n')
@@ -127,6 +148,8 @@ class BrightnessRouting(unittest.TestCase):
             return SimpleNamespace(stdout=json.dumps([{'name': self.focused, 'focused': True}]))
         if command == ['brightnessctl', '-d', 'j713-dcp', '-m']:
             return SimpleNamespace(stdout=f'j713-dcp,backlight,5,{self.percent}%,525\n')
+        if command[:4] == ['brightnessctl', '-d', 'j713-dcp', 'set']:
+            self.percent = int(command[4].rstrip('%'))
         return SimpleNamespace(returncode=0)
 
     def change(self, step, no_osd=False):
@@ -142,7 +165,7 @@ class BrightnessRouting(unittest.TestCase):
         self.percent = 4
         self.change('+5%')
         self.assertIn(['brightnessctl', '-d', 'j713-dcp', 'set', '5%'], self.calls)
-        self.assertIn(['omarchy-osd', '-i', 'brightness', '-p', '4'], self.calls)
+        self.assertIn(['omarchy-osd', '-i', 'brightness', '-p', '5'], self.calls)
 
     def test_external_monitor_keeps_existing_routing(self):
         self.focused = 'DP-1'
