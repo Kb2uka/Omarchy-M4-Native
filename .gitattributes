@@ -6,6 +6,11 @@ patches/installer/linux-partition-guid.patch whitespace=-blank-at-eol,-blank-at-
 patches/omarchy/offline-node-arm64.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
 patches-m1n1/dockchannel-tx-bound.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
 patches-m1n1/stage1-ans-no-reset.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+patches-kernel/j715-input/dockchannel-hid-accept-j715.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+packaging/j715-test/installer-j715.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+packaging/j715-test/installer-j715-tests.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+packaging/j715-test/g16-j715.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+packaging/j715-test/m4-session-placement-j715.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
 
 # Exact imported source is hash-pinned by audio/j713/imported-source.sha256.
 # Preserve its formatting: Cargo fingerprints change even for whitespace.
