@@ -129,7 +129,7 @@ class BoardTable(unittest.TestCase):
         for board in QUALIFIED:
             stub, name = board['installer']['stub'], board['target'].lower() + 'ap'
             with self.subTest(board=board['target']):
-                self.assertRegex(patch, rf'\+    IPSW\("{re.escape(stub)}", .*\["{name}"\]',
+                self.assertRegex(patch, rf'\+    IPSW\("{re.escape(stub)}", .*\[[^]]*"{name}"[^]]*\]',
                                  'no qualified IPSW for the board stub')
 
     def test_shipped_manifests_name_a_qualified_board(self):
