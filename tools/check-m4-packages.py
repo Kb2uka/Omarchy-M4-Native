@@ -15,6 +15,7 @@ import argparse
 import hashlib
 import json
 import re
+import shlex
 from pathlib import Path
 import runpy
 import subprocess
@@ -31,6 +32,7 @@ SPEAKER_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/20-m4
 GPU_DROP_IN = 'usr/lib/systemd/system/m4-gpu.service.d/20-m4-gpu-module.conf'
 HEADPHONES_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/30-m4-headphones.conf'
 CPU_IDLE_UNIT = 'usr/lib/systemd/system/m4-cpu-idle.service'
+BACKLIGHT_UNIT = 'usr/lib/systemd/system/m4-backlight.service'
 # Installed paths of the headphone UCM and WirePlumber files, relative to their
 # source tree audio/j713/headphones/policy/.
 HEADPHONES_POLICY = ('usr/share/alsa/ucm2/conf.d/J713Headphones/J713Headphones.conf',
@@ -111,7 +113,7 @@ def package_inputs(name):
         require('package-inputs/' not in text,
                 f'{name}: PKGBUILD mentions package-inputs/ but no inputs were parsed')
         return {}
-    entries = re.findall(r"""['"]([^'"]+)['"]""", sources_m.group(1))
+    entries = shlex.split(sources_m.group(1), comments=True, posix=True)
     sums = re.findall(r"'([0-9a-f]{64})'", sums_m.group(1))
     require(len(entries) == len(sums), f'{name}: source and sha256sums counts differ')
     inputs = {}
@@ -276,16 +278,20 @@ def check_package(channel, package, info, files, root, joins=None):
         require('omarchy-m4-headphones' in names, 'Boot package must require the headphone jack package')
         require('omarchy-m4-cpu' in names, 'Boot package must require the CPU idle package')
         require('omarchy-m4-evdi' in names, 'Boot package must require the USB display package')
-        # The opt-in notch stage 2 (#89): its pin, the tool's own pin, and the login unit.
-        for path, digest in channel['notch_loader'].items():
-            require(files.get(path) == (0o644, digest), 'Staged notch stage 2 differs from the pin: ' + path)
+        require('omarchy-m4-backlight' in names, 'Boot package must require the native backlight package')
+        # Both notch preferences must carry the display handoff required by this DT.
+        for path, digest in channel['backlight_loaders'].items():
+            require(files.get(path) == (0o644, digest), 'Staged display handoff stage2 differs from the pin: ' + path)
         tool = (ROOT / 'tools/m4-notch.py').read_bytes()
         require(files.get('usr/bin/m4-notch') == (0o755, sha(tool)), 'Packaged notch tool differs')
         unit = (ROOT / 'packaging/omarchy-m4/omarchy-m4-boot/omarchy-m4-notch.service').read_bytes()
         require(files.get(NOTCH_UNIT) == (0o644, sha(unit)), 'Notch login unit differs')
         notch = runpy.run_path(str(root / 'usr/bin/m4-notch'))
-        require(channel['notch_loader'].get(notch['STAGED']) == notch['NOTCH']['sha256'],
-                'Notch tool pins a different stage 2 than the channel')
+        require(channel['backlight_loaders'].get(notch['STAGED']) == notch['NOTCH']['sha256'] and
+                channel['backlight_loaders'].get(notch['HIDDEN_STAGED']) == notch['HIDDEN']['sha256'],
+                'Notch tool pins a different stage2 than the channel')
+        require(dict(policy['BACKLIGHT_LOADERS'].values()) == channel['backlight_loaders'],
+                'Composer pins different display handoff loaders than the channel')
     elif name == 'omarchy-m4-speaker':
         for path, digest in channel['speaker_module'].items():
             require(files.get(path, (0, ''))[1] == digest, 'Staged speaker module differs from the pin: ' + path)
@@ -324,6 +330,19 @@ def check_package(channel, package, info, files, root, joins=None):
         require(helper['PIN']['sha256'] == channel['cpu_idle_module'][helper['STAGED']] and
                 helper['GUARD_PIN']['sha256'] == channel['cpu_guard_module'][helper['GUARD_STAGED']] and
                 helper['RELEASE'] == kernel['release'], 'CPU idle tool pins a different module or kernel')
+    elif name == 'omarchy-m4-backlight':
+        for path, digest in channel['backlight_module'].items():
+            require(files.get(path) == (0o644, digest), 'Staged native backlight module differs from its pin')
+        helper = (ROOT / 'tools/m4-backlight.py').read_bytes()
+        require(files.get('usr/bin/m4-backlight') == (0o755, sha(helper)), 'Packaged backlight helper differs')
+        unit = (ROOT / 'packaging/omarchy-m4/omarchy-m4-backlight/m4-backlight.service').read_bytes()
+        require(files.get(BACKLIGHT_UNIT) == (0o644, sha(unit)), 'Native backlight boot unit differs')
+        pins = json.loads((root / 'usr/lib/omarchy-m4/backlight/module.json').read_bytes())
+        path = 'usr/lib/omarchy-m4/backlight/j713_dcp_backlight.ko'
+        require(pins == {'kernel_release': kernel['release'],
+                         'module_sha256': channel['backlight_module'][path],
+                         'module_bytes': (root / path).stat().st_size},
+                'Native backlight metadata pins a different module or kernel')
     elif name == 'omarchy-m4-evdi':
         for pins, label in ((channel['evdi_module'], 'evdi module'), (channel['evdi_library'], 'evdi library')):
             for path, digest in pins.items():
