@@ -35,9 +35,11 @@ def safe_path(name):
 
 
 def release_matches(version, tag):
-    """A kit's release tag: v<release_version>, or v<release_version>-update.N for an installer update."""
+    """A kit's release tag: v<release_version>, v<release_version>-update.N for an installer update,
+    or v<release_version>-j773g-test.N for an M4 Mac mini tester kit (docs/j773g-test-kit.md)."""
     return isinstance(version, str) and (
-        tag[1:] == version or re.fullmatch(re.escape(version) + r'-update\.[1-9][0-9]*', tag[1:]) is not None)
+        tag[1:] == version or
+        re.fullmatch(re.escape(version) + r'-(?:update|j773g-test)\.[1-9][0-9]*', tag[1:]) is not None)
 
 
 def no_links(path):
