@@ -47,6 +47,24 @@ The abbreviated reference is preserved as historical attribution, not a
 claim that its original upstream object is included or publicly resolvable
 from this snapshot.
 
+### T6040 devicetree sources
+
+`dts/t6040/t6040.dtsi` and `dts/t6040/t6040-j773s.dts` start from the T6040
+devicetree in [damsleth/wallace](https://github.com/damsleth/wallace)
+(commit `55f116d`), a J614s MacBook Pro bring-up whose devicetree sources carry
+`SPDX-License-Identifier: GPL-2.0+ OR MIT` and "Copyright The Asahi Linux
+Contributors". That notice and expression are kept in each file, next to
+KB2UKA's notice for the J773s changes. `dts/t6040/t6040-pmgr.dtsi` is output of
+m1n1's `proxyclient/tools/pmgr_adt2dt.py` (MIT) for the J773s ADT; as with the
+J713 PMGR description, the hardware data does not originate with either
+contributor.
+The `apple,preserve-active` and `apple,skip-auto-enable` PMGR policy, and the
+list of display domains that need it, come from CJ Damsleth's
+[damsleth/linux](https://github.com/damsleth/linux) branch
+`wallace/t6040-bringup` (commit `cf08fa5`, GPL-2.0). Florian Klink's earlier
+J773s devicetree on [flokli/linux](https://github.com/flokli/linux) branch
+`j773s` was consulted for comparison; no text from it is copied.
+
 ### Derived PMGR description
 
 `recon/pmgr-j713-generated-from-live-adt.dtsi` is a hardware description
@@ -73,6 +91,13 @@ alpha.1 bootloader source, with that tree's `LICENSE` beside them in
 `patches-m1n1/base/`. The tests compile them against host shims. See
 [docs/j713-m1n1-dockchannel-tx.md](docs/j713-m1n1-dockchannel-tx.md) and
 [docs/j713-m1n1-issue82-ans-reset.md](docs/j713-m1n1-issue82-ans-reset.md).
+
+`patches-m1n1/j773s/` holds three m1n1 changes by CJ Damsleth from the
+T6040 series in [damsleth/wallace](https://github.com/damsleth/wallace)
+(commit `55f116d`), whose README publishes its m1n1 patches under MIT. Two are
+unchanged; the third was ported to upstream m1n1 `e4419ba8`, keeping its
+author. Upstream m1n1 itself has been GPL-2.0 since `ce2b8a4`; no m1n1 tree or
+binary is bundled here. See [docs/j773s-m1n1.md](docs/j773s-m1n1.md).
 
 The upstream [MIT license](https://github.com/AsahiLinux/m1n1/blob/main/LICENSE)
 is reproduced below to preserve its notice for any adapted reference material:

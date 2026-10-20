@@ -1,0 +1,658 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * Apple T6040 "M4 Pro" SoC: bring-up description for the Mac mini (J773s)
+ *
+ * Based on dts/t6040.dtsi from damsleth/wallace (commit 55f116d), the J614s
+ * MacBook Pro bring-up, re-derived against the J773s ADT as macOS exposes it.
+ * Every reg and interrupt below was compared with that ADT; see
+ * docs/j773s-dt-skeleton.md for the table and for what that dump cannot show.
+ *
+ * Only what a first boot needs is enabled here: CPUs, AIC, timer, PMGR and
+ * watchdog. Everything else is described but disabled until its own
+ * controlled probe.
+ *
+ * Copyright The Asahi Linux Contributors
+ * Original contributions: Copyright (c) 2026 KB2UKA
+ */
+
+#include <dt-bindings/interrupt-controller/apple-aic.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/spmi/spmi.h>
+
+/ {
+	compatible = "apple,t6040", "apple,arm-platform";
+
+	#address-cells = <2>;
+	#size-cells = <2>;
+
+	/*
+	 * The full die: four E cores and two six-core P clusters, at the
+	 * positions of the ADT cpu-id numbering (E 0-3, P 4-9, P 10-15).
+	 * m1n1 matches DT CPU nodes to ADT cpu-ids by position and prunes the
+	 * nodes, and their cpu-map entries, of cores that are fused off. J773s
+	 * (12 cores) has cpu-ids 0-7 and 10-13; J614s (14 cores) has 0-8 and
+	 * 10-14. ADT /cpus max_cpus is 16.
+	 */
+	cpus {
+		#address-cells = <2>;
+		#size-cells = <0>;
+
+		cpu-map {
+			cluster0 {
+				core0 {
+					cpu = <&cpu_e0>;
+				};
+				core1 {
+					cpu = <&cpu_e1>;
+				};
+				core2 {
+					cpu = <&cpu_e2>;
+				};
+				core3 {
+					cpu = <&cpu_e3>;
+				};
+			};
+
+			cluster1 {
+				core0 {
+					cpu = <&cpu_p00>;
+				};
+				core1 {
+					cpu = <&cpu_p01>;
+				};
+				core2 {
+					cpu = <&cpu_p02>;
+				};
+				core3 {
+					cpu = <&cpu_p03>;
+				};
+				core4 {
+					cpu = <&cpu_p04>;
+				};
+				core5 {
+					cpu = <&cpu_p05>;
+				};
+			};
+
+			cluster2 {
+				core0 {
+					cpu = <&cpu_p10>;
+				};
+				core1 {
+					cpu = <&cpu_p11>;
+				};
+				core2 {
+					cpu = <&cpu_p12>;
+				};
+				core3 {
+					cpu = <&cpu_p13>;
+				};
+				core4 {
+					cpu = <&cpu_p14>;
+				};
+				core5 {
+					cpu = <&cpu_p15>;
+				};
+			};
+		};
+
+		cpu_e0: cpu@0 {
+			compatible = "apple,sawtooth";
+			device_type = "cpu";
+			reg = <0x0 0x0>;
+			enable-method = "spin-table";
+			cpu-release-addr = <0 0>; /* To be filled by loader */
+			next-level-cache = <&l2_cache_0>;
+		};
+
+		cpu_e1: cpu@1 {
+			compatible = "apple,sawtooth";
+			device_type = "cpu";
+			reg = <0x0 0x1>;
+			enable-method = "spin-table";
+			cpu-release-addr = <0 0>; /* To be filled by loader */
+			next-level-cache = <&l2_cache_0>;
+		};
+
+		cpu_e2: cpu@2 {
+			compatible = "apple,sawtooth";
+			device_type = "cpu";
+			reg = <0x0 0x2>;
+			enable-method = "spin-table";
+			cpu-release-addr = <0 0>; /* To be filled by loader */
+			next-level-cache = <&l2_cache_0>;
+		};
+
+		cpu_e3: cpu@3 {
+			compatible = "apple,sawtooth";
+			device_type = "cpu";
+			reg = <0x0 0x3>;
+			enable-method = "spin-table";
+			cpu-release-addr = <0 0>; /* To be filled by loader */
+			next-level-cache = <&l2_cache_0>;
+		};
+
+		cpu_p00: cpu@10100 {
+			compatible = "apple,everest";
+			device_type = "cpu";
+			reg = <0x0 0x10100>;
+			enable-method = "spin-table";
+			cpu-release-addr = <0 0>; /* To be filled by loader */
+			next-level-cache = <&l2_cache_1>;
+		};
+
+		cpu_p01: cpu@10101 {
+			compatible = "apple,everest";
+			device_type = "cpu";
+			reg = <0x0 0x10101>;
+			enable-method = "spin-table";
+			cpu-release-addr = <0 0>; /* To be filled by loader */
+			next-level-cache = <&l2_cache_1>;
+		};
+
+		cpu_p02: cpu@10102 {
+			compatible = "apple,everest";
+			device_type = "cpu";
+			reg = <0x0 0x10102>;
+			enable-method = "spin-table";
+			cpu-release-addr = <0 0>; /* To be filled by loader */
+			next-level-cache = <&l2_cache_1>;
+		};
+
+		cpu_p03: cpu@10103 {
+			compatible = "apple,everest";
+			device_type = "cpu";
+			reg = <0x0 0x10103>;
+			enable-method = "spin-table";
+			cpu-release-addr = <0 0>; /* To be filled by loader */
+			next-level-cache = <&l2_cache_1>;
+		};
+
+		cpu_p04: cpu@10104 {
+			compatible = "apple,everest";
+			device_type = "cpu";
+			reg = <0x0 0x10104>;
+			enable-method = "spin-table";
+			cpu-release-addr = <0 0>; /* To be filled by loader */
+			next-level-cache = <&l2_cache_1>;
+		};
+
+		cpu_p05: cpu@10105 {
+			compatible = "apple,everest";
+			device_type = "cpu";
+			reg = <0x0 0x10105>;
+			enable-method = "spin-table";
+			cpu-release-addr = <0 0>; /* To be filled by loader */
+			next-level-cache = <&l2_cache_1>;
+		};
+
+		cpu_p10: cpu@10200 {
+			compatible = "apple,everest";
+			device_type = "cpu";
+			reg = <0x0 0x10200>;
+			enable-method = "spin-table";
+			cpu-release-addr = <0 0>; /* To be filled by loader */
+			next-level-cache = <&l2_cache_2>;
+		};
+
+		cpu_p11: cpu@10201 {
+			compatible = "apple,everest";
+			device_type = "cpu";
+			reg = <0x0 0x10201>;
+			enable-method = "spin-table";
+			cpu-release-addr = <0 0>; /* To be filled by loader */
+			next-level-cache = <&l2_cache_2>;
+		};
+
+		cpu_p12: cpu@10202 {
+			compatible = "apple,everest";
+			device_type = "cpu";
+			reg = <0x0 0x10202>;
+			enable-method = "spin-table";
+			cpu-release-addr = <0 0>; /* To be filled by loader */
+			next-level-cache = <&l2_cache_2>;
+		};
+
+		cpu_p13: cpu@10203 {
+			compatible = "apple,everest";
+			device_type = "cpu";
+			reg = <0x0 0x10203>;
+			enable-method = "spin-table";
+			cpu-release-addr = <0 0>; /* To be filled by loader */
+			next-level-cache = <&l2_cache_2>;
+		};
+
+		cpu_p14: cpu@10204 {
+			compatible = "apple,everest";
+			device_type = "cpu";
+			reg = <0x0 0x10204>;
+			enable-method = "spin-table";
+			cpu-release-addr = <0 0>; /* To be filled by loader */
+			next-level-cache = <&l2_cache_2>;
+		};
+
+		cpu_p15: cpu@10205 {
+			compatible = "apple,everest";
+			device_type = "cpu";
+			reg = <0x0 0x10205>;
+			enable-method = "spin-table";
+			cpu-release-addr = <0 0>; /* To be filled by loader */
+			next-level-cache = <&l2_cache_2>;
+		};
+
+		l2_cache_0: l2-cache-0 {
+			compatible = "cache";
+			cache-level = <2>;
+			cache-unified;
+			cache-size = <0x400000>;
+		};
+
+		l2_cache_1: l2-cache-1 {
+			compatible = "cache";
+			cache-level = <2>;
+			cache-unified;
+			cache-size = <0x1000000>;
+		};
+
+		l2_cache_2: l2-cache-2 {
+			compatible = "cache";
+			cache-level = <2>;
+			cache-unified;
+			cache-size = <0x1000000>;
+		};
+	};
+
+	timer {
+		compatible = "arm,armv8-timer";
+		interrupt-parent = <&aic>;
+		interrupt-names = "phys", "virt", "hyp-phys", "hyp-virt";
+		interrupts = <AIC_FIQ AIC_TMR_GUEST_PHYS IRQ_TYPE_LEVEL_HIGH>,
+			     <AIC_FIQ AIC_TMR_GUEST_VIRT IRQ_TYPE_LEVEL_HIGH>,
+			     <AIC_FIQ AIC_TMR_HV_PHYS IRQ_TYPE_LEVEL_HIGH>,
+			     <AIC_FIQ AIC_TMR_HV_VIRT IRQ_TYPE_LEVEL_HIGH>;
+	};
+
+	clkref: clock-ref {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <24000000>;
+		clock-output-names = "clkref";
+	};
+
+	soc: soc {
+		compatible = "simple-bus";
+		#address-cells = <2>;
+		#size-cells = <2>;
+
+		ranges;
+		nonposted-mmio;
+
+		/*
+		 * Power domains are in t6040-pmgr.dtsi. apple,preserve-active keeps
+		 * the domains firmware left on, since T6040 raw boot has no earlier OS
+		 * stage to quiesce them (J614s kernel branch, cf08fa5).
+		 */
+		pmgr0: power-management@288e80000 {
+			compatible = "apple,t6041-pmgr", "apple,t8103-pmgr", "syscon", "simple-mfd";
+			#address-cells = <1>;
+			#size-cells = <1>;
+			reg = <0x2 0x88e80000 0 0x4000>;
+			apple,preserve-active;
+		};
+
+		pmgr1: power-management@502280000 {
+			compatible = "apple,t6041-pmgr", "apple,t8103-pmgr", "syscon", "simple-mfd";
+			#address-cells = <1>;
+			#size-cells = <1>;
+			reg = <0x5 0x02280000 0 0x10000>;
+			apple,preserve-active;
+		};
+
+		pmgr2: power-management@502800000 {
+			compatible = "apple,t6041-pmgr", "apple,t8103-pmgr", "syscon", "simple-mfd";
+			#address-cells = <1>;
+			#size-cells = <1>;
+			reg = <0x5 0x02800000 0 0xc000>;
+			apple,preserve-active;
+		};
+
+		pmgr3: power-management@508300000 {
+			compatible = "apple,t6041-pmgr", "apple,t8103-pmgr", "syscon", "simple-mfd";
+			#address-cells = <1>;
+			#size-cells = <1>;
+			reg = <0x5 0x08300000 0 0x4000>;
+			apple,preserve-active;
+		};
+
+		/* ADT /arm-io/aic: reg 0x502400000 + 0x1cc000, aic-iack-offset 0x40000. */
+		aic: interrupt-controller@502400000 {
+			compatible = "apple,t6040-aic3", "apple,t8122-aic3";
+			#interrupt-cells = <3>;
+			interrupt-controller;
+			reg = <0x5 0x02400000 0x0 0x1cc000>,
+			      <0x5 0x02440000 0x0 0x4000>;
+			config-offset = <0x10000>;
+			cap0-offset = <0x4>;
+			maxnumirq-offset = <0xc>;
+			power-domains = <&ps_aic>;
+		};
+
+		/* ADT /arm-io/wdt: reg[0] 0x50836c000, interrupt 827. */
+		wdt: watchdog@50836c000 {
+			compatible = "apple,t6040-wdt", "apple,t8103-wdt";
+			reg = <0x5 0x0836c000 0x0 0x4000>;
+			clocks = <&clkref>;
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 827 IRQ_TYPE_LEVEL_HIGH>;
+		};
+
+		/* ADT /arm-io/uart0: 0x429200000, interrupt 1559. */
+		serial0: serial@429200000 {
+			compatible = "apple,s5l-uart";
+			reg = <0x4 0x29200000 0x0 0x1000>;
+			reg-io-width = <4>;
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 1559 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&clkref>, <&clkref>;
+			clock-names = "uart", "clk_uart_baud0";
+			power-domains = <&ps_uart0>;
+			status = "disabled";
+		};
+
+		/*
+		 * ANS2 / NVMe. ADT /arm-io/ans and /arm-io/sart-ans carry the
+		 * same addresses and interrupts as J614s (ans reg[0] 0x409600000,
+		 * reg[3] NVMMU 0x40dcc0000, reg[9] NVMe 0x44dcc0000; interrupts
+		 * [1531 1530 1533 1532 2583]). Linux on J614s asserts the ANS
+		 * firmware at the first I/O completion-queue wrap; keep the whole
+		 * path disabled until that is understood.
+		 */
+		ans_mbox: mailbox@409608000 {
+			compatible = "apple,t8140-asc-mailbox", "apple,asc-mailbox-v4";
+			reg = <0x4 0x09608000 0x0 0x4000>;
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 1530 IRQ_TYPE_LEVEL_HIGH>,
+				     <AIC_IRQ 1531 IRQ_TYPE_LEVEL_HIGH>,
+				     <AIC_IRQ 1532 IRQ_TYPE_LEVEL_HIGH>,
+				     <AIC_IRQ 1533 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "send-empty", "send-not-empty",
+					  "recv-empty", "recv-not-empty";
+			power-domains = <&ps_ans>;
+			#mbox-cells = <0>;
+			status = "disabled";
+		};
+
+		ans_sart: iommu@40dc50000 {
+			compatible = "apple,t6040-sart", "apple,t6000-sart";
+			reg = <0x4 0x0dc50000 0x0 0xc000>;
+			power-domains = <&ps_ans>;
+			status = "disabled";
+		};
+
+		ans_nvme: nvme@44dcc0000 {
+			compatible = "apple,t6040-nvme-ans2", "apple,t8132-nvme-ans2";
+			reg = <0x4 0x4dcc0000 0x0 0x10000>,
+			      <0x4 0x09600000 0x0 0x4000>,
+			      <0x4 0x0dcc0000 0x0 0x60000>;
+			reg-names = "nvme", "ans", "nvmmu";
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 2583 IRQ_TYPE_LEVEL_HIGH>;
+			mboxes = <&ans_mbox>;
+			apple,sart = <&ans_sart>;
+			power-domains = <&ps_ans>, <&ps_apcie_sys_st0>,
+					<&ps_apcie_sys_st1>;
+			power-domain-names = "ans", "apcie0", "apcie1";
+			resets = <&ps_ans>;
+			status = "disabled";
+		};
+
+		/*
+		 * SMC. ADT /arm-io/smc: 0x50c600000, mailbox at +0x8000,
+		 * interrupts [997 996 999 998], as on J614s. The SRAM window is
+		 * not in the ADT; J614s measured its base at 0x50de70000 from an
+		 * RTKit buffer request. It has not been measured on J773s.
+		 */
+		smc_mbox: mailbox@50c608000 {
+			compatible = "apple,t8140-asc-mailbox", "apple,asc-mailbox-v4";
+			reg = <0x5 0x0c608000 0x0 0x4000>;
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 996 IRQ_TYPE_LEVEL_HIGH>,
+				     <AIC_IRQ 997 IRQ_TYPE_LEVEL_HIGH>,
+				     <AIC_IRQ 998 IRQ_TYPE_LEVEL_HIGH>,
+				     <AIC_IRQ 999 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "send-empty", "send-not-empty",
+					  "recv-empty", "recv-not-empty";
+			#mbox-cells = <0>;
+			status = "disabled";
+		};
+
+		smc: smc@50c600000 {
+			compatible = "apple,t8140-smc", "apple,t8103-smc", "apple,smc";
+			reg = <0x5 0x0c600000 0x0 0x4000>,
+			      <0x5 0x0de70000 0x0 0x100000>;
+			reg-names = "smc", "sram";
+			mboxes = <&smc_mbox>;
+			status = "disabled";
+
+			smc_gpio: gpio {
+				compatible = "apple,smc-gpio";
+				gpio-controller;
+				#gpio-cells = <2>;
+			};
+
+			smc_rtc: rtc {
+				compatible = "apple,smc-rtc";
+				nvmem-cells = <&rtc_offset>;
+				nvmem-cell-names = "rtc_offset";
+			};
+
+			smc_reboot: reboot {
+				compatible = "apple,smc-reboot";
+				nvmem-cells = <&shutdown_flag>, <&boot_stage>,
+					      <&boot_error_count>, <&panic_count>;
+				nvmem-cell-names = "shutdown_flag", "boot_stage",
+						   "boot_error_count", "panic_count";
+			};
+		};
+
+		/*
+		 * Primary SPMI bus, ADT /arm-io/nub-spmi0 (0x509014000), with the
+		 * abbey PMU at SID 0xe (ADT spmi-abbeyL1). The cells below come
+		 * from its info-pm_setting (0x2001), info-rtc_scrpad (0x2100) and
+		 * info-leg_scrpad (0xf800), which match J614s.
+		 */
+		nub_spmi0: spmi@509014000 {
+			compatible = "apple,t6040-spmi", "apple,spmi";
+			reg = <0x5 0x09014000 0x0 0x100>;
+			#address-cells = <2>;
+			#size-cells = <0>;
+			status = "disabled";
+
+			pmu1: pmic@e {
+				compatible = "apple,abbey-pmic", "apple,spmi-nvmem";
+				reg = <0xe SPMI_USID>;
+
+				nvmem-layout {
+					compatible = "fixed-layout";
+					#address-cells = <1>;
+					#size-cells = <1>;
+
+					pm_setting: pm-setting@2001 {
+						reg = <0x2001 0x1>;
+					};
+
+					rtc_offset: rtc-offset@2100 {
+						reg = <0x2100 0x6>;
+					};
+
+					boot_stage: boot-stage@f801 {
+						reg = <0xf801 0x1>;
+					};
+
+					boot_error_count: boot-error-count@f802,0 {
+						reg = <0xf802 0x1>;
+						bits = <0 4>;
+					};
+
+					panic_count: panic-count@f802,4 {
+						reg = <0xf802 0x1>;
+						bits = <4 4>;
+					};
+
+					shutdown_flag: shutdown-flag@f80f,3 {
+						reg = <0xf80f 0x1>;
+						bits = <3 1>;
+					};
+				};
+			};
+		};
+
+		/*
+		 * USB-C data role controllers. J773s has four (usb-drd0..3) for
+		 * three rear Thunderbolt ports and two front USB-C ports; which
+		 * physical port each one serves is not known yet. Peripheral mode
+		 * reuses the PHY state m1n1 leaves on its tether port, as on J614s;
+		 * there is no atc-phy,t6040 driver. Stream IDs are the ADT's: each
+		 * dart-usbN mapper has reg 1 and sid <1 14>, the same wiring the
+		 * M4 Air needed (patches/0012). J614s used <0> and <1>.
+		 */
+		/* ADT /arm-io/dart-usb0 and /arm-io/usb-drd0: interrupts 1623 and [1619 1620]. */
+		usb0_dart0: iommu@382f00000 {
+			compatible = "apple,t8110-dart";
+			reg = <0x3 0x82f00000 0x0 0xc000>;
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 1623 IRQ_TYPE_LEVEL_HIGH>;
+			#iommu-cells = <1>;
+			power-domains = <&ps_atc0_usb>;
+			status = "disabled";
+		};
+
+		usb0_dart1: iommu@382f80000 {
+			compatible = "apple,t8110-dart";
+			reg = <0x3 0x82f80000 0x0 0xc000>;
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 1623 IRQ_TYPE_LEVEL_HIGH>;
+			#iommu-cells = <1>;
+			power-domains = <&ps_atc0_usb>;
+			status = "disabled";
+		};
+
+		usb_drd0: usb@382280000 {
+			compatible = "apple,t8103-dwc3";
+			reg = <0x3 0x82280000 0x0 0xcd00>,
+			      <0x3 0x8228cd00 0x0 0x3200>;
+			reg-names = "dwc3-core", "dwc3-apple";
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 1619 IRQ_TYPE_LEVEL_HIGH>;
+			dr_mode = "peripheral";
+			maximum-speed = "high-speed";
+			iommus = <&usb0_dart0 1>, <&usb0_dart1 14>;
+			power-domains = <&ps_atc0_usb>;
+			status = "disabled";
+		};
+		/* ADT /arm-io/dart-usb1 and /arm-io/usb-drd1: interrupts 1655 and [1651 1652]. */
+		usb1_dart0: iommu@38af00000 {
+			compatible = "apple,t8110-dart";
+			reg = <0x3 0x8af00000 0x0 0xc000>;
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 1655 IRQ_TYPE_LEVEL_HIGH>;
+			#iommu-cells = <1>;
+			power-domains = <&ps_atc1_usb>;
+			status = "disabled";
+		};
+
+		usb1_dart1: iommu@38af80000 {
+			compatible = "apple,t8110-dart";
+			reg = <0x3 0x8af80000 0x0 0xc000>;
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 1655 IRQ_TYPE_LEVEL_HIGH>;
+			#iommu-cells = <1>;
+			power-domains = <&ps_atc1_usb>;
+			status = "disabled";
+		};
+
+		usb_drd1: usb@38a280000 {
+			compatible = "apple,t8103-dwc3";
+			reg = <0x3 0x8a280000 0x0 0xcd00>,
+			      <0x3 0x8a28cd00 0x0 0x3200>;
+			reg-names = "dwc3-core", "dwc3-apple";
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 1651 IRQ_TYPE_LEVEL_HIGH>;
+			dr_mode = "peripheral";
+			maximum-speed = "high-speed";
+			iommus = <&usb1_dart0 1>, <&usb1_dart1 14>;
+			power-domains = <&ps_atc1_usb>;
+			status = "disabled";
+		};
+		/* ADT /arm-io/dart-usb2 and /arm-io/usb-drd2: interrupts 1687 and [1683 1684]. */
+		usb2_dart0: iommu@392f00000 {
+			compatible = "apple,t8110-dart";
+			reg = <0x3 0x92f00000 0x0 0xc000>;
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 1687 IRQ_TYPE_LEVEL_HIGH>;
+			#iommu-cells = <1>;
+			power-domains = <&ps_atc2_usb>;
+			status = "disabled";
+		};
+
+		usb2_dart1: iommu@392f80000 {
+			compatible = "apple,t8110-dart";
+			reg = <0x3 0x92f80000 0x0 0xc000>;
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 1687 IRQ_TYPE_LEVEL_HIGH>;
+			#iommu-cells = <1>;
+			power-domains = <&ps_atc2_usb>;
+			status = "disabled";
+		};
+
+		usb_drd2: usb@392280000 {
+			compatible = "apple,t8103-dwc3";
+			reg = <0x3 0x92280000 0x0 0xcd00>,
+			      <0x3 0x9228cd00 0x0 0x3200>;
+			reg-names = "dwc3-core", "dwc3-apple";
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 1683 IRQ_TYPE_LEVEL_HIGH>;
+			dr_mode = "peripheral";
+			maximum-speed = "high-speed";
+			iommus = <&usb2_dart0 1>, <&usb2_dart1 14>;
+			power-domains = <&ps_atc2_usb>;
+			status = "disabled";
+		};
+		/* ADT /arm-io/dart-usb3 and /arm-io/usb-drd3: interrupts 1719 and [1715 1716]. */
+		usb3_dart0: iommu@39af00000 {
+			compatible = "apple,t8110-dart";
+			reg = <0x3 0x9af00000 0x0 0xc000>;
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 1719 IRQ_TYPE_LEVEL_HIGH>;
+			#iommu-cells = <1>;
+			power-domains = <&ps_atc3_usb>;
+			status = "disabled";
+		};
+
+		usb3_dart1: iommu@39af80000 {
+			compatible = "apple,t8110-dart";
+			reg = <0x3 0x9af80000 0x0 0xc000>;
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 1719 IRQ_TYPE_LEVEL_HIGH>;
+			#iommu-cells = <1>;
+			power-domains = <&ps_atc3_usb>;
+			status = "disabled";
+		};
+
+		usb_drd3: usb@39a280000 {
+			compatible = "apple,t8103-dwc3";
+			reg = <0x3 0x9a280000 0x0 0xcd00>,
+			      <0x3 0x9a28cd00 0x0 0x3200>;
+			reg-names = "dwc3-core", "dwc3-apple";
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 1715 IRQ_TYPE_LEVEL_HIGH>;
+			dr_mode = "peripheral";
+			maximum-speed = "high-speed";
+			iommus = <&usb3_dart0 1>, <&usb3_dart1 14>;
+			power-domains = <&ps_atc3_usb>;
+			status = "disabled";
+		};
+	};
+};
+
+#include "t6040-pmgr.dtsi"
