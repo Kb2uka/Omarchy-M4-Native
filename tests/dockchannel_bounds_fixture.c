@@ -316,29 +316,32 @@ static struct dchid_hdr report_hdr(u8 iface)
 	return hdr;
 }
 
-static int case_normal_report_on(unsigned number, const char *name)
+static int case_normal_report_on(unsigned number, const char *name, size_t payload_len)
 {
 	struct dchid_hdr hdr = report_hdr((u8)number);
 	struct dchid_subhdr sub;
 	u8 body[12];
 	const u8 payload[4] = {0xde, 0xad, 0xbe, 0xef};
 
+	/* Outer body stays 12 and 4-byte aligned. payload_len is the subheader length. */
+	if (payload_len == 0 || payload_len > sizeof(payload) || sizeof(sub) + payload_len > sizeof(body))
+		return 2;
 	reset_state();
 	g_iface.hid = &g_hid;
 	g_iface.open = 1;
 	g_iface.index = (u8)number;
 	g_dchid.ifaces[number] = &g_iface;
 	memset(&sub, 0, sizeof(sub));
-	sub.length = sizeof(payload);
+	sub.length = (u16)payload_len;
 	memset(body, 0, sizeof(body));
 	memcpy(body, &sub, sizeof(sub));
-	memcpy(body + sizeof(sub), payload, sizeof(payload));
+	memcpy(body + sizeof(sub), payload, payload_len);
 	if (load_rx(hdr, body, sizeof(body)) != 0)
 		return 2;
 	dchid_handle_packet(&g_dchid, sizeof(hdr));
-	if (report_count != 1 || report_type != HID_INPUT_REPORT || report_length != sizeof(payload))
+	if (report_count != 1 || report_type != HID_INPUT_REPORT || report_length != payload_len)
 		return fail("normal report was not delivered");
-	if (memcmp(report_bytes, payload, sizeof(payload)) != 0)
+	if (memcmp(report_bytes, payload, payload_len) != 0)
 		return fail("normal report payload mismatch");
 	if (init_calls || ready_calls || gpio_calls)
 		return fail("normal report dispatched a comm event");
@@ -457,31 +460,36 @@ static int case_short(size_t length, const char *name)
 	return pass(name);
 }
 
-static int case_empty_comm_event_body(size_t length, const char *name)
+static int case_empty_input(u8 iface, int with_hid, size_t length, const char *name)
 {
-	struct dchid_hdr hdr = report_hdr(IFACE_COMM);
+	struct dchid_hdr hdr = report_hdr(iface);
 	struct dchid_subhdr sub;
 	u8 body[16];
 
-	if (length < sizeof(sub) || length > sizeof(body))
+	if (length < sizeof(sub) || length > sizeof(body) || (length % 4) != 0)
 		return 2;
 	reset_state();
-	g_dchid.ifaces[IFACE_COMM] = &g_iface;
+	if (with_hid) {
+		g_iface.hid = &g_hid;
+		g_iface.open = 1;
+		g_iface.index = iface;
+	}
+	g_dchid.ifaces[iface] = &g_iface;
 	memset(&sub, 0, sizeof(sub));
 	memset(body, 0, sizeof(body));
 	memcpy(body, &sub, sizeof(sub));
-	/* A zero-length event must not consume the following byte. */
+	/* A zero-length payload must not consume the following byte. */
 	if (length > sizeof(sub))
 		body[sizeof(sub)] = EVENT_INIT;
 	if (load_rx(hdr, body, length) != 0)
 		return 2;
 	dchid_handle_packet(&g_dchid, sizeof(hdr));
 	if (init_calls || ready_calls || gpio_calls || report_count)
-		return fail("empty comm event was dispatched");
+		return fail("zero-length input was dispatched");
 	if (live_allocs != 0)
-		return fail("empty comm event leaked the worker");
+		return fail("zero-length input leaked the worker");
 	if (await_count != 1)
-		return fail("empty comm event did not rearm receive");
+		return fail("zero-length input did not rearm receive");
 	return pass(name);
 }
 
@@ -577,9 +585,11 @@ int main(int argc, char **argv)
 		return 2;
 	}
 	if (!strcmp(argv[1], "normal_report"))
-		return case_normal_report_on(1, "normal_report");
+		return case_normal_report_on(1, "normal_report", 4);
 	if (!strcmp(argv[1], "iface_15"))
-		return case_normal_report_on(15, "iface_15");
+		return case_normal_report_on(15, "iface_15", 4);
+	if (!strcmp(argv[1], "one_byte_report"))
+		return case_normal_report_on(1, "one_byte_report", 1);
 	if (!strcmp(argv[1], "normal_ack"))
 		return case_normal_ack();
 	if (!strcmp(argv[1], "iface_16"))
@@ -603,9 +613,11 @@ int main(int argc, char **argv)
 	if (!strcmp(argv[1], "short_7"))
 		return case_short(7, "short_7");
 	if (!strcmp(argv[1], "empty_comm_event"))
-		return case_empty_comm_event_body(16, "empty_comm_event");
+		return case_empty_input(IFACE_COMM, 0, 16, "empty_comm_event");
 	if (!strcmp(argv[1], "empty_comm_event_8"))
-		return case_empty_comm_event_body(8, "empty_comm_event_8");
+		return case_empty_input(IFACE_COMM, 0, 8, "empty_comm_event_8");
+	if (!strcmp(argv[1], "empty_input_report"))
+		return case_empty_input(1, 1, 12, "empty_input_report");
 	if (!strcmp(argv[1], "comm_ready"))
 		return case_comm_ready();
 	if (!strcmp(argv[1], "oversized_subpayload"))

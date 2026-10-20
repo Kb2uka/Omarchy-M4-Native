@@ -119,6 +119,9 @@ class DockChannelBoundsTest(unittest.TestCase):
     def test_normal_report(self):
         self.assert_pass("normal_report")
 
+    def test_one_byte_report(self):
+        self.assert_pass("one_byte_report")
+
     def test_normal_ack(self):
         self.assert_pass("normal_ack")
 
@@ -160,6 +163,9 @@ class DockChannelBoundsTest(unittest.TestCase):
 
     def test_empty_comm_event_exact_subheader(self):
         self.assert_pass("empty_comm_event_8")
+
+    def test_empty_input_report(self):
+        self.assert_pass("empty_input_report")
 
     def test_comm_ready_event(self):
         self.assert_pass("comm_ready")
