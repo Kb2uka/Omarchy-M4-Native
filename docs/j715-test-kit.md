@@ -99,7 +99,12 @@ accepts `-j715-test.N` release tags for this kit.
 
 ## Not known yet
 
-One J715 has run this kernel's driver change, the devicetree and the GPU
-module from an earlier unofficial kit. Nobody has installed this kit on a
-J715. Speakers and headphones stay off until the J715 audio delivery is
-decided on #142.
+One J715 has installed this kit (KIT.json `6d6f8f7f…`, derivation
+`60f404c`, the same kit as now apart from its documents). First-boot user
+setup, the desktop with GPU acceleration, the built-in keyboard and trackpad,
+Wi-Fi with the `kos` firmware, both USB-C ports, restart and shut down worked,
+Bluetooth started, and no system unit failed. WirePlumber does not start: update 4's
+`/etc/systemd/user/wireplumber.service.d/80-j713-audio-ready.conf` runs the
+J713 speaker readiness gate, which refuses the J715, so Bluetooth and USB
+audio are off too. The kit keeps that gate. Speakers and headphones stay off
+until the J715 audio delivery is decided on #142.

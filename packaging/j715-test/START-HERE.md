@@ -5,9 +5,10 @@ J715 / T8132** ([#142](https://github.com/Kb2uka/Omarchy-M4-Native/issues/142)).
 It is not for the 13-inch Air or any other Mac. It is not endorsed by Omarchy,
 Asahi, Gravity or Apple.
 
-**This kit has not been installed on a J715 yet.** One J715 has run its
-kernel, devicetree and GPU module from an earlier unofficial kit. It is the
-13-inch Air's installer update 4 with these changes for the 15-inch Air:
+**One J715 has installed this kit.** Setup, the desktop with GPU
+acceleration, the keyboard and trackpad, Wi-Fi, both USB-C ports, restart and
+shut down worked, and Bluetooth started. It is the 13-inch Air's installer update 4 with
+these changes for the 15-inch Air:
 
 - the J715 devicetree (`docs/j715-boot-dtb.md`) and a kernel that also accepts
   the J715's built-in keyboard and trackpad;
@@ -28,7 +29,7 @@ stays installed and selectable at startup.
 | USB | Both USB-C ports |
 | Network | Wi-Fi and Bluetooth |
 | Power | Shut down and restart work; **do not use Suspend** (the panel stays black after resume) |
-| Speakers, headphones, video decoding, protected movies, M4 updates | Off in this build |
+| Speakers, headphones, Bluetooth and USB audio, video decoding, protected movies, M4 updates | Off in this build |
 
 ## 1. Download (macOS)
 

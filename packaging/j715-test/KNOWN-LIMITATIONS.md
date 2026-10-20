@@ -1,14 +1,17 @@
 # Known limitations: 15-inch M4 MacBook Air tester build
 
 This tester build (v0.1.0-alpha.1-j715-test.1) is for the 15-inch M4 MacBook
-Air, Mac16,13 / J715. It has not been installed on a J715 yet; it is not
-qualified for any Mac. START-HERE.md has the install steps and what to report.
+Air, Mac16,13 / J715. One J715 has installed it; it is not qualified for any
+Mac. START-HERE.md has the install steps and what to report.
 
 - **Sleep:** do not suspend. On one J715 the panel stayed black after resume,
   and USB-C and Bluetooth needed rebinding. Closing the lid does not suspend.
 - **Speakers and headphones:** off. The J715 has six speaker amplifiers and
   needs its own protected speaker profile, which this build does not carry;
   the 13-inch Air's speaker services refuse a J715 and are not started.
+- **Bluetooth and USB audio:** off as well. The audio session manager
+  (WirePlumber) waits for the 13-inch Air's speaker readiness check, which
+  refuses a J715, so it does not start and its failures appear in the log.
 - **Not in this build:** hardware video decoding, Widevine for protected
   movies, brightness control, the camera, CPU idle, the P-core boost and M4
   updates (`omarchy-m4-update` refuses this board).

@@ -115,9 +115,8 @@ SOURCES = {
 REPLACED_DOCS = {'Install.command': 0o755, 'START-HERE.md': 0o644, 'KNOWN-LIMITATIONS.md': 0o644, 'UPDATES.md': 0o644}
 REWRITTEN = {'KIT.json', 'IMAGE.json', 'SHA256SUMS', 'installer_data.json', 'installer-macos.tar.gz',
              'os/' + OLD_PACKAGE, *REPLACED_DOCS}
-QUALIFICATION = ('J715 tester build derived from the J713 installer update 4 kit. One J715 has run '
-                 'its kernel, devicetree and GPU module; this kit has not been installed on a J715. '
-                 'It is not qualified for any Mac.')
+QUALIFICATION = ('J715 tester build derived from the J713 installer update 4 kit. One J715 has '
+                 'installed it; it is not qualified for any Mac.')
 
 
 def require(condition, message):

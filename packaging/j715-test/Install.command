@@ -33,9 +33,9 @@ printf '%s\n' 'Verifying installer and source files. The system image takes long
 [[ $(uname -s) == Darwin && $(uname -m) == arm64 ]] || { echo 'Install from native ARM64 macOS.' >&2; exit 1; }
 [[ $(/usr/sbin/sysctl -n hw.model) == Mac16,13 ]] || { echo 'This tester build supports only Mac16,13 (J715, 15-inch M4 MacBook Air).' >&2; exit 1; }
 [[ -t 0 && -t 1 && -r /dev/tty ]] || { echo 'Use a local Terminal on the target MacBook Air.' >&2; exit 1; }
-printf '%s\n' 'TESTER BUILD: one J715 has run its kernel, devicetree and GPU module, but this kit' \
-  'has not been installed on a J715 yet. Installation can cause data loss, boot failures' \
-  'and hardware problems. Keep macOS and recovery, back up first, and read START-HERE.md.'
+printf '%s\n' 'TESTER BUILD: one J715 has installed this kit, but it is not qualified for any Mac.' \
+  'Installation can cause data loss, boot failures and hardware problems.' \
+  'Keep macOS and recovery, back up first, and read START-HERE.md.'
 read -r -p 'Type TEST to confirm you have a current backup and want this untested build: ' answer
 [[ "$answer" == TEST && "$tester" == yes ]] || exit 0
 work=$(mktemp -d /private/tmp/omarchy-m4-install.XXXXXXXX)
