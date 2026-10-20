@@ -3,10 +3,13 @@
  * Host harness for the pinned Apple DockChannel HID transport.
  * The driver text spliced in at the markers below is
  * Copyright The Asahi Linux Contributors and stays under GPL-2.0 OR MIT.
- * Event init, ready, and GPIO dispatch are host mocks. The packet, ACK,
- * event, report, and checksum functions are the pinned driver.
+ * Ready and GPIO command dispatch are host mocks. Init parsing, packet,
+ * ACK, event, report, and checksum functions are the pinned driver.
+ * Interface lookup, HID creation, and descriptor storage are host mocks
+ * that still consume C strings the way the driver helper does.
  */
 #include <assert.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -25,9 +28,29 @@ typedef uintptr_t dma_addr_t;
 #define GENMASK(h, l) ((unsigned)(((1U << ((h) - (l) + 1)) - 1U) << (l)))
 #define FIELD_GET(mask, reg) (((unsigned)(reg) & (unsigned)(mask)) >> __builtin_ctz((unsigned)(mask)))
 #define container_of(ptr, type, member) ((type *)((char *)(ptr) - offsetof(type, member)))
-#define dev_err(dev, fmt, ...) do { (void)(dev); (void)(fmt); error_count++; } while (0)
-#define dev_warn(dev, fmt, ...) do { (void)(dev); (void)(fmt); warn_count++; } while (0)
-#define dev_info(dev, fmt, ...) do { (void)(dev); (void)(fmt); } while (0)
+static int product_accepted;
+static int product_rejected;
+static char log_sink[160];
+
+static void note_dev_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+
+static void note_dev_log(const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	/* vsnprintf reads each %s through its NUL and does not write the source. */
+	vsnprintf(log_sink, sizeof(log_sink), fmt, ap);
+	va_end(ap);
+	if (strstr(fmt, "Product name for %s: %s"))
+		product_accepted++;
+	if (strstr(fmt, "Unterminated product name"))
+		product_rejected++;
+}
+
+#define dev_err(dev, fmt, ...) do { (void)(dev); error_count++; note_dev_log(fmt, ##__VA_ARGS__); } while (0)
+#define dev_warn(dev, fmt, ...) do { (void)(dev); warn_count++; note_dev_log(fmt, ##__VA_ARGS__); } while (0)
+#define dev_info(dev, fmt, ...) do { (void)(dev); note_dev_log(fmt, ##__VA_ARGS__); } while (0)
 #define WARN_ON_ONCE(cond) do { if (cond) warn_count++; } while (0)
 #define INIT_WORK(item, fn) ((item)->func = (fn))
 #define min(a, b) ((a) < (b) ? (a) : (b))
@@ -60,6 +83,9 @@ static_assert(offsetof(struct dockchannel_hid, pkt_buf) ==
 	      "interface 16 aliases the packet buffer");
 static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "checksum fixture is little-endian");
 static_assert(sizeof(void *) == 8, "interface slots are 8-byte pointers");
+static_assert(sizeof(struct dchid_init_hdr) == 22, "pinned init header is 22 bytes");
+static_assert(sizeof(struct dchid_init_block_hdr) == 4, "pinned init block header is 4 bytes");
+static_assert(sizeof(struct dchid_gpio_request) == 36, "pinned gpio request is 36 bytes");
 
 static struct device g_dev;
 static struct hid_device g_hid;
@@ -80,7 +106,83 @@ static u8 report_bytes[64];
 static int init_calls;
 static int ready_calls;
 static int gpio_calls;
+static int get_calls;
+static int create_calls;
+static int desc_calls;
+static int last_get_index;
+static size_t desc_len_seen;
+static u8 desc_copy[64];
+static char last_get_name[64];
 static struct dchid_iface *queued_iface;
+
+#define E2BIG 7
+
+/* Kernel strscpy: stop at NUL or count, and always leave a terminator. */
+static long strscpy(char *dst, const char *src, size_t count)
+{
+	size_t i;
+
+	if (count == 0)
+		return -E2BIG;
+	for (i = 0; i < count; i++) {
+		dst[i] = src[i];
+		if (dst[i] == '\0')
+			return (long)i;
+	}
+	dst[count - 1] = '\0';
+	return -E2BIG;
+}
+
+/*
+ * Platform half of dchid_get_interface. Index is bounded first, matching the
+ * helper. A new slot still consumes name as a C string, so a 16-byte
+ * non-terminated name walks out of the packet when init fails to reject it.
+ */
+static struct dchid_iface *
+dchid_get_interface(struct dockchannel_hid *dchid, int index, const char *name)
+{
+	size_t n = 0;
+
+	get_calls++;
+	last_get_index = index;
+	if (index < 0 || index >= MAX_INTERFACES) {
+		error_count++;
+		return NULL;
+	}
+	if (dchid->ifaces[index])
+		return dchid->ifaces[index];
+
+	while (name[n] != '\0')
+		n++;
+	if (n >= sizeof(last_get_name))
+		n = sizeof(last_get_name) - 1;
+	memcpy(last_get_name, name, n);
+	last_get_name[n] = '\0';
+
+	g_iface.index = index;
+	g_iface.name = last_get_name;
+	g_iface.dchid = dchid;
+	dchid->ifaces[index] = &g_iface;
+	return &g_iface;
+}
+
+static int dchid_create_interface(struct dchid_iface *iface)
+{
+	create_calls++;
+	iface->creating = true;
+	return 0;
+}
+
+static void dchid_handle_descriptor(struct dchid_iface *iface, void *hid_desc, size_t desc_len)
+{
+	(void)iface;
+	desc_calls++;
+	desc_len_seen = desc_len;
+	if (desc_len > sizeof(desc_copy))
+		return;
+	if (desc_len)
+		memcpy(desc_copy, hid_desc, desc_len);
+}
 
 struct alloc_rec {
 	void *obj;
@@ -187,13 +289,7 @@ static int hid_input_report(struct hid_device *hid, int type, void *data, size_t
 	return 0;
 }
 
-static void dchid_handle_init(struct dockchannel_hid *dchid, void *data, size_t length)
-{
-	(void)dchid;
-	(void)data;
-	(void)length;
-	init_calls++;
-}
+/* ACTUAL_INIT */
 
 static void dchid_handle_ready(struct dockchannel_hid *dchid, void *data, size_t length)
 {
@@ -245,6 +341,16 @@ static void reset_state(void)
 	init_calls = 0;
 	ready_calls = 0;
 	gpio_calls = 0;
+	get_calls = 0;
+	create_calls = 0;
+	desc_calls = 0;
+	last_get_index = -1;
+	desc_len_seen = 0;
+	product_accepted = 0;
+	product_rejected = 0;
+	memset(desc_copy, 0, sizeof(desc_copy));
+	memset(last_get_name, 0, sizeof(last_get_name));
+	memset(log_sink, 0, sizeof(log_sink));
 	queued_iface = NULL;
 	error_count = 0;
 	warn_count = 0;
@@ -578,6 +684,374 @@ static int case_alloc_fail(void)
 	return pass("alloc_fail_rearm");
 }
 
+static int rearmed(const char *what)
+{
+	if (live_allocs != 0)
+		return fail(what);
+	if (await_count != 1)
+		return fail("packet path did not rearm receive");
+	return 0;
+}
+
+static void prepare_comm(int id_ready)
+{
+	reset_state();
+	g_iface.name = "comm";
+	g_iface.index = IFACE_COMM;
+	g_iface.dchid = &g_dchid;
+	g_dchid.ifaces[IFACE_COMM] = &g_iface;
+	g_dchid.id_ready = id_ready;
+}
+
+static int send_comm_payload(const void *payload, size_t payload_len)
+{
+	struct dchid_hdr hdr = report_hdr(IFACE_COMM);
+	struct dchid_subhdr sub;
+	u8 body[256];
+	size_t length;
+
+	if (payload_len > sizeof(body) - sizeof(sub))
+		return 2;
+	memset(&sub, 0, sizeof(sub));
+	sub.length = (u16)payload_len;
+	memset(body, 0, sizeof(body));
+	memcpy(body, &sub, sizeof(sub));
+	if (payload && payload_len)
+		memcpy(body + sizeof(sub), payload, payload_len);
+	length = sizeof(sub) + payload_len;
+	if (length % 4)
+		length += 4 - (length % 4);
+	if (load_rx(hdr, body, length) != 0)
+		return 2;
+	dchid_handle_packet(&g_dchid, sizeof(hdr));
+	return 0;
+}
+
+static size_t put_init_hdr(u8 *payload, u8 iface, const char *name)
+{
+	struct dchid_init_hdr ih;
+
+	memset(&ih, 0, sizeof(ih));
+	ih.type = EVENT_INIT;
+	ih.iface = iface;
+	if (name)
+		memcpy(ih.name, name, strlen(name) + 1);
+	memcpy(payload, &ih, sizeof(ih));
+	return sizeof(ih);
+}
+
+static size_t put_block(u8 *payload, size_t at, u16 type, const void *data, u16 length)
+{
+	struct dchid_init_block_hdr blk;
+
+	blk.type = type;
+	blk.length = length;
+	memcpy(payload + at, &blk, sizeof(blk));
+	if (data && length)
+		memcpy(payload + at + sizeof(blk), data, length);
+	return at + sizeof(blk) + length;
+}
+
+static int case_init_product_zero(int walk_off)
+{
+	u8 payload[64];
+	size_t at;
+	const char *case_name = walk_off ? "init_product_zero_walk" : "init_product_zero";
+
+	memset(payload, 0, sizeof(payload));
+	at = put_init_hdr(payload, 4, "keyboard");
+	at = put_block(payload, at, INIT_PRODUCT_NAME, NULL, 0);
+	/* Header 22 + block 4 = 26. Two tail bytes make the 28-byte aligned worker.
+	 * Length is zero, so its high byte (the byte before the product) stays 0.
+	 */
+	if (at != 26 || payload[at - 1] != 0)
+		return 2;
+	if (walk_off) {
+		payload[at++] = 0xff;
+		payload[at++] = 0xff;
+	} else {
+		payload[at++] = 0;
+		payload[at++] = 0;
+	}
+	if (at != 28 || (at % 4) != 0)
+		return 2;
+	prepare_comm(0);
+	if (send_comm_payload(payload, at) != 0)
+		return 2;
+	if (product_accepted != 0)
+		return fail("zero-length product was accepted");
+	if (get_calls != 1 || strcmp(last_get_name, "keyboard") != 0)
+		return fail("zero-length product skipped interface lookup");
+	if (g_iface.gpio_id != 0 || g_iface.gpio_name[0] != '\0')
+		return fail("zero-length product changed gpio state");
+	if (!g_iface.deferred || create_calls != 0)
+		return fail("zero-length product did not defer interface creation");
+	if (rearmed("zero-length product leaked the worker"))
+		return 1;
+	return pass(case_name);
+}
+
+static int case_init_product_empty(void)
+{
+	u8 payload[64];
+	u8 text[1] = {0};
+	size_t at;
+
+	memset(payload, 0, sizeof(payload));
+	at = put_init_hdr(payload, 4, "keyboard");
+	at = put_block(payload, at, INIT_PRODUCT_NAME, text, sizeof(text));
+	prepare_comm(0);
+	if (send_comm_payload(payload, at) != 0)
+		return 2;
+	if (get_calls != 1 || strcmp(last_get_name, "keyboard") != 0)
+		return fail("empty product skipped interface lookup");
+	if (product_accepted != 1 || strstr(log_sink, "keyboard: ") == NULL)
+		return fail("empty product was not logged");
+	if (product_rejected != 0)
+		return fail("empty product was treated as unterminated");
+	if (!g_iface.deferred || create_calls != 0)
+		return fail("empty product did not defer interface creation");
+	if (rearmed("empty product leaked the worker"))
+		return 1;
+	return pass("init_product_empty");
+}
+
+static int case_init_product_text(void)
+{
+	u8 payload[64];
+	const char text[] = "Key";
+	size_t at;
+
+	memset(payload, 0, sizeof(payload));
+	at = put_init_hdr(payload, 4, "keyboard");
+	at = put_block(payload, at, INIT_PRODUCT_NAME, text, sizeof(text));
+	prepare_comm(0);
+	if (send_comm_payload(payload, at) != 0)
+		return 2;
+	if (product_accepted != 1 || strstr(log_sink, "keyboard: Key") == NULL)
+		return fail("product text was not logged");
+	if (product_rejected != 0)
+		return fail("product text was treated as unterminated");
+	if (strcmp(last_get_name, "keyboard") != 0 || !g_iface.deferred || create_calls != 0)
+		return fail("product text did not defer the looked-up interface");
+	if (rearmed("product text leaked the worker"))
+		return 1;
+	return pass("init_product_text");
+}
+
+static int case_init_product_unterminated(void)
+{
+	u8 payload[64];
+	const char text[] = {'A', 'B', 'C', 'D'};
+	size_t at;
+
+	memset(payload, 0, sizeof(payload));
+	at = put_init_hdr(payload, 4, "keyboard");
+	at = put_block(payload, at, INIT_PRODUCT_NAME, text, sizeof(text));
+	prepare_comm(1);
+	if (send_comm_payload(payload, at) != 0)
+		return 2;
+	if (product_accepted != 0)
+		return fail("unterminated product was logged as accepted");
+	if (product_rejected != 1)
+		return fail("unterminated product was not rejected");
+	if (create_calls != 1)
+		return fail("unterminated product skipped creation of a known interface");
+	if (rearmed("unterminated product leaked the worker"))
+		return 1;
+	return pass("init_product_unterminated");
+}
+
+static int case_init_gpio_short(void)
+{
+	u8 payload[96];
+	u8 owned[4];
+	size_t at;
+	u16 id = 0x00B7;
+
+	memset(payload, 0, sizeof(payload));
+	memset(owned, 0, sizeof(owned));
+	memcpy(owned + 2, &id, sizeof(id));
+	at = put_init_hdr(payload, 4, "keyboard");
+	at = put_block(payload, at, INIT_GPIO_REQUEST, owned, sizeof(owned));
+	memcpy(payload + at, "LEAKED", 6);
+	at += 40;
+	prepare_comm(0);
+	if (send_comm_payload(payload, at) != 0)
+		return 2;
+	if (g_iface.gpio_id != 0 || g_iface.gpio_name[0] != '\0')
+		return fail("short gpio block consumed the following bytes");
+	if (create_calls != 0 || desc_calls != 0)
+		return fail("short gpio block created or described an interface");
+	if (rearmed("short gpio block leaked the worker"))
+		return 1;
+	return pass("init_gpio_short");
+}
+
+static int case_init_gpio_valid(void)
+{
+	u8 payload[96];
+	struct dchid_gpio_request req;
+	size_t at;
+
+	memset(payload, 0, sizeof(payload));
+	memset(&req, 0, sizeof(req));
+	req.id = 7;
+	memcpy(req.name, "reset", 6);
+	at = put_init_hdr(payload, 4, "keyboard");
+	at = put_block(payload, at, INIT_GPIO_REQUEST, &req, sizeof(req));
+	payload[at++] = 0xff;
+	prepare_comm(0);
+	if (send_comm_payload(payload, at) != 0)
+		return 2;
+	if (g_iface.gpio_id != 7 || strcmp(g_iface.gpio_name, "reset") != 0)
+		return fail("gpio request was not stored");
+	if (get_calls != 1 || strcmp(last_get_name, "keyboard") != 0)
+		return fail("gpio request skipped interface lookup");
+	if (!g_iface.deferred || create_calls != 0)
+		return fail("gpio request did not defer interface creation");
+	if (rearmed("gpio request leaked the worker"))
+		return 1;
+	return pass("init_gpio_valid");
+}
+
+static int case_init_name_unterminated(void)
+{
+	u8 payload[24];
+
+	memset(payload, 0x41, sizeof(payload));
+	payload[0] = EVENT_INIT;
+	payload[3] = 4;
+	prepare_comm(0);
+	if (send_comm_payload(payload, sizeof(payload)) != 0)
+		return 2;
+	if (get_calls != 0)
+		return fail("unterminated interface name reached lookup");
+	if (create_calls != 0 || desc_calls != 0 || product_accepted != 0)
+		return fail("unterminated interface name was accepted");
+	if (rearmed("unterminated interface name leaked the worker"))
+		return 1;
+	return pass("init_name_unterminated");
+}
+
+static int case_init_name(const char *name, int stm, const char *case_name)
+{
+	u8 payload[64];
+	size_t at;
+
+	memset(payload, 0, sizeof(payload));
+	at = put_init_hdr(payload, 4, name);
+	at = put_block(payload, at, INIT_TERMINATOR, NULL, 0);
+	prepare_comm(0);
+	if (send_comm_payload(payload, at) != 0)
+		return 2;
+	if (get_calls != 1 || strcmp(last_get_name, name) != 0 || last_get_index != 4)
+		return fail("interface name was not looked up");
+	if (stm) {
+		if (create_calls != 1 || g_iface.deferred)
+			return fail("stm interface was not created");
+	} else if (create_calls != 0 || !g_iface.deferred) {
+		return fail("named interface was not deferred");
+	}
+	if (rearmed("interface name leaked the worker"))
+		return 1;
+	return pass(case_name);
+}
+
+static int case_init_header_truncated(void)
+{
+	u8 payload[8];
+
+	memset(payload, 0x5a, sizeof(payload));
+	payload[0] = EVENT_INIT;
+	prepare_comm(1);
+	if (send_comm_payload(payload, sizeof(payload)) != 0)
+		return 2;
+	if (get_calls != 0 || create_calls != 0 || desc_calls != 0)
+		return fail("truncated init header was parsed");
+	if (rearmed("truncated init header leaked the worker"))
+		return 1;
+	return pass("init_header_truncated");
+}
+
+static int case_init_block_oversized(void)
+{
+	u8 payload[64];
+	u8 bytes[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+	size_t at;
+	struct dchid_init_block_hdr blk;
+
+	memset(payload, 0, sizeof(payload));
+	at = put_init_hdr(payload, 4, "keyboard");
+	blk.type = INIT_HID_DESCRIPTOR;
+	blk.length = 500;
+	memcpy(payload + at, &blk, sizeof(blk));
+	memcpy(payload + at + sizeof(blk), bytes, sizeof(bytes));
+	at += sizeof(blk) + sizeof(bytes);
+	prepare_comm(1);
+	if (send_comm_payload(payload, at) != 0)
+		return 2;
+	if (desc_calls != 0 || desc_len_seen != 0)
+		return fail("oversized block was stored as a descriptor");
+	if (get_calls != 1)
+		return fail("oversized block skipped a valid interface name");
+	if (rearmed("oversized block leaked the worker"))
+		return 1;
+	return pass("init_block_oversized");
+}
+
+static int case_init_descriptor_terminator(void)
+{
+	u8 payload[96];
+	struct dchid_gpio_request req;
+	const u8 desc[4] = {0xde, 0xad, 0xbe, 0xef};
+	size_t at;
+
+	memset(payload, 0, sizeof(payload));
+	memset(&req, 0, sizeof(req));
+	req.id = 99;
+	memcpy(req.name, "nope", 5);
+	at = put_init_hdr(payload, 4, "keyboard");
+	at = put_block(payload, at, INIT_HID_DESCRIPTOR, desc, sizeof(desc));
+	at = put_block(payload, at, INIT_TERMINATOR, NULL, 0);
+	at = put_block(payload, at, INIT_GPIO_REQUEST, &req, sizeof(req));
+	prepare_comm(1);
+	if (send_comm_payload(payload, at) != 0)
+		return 2;
+	if (desc_calls != 1 || desc_len_seen != sizeof(desc) || memcmp(desc_copy, desc, sizeof(desc)) != 0)
+		return fail("descriptor block was not stored");
+	if (g_iface.gpio_id != 0 || g_iface.gpio_name[0] != '\0')
+		return fail("terminator did not stop the following gpio block");
+	if (create_calls != 1)
+		return fail("terminated init did not create the interface");
+	if (rearmed("descriptor init leaked the worker"))
+		return 1;
+	return pass("init_descriptor_terminator");
+}
+
+static int case_init_unknown_block(void)
+{
+	u8 payload[64];
+	const u8 body[4] = {9, 9, 9, 9};
+	size_t at;
+
+	memset(payload, 0, sizeof(payload));
+	at = put_init_hdr(payload, 4, "keyboard");
+	at = put_block(payload, at, 0x1111, body, sizeof(body));
+	prepare_comm(0);
+	if (send_comm_payload(payload, at) != 0)
+		return 2;
+	if (warn_count == 0)
+		return fail("unknown init block was silent");
+	if (desc_calls != 0 || g_iface.gpio_id != 0 || product_accepted != 0)
+		return fail("unknown init block changed device state");
+	if (!g_iface.deferred || create_calls != 0)
+		return fail("unknown init block did not defer the interface");
+	if (rearmed("unknown init block leaked the worker"))
+		return 1;
+	return pass("init_unknown_block");
+}
+
 static int case_all_invalid_ifaces(void)
 {
 	unsigned i;
@@ -639,6 +1113,36 @@ int main(int argc, char **argv)
 		return case_oversized();
 	if (!strcmp(argv[1], "alloc_fail_rearm"))
 		return case_alloc_fail();
+	if (!strcmp(argv[1], "init_product_zero"))
+		return case_init_product_zero(0);
+	if (!strcmp(argv[1], "init_product_zero_walk"))
+		return case_init_product_zero(1);
+	if (!strcmp(argv[1], "init_product_empty"))
+		return case_init_product_empty();
+	if (!strcmp(argv[1], "init_product_text"))
+		return case_init_product_text();
+	if (!strcmp(argv[1], "init_product_unterminated"))
+		return case_init_product_unterminated();
+	if (!strcmp(argv[1], "init_gpio_short"))
+		return case_init_gpio_short();
+	if (!strcmp(argv[1], "init_gpio_valid"))
+		return case_init_gpio_valid();
+	if (!strcmp(argv[1], "init_name_unterminated"))
+		return case_init_name_unterminated();
+	if (!strcmp(argv[1], "init_name_valid"))
+		return case_init_name("keyboard", 0, "init_name_valid");
+	if (!strcmp(argv[1], "init_name_15"))
+		return case_init_name("abcdefghijklmno", 0, "init_name_15");
+	if (!strcmp(argv[1], "init_stm_creates"))
+		return case_init_name("stm", 1, "init_stm_creates");
+	if (!strcmp(argv[1], "init_header_truncated"))
+		return case_init_header_truncated();
+	if (!strcmp(argv[1], "init_block_oversized"))
+		return case_init_block_oversized();
+	if (!strcmp(argv[1], "init_descriptor_terminator"))
+		return case_init_descriptor_terminator();
+	if (!strcmp(argv[1], "init_unknown_block"))
+		return case_init_unknown_block();
 	fprintf(stderr, "unknown case %s\n", argv[1]);
 	return 2;
 }
