@@ -1,10 +1,18 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 KB2UKA
 """The boot-time CPU idle driver and boost guard load: pinned inputs only, one strike after a boot dies."""
+import contextlib
 import hashlib
 import importlib.util
+import json
+import os
 from pathlib import Path
+import signal
+import subprocess
+import sys
 import tempfile
+import time
+import types
 import unittest
 from unittest import mock
 
@@ -68,6 +76,71 @@ class Machine:
         if self.idles:
             for usage in (self.root / MODULE.CPUS).glob('cpu*/' + MODULE.POWER_DOWN + '/usage'):
                 usage.write_text(str(int(usage.read_text()) + 500) + '\n')
+
+
+class ChildMachine(Machine):
+    """Machine for a child process: at the chosen window (the settle sleep or a pending module
+    load) it records the state, announces it to the parent, then waits for release. The failsafe
+    exits the child without completing, long after the parent's EXIT_TIMEOUT, so a child still
+    running at the parent's deadline ignored the signal rather than finished on its own."""
+
+    FAILSAFE_SECONDS = 30.0
+
+    def __init__(self, root, sync, window):
+        super().__init__(root)
+        self.sync, self.window, self.announced = Path(sync), window, False
+
+    def announce(self, phase, seconds=None):
+        import fcntl
+        state = self.root / MODULE.STATE
+        fd = os.open(state / 'lock', os.O_RDONLY)
+        try:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+                lock_free = True
+            except BlockingIOError:
+                lock_free = False
+        finally:
+            os.close(fd)
+        (self.sync / 'blocked.json').write_text(json.dumps(
+            {'phase': phase, 'seconds': seconds, 'marked': (state / 'attempt').is_file(),
+             'lock_free': lock_free}))
+        (self.sync / 'ready').write_text('ready\n')
+        deadline = time.monotonic() + self.FAILSAFE_SECONDS
+        while not (self.sync / 'release').exists():
+            if time.monotonic() > deadline:
+                raise SystemExit('child harness: the parent never released the ' + phase + ' window')
+            time.sleep(0.02)
+
+    def __call__(self, command):
+        guard = command[-1].endswith(MODULE.GUARD_STAGED)
+        wanted = (self.window == 'load' and not guard) or (self.window == 'guard-load' and guard)
+        if wanted and not self.announced:
+            self.announced = True
+            # The marker is already durable; this module load is still pending.
+            self.announce(self.window)
+        return super().__call__(command)
+
+    def sleep(self, seconds):
+        if not self.announced:
+            self.announced = True
+            self.announce('settle', seconds)
+        super().sleep(seconds)
+
+
+def child_settle_main(argv):
+    """Child harness: the real main() with a fake machine runner and a synchronizing settle
+    sleep, so a test can signal the child while it is provably blocked at the requested window."""
+    mode, root, sync, window = argv[0], Path(argv[1]), Path(argv[2]), argv[3]
+    MODULE.PIN, MODULE.GUARD_PIN = PIN, GUARD_PIN
+    machine = ChildMachine(root, sync, window)
+    real_run = MODULE.run
+
+    def run_with_fake_machine(root_arg, mode_arg, runner=None, settle_seconds=None, sleep=None):
+        return real_run(root_arg, mode_arg, machine, MODULE.SETTLE_SECONDS, machine.sleep)
+
+    MODULE.run = run_with_fake_machine
+    return MODULE.main(['--' + mode, '--root', str(root)])
 
 
 class CpuIdleLoad(unittest.TestCase):
@@ -479,6 +552,352 @@ class CpuIdleLoad(unittest.TestCase):
         self.assertIn('systemctl disable m4-cpu-idle.service', install)
 
 
+class CpuIdleStopSignal(unittest.TestCase):
+    """A stop inside the settle window (#130): SIGTERM (clean stop) must clear the attempt
+    marker and release the lock, so the next boot loads; SIGKILL (abrupt death) must keep the
+    marker, so the next boot refuses until sudo m4-cpu-idle --start. The child runs the real
+    main() and is signaled only after it is provably inside the window. A child that ignored
+    SIGTERM would still be waiting on the release file at FAILSAFE_SECONDS, so exiting within
+    EXIT_TIMEOUT is caused by the signal, not by the harness."""
+
+    # The same fake-machine fixture as CpuIdleLoad, reused by assignment so its tests do not rerun.
+    setUp = CpuIdleLoad.setUp
+    put = CpuIdleLoad.put
+    marker = CpuIdleLoad.marker
+    boost_ready = CpuIdleLoad.boost_ready
+    restart = CpuIdleLoad.restart
+    run_mode = CpuIdleLoad.run_mode
+
+    READY_TIMEOUT = 15.0
+    EXIT_TIMEOUT = 15.0
+
+    @contextlib.contextmanager
+    def blocked_child(self, mode, window='settle'):
+        """The real main() in a child process, blocked at the requested window; reaped and its
+        pipes drained and closed on every exit path. child.out / child.err hold the captures."""
+        with tempfile.TemporaryDirectory() as sync:
+            proc = subprocess.Popen(
+                [sys.executable, str(Path(__file__).resolve()), '--child-settle', mode,
+                 str(self.root), sync, window],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            child = types.SimpleNamespace(proc=proc, sync=Path(sync), out=None, err=None)
+            try:
+                deadline = time.monotonic() + self.READY_TIMEOUT
+                while not (child.sync / 'ready').exists():
+                    if proc.poll() is not None:
+                        self.fail('child exited before the ' + window + ' window: '
+                                  + (proc.stderr.read() or '<no stderr>'))
+                    if time.monotonic() > deadline:
+                        self.fail('child never reached the ' + window + ' window')
+                    time.sleep(0.02)
+                yield child
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                proc.wait()
+                child.out, child.err = proc.stdout.read(), proc.stderr.read()
+                proc.stdout.close()
+                proc.stderr.close()
+
+    def blocked_entry(self, sync):
+        return json.loads((sync / 'blocked.json').read_text())
+
+    def test_sigterm_during_boot_settle_clears_the_marker_for_the_next_boot(self):
+        with self.blocked_child('boot') as child:
+            self.assertEqual(self.blocked_entry(child.sync),
+                             {'phase': 'settle', 'seconds': 120, 'marked': True, 'lock_free': False},
+                             'the signal must land inside the settle window, under the marker and the lock')
+            child.proc.send_signal(signal.SIGTERM)
+            child.proc.wait(timeout=self.EXIT_TIMEOUT)
+        # The exit code and the stderr note are the orderly-stop convention; the marker, the
+        # lock and the next boot are the contract. A completed run would print a report.
+        self.assertEqual((child.proc.returncode, child.out), (0, ''))
+        self.assertIn('stopped', child.err)
+        self.assertFalse(self.marker().exists(), 'a clean stop during settle is not a strike')
+        with MODULE.Locked(self.root):  # the stopped loader must not keep the lock
+            pass
+        self.restart()
+        machine = Machine(self.root)
+        self.assertEqual(self.run_mode('boot', machine)['state'], 'loaded',
+                         'the boot after a clean stop loads the driver again')
+        self.assertEqual(machine.commands, [['insmod', str(self.root / MODULE.STAGED)]])
+
+    def test_sigkill_during_boot_settle_stops_the_next_boot_until_start(self):
+        with self.blocked_child('boot') as child:
+            self.assertTrue(self.blocked_entry(child.sync)['marked'])
+            child.proc.send_signal(signal.SIGKILL)
+            child.proc.wait(timeout=self.EXIT_TIMEOUT)
+        self.assertEqual(child.proc.returncode, -signal.SIGKILL)
+        self.assertEqual(child.out, '')
+        self.assertTrue(self.marker().exists(), 'an abrupt kill keeps the strike marker')
+        self.restart()
+        machine = Machine(self.root)
+        with self.assertRaisesRegex(MODULE.Refused, 'previous boot stopped'):
+            self.run_mode('boot', machine)
+        self.assertEqual(machine.commands, [])
+        self.assertTrue(self.marker().exists(), 'no auto-clearing a strike of unknown reason')
+        machine = Machine(self.root)
+        self.assertEqual(self.run_mode('start', machine)['state'], 'loaded',
+                         'sudo m4-cpu-idle --start still recovers an already-struck install')
+        self.assertFalse(self.marker().exists())
+
+    def test_sigterm_during_start_load_settle_clears_the_marker_for_the_next_boot(self):
+        self.put(MODULE.STATE + '/attempt', b'loading the CPU idle driver\n')  # a struck install
+        with self.blocked_child('start') as child:
+            self.assertEqual(self.blocked_entry(child.sync),
+                             {'phase': 'settle', 'seconds': 120, 'marked': True, 'lock_free': False},
+                             '--start loads the driver and settles under the marker')
+            child.proc.send_signal(signal.SIGTERM)
+            child.proc.wait(timeout=self.EXIT_TIMEOUT)
+        self.assertEqual((child.proc.returncode, child.out), (0, ''))
+        self.assertFalse(self.marker().exists(), 'a clean stop of a --start load is not a strike')
+        machine = Machine(self.root)
+        self.assertEqual(self.run_mode('boot', machine)['status'], 'current',
+                         'the driver the stopped --start loaded stays in charge')
+        self.assertEqual(machine.commands, [])
+        self.restart()
+        machine = Machine(self.root)
+        self.assertEqual(self.run_mode('boot', machine)['state'], 'loaded',
+                         'a full boot after the stop loads the driver again')
+
+    def test_sigkill_during_start_load_settle_stops_the_next_boot_until_start(self):
+        with self.blocked_child('start') as child:
+            self.assertTrue(self.blocked_entry(child.sync)['marked'])
+            child.proc.send_signal(signal.SIGKILL)
+            child.proc.wait(timeout=self.EXIT_TIMEOUT)
+        self.assertEqual(child.proc.returncode, -signal.SIGKILL)
+        self.assertTrue(self.marker().exists(), 'a kill while --start settles is still a strike')
+        self.restart()
+        machine = Machine(self.root)
+        with self.assertRaisesRegex(MODULE.Refused, 'previous boot stopped'):
+            self.run_mode('boot', machine)
+        self.assertEqual(machine.commands, [])
+        machine = Machine(self.root)
+        self.assertEqual(self.run_mode('start', machine)['state'], 'loaded',
+                         'sudo m4-cpu-idle --start still recovers an already-struck install')
+        self.assertFalse(self.marker().exists())
+
+    def test_sigterm_during_guard_retry_settle_clears_the_marker_for_the_next_boot(self):
+        self.assertEqual(self.run_mode('boot', Machine(self.root))['state'], 'loaded')
+        self.boost_ready()
+        with self.blocked_child('start') as child:
+            self.assertEqual(self.blocked_entry(child.sync),
+                             {'phase': 'settle', 'seconds': 120, 'marked': True, 'lock_free': False},
+                             'the signal must land inside the guard-only settle window')
+            child.proc.send_signal(signal.SIGTERM)
+            child.proc.wait(timeout=self.EXIT_TIMEOUT)
+        self.assertEqual((child.proc.returncode, child.out), (0, ''))
+        self.assertFalse(self.marker().exists(), 'a clean stop while adding the guard is not a strike')
+        machine = Machine(self.root)
+        self.assertEqual(self.run_mode('boot', machine)['status'], 'current',
+                         'the next boot is not refused; the guard it loaded stays')
+        self.assertEqual(machine.commands, [])
+        self.restart()
+        machine = Machine(self.root)
+        report = self.run_mode('boot', machine)
+        self.assertEqual((report['state'], report['boost']), ('loaded', 'on'),
+                         'a full boot after the stop loads idle and the guard')
+        self.assertEqual(machine.commands, [['insmod', str(self.root / MODULE.STAGED)],
+                                            ['insmod', str(self.root / MODULE.GUARD_STAGED)]])
+
+    def test_sigkill_during_guard_retry_settle_stops_the_next_boot_until_start(self):
+        self.assertEqual(self.run_mode('boot', Machine(self.root))['state'], 'loaded')
+        self.boost_ready()
+        with self.blocked_child('start') as child:
+            self.assertTrue(self.blocked_entry(child.sync)['marked'])
+            child.proc.send_signal(signal.SIGKILL)
+            child.proc.wait(timeout=self.EXIT_TIMEOUT)
+        self.assertEqual(child.proc.returncode, -signal.SIGKILL)
+        self.assertTrue(self.marker().exists())
+        machine = Machine(self.root)
+        with self.assertRaisesRegex(MODULE.Refused, 'previous boot stopped'):
+            self.run_mode('boot', machine)
+        self.assertEqual(machine.commands, [])
+        machine = Machine(self.root)
+        self.assertEqual(self.run_mode('start', machine)['status'], 'current',
+                         'sudo m4-cpu-idle --start clears the strike; the loaded guard stays')
+        self.assertFalse(self.marker().exists())
+        self.restart()
+        report = self.run_mode('boot', Machine(self.root))
+        self.assertEqual((report['state'], report['boost']), ('loaded', 'on'),
+                         'a full boot after the recovery loads idle and the guard')
+
+    def test_sigterm_during_a_pending_module_load_stays_a_strike(self):
+        """The orderly-stop handling covers only the settle window: a stop while a module load
+        is still pending keeps the default disposition, the marker survives and the next boot
+        refuses, because that load's outcome is unknowable."""
+        with self.blocked_child('boot', window='load') as child:
+            self.assertEqual(self.blocked_entry(child.sync),
+                             {'phase': 'load', 'seconds': None, 'marked': True, 'lock_free': False},
+                             'the signal lands while the insmod is pending, under the marker')
+            child.proc.send_signal(signal.SIGTERM)
+            child.proc.wait(timeout=self.EXIT_TIMEOUT)
+        self.assertEqual(child.proc.returncode, -signal.SIGTERM,
+                         'outside the settle window SIGTERM keeps its default disposition')
+        self.assertTrue(self.marker().exists(), 'a pending load is never silently cleared')
+        self.restart()
+        machine = Machine(self.root)
+        with self.assertRaisesRegex(MODULE.Refused, 'previous boot stopped'):
+            self.run_mode('boot', machine)
+        self.assertEqual(machine.commands, [])
+
+    def test_sigterm_during_a_pending_guard_load_stays_a_strike(self):
+        """Same scoping at boot with the boost devicetree: the idle driver is already loaded and
+        the guard's insmod is pending; a stop there is still a strike, not a silent clear."""
+        self.boost_ready()
+        with self.blocked_child('boot', window='guard-load') as child:
+            self.assertEqual(self.blocked_entry(child.sync),
+                             {'phase': 'guard-load', 'seconds': None, 'marked': True, 'lock_free': False},
+                             'the signal lands while the guard insmod is pending, under the marker')
+            child.proc.send_signal(signal.SIGTERM)
+            child.proc.wait(timeout=self.EXIT_TIMEOUT)
+        self.assertEqual(child.proc.returncode, -signal.SIGTERM,
+                         'outside the settle window SIGTERM keeps its default disposition')
+        self.assertTrue(self.marker().exists(), 'a pending guard load is never silently cleared')
+        self.restart()
+        machine = Machine(self.root)
+        with self.assertRaisesRegex(MODULE.Refused, 'previous boot stopped'):
+            self.run_mode('boot', machine)
+        self.assertEqual(machine.commands, [])
+
+    def test_sigterm_during_a_pending_guard_load_on_start_stays_a_strike(self):
+        """Same scoping for the guard-only --start retry: the guard's insmod is pending inside
+        start_guard's attempt window; a stop there is still a strike."""
+        self.assertEqual(self.run_mode('boot', Machine(self.root))['state'], 'loaded')
+        self.boost_ready()
+        with self.blocked_child('start', window='guard-load') as child:
+            self.assertEqual(self.blocked_entry(child.sync),
+                             {'phase': 'guard-load', 'seconds': None, 'marked': True, 'lock_free': False},
+                             'the signal lands while the guard insmod is pending, under the marker')
+            child.proc.send_signal(signal.SIGTERM)
+            child.proc.wait(timeout=self.EXIT_TIMEOUT)
+        self.assertEqual(child.proc.returncode, -signal.SIGTERM,
+                         'outside the settle window SIGTERM keeps its default disposition')
+        self.assertTrue(self.marker().exists(), 'a pending guard load is never silently cleared')
+        self.restart()
+        machine = Machine(self.root)
+        with self.assertRaisesRegex(MODULE.Refused, 'previous boot stopped'):
+            self.run_mode('boot', machine)
+        self.assertEqual(machine.commands, [])
+
+    def test_an_undisturbed_child_boot_loads_and_clears_the_marker(self):
+        """Harness control: released from the settle window, the child boots, settles and exits 0."""
+        with self.blocked_child('boot') as child:
+            self.assertEqual(self.blocked_entry(child.sync)['phase'], 'settle')
+            (child.sync / 'release').write_text('go\n')
+            child.proc.wait(timeout=self.EXIT_TIMEOUT)
+        self.assertEqual((child.proc.returncode, child.err), (0, ''))
+        self.assertEqual(json.loads(child.out)['state'], 'loaded')
+        self.assertFalse(self.marker().exists())
+
+    def test_the_settle_window_restores_the_previous_sigterm_disposition(self):
+        original = signal.getsignal(signal.SIGTERM)
+        calls = []
+        signal.signal(signal.SIGTERM, lambda signum, frame: calls.append(signum))
+        self.addCleanup(signal.signal, signal.SIGTERM, original)
+        sentinel = signal.getsignal(signal.SIGTERM)
+        self.run_mode('boot', Machine(self.root))
+        self.assertIs(signal.getsignal(signal.SIGTERM), sentinel, 'restored after a normal settle')
+        self.restart()
+        with self.assertRaisesRegex(MODULE.Refused, 'no core powered down'):
+            self.run_mode('boot', Machine(self.root, idles=False))
+        self.assertIs(signal.getsignal(signal.SIGTERM), sentinel, 'restored after a failing settle')
+        self.assertEqual(calls, [], 'no signal arrived; the sentinel must never run')
+
+    def test_the_settle_window_restores_the_disposition_when_the_sleep_itself_raises(self):
+        original = signal.getsignal(signal.SIGTERM)
+        signal.signal(signal.SIGTERM, lambda signum, frame: None)
+        self.addCleanup(signal.signal, signal.SIGTERM, original)
+        sentinel = signal.getsignal(signal.SIGTERM)
+        machine = Machine(self.root)
+
+        def exploding_sleep(seconds):
+            raise OSError('the wait itself failed')
+
+        with self.assertRaises(OSError):
+            MODULE.run(self.root, 'boot', machine, settle_seconds=120, sleep=exploding_sleep)
+        self.assertIs(signal.getsignal(signal.SIGTERM), sentinel,
+                      'restored after an exception raised inside the settle wait')
+        self.assertFalse(self.marker().exists(), 'the finally still clears the marker')
+        with MODULE.Locked(self.root):  # the lock is released too
+            pass
+
+    def test_sigterm_in_the_settle_wait_unwinds_as_stopped_with_the_prior_handler_restored(self):
+        original = signal.getsignal(signal.SIGTERM)
+        signal.signal(signal.SIGTERM, lambda signum, frame: None)
+        self.addCleanup(signal.signal, signal.SIGTERM, original)
+        sentinel = signal.getsignal(signal.SIGTERM)
+        machine = Machine(self.root)
+
+        def signaling_sleep(seconds):
+            os.kill(os.getpid(), signal.SIGTERM)
+
+        with self.assertRaises(MODULE.Stopped):
+            MODULE.run(self.root, 'boot', machine, settle_seconds=120, sleep=signaling_sleep)
+        self.assertIs(signal.getsignal(signal.SIGTERM), sentinel,
+                      'the handler restores the previous disposition before unwinding')
+        self.assertFalse(self.marker().exists(), 'an orderly stop clears the marker')
+        with MODULE.Locked(self.root):
+            pass
+
+
+class CpuIdleInstallScriptlet(unittest.TestCase):
+    """The package scriptlet points an already-struck install at --start, keeps its existing
+    notices, and never clears the marker or starts anything itself."""
+
+    INSTALL = ROOT / 'packaging/omarchy-m4/omarchy-m4-cpu/omarchy-m4-cpu.install'
+
+    def scriptlet_root(self, struck):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        (root / 'bin').mkdir()
+        systemctl = root / 'bin' / 'systemctl'
+        systemctl.write_text('#!/bin/sh\necho "systemctl $@" >> "$SYSTEMCTL_LOG"\n')
+        systemctl.chmod(0o755)
+        if struck:
+            marker = root / 'var/lib/omarchy-m4/cpu-idle/attempt'
+            marker.parent.mkdir(parents=True)
+            marker.write_text('loading the CPU idle driver\n')
+        return root
+
+    def run_hook(self, root, hook):
+        env = dict(os.environ, PATH=str(root / 'bin') + os.pathsep + os.environ['PATH'],
+                   SYSTEMCTL_LOG=str(root / 'systemctl.log'))
+        return subprocess.run(['bash', '-c', 'source "$1" && shift && "$@"', 'bash',
+                               str(self.INSTALL), hook],
+                              cwd=root, env=env, capture_output=True, text=True, check=True).stdout
+
+    def systemctl_calls(self, root):
+        log = root / 'systemctl.log'
+        return log.read_text().splitlines() if log.exists() else []
+
+    def test_post_upgrade_points_a_struck_install_at_start_and_preserves_the_marker(self):
+        root = self.scriptlet_root(struck=True)
+        out = self.run_hook(root, 'post_upgrade')
+        self.assertIn('Restart once to let idle CPU cores power down', out, 'the install notice stays')
+        self.assertIn('sudo m4-cpu-idle --start', out, 'the recovery is discoverable')
+        self.assertTrue((root / 'var/lib/omarchy-m4/cpu-idle/attempt').exists(),
+                        'the scriptlet never clears a marker: its reason is unknowable')
+        self.assertEqual(self.systemctl_calls(root), ['systemctl enable m4-cpu-idle.service'],
+                         'the hook starts nothing')
+
+    def test_post_upgrade_is_quiet_about_a_marker_that_is_not_there(self):
+        out = self.run_hook(self.scriptlet_root(struck=False), 'post_upgrade')
+        self.assertIn('Restart once to let idle CPU cores power down', out)
+        self.assertNotIn('--start', out)
+
+    def test_post_install_and_pre_remove_are_unchanged(self):
+        root = self.scriptlet_root(struck=False)
+        out = self.run_hook(root, 'post_install')
+        self.assertIn('Restart once to let idle CPU cores power down', out)
+        self.assertNotIn('--start', out)
+        out = self.run_hook(root, 'pre_remove')
+        self.assertIn('stays until the next restart', out)
+        self.assertEqual(self.systemctl_calls(root),
+                         ['systemctl enable m4-cpu-idle.service', 'systemctl disable m4-cpu-idle.service'])
+
+
 class ModuleSource(unittest.TestCase):
     """The idle module never writes the locked M4 register and serves only T8132."""
 
@@ -513,4 +932,6 @@ class ModuleSource(unittest.TestCase):
 
 
 if __name__ == '__main__':
+    if sys.argv[1:2] == ['--child-settle']:
+        sys.exit(child_settle_main(sys.argv[2:]))
     unittest.main()

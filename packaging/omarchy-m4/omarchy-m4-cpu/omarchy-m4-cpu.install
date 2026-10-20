@@ -5,6 +5,12 @@ post_install() {
 
 post_upgrade() {
   post_install
+  # A struck install stays struck across the upgrade: the marker's reason is unknowable, so it
+  # is never cleared here. Scriptlets run at the installation root, so the marker path is relative.
+  if [ -e var/lib/omarchy-m4/cpu-idle/attempt ]; then
+    echo '==> CPU idle is struck: a previous boot stopped while loading the driver.'
+    echo '==> Retry it in the running session with: sudo m4-cpu-idle --start'
+  fi
 }
 
 pre_remove() {
