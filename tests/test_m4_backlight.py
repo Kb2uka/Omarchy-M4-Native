@@ -3,6 +3,9 @@
 import hashlib
 import importlib.util
 import json
+import os
+from types import SimpleNamespace
+from unittest.mock import patch
 from pathlib import Path
 import subprocess
 import tempfile
@@ -73,6 +76,29 @@ class BacklightGuards(unittest.TestCase):
             BACKLIGHT.start(self.root, forbidden)
         self.assertFalse((self.root / BACKLIGHT.STATE / 'attempt').exists())
 
+    def test_old_boot_without_handoff_node_gives_restart_guidance(self):
+        (self.root / BACKLIGHT.CLIENT / 'status').unlink()
+        with self.assertRaisesRegex(BACKLIGHT.Refused, 'restart after omarchy-m4-update'):
+            BACKLIGHT.start(self.root, lambda *args, **kwargs: self.fail('must not load'))
+        self.assertFalse((self.root / BACKLIGHT.STATE / 'attempt').exists())
+
+    def test_successful_start_clears_marker_only_after_backlight_is_online(self):
+        self.put(BACKLIGHT.DEBUG + '/status', b'online=1 failed=0 applied_nits=300\n')
+        self.put(BACKLIGHT.DEBUG + '/start', b'')
+        self.put(BACKLIGHT.DEBUG + '/brightness_nits', b'')
+        self.put(BACKLIGHT.BACKLIGHT + '/actual_brightness', b'300\n')
+        self.put(BACKLIGHT.BACKLIGHT + '/max_brightness', b'525\n')
+
+        def load(command, **options):
+            self.assertTrue((self.root / BACKLIGHT.STATE / 'attempt').exists())
+            self.assertEqual(command[0], 'insmod')
+
+        state = BACKLIGHT.start(self.root, load)
+        self.assertFalse(state['failed_attempt'])
+        self.assertEqual(state['nits'], 300)
+        self.assertEqual((self.root / BACKLIGHT.DEBUG / 'start').read_text(), '1\n')
+        self.assertEqual((self.root / BACKLIGHT.DEBUG / 'brightness_nits').read_text(), '300\n')
+
     def test_state_change_cannot_clear_an_inflight_marker(self):
         with BACKLIGHT.locked_state(self.root) as state:
             BACKLIGHT.write_state(state, 'attempt', 'inflight\n')
@@ -80,6 +106,49 @@ class BacklightGuards(unittest.TestCase):
                 with BACKLIGHT.locked_state(self.root):
                     BACKLIGHT.remove_state(state, 'attempt')
             self.assertEqual((state / 'attempt').read_text(), 'inflight\n')
+
+
+class BrightnessRouting(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        board = self.root / BACKLIGHT.COMPATIBLE
+        board.parent.mkdir(parents=True)
+        board.write_bytes(b'apple,j713\0apple,t8132\0')
+        (self.root / BACKLIGHT.BACKLIGHT).mkdir(parents=True)
+        self.calls = []
+        self.focused = 'Unknown-1'
+        self.percent = 1
+
+    def run_command(self, command, **options):
+        self.calls.append(command)
+        if command == ['hyprctl', 'monitors', '-j']:
+            return SimpleNamespace(stdout=json.dumps([{'name': self.focused, 'focused': True}]))
+        if command == ['brightnessctl', '-d', 'j713-dcp', '-m']:
+            return SimpleNamespace(stdout=f'j713-dcp,backlight,5,{self.percent}%,525\n')
+        return SimpleNamespace(returncode=0)
+
+    def change(self, step, no_osd=False):
+        with patch.dict(os.environ, {'XDG_RUNTIME_DIR': str(self.root)}):
+            return BACKLIGHT.brightness(step, no_osd, self.run_command, self.root)
+
+    def test_precise_down_key_stops_at_one_percent(self):
+        self.change('1%-')
+        self.assertIn(['brightnessctl', '-d', 'j713-dcp', 'set', '1%'], self.calls)
+        self.assertNotIn(['brightnessctl', '-d', 'j713-dcp', 'set', '1%-'], self.calls)
+
+    def test_normal_step_near_minimum_and_osd(self):
+        self.percent = 4
+        self.change('+5%')
+        self.assertIn(['brightnessctl', '-d', 'j713-dcp', 'set', '5%'], self.calls)
+        self.assertIn(['omarchy-osd', '-i', 'brightness', '-p', '4'], self.calls)
+
+    def test_external_monitor_keeps_existing_routing(self):
+        self.focused = 'DP-1'
+        self.change('1%-', no_osd=True)
+        self.assertEqual(self.calls, [['hyprctl', 'monitors', '-j'],
+                                     ['omarchy', 'brightness', 'display', '--no-osd', '1%-']])
 
 
 class OwnerKeys(unittest.TestCase):
@@ -120,6 +189,12 @@ class OwnerKeys(unittest.TestCase):
             'o.bind("XF86MonBrightnessUp", "Custom", "custom-brightness --up")\n')
         self.assertEqual(BACKLIGHT.add_keys(self.config, True), 'custom brightness bindings preserved')
         self.assertEqual(self.config.read_text(), self.original)
+
+    def test_inline_custom_brightness_keys_are_preserved(self):
+        source = self.original + 'o.bind("XF86MonBrightnessDown", "Custom", "custom --down")\n'
+        self.config.write_text(source)
+        self.assertEqual(BACKLIGHT.add_keys(self.config, True), 'custom brightness bindings preserved')
+        self.assertEqual(self.config.read_text(), source)
 
     def test_symlink_configuration_cannot_modify_another_file(self):
         other = self.home / 'other'

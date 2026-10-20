@@ -12,7 +12,7 @@ install=omarchy-m4-backlight.install
 options=('!strip' '!debug')
 source=('m4-backlight.py' 'module.json' 'm4-backlight.service' 'NOTICE' 'MIT.txt' 'GPL-2.0-only.txt'
         "j713_dcp_backlight.ko::${url}/releases/download/package-inputs/j713-dcp-backlight-2186b280.ko")
-sha256sums=('3ed5dd6901a0feef364f8b880a5b8f02fcbad6b550adfed4397aef4e470a1f79'
+sha256sums=('008f7ba01880a60015e0e8011209982f97ccac573cde8d78850a379e4232eacd'
             'ff21a39817e86971a30ff2412c0e5deee6578b4a247d19cd837fcda355381db6'
             '65dc5be7e0632a97b9022e5fc06655c9273fae61656703f5a95b6175ab2b6a4f'
             '14f8288e71131582403f5db6763a3a8239b09fe07519e55e4f62defd94d21031'

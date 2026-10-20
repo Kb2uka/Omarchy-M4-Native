@@ -182,7 +182,9 @@ class Lineage(unittest.TestCase):
         self.assertEqual(MODULE.BASE_SHA256, updater.PBOOST_DTB)
         self.assertEqual(updater.UPDATES[updater.USB0_DTB], ((updater.PBOOST_DTB,), '.pre-usb0'))
         compose = load('composer', 'tools/m4-boot-compose.py')
-        self.assertEqual(list(compose.KNOWN_DTBS)[-2:], [updater.PBOOST_DTB, updater.USB0_DTB])
+        lineage = list(compose.KNOWN_DTBS)
+        self.assertEqual(lineage[lineage.index(updater.PBOOST_DTB):],
+                         [updater.PBOOST_DTB, updater.USB0_DTB, compose.BACKLIGHT_DTB])
         self.assertEqual(compose.KNOWN_DTBS[updater.USB0_DTB], 'j713-usb0')
 
     def test_overlay_names_the_front_port_darts_and_the_hinge_streams(self):

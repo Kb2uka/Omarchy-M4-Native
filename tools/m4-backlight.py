@@ -128,7 +128,7 @@ def start(root, run=subprocess.run):
             require((root / BACKLIGHT).exists(), 'Loaded backlight is incomplete; reboot instead of retrying')
             return status(root)
         node = root / CLIENT
-        require(text(node / 'status').rstrip('\0') == 'okay' and
+        require((node / 'status').is_file() and text(node / 'status').rstrip('\0') == 'okay' and
                 (node / 'omarchy,display-handoff-verified').exists() and
                 (node / 'memory-region').exists(),
                 'Verified display handoff is not booted; restart after omarchy-m4-update')
@@ -180,6 +180,10 @@ def brightness(step, no_osd=False, run=subprocess.run, root=Path('/')):
             step = f'{min(100, current + (1 if current < 5 else 5))}%'
         elif step == '5%-':
             step = f'{max(1, current - (1 if current <= 5 else 5))}%'
+        elif step == '1%-':
+            step = f'{max(1, current - 1)}%'
+        elif step == '+1%':
+            step = f'{min(100, current + 1)}%'
         run(['brightnessctl', '-d', 'j713-dcp', 'set', step], check=True, capture_output=True, text=True)
         if not no_osd:
             result = run(['brightnessctl', '-d', 'j713-dcp', '-m'], check=True, capture_output=True, text=True)
@@ -188,6 +192,12 @@ def brightness(step, no_osd=False, run=subprocess.run, root=Path('/')):
         return 0
     finally:
         os.close(fd)
+
+
+def has_custom_brightness(source):
+    # Whole-line examples are inert; command strings may contain --flags.
+    return any('XF86MonBrightness' in line and not line.lstrip().startswith('--')
+               for line in source.splitlines())
 
 
 def add_keys(path, apply):
@@ -203,15 +213,15 @@ def add_keys(path, apply):
             return 'present'
         if 'require("default.hypr.omarchy")' not in source:
             return 'not an Omarchy configuration'
+        if has_custom_brightness(source):
+            return 'custom brightness bindings preserved'
         custom = path.with_name('bindings.lua')
         if custom.exists():
             custom_fd = os.open(custom, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
             with os.fdopen(custom_fd, 'rb') as custom_stream:
                 require(stat.S_ISREG(os.fstat(custom_stream.fileno()).st_mode),
                         'Custom bindings are not a regular file')
-                # Ignore whole-line examples, but preserve any active custom line.
-                if any(b'XF86MonBrightness' in line and not line.lstrip().startswith(b'--')
-                       for line in custom_stream.read().splitlines()):
+                if has_custom_brightness(custom_stream.read().decode('utf-8')):
                     return 'custom brightness bindings preserved'
         if not apply:
             return 'missing'
