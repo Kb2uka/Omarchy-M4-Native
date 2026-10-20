@@ -68,6 +68,68 @@ class BacklightGuards(unittest.TestCase):
             BACKLIGHT.start(self.root, forbidden)
         self.assertFalse((self.root / BACKLIGHT.STATE / 'attempt').exists())
 
+    def test_same_size_module_tamper_is_refused(self):
+        data = (self.root / BACKLIGHT.MODULE).read_bytes()
+        self.put(BACKLIGHT.MODULE, b'X' + data[1:])
+        with self.assertRaisesRegex(BACKLIGHT.Refused, 'differs from its pin'):
+            BACKLIGHT.start(self.root, lambda *args, **kwargs: self.fail('tampered module loaded'))
+        self.assertFalse((self.root / BACKLIGHT.STATE / 'attempt').exists())
+
+    def test_wrong_kernel_is_refused_before_loading(self):
+        self.put('proc/sys/kernel/osrelease', b'other-kernel\n')
+        with self.assertRaisesRegex(BACKLIGHT.Refused, 'not qualified for this kernel'):
+            BACKLIGHT.start(self.root, lambda *args, **kwargs: self.fail('wrong kernel loaded'))
+        self.assertFalse((self.root / BACKLIGHT.STATE / 'attempt').exists())
+
+    def test_other_board_is_refused_before_creating_state(self):
+        self.put(BACKLIGHT.COMPATIBLE, b'apple,j715\0apple,t8132\0')
+        with self.assertRaisesRegex(BACKLIGHT.Refused, 'not a J713'):
+            BACKLIGHT.start(self.root, lambda *args, **kwargs: self.fail('wrong board loaded'))
+        self.assertFalse((self.root / BACKLIGHT.STATE).exists())
+
+    def test_disabled_node_is_refused(self):
+        self.put(BACKLIGHT.CLIENT + '/status', b'disabled\0')
+        with self.assertRaisesRegex(BACKLIGHT.Refused, 'handoff is not booted'):
+            BACKLIGHT.start(self.root, lambda *args, **kwargs: self.fail('disabled node loaded'))
+        self.assertFalse((self.root / BACKLIGHT.STATE / 'attempt').exists())
+
+    def test_missing_memory_region_is_refused(self):
+        (self.root / BACKLIGHT.CLIENT / 'memory-region').unlink()
+        with self.assertRaisesRegex(BACKLIGHT.Refused, 'handoff is not booted'):
+            BACKLIGHT.start(self.root, lambda *args, **kwargs: self.fail('unreserved memory loaded'))
+        self.assertFalse((self.root / BACKLIGHT.STATE / 'attempt').exists())
+
+    def test_failed_driver_status_preserves_the_attempt_marker(self):
+        self.put(BACKLIGHT.DEBUG + '/start', b'')
+        self.put(BACKLIGHT.DEBUG + '/brightness_nits', b'')
+        self.put(BACKLIGHT.BACKLIGHT + '/actual_brightness', b'300\n')
+        self.put(BACKLIGHT.BACKLIGHT + '/max_brightness', b'525\n')
+        for value in [b'online=0 failed=0 applied_nits=300',
+                      b'online=1 failed=1 applied_nits=300',
+                      b'online=1 failed=0 applied_nits=526']:
+            with self.subTest(status=value):
+                self.put(BACKLIGHT.DEBUG + '/status', value)
+                with self.assertRaisesRegex(BACKLIGHT.Refused, 'startup did not complete'):
+                    BACKLIGHT.start(self.root, lambda *args, **kwargs: None)
+                self.assertTrue((self.root / BACKLIGHT.STATE / 'attempt').exists())
+                (self.root / BACKLIGHT.STATE / 'attempt').unlink()
+        self.put(BACKLIGHT.DEBUG + '/status', b'online=1 failed=0 applied_nits=300')
+        for name in ['actual_brightness', 'max_brightness']:
+            (self.root / BACKLIGHT.BACKLIGHT / name).unlink()
+        (self.root / BACKLIGHT.BACKLIGHT).rmdir()
+        with self.assertRaisesRegex(BACKLIGHT.Refused, 'startup did not complete'):
+            BACKLIGHT.start(self.root, lambda *args, **kwargs: None)
+        self.assertTrue((self.root / BACKLIGHT.STATE / 'attempt').exists())
+
+    def test_loaded_module_is_not_loaded_again_and_requires_backlight(self):
+        (self.root / 'sys/module' / BACKLIGHT.NAME).mkdir(parents=True)
+        forbidden = lambda *args, **kwargs: self.fail('module loaded twice')
+        with self.assertRaisesRegex(BACKLIGHT.Refused, 'Loaded backlight is incomplete'):
+            BACKLIGHT.start(self.root, forbidden)
+        self.put(BACKLIGHT.BACKLIGHT + '/actual_brightness', b'26\n')
+        self.put(BACKLIGHT.BACKLIGHT + '/max_brightness', b'525\n')
+        self.assertEqual(BACKLIGHT.start(self.root, forbidden)['nits'], 26)
+
     def test_unverified_handoff_never_loads_a_module(self):
         (self.root / BACKLIGHT.CLIENT / 'omarchy,display-handoff-verified').unlink()
 
@@ -167,6 +229,15 @@ class BrightnessRouting(unittest.TestCase):
         self.assertIn(['brightnessctl', '-d', 'j713-dcp', 'set', '5%'], self.calls)
         self.assertIn(['omarchy-osd', '-i', 'brightness', '-p', '5'], self.calls)
 
+    def test_normal_down_and_precise_up_bounds(self):
+        for current, step, expected in [(6, '5%-', '1%'), (5, '5%-', '4%'),
+                                        (1, '5%-', '1%'), (100, '+1%', '100%')]:
+            with self.subTest(current=current, step=step):
+                self.calls.clear()
+                self.percent = current
+                self.change(step)
+                self.assertIn(['brightnessctl', '-d', 'j713-dcp', 'set', expected], self.calls)
+
     def test_external_monitor_keeps_existing_routing(self):
         self.focused = 'DP-1'
         self.change('1%-', no_osd=True)
@@ -217,6 +288,14 @@ class OwnerKeys(unittest.TestCase):
         source = self.original + 'o.bind("XF86MonBrightnessDown", "Custom", "custom --down")\n'
         self.config.write_text(source)
         self.assertEqual(BACKLIGHT.add_keys(self.config, True), 'custom brightness bindings preserved')
+        self.assertEqual(self.config.read_text(), source)
+
+    def test_removal_preserves_an_edited_managed_block(self):
+        BACKLIGHT.add_keys(self.config, True)
+        source = self.config.read_text().replace('m4-backlight brightness +5%', 'custom brightness +5%')
+        self.config.write_text(source)
+        with self.assertRaisesRegex(BACKLIGHT.Refused, 'edited; preserving'):
+            BACKLIGHT.remove_keys(self.config)
         self.assertEqual(self.config.read_text(), source)
 
     def test_symlink_configuration_cannot_modify_another_file(self):
