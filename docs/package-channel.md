@@ -1,8 +1,8 @@
 # M4 package channel
 
 Installed M4 machines receive kernel, devicetree and boot-object fixes as signed
-pacman packages from the `[omarchy-m4]` repository, through the normal
-`omarchy update`, without reinstalling
+pacman packages from the `[omarchy-m4]` repository, through
+`omarchy-m4-update`, without reinstalling
 ([issue #49](https://github.com/Kb2uka/Omarchy-M4-Native/issues/49)). Owners
 connect once; see [updates.md](updates.md). This page is for maintainers and
 reviewers.
@@ -12,11 +12,13 @@ reviewers.
 | Package | Installs | Version at launch |
 | --- | --- | --- |
 | `omarchy-m4-keyring` | The channel's public signing key for `pacman-key` | `20261012-1` |
-| `omarchy-m4-boot` | `m4-boot-compose`, its pacman hook, the J713 devicetree, the daily update notifier and, from 1-4, the real-time speaker protection drop-in | `1-1`; `1-4` adds CPU frequency scaling and CPU temperature; `1-12` adds the opt-in notch switch and turns on the front USB-C port |
+| `omarchy-m4-boot` | `m4-boot-compose`, its pacman hook, the J713 devicetree, update notifier and guarded hardware dependencies | `1-1`; `1-14` brings native brightness and both handoff-aware notch loaders |
 | `linux-m4-omarchy` | The J713 kernel image and its modules | `7.1.9.m4.20261008-2` |
 | `omarchy-m4-gst-audio` | GStreamer's `autodetect` and `pulse` sinks in `/usr/lib/gstreamer-1.0`, for WebKitGTK and GStreamer apps | `1.28.7-1` |
 | `omarchy-m4-headphones` | The headphone jack card: two pinned modules, `m4-headphones`, its registration drop-in, UCM and WirePlumber files | `1-1`; `1-2` adds the headset microphone |
 | `omarchy-m4-cpu` | The CPU idle driver: one pinned module, `m4-cpu-idle` and its boot unit | `1-1` |
+| `omarchy-m4-evdi` | DisplayLink's evdi module and `libevdi`, for USB display adapters | `1.15.1-1` |
+| `omarchy-m4-backlight` | Native DCP backlight module, guarded startup, brightness-key routing and OSD | `1-1` |
 
 ### omarchy-m4-boot 1-4 and omarchy-m4-gst-audio 1.28.7-1
 
@@ -289,6 +291,65 @@ file.
   shipped in `omarchy-m4-boot`) counts only a swap from alpha.1, so an Air
   moving from 1-2 is told to restart by pacman's install message instead.
 
+### omarchy-m4-evdi 1.15.1-1 and omarchy-m4-boot 1-13
+
+- **USB external displays** ([J713 external displays](j713-external-displays.md),
+  #58): DisplayLink's evdi 1.15.1, the kernel half of DisplayLink adapters and
+  docks. USB-C and Thunderbolt monitors still need DCP support and do not work.
+- **Files:** `evdi.ko` (`c5e65a2b…`) in
+  `/usr/lib/modules/7.1.9-m4-gpu-backport-20261008/updates/`, where pacman's
+  depmod hook indexes it, and `libevdi` (`0f1da52d…`) as `/usr/lib/libevdi.so`,
+  the layout of Arch's `evdi` package. Both are built by `display/evdi/build.sh`
+  from the upstream `v1.15.1` archive (mirrored in `package-inputs`) and pinned
+  in `evdi_module` and `evdi_library`.
+- **Relations:** `provides=evdi=1.15.1` and conflicts with `evdi`, `evdi-dkms`
+  and `evdi-git`, so the AUR `displaylink` package (which needs `evdi<1.16`)
+  installs on top. Nothing loads evdi until its service runs `modprobe evdi`;
+  no restart is needed.
+- **Not shipped:** Synaptics' DisplayLinkManager is closed source; owners
+  install it from the AUR.
+- **`omarchy-m4-boot` 1-13** depends on `omarchy-m4-evdi`, as 1-6, 1-7 and 1-10
+  do for the GPU, headphone and CPU packages. Nothing else in it changes.
+
+### omarchy-m4-backlight 1-1 and omarchy-m4-boot 1-14
+
+- **Delivery:** every owner receives the package through `omarchy-m4-update`.
+  The boot package depends on it, including for Airs whose installed setup
+  script predates this package. There is no opt-in package or second install
+  command. Restart after the update.
+- **Native panel control:** `j713_dcp_backlight.ko` exposes `j713-dcp` under
+  `/sys/class/backlight`, with integer brightness in nits and maximum 525.
+  It uses the existing Linux RTKit/mailbox/IOMMU APIs and native AFK envelopes.
+  Command 7 has a status-only reply: advertising a receive buffer for it
+  asserts in this firmware, so brightness writes have zero RX address/capacity.
+- **Boot handoff:** the enabled `afb025a8…` devicetree and known stage2 are
+  upgraded together. Stage2 reserves this boot's DCP mappings and page tables
+  from its own ADT/DART data before Linux attaches SID23. It does not reuse
+  another boot's physical addresses or take over scanout/PIODMA/modesetting.
+  Both notch choices carry the handoff; see [J713 notch](j713-notch.md).
+- **Startup safety:** `m4-backlight.service` loads the pinned module, performs
+  read-only display-status discovery, and initializes a visible 300-nit level.
+  Normal systemd backlight state can then restore the saved setting. A durable
+  attempt marker is written before loading; a failed/interrupted startup holds
+  later boots until the owner inspects the journal and runs `sudo m4-backlight
+  --enable`. There is no live retry, unbind or unload of a display DMA domain.
+- **Off switch:** `sudo m4-backlight --disable` holds future startup without
+  removing the package; `--enable` clears the hold and failed-attempt marker
+  for the next boot. Updates continue to keep the installed package current.
+- **Keys and OSD:** the existing brightness keys retain their normal, Shift
+  and Alt steps. Only the focused `Unknown-1` native panel uses `j713-dcp`;
+  external displays retain Omarchy's Apple-display/DDC routing. The user-level
+  migration backs up the configuration, preserves explicit custom brightness
+  bindings and removes only its own block when the package is removed.
+- **Verification boundary:** J713/T8132 native service/status and 100/300-nit
+  physical panel changes passed on kernel `7.1.9-m4-gpu-backport-20261008`.
+  The standalone module and both loaders reproduced byte for byte. Automatic
+  startup passed on two successive production boots; the saved 26-nit setting
+  was restored before later brightness-key changes. Physical keys and OSD
+  were confirmed. No suspend, other-board or native external-display support
+  is claimed.
+
+
 ## Connecting new installs
 
 The release root builder (`tools/prepare-j713-release.py`) adds
@@ -326,11 +387,11 @@ redistributed and must never be regenerated by a package.
    Anything else, such as a development boot object, is refused and left
    untouched. A current devicetree later in that lineage than the packaged one
    is kept, so an owner-applied devicetree update is never reverted.
-3. It replaces only the kernel and devicetree segments with the packaged files.
-   Those must also be known, and the kernel must be one complete gzip stream.
-   The loader, the boot arguments (including the trackpad options) and the
-   firmware payload are carried over byte for byte, then checked again in the
-   result.
+3. It replaces the kernel and devicetree with known packaged files. For the
+   native-backlight tree it also requires a known current stage2 and selects
+   the pinned handoff loader for the same notch preference. Boot arguments,
+   including trackpad options, and the owner's firmware payload remain
+   byte-identical and are checked again in the result.
 4. **Protected stack:** it refuses any kernel the installed video stack
    (`/etc/omarchy/j713-video-manifest.json`: `boot_kernel_sha256` and
    `kernel_release`) or audio stack (`kernel_release`) is not qualified for. It
@@ -343,6 +404,10 @@ Every failed check leaves `boot.bin` unchanged; a pacman hook cannot roll back
 package files, so the old boot object simply keeps booting. The hook
 (`90-omarchy-m4-boot.hook`, PostTransaction) runs after any transaction that
 installs or upgrades the composer, the kernel image or the devicetree.
+Standalone writes share pacman's database lock with `m4-notch`; the internal
+package-hook mode uses the transaction lock already held by pacman. Rollback
+restores stage2 and tree together and refuses different owner firmware/boot
+arguments or a changed notch preference.
 
 Equivalence on hardware: run on the Air against its own alpha.1 `boot.bin`
 (`54273bb8…`), the composer produced `deb79273…`, byte-identical to the
@@ -431,11 +496,13 @@ package's contents without a new version.
   the private key as `PACKAGE_SIGNING_KEY`. It keeps already-published package
   files and verifies their signatures, then signs and uploads new ones. It
   repairs an interrupted earlier run by signing an unsigned published package.
-  The signed databases go up last, whenever they are missing, unsigned or out
-  of date. Everything is then
-  downloaded anonymously and verified again. The
-  [workflow policy](../tools/ci/check-workflows.py) allows a secret or write
-  access nowhere else.
+  The corresponding integration source archive (`release-integration-<commit>.tar.gz`)
+  is packaged, signed, and published alongside packages and databases. The
+  separately pinned source archives named by package joins are not yet channel
+  assets. The signed databases go up last, whenever they are missing, unsigned
+  or out of date. Everything is then downloaded anonymously and verified
+  again. The [workflow policy](../tools/ci/check-workflows.py) allows a secret
+  or write access nowhere else.
 
 ### Maintainer setup (once)
 
@@ -493,13 +560,39 @@ first. Joins stay `unverified` until a byte-identical rebuild is recorded:
 - **CPU idle and boost guard (`omarchy-m4-cpu`):** `j713_cpuidle.ko` (`a2a7947a…`)
   and `j713_pguard.ko` (`91fe247e…`), built from `cpu/j713/` on the alpha.1
   kernel tree with `cpu/j713/build-module.sh`.
-- **Notch stage 2 (`omarchy-m4-boot`):** `m1n1-stage2-notch.bin` (`f2417a74…`),
-  alpha.1's `source/m1n1-stage2-source.tar.gz` plus `display/j713/m1n1-show-notch.patch`,
-  built by `display/j713/build-notch-loader.sh`. Rebuilt byte for byte
-  (`rebuilt-identical`).
+- **Display handoff stage2 (`omarchy-m4-boot`):** hidden `b86aee68…` and shown
+  `692f656c…` variants from alpha.1's stage2 archive, the bounded T8132 handoff
+  in `display/j713/m1n1-base/` and the optional notch patch. Two clean x86-64
+  builds with `display/j713/build-backlight-loader.sh` were byte-identical.
+- **Native backlight (`omarchy-m4-backlight`):** `2186b280…`, built twice from
+  `display/j713/backlight/` and the prepared alpha.1 kernel-controller tree
+  with Ubuntu clang 21.1.8; compared byte for byte. Imported AFK notices and
+  GPL/MIT license texts are installed with the package.
+- **USB display support (`omarchy-m4-evdi`):** `evdi.ko` (`c5e65a2b…`), built
+  on the alpha.1 kernel tree, and `libevdi` (`0f1da52d…`), built for aarch64,
+  both from DisplayLink's unchanged `evdi-1.15.1.tar.gz` (`b120df30…`, mirrored
+  in `package-inputs`) with `display/evdi/build.sh`. Each was rebuilt byte for
+  byte (`rebuilt-identical`).
 - **GStreamer audio sinks (`omarchy-m4-gst-audio`):** `libgstautodetect.so` and
   `libgstpulseaudio.so`, built by `tools/m4-webkit-audio-plugins.py` from
   `gst-plugins-good-1.28.7.tar.xz` (mirrored in `package-inputs`).
+
+### Published source artifact
+
+Each full commit has an immutable archive name, so interrupted signature
+uploads can be retried without blocking later revisions or replacing older
+source. Existing archive bytes must match the clean rebuild before a missing
+or corrupt signature can be repaired.
+
+With each channel publish, the committed repository integration source is
+packaged into `release-integration-<commit>.tar.gz` and signed with the channel key
+(`release-integration-<commit>.tar.gz.sig`). The publisher refuses tracked local edits,
+uses `git archive` at `HEAD`, and records that revision in
+`release-integration-revision.txt` inside the archive. It includes tracked
+integration files except `AGENTS.md` and `CLAUDE.md`; it does not claim to
+contain the separately pinned source archives named by every package join.
+Those archives remain individually named and hash-pinned in
+[`packaging/channel-source-joins.json`](../packaging/channel-source-joins.json).
 
 ## Limits
 

@@ -138,10 +138,11 @@ nothing on J713:
 
 The image's `/etc/systemd/logind.conf.d/90-m4-ram.conf` keeps
 `HandleLidSwitch=ignore`, so closing the lid does not suspend. Suspend and
-resume are unqualified on J713. Linux also has no panel backlight control here
-yet (`/sys/class/backlight` is empty under simpledrm). The lock blanks the
-picture, but whether the panel itself goes dark with the lid shut has not been
-measured. macOS-style sleep on lid close needs that qualification first.
+resume are unqualified on J713. Alpha.1 images have no panel backlight device;
+the [native backlight channel update](package-channel.md#omarchy-m4-backlight-1-1-and-omarchy-m4-boot-1-14)
+adds `j713-dcp` through `omarchy-m4-update`. The lock blanks the picture, but
+whether the panel itself goes dark with the lid shut has not been measured.
+Native brightness control does not qualify macOS-style sleep on lid close.
 
 Upstream Omarchy added its own Apple SMC lid binds after 4.0.4 (commit
 `e1b0e5e`, not yet in a release). They go through the lid-close helper and its

@@ -1,0 +1,14 @@
+[Unit]
+Description=Start the J713 native panel backlight with a one-strike guard
+After=local-fs.target systemd-udev-trigger.service
+Before=graphical.target
+ConditionPathExists=/usr/lib/omarchy-m4/backlight/j713_dcp_backlight.ko
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/m4-backlight --boot
+RemainAfterExit=yes
+TimeoutStartSec=30
+
+[Install]
+WantedBy=multi-user.target

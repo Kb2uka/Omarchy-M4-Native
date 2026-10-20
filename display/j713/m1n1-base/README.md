@@ -1,5 +1,24 @@
 # m1n1: A bootloader and experimentation playground for Apple Silicon
 
+This directory preserves the upstream notices and selected source from the
+alpha.1 companion archive (`m1n1-stage2-source.tar.gz`, SHA-256
+`c394517941a5700b227718bb02e3df3dd43c9ad5a8e53c9447a55d3c36846c44`).
+The selected `src/kboot.c`, `src/dart.c`, and `src/dart.h` now include the
+J713/T8132 brightness-only handoff and bounded, read-only existing DART mapping
+visitor. They remain under the upstream MIT license. `SHA256SUMS` records the
+modified source, not the stock archive. The stock/notch recipe still extracts
+the pinned original archive; the backlight recipe copies these three modified
+files only after reproducing the original stage2 hash. Neither handoff variant
+initializes modesetting, scanout, or PIODMA. Physical DRAM reservations are
+derived exclusively from each boot's ADT and existing SID23 tables.
+
+`../build-backlight-loader.sh COMPANION_SOURCE_DIR OUT_DIR` produces
+`stage2-backlight-m1n1.bin` (stock hidden-notch preference) and
+`stage2-backlight-notch-m1n1.bin` (visible-notch preference), plus the reproduced
+`stage2-stock-m1n1.bin` and build logs. It uses the original `/job` build path,
+two make passes, clang/lld 21.1.8, rustc 1.93.1 with rust-src, and the x86-64
+alpha.1 builder environment. Native ARM64 output is not interchangeable.
+
 ## Building
 
 You need an `aarch64-linux-gnu-gcc` cross-compiler toolchain (or a native one, if running on ARM64).

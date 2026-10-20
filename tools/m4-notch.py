@@ -10,13 +10,13 @@ in with a stage 2 that keeps them (display/j713, docs/j713-notch.md):
 
   m4-notch                 report the current and the next-boot state
   sudo m4-notch --show     use the notch stage 2 from the next boot
-  sudo m4-notch --hide     go back to the stage 2 this Air had before
+  sudo m4-notch --hide     hide the cutout rows from the next boot
 
---show replaces only the first 0x110000 bytes of boot.bin, and only when they
-are a stage 2 this tool knows. It keeps the whole old file as boot.bin.pre-notch
-(the macOS recovery copy) and --hide splices that file's stage 2 back, so a
-kernel or devicetree update installed meanwhile is kept. m4-boot-compose
-carries the stage 2 byte for byte, so updates keep the owner's choice.
+--show and --hide replace only the first 0x110000 bytes with the corresponding
+packaged stage2. Both preserve the native backlight's per-boot reservations.
+The old boot file is kept as boot.bin.pre-notch for macOS recovery; a kernel or
+devicetree update installed meanwhile is preserved. m4-boot-compose keeps the
+owner's shown/hidden preference while upgrading the handoff stage2.
 
 --desktop is run at login by omarchy-m4-notch.service as the desktop user. When
 the booted framebuffer is the whole panel it fits the Omarchy bar to the cutout
@@ -46,16 +46,22 @@ COMPATIBLE = 'sys/firmware/devicetree/base/compatible'
 CHOSEN = 'sys/firmware/devicetree/base/chosen'
 BOOT = 'boot/efi/omarchy/boot.bin'
 BACKUP = 'boot/efi/omarchy/boot.bin.pre-notch'
-STAGED = 'usr/lib/omarchy-m4/m1n1-stage2-notch.bin'
+STAGED = 'usr/lib/omarchy-m4/backlight/stage2-shown.bin'
+HIDDEN_STAGED = 'usr/lib/omarchy-m4/backlight/stage2-hidden.bin'
 PACMAN_LOCK = 'var/lib/pacman/db.lck'
 LOADER_SIZE = 0x110000
-# Built by display/j713/build-notch-loader.sh: alpha.1's stage 2 plus
-# m1n1-show-notch.patch, version tag air-c9ef56f-gpu-stage2-20261008-notch1.
-NOTCH = {'sha256': 'f2417a74d13838004847a6fbdf946b524005301b88b5a403b1e79cb36d0ec7ca', 'size': LOADER_SIZE}
+# Both variants include the verified brightness-only DCP handoff.
+NOTCH = {'sha256': '692f656cd8f6dfb2530172da518f9e2e18e6c5032df3062cd603eb4539e4c405', 'size': LOADER_SIZE}
+HIDDEN = {'sha256': 'b86aee6840fe670b592271ec2816d42c5515cddc20a14e08bdc5bcbce547e6fd', 'size': LOADER_SIZE}
 # Stage 2 loaders --show may replace, all of which boot the owner's Air.
 KNOWN_LOADERS = {
     '3a3f7a64c65fc366d5ac9aece3e1bee64119be012aa1ec5b15d2743c6f91fce4': 'alpha.1',
     '7bc78b9138ae449eeab08d0a713c96f25e0d7477b7a48f2804da2c17509a9609': '#82 test build (dctx1)',
+    'b86aee6840fe670b592271ec2816d42c5515cddc20a14e08bdc5bcbce547e6fd': 'backlight1',
+}
+KNOWN_SHOWN_LOADERS = {
+    'f2417a74d13838004847a6fbdf946b524005301b88b5a403b1e79cb36d0ec7ca': 'notch1',
+    NOTCH['sha256']: 'backlight-notch1',
 }
 MARGIN = 1 << 20
 
@@ -151,7 +157,7 @@ def booted_state(root):
 # ---------------------------------------------------------------- boot.bin
 
 def loader_name(digest):
-    if digest == NOTCH['sha256']:
+    if digest in KNOWN_SHOWN_LOADERS:
         return 'notch'
     return KNOWN_LOADERS.get(digest, 'unknown')
 
@@ -161,6 +167,13 @@ def read_boot(root, compose, path=BOOT, what='boot.bin'):
     layout = compose.parse(data)
     require(len(layout['loader']) == LOADER_SIZE, what + ' does not start with a stage 2 loader')
     return data, layout
+
+
+def check_backup(root, compose, layout):
+    _, saved = read_boot(root, compose, BACKUP, 'The notch recovery backup')
+    require(loader_name(sha(saved['loader'])) != 'unknown' and
+            all(saved[name] == layout[name] for name in ('bootargs', 'initramfs')),
+            'Notch recovery backup is unrecognized or belongs to another boot object')
 
 
 def splice(compose, data, layout, loader):
@@ -211,16 +224,21 @@ def show(root):
     if current == NOTCH['sha256']:
         return {'status': 'already shown from the next boot', 'loader': 'notch',
                 'backup': str(root / BACKUP) if (root / BACKUP).exists() else None}
-    require(current in KNOWN_LOADERS, 'boot.bin starts with an unknown stage 2 ' + current + '; nothing changed')
+    require(current in KNOWN_LOADERS or current in KNOWN_SHOWN_LOADERS,
+            'boot.bin starts with an unknown stage2 ' + current + '; nothing changed')
     notch = compose.read_regular(root / STAGED, 'The notch stage 2')
     require(len(notch) == NOTCH['size'] and sha(notch) == NOTCH['sha256'],
             'The notch stage 2 does not match its pin; reinstall omarchy-m4-boot')
     desired = splice(compose, data, layout, notch)
     space(root, 2 * len(data))
     with guard(root, data):
-        compose.write(root / BACKUP, data)
+        if not os.path.lexists(root / BACKUP):
+            compose.write(root / BACKUP, data)
+        else:
+            check_backup(root, compose, layout)
         compose.write(root / BOOT, desired)
-    return {'status': 'notch shown from the next boot', 'loader': 'notch', 'replaced': KNOWN_LOADERS[current],
+    return {'status': 'notch shown from the next boot', 'loader': 'notch',
+            'replaced': KNOWN_LOADERS.get(current, KNOWN_SHOWN_LOADERS.get(current)),
             'backup': str(root / BACKUP), 'undo': 'sudo m4-notch --hide'}
 
 
@@ -234,14 +252,17 @@ def hide(root):
             with guard(root, data):
                 drop_backup(root, report)
         return report
-    require(current == NOTCH['sha256'], 'boot.bin starts with an unknown stage 2 ' + current + '; nothing changed')
-    _, saved = read_boot(root, compose, BACKUP, 'The notch backup ' + BACKUP)
-    original = sha(saved['loader'])
-    require(original in KNOWN_LOADERS, 'The notch backup holds an unknown stage 2 ' + original + '; nothing changed')
-    desired = splice(compose, data, layout, saved['loader'])
+    require(current in KNOWN_SHOWN_LOADERS,
+            'boot.bin starts with an unknown stage2 ' + current + '; nothing changed')
+    hidden = compose.read_regular(root / HIDDEN_STAGED, 'The hidden-notch handoff stage2')
+    require(len(hidden) == HIDDEN['size'] and sha(hidden) == HIDDEN['sha256'],
+            'The hidden-notch handoff stage2 does not match its pin')
+    desired = splice(compose, data, layout, hidden)
     space(root, len(data))
-    report = {'status': 'notch hidden from the next boot', 'loader': KNOWN_LOADERS[original]}
+    report = {'status': 'notch hidden from the next boot', 'loader': 'backlight1'}
     with guard(root, data):  # the backup goes under the lock too, so a --show cannot slip in between
+        if os.path.lexists(root / BACKUP):
+            check_backup(root, compose, layout)
         compose.write(root / BOOT, desired)
         drop_backup(root, report)
     return report

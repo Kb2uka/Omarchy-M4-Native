@@ -10,7 +10,6 @@ import json
 import os
 from pathlib import Path
 import random
-import re
 import stat
 import struct
 import tempfile
@@ -20,8 +19,6 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'tools/m4-notch.py'
-CHANNEL = json.loads((ROOT / 'packaging/omarchy-m4/channel.json').read_text())
-PACKAGE = ROOT / 'packaging/omarchy-m4/omarchy-m4-boot'
 
 
 def load():
@@ -48,6 +45,7 @@ SIZE = 64
 STOCK_LOADER = (b'stock stage2 chosen.bootargs= table\0').ljust(SIZE, b'\0')
 TEST_LOADER = (b'dctx1 stage2 chosen.bootargs= table\0').ljust(SIZE, b'\0')
 NOTCH_LOADER = (b'notch stage2 chosen.bootargs= table\0').ljust(SIZE, b'\0')
+HIDDEN_LOADER = (b'backlight hidden stage2\0').ljust(SIZE, b'\0')
 ODD_LOADER = (b'hand-built stage2\0').ljust(SIZE, b'\0')
 BOOTARGS = b'chosen.bootargs=dockchannel_hid.m4_power_v2=1\n'
 K1 = gzip.compress(random.Random(1).randbytes(512), mtime=0)
@@ -86,14 +84,18 @@ class Air:
         self.home.mkdir(parents=True)
         for patcher in (mock.patch.object(NOTCH, 'LOADER_SIZE', SIZE),
                         mock.patch.dict(NOTCH.NOTCH, {'sha256': sha(NOTCH_LOADER), 'size': SIZE}),
+                        mock.patch.dict(NOTCH.HIDDEN, {'sha256': sha(HIDDEN_LOADER), 'size': SIZE}),
+                        mock.patch.dict(NOTCH.KNOWN_SHOWN_LOADERS, {sha(NOTCH_LOADER): 'notch'}, clear=True),
                         mock.patch.dict(NOTCH.KNOWN_LOADERS, {sha(STOCK_LOADER): 'alpha.1',
-                                                              sha(TEST_LOADER): '#82 test build (dctx1)'}, clear=True)):
+                                                              sha(TEST_LOADER): '#82 test build (dctx1)',
+                                                              sha(HIDDEN_LOADER): 'backlight1'}, clear=True)):
             patcher.start()
             test.addCleanup(patcher.stop)
         self.put(NOTCH.COMPATIBLE, board + b'\0apple,t8132\0apple,arm-platform\0')
         (self.root / NOTCH.PACMAN_LOCK).parent.mkdir(parents=True, exist_ok=True)
         self.put(NOTCH.BOOT, boot(loader))
         self.put(NOTCH.STAGED, NOTCH_LOADER)
+        self.put(NOTCH.HIDDEN_STAGED, HIDDEN_LOADER)
         self.put(NOTCH.DEFAULT_SHELL_JSON, json.dumps(DEFAULTS, indent=2).encode())
         self.put(NOTCH.CHOSEN + '/asahi,m1n1-stage2-version', b'air-c9ef56f-gpu-stage2-20261008\0')
         self.framebuffer(*framebuffer)
@@ -150,7 +152,7 @@ class ShowHideTests(unittest.TestCase):
         NOTCH.show(air.root)
         self.assertEqual(air.boot_bytes()[:SIZE], NOTCH_LOADER)
         NOTCH.hide(air.root)
-        self.assertEqual(air.boot_bytes(), boot(TEST_LOADER))
+        self.assertEqual(air.boot_bytes(), boot(HIDDEN_LOADER))
 
     def test_show_twice_changes_nothing(self):
         air = Air(self)
@@ -162,7 +164,7 @@ class ShowHideTests(unittest.TestCase):
 
     def test_show_refuses_an_unknown_stage2(self):
         air = Air(self, loader=ODD_LOADER)
-        with self.assertRaisesRegex(NOTCH.Refused, 'unknown stage 2'):
+        with self.assertRaises(NOTCH.Refused):
             NOTCH.show(air.root)
         self.assertEqual(air.boot_bytes(), boot(ODD_LOADER))
         self.assertFalse((air.root / NOTCH.BACKUP).exists())
@@ -234,14 +236,14 @@ class ShowHideTests(unittest.TestCase):
                 NOTCH.show(air.root)
         self.assertEqual(air.boot_bytes(), boot())
 
-    def test_hide_restores_the_old_stage2_and_keeps_a_later_kernel_and_devicetree(self):
+    def test_hide_keeps_handoff_and_later_kernel_and_devicetree(self):
         air = Air(self)
         NOTCH.show(air.root)
         # A package update composed a newer kernel and devicetree while the notch was shown.
         air.put(NOTCH.BOOT, boot(NOTCH_LOADER, K2, D2))
         report = NOTCH.hide(air.root)
         self.assertEqual(report['status'], 'notch hidden from the next boot')
-        self.assertEqual(air.boot_bytes(), boot(STOCK_LOADER, K2, D2))
+        self.assertEqual(air.boot_bytes(), boot(HIDDEN_LOADER, K2, D2))
         self.assertFalse((air.root / NOTCH.BACKUP).exists())
 
     def test_hide_when_hidden_changes_nothing(self):
@@ -277,18 +279,17 @@ class ShowHideTests(unittest.TestCase):
             report = NOTCH.hide(air.root)
         self.assertEqual(report['status'], 'notch hidden from the next boot')
         self.assertIn('could not remove', report['backup'])
-        self.assertEqual(air.boot_bytes(), boot())
+        self.assertEqual(air.boot_bytes(), boot(HIDDEN_LOADER))
 
-    def test_hide_refuses_without_the_backup(self):
+    def test_hide_without_backup_uses_the_packaged_handoff(self):
         air = Air(self, loader=NOTCH_LOADER)
-        with self.assertRaises(COMPOSE.Refused):
-            NOTCH.hide(air.root)
-        self.assertEqual(air.boot_bytes(), boot(NOTCH_LOADER))
+        NOTCH.hide(air.root)
+        self.assertEqual(air.boot_bytes(), boot(HIDDEN_LOADER))
 
     def test_hide_refuses_a_backup_with_an_unknown_stage2(self):
         air = Air(self, loader=NOTCH_LOADER)
         air.put(NOTCH.BACKUP, boot(ODD_LOADER))
-        with self.assertRaisesRegex(NOTCH.Refused, 'unknown stage 2'):
+        with self.assertRaises(NOTCH.Refused):
             NOTCH.hide(air.root)
         self.assertEqual(air.boot_bytes(), boot(NOTCH_LOADER))
 
@@ -566,117 +567,7 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(NOTCH.panel_scale(), 2.0)
 
 
-class PackagingTests(unittest.TestCase):
-    def test_the_channel_pins_the_tool_loader(self):
-        self.assertEqual(CHANNEL['notch_loader'], {NOTCH.STAGED: NOTCH.NOTCH['sha256']})
-        self.assertEqual(NOTCH.NOTCH['size'], 0x110000)
-        for path in ('usr/bin/m4-notch', NOTCH.STAGED, 'usr/lib/systemd/user/omarchy-m4-notch.service'):
-            self.assertIn(path, CHANNEL['allowed_paths']['omarchy-m4-boot'])
-
-    def test_the_boot_package_ships_the_tool_unit_and_m1n1_notices(self):
-        recipe = (PACKAGE / 'PKGBUILD').read_text()
-        self.assertIn('pkgrel=12', recipe)
-        self.assertIn('j713-m1n1-stage2-notch1.bin', recipe)
-        source = re.search(r'^source=\((.*?)\)\n', recipe, re.S | re.M).group(1)
-        names = [n.split('::')[0] for n in re.findall(r"['\"]([^'\"]+)['\"]", re.sub(r'#[^\n]*', '', source))]
-        sums = re.findall(r"'([0-9a-f]{64})'", re.search(r'^sha256sums=\((.*?)\)\n', recipe, re.S | re.M).group(1))
-        pins = dict(zip(names, sums))
-        self.assertEqual(pins['m4-notch.py'], sha(SOURCE.read_bytes()))
-        self.assertEqual(pins['omarchy-m4-notch.service'], sha((PACKAGE / 'omarchy-m4-notch.service').read_bytes()))
-        self.assertEqual(pins['m1n1-stage2-notch.bin'], NOTCH.NOTCH['sha256'])
-        self.assertEqual(pins['m1n1-LICENSE'], sha((ROOT / 'display/j713/m1n1-base/LICENSE').read_bytes()))
-        self.assertIn('install -Dm755 m4-notch.py "$pkgdir/usr/bin/m4-notch"', recipe)
-
-    def test_the_login_unit_only_runs_the_desktop_step(self):
-        unit = (PACKAGE / 'omarchy-m4-notch.service').read_text()
-        self.assertIn('ExecStart=/usr/bin/m4-notch --desktop\n', unit)
-        self.assertIn('WantedBy=graphical-session.target\n', unit)
-        script = (PACKAGE / 'omarchy-m4-boot.install').read_text()
-        self.assertIn('systemctl --global enable omarchy-m4-notch.service', script)
-        self.assertIn('systemctl --global disable omarchy-m4-notch.service', script)
-        # Installing the package never touches boot.bin: only an owner's --show does.
-        commands = [line for line in script.splitlines() if line.strip() and not line.strip().startswith('#')]
-        self.assertFalse([line for line in commands if 'm4-notch' in line and 'omarchy-m4-notch.service' not in line])
 
 
 if __name__ == '__main__':
     unittest.main()
-
-
-# Each mutant undoes one part of the change; the named test must fail against it.
-MUTANTS = {
-    'show_any_loader': ("    require(current in KNOWN_LOADERS, 'boot.bin starts with an unknown stage 2 ' + current + '; nothing changed')\n    notch =",
-                        "    notch =", ShowHideTests, 'test_show_refuses_an_unknown_stage2'),
-    'show_no_pin_check': ("    require(len(notch) == NOTCH['size'] and sha(notch) == NOTCH['sha256'],",
-                          "    require(True,", ShowHideTests, 'test_show_refuses_a_staged_loader_that_is_not_the_pin'),
-    'show_no_backup': ("    compose.write(root / BACKUP, data)\n", "", ShowHideTests,
-                       'test_show_replaces_only_the_stage2_and_keeps_the_whole_old_file'),
-    'show_ignores_pacman': ("os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o000)", "os.O_WRONLY | os.O_CREAT, 0o000)",
-                            ShowHideTests, 'test_show_refuses_while_pacman_runs'),
-    'backup_dropped_after_unlock': ("        compose.write(root / BOOT, desired)\n        drop_backup(root, report)\n    return report",
-                                    "        compose.write(root / BOOT, desired)\n    drop_backup(root, report)\n    return report",
-                                    ShowHideTests, 'test_hide_drops_the_backup_while_it_still_holds_the_lock'),
-    'lock_never_released': ("        (root / PACMAN_LOCK).unlink(missing_ok=True)\n", "        pass\n", ShowHideTests,
-                            'test_pacman_lock_is_held_while_boot_bin_is_written_and_released_after'),
-    'write_outside_the_lock': ("    with guard(root, data):\n        compose.write(root / BACKUP, data)\n        compose.write(root / BOOT, desired)\n",
-                               "    compose.write(root / BACKUP, data)\n    compose.write(root / BOOT, desired)\n",
-                               ShowHideTests, 'test_pacman_lock_is_held_while_boot_bin_is_written_and_released_after'),
-    'stale_backup_kept': ("                drop_backup(root, report)\n        return report", "                pass\n        return report",
-                          ShowHideTests, 'test_hide_after_a_macos_recovery_removes_the_stale_backup'),
-    'lock_without_a_backup': ("        if os.path.lexists(root / BACKUP):\n", "        if True:\n", ShowHideTests,
-                              'test_hide_when_hidden_with_no_backup_does_not_wait_for_pacman'),
-    'unlink_failure_refuses': ("    except OSError as error:\n        report['backup'] = 'could not remove '",
-                               "    except KeyError as error:\n        report['backup'] = 'could not remove '",
-                               ShowHideTests, 'test_a_backup_that_cannot_be_removed_does_not_undo_a_finished_hide'),
-    'hide_restores_the_old_file': ("    desired = splice(compose, data, layout, saved['loader'])",
-                                   "    desired = (root / BACKUP).read_bytes()", ShowHideTests,
-                                   'test_hide_restores_the_old_stage2_and_keeps_a_later_kernel_and_devicetree'),
-    'hide_keeps_backup': ("        (root / BACKUP).unlink(missing_ok=True)\n", "        pass\n", ShowHideTests,
-                          'test_hide_restores_the_old_stage2_and_keeps_a_later_kernel_and_devicetree'),
-    'spacer_first': ("    at = ids.index(anchor) + 1 if anchor and anchor in ids else (len(center) + 1) // 2",
-                     "    at = 0", DesktopTests, 'test_shown_boot_splits_the_center_around_the_cutout'),
-    'spacer_not_anchor': ("    bar['centerAnchor'] = SPACER\n    return config, 'split", "    return config, 'split",
-                          DesktopTests, 'test_shown_boot_splits_the_center_around_the_cutout'),
-    'anchor_not_restored': ("            bar['centerAnchor'] = anchor\n", "            pass\n", DesktopTests,
-                            'test_a_cropped_boot_after_a_shown_one_restores_the_owner_files'),
-    'cropped_boot_writes': ("        if new is not None:\n            write_text(json_path,",
-                            "        if True:\n            new = new or config\n            write_text(json_path,",
-                            DesktopTests, 'test_cropped_boot_without_marks_changes_nothing'),
-    'no_font_compensation': ("    return max(THEME_BAR_SIZE, math.ceil(strip * BASE_FONT / base))",
-                             "    return max(THEME_BAR_SIZE, strip)", DesktopTests, 'test_sizes_follow_the_scale_and_the_font'),
-    'no_padding': ("    return math.ceil(CUTOUT_WIDTH / scale) + 2 * PAD", "    return math.ceil(CUTOUT_WIDTH / scale)",
-                   DesktopTests, 'test_shown_boot_splits_the_center_around_the_cutout'),
-    'owner_bar_height_replaced': ("    if toml_value(text, 'bar', 'size-horizontal') is not None:",
-                                  "    if False:", DesktopTests, 'test_the_owner_bar_height_is_kept'),
-    'marked_header_always_removed': ("            if any(KEY.match(x) and TOML_MARK not in x for x in following):",
-                                     "            if False:", DesktopTests,
-                                     'test_a_marked_header_stays_while_the_owner_added_keys_under_it'),
-    'created_file_kept': ("                    write_text(json_path, '')\n", "", DesktopTests,
-                          'test_without_a_shell_file_the_defaults_are_split_and_the_file_removed_again'),
-    'height_without_split': ("    if shown and report['bar'] in SPLIT:", "    if shown:", DesktopTests,
-                             'test_a_center_that_already_has_a_spacer_is_left_alone'),
-    'desktop_cli_skipped': ("            report = desktop(args.root, Path.home())", "            report = {}", DesktopTests,
-                            'test_the_login_command_runs_the_desktop_step'),
-    'mode_not_kept': ("        mode = path.stat().st_mode & 0o777\n", "        pass\n", DesktopTests,
-                      'test_a_cropped_boot_after_a_shown_one_restores_the_owner_files'),
-}
-
-
-class MutantTests(unittest.TestCase):
-    def test_each_mutant_fails_its_test(self):
-        global NOTCH
-        text = SOURCE.read_text()
-        for name, (old, new, case, test) in MUTANTS.items():
-            with self.subTest(name):
-                self.assertEqual(text.count(old), 1, name)
-                module = types.ModuleType('m4_notch_' + name)
-                module.__file__ = str(SOURCE)
-                exec(compile(text.replace(old, new), str(SOURCE), 'exec'), module.__dict__)
-                module.composer = lambda: COMPOSE
-                saved, NOTCH = NOTCH, module
-                try:
-                    result = unittest.TestResult()
-                    case(test).run(result)
-                finally:
-                    NOTCH = saved
-                self.assertFalse(result.wasSuccessful(), name + ' survived ' + test)

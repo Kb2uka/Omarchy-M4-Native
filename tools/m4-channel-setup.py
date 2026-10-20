@@ -48,8 +48,10 @@ HEADPHONES_STATE = 'var/lib/omarchy-m4/headphones'
 CPU_IDLE_STAGED = 'usr/lib/omarchy-m4/cpu/j713_cpuidle.ko'
 CPU_GUARD_STAGED = 'usr/lib/omarchy-m4/cpu/j713_pguard.ko'
 CPU_IDLE_STATE = 'var/lib/omarchy-m4/cpu-idle'
+BACKLIGHT_STAGED = 'usr/lib/omarchy-m4/backlight/j713_dcp_backlight.ko'
+BACKLIGHT_STATE = 'var/lib/omarchy-m4/backlight'
 PACKAGES = ('omarchy-m4-keyring', 'omarchy-m4-boot', 'linux-m4-omarchy', 'omarchy-m4-gst-audio', 'omarchy-m4-speaker',
-            'omarchy-m4-gpu', 'omarchy-m4-headphones', 'omarchy-m4-cpu')
+            'omarchy-m4-gpu', 'omarchy-m4-headphones', 'omarchy-m4-cpu', 'omarchy-m4-evdi', 'omarchy-m4-backlight')
 SINKS = 'omarchy-m4-gst-audio'  # gst-plugins-good already has both sinks and conflicts with it
 BOARD = b'apple,j713'
 CONF = 'etc/pacman.conf'
@@ -238,6 +240,13 @@ def cpu_idle_pending(root):
     return idle or guard
 
 
+def backlight_pending(root):
+    state = root / BACKLIGHT_STATE
+    return ((root / BACKLIGHT_STAGED).is_file() and (root / 'sys/module').is_dir() and
+            not (root / 'sys/module/j713_dcp_backlight').exists() and
+            not (state / 'hold').exists() and not (state / 'attempt').exists())
+
+
 def boot_digest(root):
     path = root / BOOT
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
@@ -320,7 +329,7 @@ def connect(root, apply, server, key, fingerprint, output):
             'fix the cause, then run this again')
     machine.start_notifier()
     restart = (boot_digest(root) != before or speaker_pending(root) or gpu_pending(root) or
-               headphones_pending(root) or cpu_idle_pending(root))
+               headphones_pending(root) or cpu_idle_pending(root) or backlight_pending(root))
     plan.update(applied=True, boot=boot, restart_needed=restart,
                 status=('connected; restart once to apply the update' if restart else
                         'connected; future M4 fixes arrive with omarchy-m4-update'))

@@ -10,9 +10,11 @@ boot entry has been installed.
 The [profile patch](../patches/installer/j713-recovery-radio-profile.patch)
 applies to [Gravity Linux installer](https://github.com/GravityLinux/installer)
 revision `6420623289fe7544cb8589b658355e57f0290fcc`. It adds an experimental
-`j713ap` profile gated by the installer's existing expert mode. It does not
-enable other Air models or M4 Pro/Max systems. The Mini's 26.6.2 requirement
-and the shared T8132 minimum remain unchanged; only J713 selects 26.5.1.
+`j713ap` profile gated by the installer's existing expert mode, and a
+`j715ap` profile for the 15-inch Air, a `testing` board
+([m4-boards.md](m4-boards.md), #142), with the same 26.5.1 image behind expert
+mode. It does not enable other Air models or M4 Pro/Max systems. The Mini's 26.6.2 requirement
+and the shared T8132 minimum remain unchanged; J713 and J715 select 26.5.1.
 
 This is a recovery and firmware packaging checkpoint, not an installable Omarchy
 distribution. The complete boot chain, SSD root filesystem, owner setup,
@@ -41,6 +43,14 @@ The hash-pinned 26.5.1 recovery's `C-4388__s-C2` firmware directory contains
 only module revision 4.9 for Garden WLMT, for both vendors. Its separate C0
 directory has revision 4.7; this C2 profile does not select it or qualify
 another module revision or another Air unit.
+
+The `j715ap` profile selects the same file set from the 15-inch Air's `kos`
+module: `kos.trx`/`.clmb`/`.txcb`/`.sig`, `P-kos_M-WLMT_V-{a,u}__m-4.9.txt` and
+both vendors' `Willamette_Kos` Bluetooth binary/PTB pairs. Garden and Kos
+select only their own files. The unit tests check that selection with fixture
+files; the native recovery check has not been run for `kos` and no `kos`
+firmware fixture is recorded yet. On one J715 installed from a kit built with
+this profile, Wi-Fi and Bluetooth worked (#142).
 
 ## Failures reproduced and corrected
 

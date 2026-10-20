@@ -13,8 +13,8 @@ sudo m4-notch --hide    # back to 2560x1600 from the next restart
 m4-notch                # what this boot shows, and what the next boot will
 ```
 
-The default does not change. An Air that never runs `--show` boots the same
-loader bytes as before and its desktop files are never touched.
+The default notch preference does not change. Native-backlight updates may
+replace the loader bytes, but an Air that never chooses `--show` stays cropped.
 
 ## Why it needs a bootloader change
 
@@ -42,32 +42,36 @@ has no display driver yet, so that parameter does nothing here.
 [`display/j713/m1n1-show-notch.patch`](../display/j713/m1n1-show-notch.patch)
 replaces the crop: the function still detects the notch and logs
 `display: Showing notch, 2560x1664 (stock m1n1 hides 64 rows, 16:10)`, but
-leaves the base and height as iBoot set them. Nothing else in m1n1 changes.
+leaves the base and height as iBoot set them. The notch patch changes only this
+geometry; both current loader variants also preserve the native backlight's
+per-boot DCP memory reservations.
 With the full height, m1n1 also skips the `apple,notch-height` note it writes
 only for a cropped framebuffer.
 
-[`display/j713/build-notch-loader.sh`](../display/j713/build-notch-loader.sh)
-builds it from alpha.1's published stage-2 source
-(`m1n1-stage2-source.tar.gz`, `c3945179…`) in `m4-gravity-builder:20261008`,
-as root, the way alpha.1 was built (Rust embeds the `/root/.cargo` paths). It
-first rebuilds the unpatched source and requires alpha.1's shipped stage 2,
-`3a3f7a64…`, byte for byte. The notch stage 2 is then
-`f2417a74d13838004847a6fbdf946b524005301b88b5a403b1e79cb36d0ec7ca`
-(0x110000 bytes, tag `air-c9ef56f-gpu-stage2-20261008-notch1`), and two clean
-builds gave the same bytes. It is pinned in the `package-inputs` release and in
-`channel.json` (`notch_loader`).
+[`display/j713/build-backlight-loader.sh`](../display/j713/build-backlight-loader.sh)
+builds both preferences from alpha.1's stage2 source (`c3945179…`). Each
+pipeline first reproduces the stock `3a3f7a64…` loader, then adds the bounded
+T8132 handoff and, for the shown variant, the notch patch. Two clean x86-64
+builds with Ubuntu clang/lld 21.1.8 and rustc 1.93.1 produced identical bytes.
+Native ARM64 builds are not byte-identical to alpha.1's x86-64 builder.
 
-`display/j713/m1n1-base/` holds the unmodified MIT `src/kboot.c`, m1n1's
-`LICENSE`, its README (whose License section names every embedded part) and its
-`3rdparty_licenses/`. `SHA256SUMS` pins them to alpha.1's published
-`m1n1-stage2-files.json`. The boot package installs those notices under
-`/usr/share/licenses/omarchy-m4-boot/m1n1/`.
+| Preference | Stage2 SHA-256 prefix | Version tag suffix |
+| --- | --- | --- |
+| Hidden | `b86aee68` | `-backlight1` |
+| Shown | `692f656c` | `-backlight1-notch1` |
+
+Both are 0x110000 bytes and pinned in `channel.json` (`backlight_loaders`).
+The handoff reserves this boot's mapped DCP pages from ADT/DART data; it does
+not take over modesetting, scanout or PIODMA. `m1n1-base/` records the changed
+source and preserves its upstream license notices. The package installs those
+notices under `/usr/share/licenses/omarchy-m4-boot/m1n1/`.
 
 ## The switch
 
-`omarchy-m4-boot` 1-12 delivers `m4-notch`, the notch stage 2 at
-`/usr/lib/omarchy-m4/m1n1-stage2-notch.bin` and a login unit, through
-`omarchy-m4-update` like every M4 update. Installing it changes nothing.
+`omarchy-m4-boot` 1-14 delivers `m4-notch`, both handoff stage2 variants under
+`/usr/lib/omarchy-m4/backlight/`, and the existing login unit through
+`omarchy-m4-update`. The composer upgrades the loader and enabled backlight
+devicetree together without changing the chosen notch preference.
 
 `sudo m4-notch --show`:
 
@@ -79,23 +83,25 @@ builds gave the same bytes. It is pinned in the `package-inputs` release and in
   (with no pacman running) clears it, as pacman's own message says;
 - parses `boot.bin` with `m4-boot-compose`'s own parser, so a file the composer
   does not recognise is refused;
-- replaces the stage 2 (the first 0x110000 bytes) only when it is alpha.1's
-  (`3a3f7a64…`) or the published #82 test build (`7bc78b91…`, `-dctx1`), and
-  only with a staged file that matches the pin;
+- replaces only a known stage2, retaining support for migration from alpha.1,
+  the published #82 test build and the original notch build; the replacement
+  must match its package pin;
 - checks the result keeps the boot arguments, kernel, devicetree and firmware
   payload byte for byte;
-- keeps the whole old file as `/boot/efi/omarchy/boot.bin.pre-notch`, then
-  writes a verified copy and renames it over `boot.bin` (the composer's writer).
+- keeps the old file as `/boot/efi/omarchy/boot.bin.pre-notch` if no recovery
+  copy exists; an existing copy must belong to the same boot object;
+- writes a verified copy and atomically renames it over `boot.bin`.
 
-`sudo m4-notch --hide` splices the stage 2 from `boot.bin.pre-notch` back in,
-so a kernel or devicetree update installed while the notch was shown is kept,
-then removes the backup. When the notch is already hidden it only removes a
-leftover backup, for example after the macOS recovery copy below. Both directions take effect at the next restart and
-leave `boot.bin` unchanged when it is already in the requested state.
+`sudo m4-notch --hide` uses the packaged hidden-notch handoff loader, rather
+than restoring a pre-backlight loader from the recovery copy. Kernel,
+devicetree, boot arguments and firmware installed meanwhile stay unchanged.
+Both directions take effect at the next restart. A known recovery copy is
+removed only after the hide completes.
 
-`m4-boot-compose` carries the stage 2 byte for byte, so package updates keep
-the owner's choice. Its own `--rollback` refuses a `boot.bin.previous` made
-before a `--show` or `--hide`, because the loader differs; use `m4-notch`.
+`m4-boot-compose` upgrades the loader while keeping its shown/hidden preference.
+Its `--rollback` restores loader and devicetree together when their notch
+preferences agree; it refuses a recovery object with different owner boot
+arguments, firmware, or notch preference.
 
 **If the Air does not start after `--show`:** start up from macOS, mount the
 `EFI - OMARC` partition, and copy `omarchy/boot.bin.pre-notch` over

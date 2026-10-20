@@ -1,0 +1,5 @@
+post_install() {
+  echo '==> USB displays: DisplayLink adapters also need the displaylink package; see'
+  echo '    https://github.com/Kb2uka/Omarchy-M4-Native/blob/develop/docs/j713-external-displays.md'
+  echo '    USB-C and Thunderbolt monitors, and plain USB-C to HDMI adapters, do not work yet.'
+}

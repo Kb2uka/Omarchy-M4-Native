@@ -1,13 +1,14 @@
 {
-  "schema": 1,
-  "soc": {
-    "chip": "T8132",
-    "compatible": "apple,t8132"
-  },
+  "schema": 2,
+  "socs": [
+    {"chip": "T8132", "compatible": "apple,t8132", "name": "M4"},
+    {"chip": "T6040", "compatible": "apple,t6040", "name": "M4 Pro"}
+  ],
   "boards": [
     {
       "target": "J713",
       "compatible": "apple,j713",
+      "soc": "apple,t8132",
       "models": ["Mac16,12"],
       "name": "MacBook Air (13-inch, M4, 2025)",
       "support": "qualified",
@@ -16,14 +17,16 @@
     {
       "target": "J715",
       "compatible": "apple,j715",
+      "soc": "apple,t8132",
       "models": ["Mac16,13"],
       "name": "MacBook Air (15-inch, M4, 2025)",
-      "support": "refused",
-      "installer": null
+      "support": "testing",
+      "installer": {"stub": "26.5.1", "expert_only": true}
     },
     {
       "target": "J604",
       "compatible": "apple,j604",
+      "soc": "apple,t8132",
       "models": ["Mac16,1"],
       "name": "MacBook Pro (14-inch, M4, 2024)",
       "support": "refused",
@@ -32,6 +35,7 @@
     {
       "target": "J623",
       "compatible": "apple,j623",
+      "soc": "apple,t8132",
       "models": ["Mac16,2"],
       "name": "iMac (24-inch, 2024, Two ports)",
       "support": "refused",
@@ -40,6 +44,7 @@
     {
       "target": "J624",
       "compatible": "apple,j624",
+      "soc": "apple,t8132",
       "models": ["Mac16,3"],
       "name": "iMac (24-inch, 2024, Four ports)",
       "support": "refused",
@@ -48,17 +53,23 @@
     {
       "target": "J773g",
       "compatible": "apple,j773g",
+      "soc": "apple,t8132",
       "models": ["Mac16,10"],
       "name": "Mac mini (M4, 2024)",
-      "support": "refused",
+      "support": "testing",
       "installer": {"stub": "26.6.2", "expert_only": false}
+    },
+    {
+      "target": "J773s",
+      "compatible": "apple,j773s",
+      "soc": "apple,t6040",
+      "models": ["Mac16,11"],
+      "name": "Mac mini (M4 Pro, 2024)",
+      "support": "refused",
+      "installer": null
     }
   ],
-  "other_socs": [
-    {
-      "models": ["Mac16,11"],
-      "name": "Mac mini (M4 Pro, 2024)"
-    },
+  "unlisted": [
     {
       "models": ["Mac16,5", "Mac16,6", "Mac16,7", "Mac16,8"],
       "name": "MacBook Pro (14-inch and 16-inch, M4 Pro or M4 Max, 2024)"

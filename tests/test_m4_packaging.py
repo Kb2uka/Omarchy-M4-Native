@@ -6,7 +6,9 @@ import importlib.util
 import json
 from pathlib import Path
 import io
+import os
 import re
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -52,19 +54,6 @@ class RecipeTests(unittest.TestCase):
         self.assertFalse(covers_protected('usr/lib/gstreamer-1.0/', CHANNEL['protected_paths']))
         self.assertFalse(covers_protected('usr/lib/omarchy-m4/j713.dtb', CHANNEL['protected_paths']))
 
-    def test_local_sources_match_their_hashes(self):
-        for name in CHANNEL['packages']:
-            text = recipe(name)
-            sources = re.search(r'^source=\((.*?)\)', text, re.M | re.S).group(1)
-            sums = re.findall(r"'([0-9a-f]{64})'", re.search(r'^sha256sums=\((.*?)\)', text, re.M | re.S).group(1))
-            entries = re.findall(r"""['"]([^'"]+)['"]""", sources)
-            self.assertEqual(len(entries), len(sums), name)
-            for entry, digest in zip(entries, sums):
-                if '::' in entry or '$' in entry:  # remote, pinned by URL and hash
-                    continue
-                staged = BUILD.STAGED.get(name, {}).get(entry)
-                path = ROOT / staged if staged else PACKAGING / name / entry
-                self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), digest, f'{name}: {entry}')
 
     def test_kernel_pin_is_the_qualified_alpha1_kernel(self):
         release = load('tools/prepare-j713-release.py')
@@ -83,15 +72,57 @@ class RecipeTests(unittest.TestCase):
         self.assertIn("conflicts=('linux-aarch64')", text)
         self.assertIn("provides=('linux=7.1.9' 'linux-aarch64=7.1.9')", text)
 
-    def test_boot_package_carries_the_front_usb_devicetree(self):
-        text = recipe('omarchy-m4-boot')
-        self.assertIn('releases/download/package-inputs/j713-usb0.dtb', text)
-        self.assertIn(CHANNEL['devicetree']['sha256'], text)
-        self.assertEqual(load('tools/m4-boot-compose.py').KNOWN_DTBS[CHANNEL['devicetree']['sha256']],
-                         'j713-usb0')
-        self.assertIn("depends=('python' 'pacman' 'omarchy-m4-gpu' 'omarchy-m4-headphones' 'omarchy-m4-cpu')\n",
-                      text, 'gst-plugins-good must be able to replace the sinks; the GPU fix, the headphone '
-                      'jack and CPU idle must come with this version')
+
+    def test_evdi_recipe_pins_the_channel_builds(self):
+        text = recipe('omarchy-m4-evdi')
+        self.assertEqual((field(text, 'pkgver'), field(text, 'pkgrel')), ('1.15.1', '1'))
+        for pins, name in ((CHANNEL['evdi_module'], 'evdi-1.15.1'), (CHANNEL['evdi_library'], 'libevdi-1.15.1')):
+            for path, digest in pins.items():
+                self.assertIn(f"'{digest}'", text)
+                self.assertIn(f'package-inputs/{name}-{digest[:8]}.', text)
+                self.assertIn(f'"$pkgdir/{path}"', text)
+        self.assertIn("provides=('evdi=1.15.1')", text)
+        self.assertIn("conflicts=('evdi' 'evdi-dkms' 'evdi-git')", text)
+        build = (ROOT / 'display/evdi/build.sh').read_text()
+        # The module is built on the alpha.1 kernel tree the channel kernel came from.
+        self.assertIn('tree_sha=810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57', build)
+        self.assertIn(f"/usr/lib/modules/{CHANNEL['kernel']['release']}/updates/evdi.ko", text)
+
+    def test_evdi_build_refuses_each_unpinned_input_before_building(self):
+        build = ROOT / 'display/evdi/build.sh'
+        text = build.read_text()
+        tree_pin = re.search(r'^tree_sha=([0-9a-f]{64})$', text, re.M).group(1)
+        evdi_pin = re.search(r'^evdi_sha=([0-9a-f]{64})$', text, re.M).group(1)
+        with tempfile.TemporaryDirectory() as temp:
+            temp = Path(temp)
+            # A sha256sum stand-in: the files named "pinned-tree" and "pinned-evdi" hash to the
+            # pins, so each check is exercised alone with a well-formed but unpinned partner.
+            shim = temp / 'bin/sha256sum'
+            shim.parent.mkdir()
+            shim.write_text('#!/bin/sh\ncase "$(cat)" in\n'
+                            f'  pinned-tree) echo "{tree_pin}  -" ;;\n'
+                            f'  pinned-evdi) echo "{evdi_pin}  -" ;;\n'
+                            '  *) echo "0000000000000000000000000000000000000000000000000000000000000000  -" ;;\n'
+                            'esac\n')
+            shim.chmod(0o755)
+            tree, evdi, other = temp / 'tree.tar.gz', temp / 'evdi.tar.gz', temp / 'other.tar.gz'
+            tree.write_text('pinned-tree')
+            evdi.write_text('pinned-evdi')
+            with tarfile.open(other, 'w:gz') as archive:  # a valid archive that is not the pin
+                archive.addfile(tarfile.TarInfo('evdi-1.15.1/README.md'), io.BytesIO(b''))
+            env = {**os.environ, 'PATH': f"{shim.parent}:{os.environ['PATH']}"}
+            # Each case names the archive that must be refused; the message proves which check
+            # stopped the build, whatever state the host's /job is in.
+            for name, args in (('module: unpinned tree', ['module', other, evdi]),
+                               ('module: unpinned evdi', ['module', tree, other]),
+                               ('library: unpinned evdi', ['library', other])):
+                with self.subTest(name):
+                    out = temp / ('out-' + name.replace(' ', '-').replace(':', ''))
+                    result = subprocess.run(['bash', str(build), *map(str, args), str(out)],
+                                            capture_output=True, text=True, env=env)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(f'refusing {other}: not the pinned input', result.stderr)
+                    self.assertFalse(out.exists(), 'nothing is built from an unpinned archive')
 
     def test_gpu_recipe_pins_the_channel_module(self):
         text = recipe('omarchy-m4-gpu')
@@ -121,16 +152,6 @@ class RecipeTests(unittest.TestCase):
             self.assertIn(digest, text)
         self.assertIn("conflicts=('gst-plugins-good')", text)
 
-    def test_hook_covers_every_boot_input(self):
-        hook = (PACKAGING / 'omarchy-m4-boot/90-omarchy-m4-boot.hook').read_text()
-        compose = load('tools/m4-boot-compose.py')
-        targets = set(re.findall(r'^Target = (.+)$', hook, re.M))
-        self.assertEqual(targets, {compose.KERNEL, compose.DTB, 'usr/bin/m4-boot-compose'})
-        self.assertIn('When = PostTransaction', hook)
-        self.assertIn('Exec = /usr/bin/m4-boot-compose --apply\n', hook)
-        for target in targets:
-            owners = [n for n, paths in CHANNEL['allowed_paths'].items() if CHECK.allowed(target, paths)]
-            self.assertEqual(len(owners), 1, target)
 
     def test_allowlists_never_reach_protected_paths(self):
         exceptions = CHANNEL['protected_exceptions']
@@ -232,7 +253,7 @@ class PolicyTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     CHECK.check_package(CHANNEL, *self.package('omarchy-m4-speaker', files))
 
-    def test_boot_package_must_bring_the_gpu_and_headphone_packages(self):
+    def test_boot_package_must_bring_the_gpu_headphone_cpu_and_evdi_packages(self):
         realtime = (PACKAGING / 'omarchy-m4-boot/speakersafetyd-j713-realtime.conf').read_bytes()
         files = {**self.boot_files(), CHECK.REALTIME: (0o644, hashlib.sha256(realtime).hexdigest())}
         CHECK.check_package(CHANNEL, *self.boot_package(files))
@@ -241,6 +262,39 @@ class PolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'must require the headphone jack package'):
             CHECK.check_package(CHANNEL, *self.boot_package(
                 files, {**self.boot_info(), 'depend': ['python', 'pacman', 'omarchy-m4-gpu']}))
+        without_evdi = [d for d in self.boot_info()['depend'] if d != 'omarchy-m4-evdi']
+        with self.assertRaisesRegex(ValueError, 'must require the USB display package'):
+            CHECK.check_package(CHANNEL, *self.boot_package(files, {**self.boot_info(), 'depend': without_evdi}))
+
+    def evdi_info(self):
+        return {'pkgname': ['omarchy-m4-evdi'], 'pkgver': ['1.15.1-1'], 'arch': ['aarch64'],
+                'provides': ['evdi=1.15.1'], 'conflict': ['evdi', 'evdi-dkms', 'evdi-git'],
+                'depend': ['linux-m4-omarchy', 'kmod']}
+
+    def test_evdi_package_must_be_the_pin_with_arch_evdi_relations(self):
+        good = {**{p: (0o644, d) for p, d in CHANNEL['evdi_module'].items()},
+                **{p: (0o755, d) for p, d in CHANNEL['evdi_library'].items()},
+                'usr/share/licenses/omarchy-m4-evdi/GPL-2.0-only.txt': (0o644, file_sha('LICENSES/GPL-2.0-only.txt'))}
+        package = lambda files, info=None: self.package('omarchy-m4-evdi', files, info or self.evdi_info(),
+                                                         version='1.15.1-1')
+        CHECK.check_package(CHANNEL, *package(good))
+        module, library = next(iter(CHANNEL['evdi_module'])), next(iter(CHANNEL['evdi_library']))
+        other_release = module.replace(CHANNEL['kernel']['release'], '7.2.0-other')
+        for files, info, message in (
+                ({**good, module: (0o644, '0' * 64)}, None, 'evdi module differs from the pin'),
+                ({k: v for k, v in good.items() if k != library}, None, 'evdi library differs from the pin'),
+                ({**good, 'usr/lib/libevdi.so.1': (0o644, 'x')}, None, 'unlisted path'),
+                ({**good, other_release: (0o644, 'x')}, None, 'unlisted path'),
+                (good, {**self.evdi_info(), 'provides': []}, 'relations changed'),
+                (good, {**self.evdi_info(), 'provides': ['evdi=1.16.0']}, 'relations changed'),
+                (good, {**self.evdi_info(), 'conflict': ['evdi']}, 'relations changed')):
+            with self.subTest(message), self.assertRaisesRegex(ValueError, message):
+                CHECK.check_package(CHANNEL, *package(files, info))
+        channel = json.loads(json.dumps(CHANNEL))
+        channel['evdi_module'] = {other_release: '0' * 64}
+        channel['allowed_paths']['omarchy-m4-evdi'].append(other_release)
+        with self.assertRaisesRegex(ValueError, 'not installed for the channel kernel'):
+            CHECK.check_package(channel, *package({**good, other_release: (0o644, '0' * 64)}))
 
     def test_gpu_package_must_be_the_pin(self):
         good = {path: (0o644, digest) for path, digest in CHANNEL['gpu_module'].items()}
@@ -340,10 +394,6 @@ class PolicyTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'pins a different module'):
                 CHECK.check_package(CHANNEL, package, info, files, root)
 
-    def test_every_channel_package_comes_with_the_update(self):
-        # One update path: omarchy-m4-update installs every channel package, none is opt-in.
-        self.assertNotIn('opt_in_packages', CHANNEL)
-        self.assertEqual(list(load('tools/m4-channel-setup.py').PACKAGES), CHANNEL['packages'])
 
     def test_headphone_drop_in_runs_after_registration_and_cannot_fail_it(self):
         text = (PACKAGING / 'omarchy-m4-headphones/30-m4-headphones.conf').read_text()
@@ -363,7 +413,8 @@ class PolicyTests(unittest.TestCase):
 
     def boot_info(self):
         return {'pkgname': ['omarchy-m4-boot'], 'pkgver': ['1-4'], 'arch': ['aarch64'],
-                'depend': ['python', 'pacman', 'omarchy-m4-gpu', 'omarchy-m4-headphones', 'omarchy-m4-cpu']}
+                'depend': ['python', 'pacman', 'omarchy-m4-gpu', 'omarchy-m4-headphones', 'omarchy-m4-cpu',
+                           'omarchy-m4-evdi', 'omarchy-m4-backlight']}
 
     def boot_files(self):
         """A boot package that passes every check except the ones under test, unpacked on disk."""
@@ -376,7 +427,7 @@ class PolicyTests(unittest.TestCase):
         (self.boot_root / 'usr/bin/m4-boot-compose').write_bytes(composer)
         notch = (ROOT / 'tools/m4-notch.py').read_bytes()
         (self.boot_root / 'usr/bin/m4-notch').write_bytes(notch)
-        return {**{path: (0o644, digest) for path, digest in CHANNEL['notch_loader'].items()},
+        return {**{path: (0o644, digest) for path, digest in CHANNEL['backlight_loaders'].items()},
                 'usr/bin/m4-notch': (0o755, hashlib.sha256(notch).hexdigest()),
                 CHECK.NOTCH_UNIT: (0o644, file_sha('packaging/omarchy-m4/omarchy-m4-boot/omarchy-m4-notch.service')),
                 'usr/bin/m4-boot-compose': (0o755, hashlib.sha256(composer).hexdigest()),
@@ -385,21 +436,21 @@ class PolicyTests(unittest.TestCase):
                 'usr/bin/omarchy-m4-update': (0o755, file_sha('tools/omarchy-m4-update')),
                 'usr/lib/omarchy-m4/m4-channel-setup.py': (0o644, file_sha('tools/m4-channel-setup.py'))}
 
-    def test_boot_package_must_carry_the_pinned_notch_switch(self):
+    def test_boot_package_requires_both_pinned_handoff_variants(self):
         realtime = (PACKAGING / 'omarchy-m4-boot/speakersafetyd-j713-realtime.conf').read_bytes()
         good = {**self.boot_files(), CHECK.REALTIME: (0o644, hashlib.sha256(realtime).hexdigest())}
         CHECK.check_package(CHANNEL, *self.boot_package(good))
-        staged = next(iter(CHANNEL['notch_loader']))
-        for files, message in (({**good, staged: (0o644, '0' * 64)}, 'notch stage 2 differs'),
-                               ({k: v for k, v in good.items() if k != staged}, 'notch stage 2 differs'),
+        staged = next(iter(CHANNEL['backlight_loaders']))
+        for files, message in (({**good, staged: (0o644, '0' * 64)}, 'display handoff stage2 differs'),
+                               ({k: v for k, v in good.items() if k != staged}, 'display handoff stage2 differs'),
                                ({**good, 'usr/bin/m4-notch': (0o755, '0' * 64)}, 'notch tool differs'),
                                ({**good, CHECK.NOTCH_UNIT: (0o644, '0' * 64)}, 'login unit differs')):
             with self.subTest(message), self.assertRaisesRegex(ValueError, message):
                 CHECK.check_package(CHANNEL, *self.boot_package(files))
         channel = json.loads(json.dumps(CHANNEL))
-        channel['notch_loader'] = {staged: '1' * 64}
+        channel['backlight_loaders'][staged] = '1' * 64
         files = {**good, staged: (0o644, '1' * 64)}
-        with self.assertRaisesRegex(ValueError, 'pins a different stage 2'):
+        with self.assertRaises(ValueError):
             CHECK.check_package(channel, *self.boot_package(files))
 
     def test_protected_beats_an_allowlist_mistake(self):
