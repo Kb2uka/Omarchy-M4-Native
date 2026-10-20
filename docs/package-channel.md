@@ -16,7 +16,7 @@ reviewers.
 | `linux-m4-omarchy` | The J713 kernel image and its modules | `7.1.9.m4.20261008-2` |
 | `omarchy-m4-gst-audio` | GStreamer's `autodetect` and `pulse` sinks in `/usr/lib/gstreamer-1.0`, for WebKitGTK and GStreamer apps | `1.28.7-1` |
 | `omarchy-m4-headphones` | The headphone jack card: two pinned modules, `m4-headphones`, its registration drop-in, UCM and WirePlumber files | `1-1`; `1-2` adds the headset microphone |
-| `omarchy-m4-cpu` | The CPU idle driver: one pinned module, `m4-cpu-idle` and its boot unit | `1-1` |
+| `omarchy-m4-cpu` | The CPU idle driver: one pinned module, `m4-cpu-idle` and its boot unit | `1-1`; `1-4` survives a clean stop during the settle period |
 | `omarchy-m4-evdi` | DisplayLink's evdi module and `libevdi`, for USB display adapters | `1.15.1-1` |
 | `omarchy-m4-backlight` | Native DCP backlight module, guarded startup, brightness-key routing and OSD | `1-1` |
 
@@ -207,6 +207,21 @@ file.
   state instead of 70% of its predicted step, and looks back 750-1000 ms for the
   lowest state. Guard `j713_pguard.ko` `91fe247e…`, pinned in
   `package-inputs` and `cpu_guard_module`.
+
+### omarchy-m4-cpu 1-4
+
+- **Orderly stop during the settle period**
+  ([#130](https://github.com/Kb2uka/Omarchy-M4-Native/issues/130)): a clean
+  SIGTERM (service restart or shutdown) while `m4-cpu-idle --boot` or `--start`
+  is settling now runs the marker cleanup as the loader stops, so the next boot
+  loads the driver instead of refusing on a stale strike. The previous signal
+  disposition is restored when the window ends, and a stop while a module load
+  is still pending still leaves the marker: crash protection is unchanged, and
+  the full 120 s settle is unchanged.
+- **Already-struck installs stay protected:** the package never clears a
+  historical marker, because its reason is unknowable. The upgrade prints the
+  recovery instead: `sudo m4-cpu-idle --start` retries the load in the running
+  session. `--disable` and `--boost off` choices are untouched.
 
 ### omarchy-m4-headphones 1-2
 
@@ -559,7 +574,9 @@ first. Joins stay `unverified` until a byte-identical rebuild is recorded:
   the alpha.1 kernel-controller tree with `tools/build-j713-headphones.sh`.
 - **CPU idle and boost guard (`omarchy-m4-cpu`):** `j713_cpuidle.ko` (`a2a7947a…`)
   and `j713_pguard.ko` (`91fe247e…`), built from `cpu/j713/` on the alpha.1
-  kernel tree with `cpu/j713/build-module.sh`.
+  kernel tree with `cpu/j713/build-module.sh`. The shipped modules are
+  unchanged; both were rebuilt byte for byte in two clean offline builds on
+  2026-10-20 and compared against the published binaries (`rebuilt-identical`).
 - **Display handoff stage2 (`omarchy-m4-boot`):** hidden `b86aee68…` and shown
   `692f656c…` variants from alpha.1's stage2 archive, the bounded T8132 handoff
   in `display/j713/m1n1-base/` and the optional notch patch. Two clean x86-64

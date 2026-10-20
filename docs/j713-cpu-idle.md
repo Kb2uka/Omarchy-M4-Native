@@ -67,7 +67,12 @@ one-strike rule:
   driver. A lost-state fault shows within milliseconds of a core's first
   power-down, so a boot that dies while loading or settling leaves the marker,
   and the next boot loads nothing. `sudo m4-cpu-idle --start` retries in the
-  running session.
+  running session. A clean stop during the settle period is not a death: a
+  service restart or shutdown sends SIGTERM, the loader clears the marker as it
+  stops, and the next boot tries again
+  ([#130](https://github.com/Kb2uka/Omarchy-M4-Native/issues/130)). A stop
+  while a module load is still pending still leaves the marker, because that
+  load's outcome is unknowable.
 - `sudo m4-cpu-idle --disable` is the off switch (hold file
   `/var/lib/omarchy-m4/cpu-idle/hold`); `--enable` turns it back on. A loaded
   driver stays until the next restart.

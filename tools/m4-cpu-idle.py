@@ -20,9 +20,12 @@ One strike: an attempt marker is written durably before the module loads and
 removed only after the cores have idled through it for a settle period. A
 lost-state fault shows within milliseconds of a core's first power-down, so if
 a boot dies while loading or settling, the next boot finds the marker and loads
-nothing, because the Air has no boot menu to recover from. --start loads the
-driver in the running session instead (and clears a marker left by such a
-boot). Inspection is the default.
+nothing, because the Air has no boot menu to recover from. A clean stop during
+the settle period (a systemd restart or shutdown sends SIGTERM) is not a death:
+the loader clears the marker as it stops and the next boot tries again. A stop
+while a module load is still pending keeps the marker, because that load's
+outcome is unknowable. --start loads the driver in the running session instead
+(and clears a marker left by such a boot). Inspection is the default.
 
 Off switch: --disable writes a hold file, and no boot or --start loads the
 driver until --enable removes it. A loaded driver stays until the next restart:
@@ -39,6 +42,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import time
@@ -80,6 +84,32 @@ SETTLE_SECONDS = 120
 
 class Refused(Exception):
     pass
+
+
+class Stopped(Exception):
+    """SIGTERM arrived inside the settle window: an orderly stop, not a strike."""
+    pass
+
+
+class SettleStop:
+    """During the settle sleep, SIGTERM (a systemd restart or shutdown) is an orderly stop:
+    raise Stopped so the marker-clearing finally runs. Everywhere else SIGTERM keeps its previous
+    disposition, so a stop while a module load is still pending stays a strike. The previous
+    disposition is restored when the window ends, however it ends, and the handler restores it
+    before unwinding too, so a second SIGTERM during the cleanup cannot be absorbed."""
+
+    def __enter__(self):
+        self.previous = signal.getsignal(signal.SIGTERM)
+        signal.signal(signal.SIGTERM, self._stop)
+        return self
+
+    def _stop(self, signum, frame):
+        signal.signal(signal.SIGTERM, self.previous)
+        raise Stopped('stopped while settling')
+
+    def __exit__(self, *exc):
+        signal.signal(signal.SIGTERM, self.previous)
+        return False
 
 
 def require(condition, message):
@@ -219,9 +249,11 @@ def inspect(root):
 
 
 def settle(root, seconds, sleep):
-    """Wait while the cores power down through the driver; the marker stays until this returns."""
+    """Wait while the cores power down through the driver; the marker stays until this returns.
+    A SIGTERM during the wait is an orderly stop: the caller's finally clears the marker."""
     before = power_downs(root)
-    sleep(seconds)
+    with SettleStop():
+        sleep(seconds)
     after = power_downs(root)
     require(before is not None and after is not None and after > before,
             'The driver loaded but no core powered down through it')
@@ -267,7 +299,8 @@ def load(root, report, run, settle_seconds, sleep):
         boost = load_guard(root, inspect(root), run)
         settle(root, settle_seconds, sleep)
     finally:
-        # The boot lived through the settle period, so neither module took it down.
+        # The boot lived through the settle period, or the loader was stopped cleanly in it:
+        # neither module took the boot down.
         remove_state(root, 'attempt')
     return joined('loaded; idle cores power down', boost)
 
@@ -417,6 +450,10 @@ def main(argv=None):
         return 1
     try:
         report = run(args.root, mode)
+    except Stopped:
+        print('m4-cpu-idle: stopped while settling; the attempt marker is cleared, '
+              'the next boot tries again', file=sys.stderr)
+        return 0
     except (Refused, OSError, ValueError) as error:
         print('m4-cpu-idle: refused: ' + str(error), file=sys.stderr)
         return 1
