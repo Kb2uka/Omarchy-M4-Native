@@ -8,9 +8,12 @@ PACKAGE_SIGNING_KEY and lives in a temporary keyring. A package file that is
 already published is never replaced: its published signature is verified and
 the published bytes stay in the database. New packages and signatures are
 uploaded first; the signed database is replaced last, and only when its
-package set changed. The result is then downloaded anonymously and verified.
+package set changed. The corresponding integration source archive is packaged,
+signed, and uploaded alongside the channel assets. The result is then
+downloaded anonymously and verified.
 """
 import argparse
+import gzip
 import hashlib
 import io
 import json
@@ -31,6 +34,8 @@ TAG, REPO, FPR = CHANNEL['release_tag'], CHANNEL['repository'], CHANNEL['signing
 SETUP = 'omarchy-m4-setup.py'
 CONNECT = 'm4-connect.sh'
 CONNECT_HASH = '@SETUP_SHA256@'
+SOURCE_ARCHIVE = 'release-integration-{revision}.tar.gz'
+SOURCE_REVISION = 'release-integration-revision.txt'
 NOTES = ('Signed pacman repository for the experimental M4 build ([issue #49]'
          '(https://github.com/Kb2uka/Omarchy-M4-Native/issues/49)). Owners connect once with '
          '`m4-connect.sh` (it checks and runs `omarchy-m4-setup.py`); see docs/updates.md. Not an installer.')
@@ -47,6 +52,10 @@ def run(*command, **options):
 
 def output(*command):
     return run(*command, capture_output=True, text=True).stdout
+
+
+def release_exists():
+    return subprocess.run(['gh', 'release', 'view', TAG], capture_output=True).returncode == 0
 
 
 def signed(signature, data_file):
@@ -152,23 +161,82 @@ def sign(package):
     verify(package.with_name(package.name + '.sig'), package)
 
 
+def git_output(tree, *args):
+    """Return Git's bytes or fail closed instead of widening the archive scope."""
+    try:
+        return subprocess.check_output(['git', '-C', str(tree), *args])
+    except (FileNotFoundError, OSError, subprocess.CalledProcessError) as exc:
+        raise SystemExit('publish-m4-packages: Git source archive input failed: ' + str(exc)) from exc
+
+
+def source_revision(tree=ROOT):
+    """Return a clean committed revision for the integration source archive."""
+    require(not git_output(tree, 'status', '--porcelain', '--untracked-files=no'),
+            'Refusing to publish integration sources from a tree with tracked changes')
+    return git_output(tree, 'rev-parse', '--verify', 'HEAD').decode().strip()
+
+
+def build_source_archive(target_path, revision, tree=ROOT):
+    """Bundle the committed integration source and its revision deterministically."""
+    tar = git_output(tree, 'archive', '--format=tar', revision, '--', '.',
+                     ':(exclude)AGENTS.md', ':(exclude)CLAUDE.md')
+    stream = io.BytesIO(tar)
+    with tarfile.open(fileobj=stream, mode='a:') as archive:
+        data = (revision + '\n').encode()
+        info = tarfile.TarInfo(SOURCE_REVISION)
+        info.size, info.mtime, info.uid, info.gid = len(data), 0, 0, 0
+        info.uname = info.gname = ''
+        info.mode = 0o644
+        archive.addfile(info, io.BytesIO(data))
+    with open(target_path, 'wb') as raw_file:
+        with gzip.GzipFile(filename='', mode='wb', fileobj=raw_file, mtime=0) as gz:
+            gz.write(stream.getvalue())
+
+
 def publish(directory):
     key = os.environ.get('PACKAGE_SIGNING_KEY', '')
     require(key.strip(), 'PACKAGE_SIGNING_KEY is not available')
     with tempfile.TemporaryDirectory(prefix='m4-publish-') as scratch:
         scratch = Path(scratch)
+        revision = source_revision(ROOT)
+        source_name = SOURCE_ARCHIVE.format(revision=revision)
+        source_archive = scratch / source_name
+        build_source_archive(source_archive, revision)
+        source_sig = scratch / (source_name + '.sig')
         os.environ['GNUPGHOME'] = str(scratch / 'gnupg')
         (scratch / 'gnupg').mkdir(mode=0o700)
         run('gpg', '--batch', '--import', input=key, text=True)
         secret = [line.split(':')[9] for line in output('gpg', '--list-secret-keys', '--with-colons').splitlines()
                   if line.startswith('fpr:')]
         require(secret[:1] == [FPR], 'The signing key is not the channel key ' + FPR)
-        if subprocess.run(['gh', 'release', 'view', TAG], capture_output=True).returncode != 0:
+        if not release_exists():
             run('gh', 'release', 'create', TAG, '--prerelease', '--target', 'main',
                 '--title', 'M4 package repository', '--notes', NOTES)
         assets = set(output('gh', 'release', 'view', TAG, '--json', 'assets', '-q', '.assets[].name').split())
-        repo, uploads = scratch / 'repo', []
+        repo, published, uploads = scratch / 'repo', scratch / 'published', []
         repo.mkdir()
+        published.mkdir()
+        # Each clean revision gets an immutable archive, so an interrupted
+        # signature upload cannot wedge publication of a later revision.
+        if source_name in assets:
+            run('gh', 'release', 'download', TAG, '-D', published, '-p', source_name)
+            published_archive = published / source_name
+            require(published_archive.read_bytes() == source_archive.read_bytes(),
+                    'Published source archive differs from its committed revision: ' + source_name)
+            valid_signature = False
+            if source_name + '.sig' in assets:
+                run('gh', 'release', 'download', TAG, '-D', published, '-p', source_name + '.sig')
+                valid_signature = signed(published / (source_name + '.sig'), published_archive)
+            if not valid_signature:
+                # Exact equality with the clean rebuild is required before repair.
+                sign(source_archive)
+                run('gh', 'release', 'upload', TAG, '--clobber', source_sig)
+            print('kept published ' + source_name)
+        else:
+            sign(source_archive)
+            run('gh', 'release', 'upload', TAG, source_archive)
+            run('gh', 'release', 'upload', TAG, '--clobber', source_sig)
+
         for package in sorted(directory.glob('*.pkg.tar.zst')):
             name, signature = package.name, repo / (package.name + '.sig')
             if name in assets:
@@ -187,6 +255,7 @@ def publish(directory):
             shutil.copyfile(package, repo / name)
             sign(repo / name)
             uploads.append((repo / name, signature))
+
         packages = sorted(repo.glob('*.pkg.tar.zst'))
         run('repo-add', '--sign', '--key', FPR, repo / f'{REPO}.db.tar.gz', *packages)
         desired = database_entries((repo / f'{REPO}.db.tar.gz').read_bytes())
@@ -230,13 +299,19 @@ def publish(directory):
             print('verified ' + name)
         served(SETUP, lambda d: d == setup.read_bytes(), 'Published setup script differs')
         served(CONNECT, lambda d: d == connect.read_bytes(), 'Published connect script differs')
+        (check / source_name).write_bytes(served(source_name, lambda d: d == source_archive.read_bytes(),
+                                                    'Published source archive differs'))
+        served(source_name + '.sig', signs(check / (source_name + '.sig'), check / source_name),
+               'Bad or foreign signature on ' + source_name)
+        print('verified ' + source_name)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('directory', type=Path, help='checked packages from build-m4-packages.py')
-    publish(parser.parse_args().directory.resolve())
+    args = parser.parse_args()
+    publish(args.directory.resolve())
 
 
 if __name__ == '__main__':

@@ -452,11 +452,13 @@ package's contents without a new version.
   the private key as `PACKAGE_SIGNING_KEY`. It keeps already-published package
   files and verifies their signatures, then signs and uploads new ones. It
   repairs an interrupted earlier run by signing an unsigned published package.
-  The signed databases go up last, whenever they are missing, unsigned or out
-  of date. Everything is then
-  downloaded anonymously and verified again. The
-  [workflow policy](../tools/ci/check-workflows.py) allows a secret or write
-  access nowhere else.
+  The corresponding integration source archive (`release-integration-<commit>.tar.gz`)
+  is packaged, signed, and published alongside packages and databases. The
+  separately pinned source archives named by package joins are not yet channel
+  assets. The signed databases go up last, whenever they are missing, unsigned
+  or out of date. Everything is then downloaded anonymously and verified
+  again. The [workflow policy](../tools/ci/check-workflows.py) allows a secret
+  or write access nowhere else.
 
 ### Maintainer setup (once)
 
@@ -526,6 +528,23 @@ first. Joins stay `unverified` until a byte-identical rebuild is recorded:
 - **GStreamer audio sinks (`omarchy-m4-gst-audio`):** `libgstautodetect.so` and
   `libgstpulseaudio.so`, built by `tools/m4-webkit-audio-plugins.py` from
   `gst-plugins-good-1.28.7.tar.xz` (mirrored in `package-inputs`).
+
+### Published source artifact
+
+Each full commit has an immutable archive name, so interrupted signature
+uploads can be retried without blocking later revisions or replacing older
+source. Existing archive bytes must match the clean rebuild before a missing
+or corrupt signature can be repaired.
+
+With each channel publish, the committed repository integration source is
+packaged into `release-integration-<commit>.tar.gz` and signed with the channel key
+(`release-integration-<commit>.tar.gz.sig`). The publisher refuses tracked local edits,
+uses `git archive` at `HEAD`, and records that revision in
+`release-integration-revision.txt` inside the archive. It includes tracked
+integration files except `AGENTS.md` and `CLAUDE.md`; it does not claim to
+contain the separately pinned source archives named by every package join.
+Those archives remain individually named and hash-pinned in
+[`packaging/channel-source-joins.json`](../packaging/channel-source-joins.json).
 
 ## Limits
 
