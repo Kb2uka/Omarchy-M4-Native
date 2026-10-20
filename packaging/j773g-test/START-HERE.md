@@ -1,5 +1,9 @@
 # M4 Mac mini tester build (v0.1.0-alpha.1-j773g-test.1)
 
+**October 20 status:** the first tester reported no HDMI signal (#136). Hold
+new installations until display diagnosis and a validated replacement kit.
+The procedure below is retained for investigation; a desktop boot is unverified.
+
 This build is for testers of the **plain M4 Mac mini (2024), Mac16,10 / J773g /
 T8132** ([#136](https://github.com/Kb2uka/Omarchy-M4-Native/issues/136)). It
 is not for the M4 Pro mini or any other Mac. It is not endorsed by Omarchy,
@@ -24,7 +28,7 @@ stays installed and selectable at startup.
 | Graphics | Software drawing (no GPU acceleration yet), so it is slower than the Air |
 | Keyboard and mouse | USB, in the **two rear USB-C ports nearest the HDMI port** (Gravity Linux names them back-left and back-middle; use a USB-C adapter or hub). The third rear port and the two front ports are not on yet, so if a keyboard does nothing, move it to another rear port. Bluetooth keyboards may work after setup. |
 | Network | Wired Ethernet is expected to work; Wi-Fi may |
-| Speaker, video decoding, protected movies, M4 updates | Off in this build |
+| Audio (speaker, USB, Bluetooth, HDMI), video decoding, protected movies, M4 updates | Off in this build |
 
 ## 1. Download (macOS)
 

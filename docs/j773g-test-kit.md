@@ -21,6 +21,7 @@ unchanged. The tool changes only the following:
 | `Install.command` | Mac16,12 only | Mac16,10 only, with `--install --tester` and a typed `TEST` confirmation; Widevine off |
 | `START-HERE.md`, `KNOWN-LIMITATIONS.md`, `UPDATES.md` | J713 instructions, limits and update channel | The mini versions in [packaging/j773g-test](../packaging/j773g-test/) |
 | SDDM (`/etc/sddm.conf.d/99-m4.conf`, `sddm.service.d/90-m4-staging.conf`) | Requires the J713 GPU unit and the project's GPU Mesa | Starts without the GPU unit and uses the system Mesa (`llvmpipe`) on the boot framebuffer |
+| Owner-assets dependency drop-ins removed | Air-only owner provisioning/session dependencies | Both `10-owner-assets.conf` drop-ins are checked against their pins and removed; account creation no longer depends on the Air-only service |
 | Start links removed | — | `m4-j713-audio-register`, `speakersafetyd-j713`, `m4-video`, `j713-owner-assets`, `m4-channel-connect.timer` |
 | `KIT.json`, `IMAGE.json`, `SHA256SUMS` | — | Regenerated, with a `j773g_test` record of the source kit, revision and root changes |
 
@@ -38,9 +39,13 @@ same.
 
 Each removed service has a board gate that refuses a J773g: J713 speaker
 setup, video decoding, Widevine setup, and the M4 update channel connection.
-None of them has a failure action, so leaving them enabled would only log
-failures. The update timer would retry every 20 minutes for ever. The root
-filesystem keeps their files; only the start links go. The image's
+The owner-assets service is also required by a provisioning drop-in and wanted
+by a session drop-in. Both dependencies must be removed: deleting its target
+link alone still starts the service and blocks first-boot account creation. The update timer would retry every 20 minutes for ever. The root
+filesystem keeps the service files; the start links and those two dependency
+drop-ins go. The WirePlumber readiness gate stays in place for speaker safety;
+it refuses the mini, so session audio (including USB, Bluetooth and HDMI) is
+unavailable in this kit. The image's
 filesystem UUID is unchanged, so the installer's root identity check still
 holds.
 
@@ -64,6 +69,9 @@ tags for this kit.
 
 ## Not known yet
 
-Nobody has booted this kit on a Mac mini. The first tester boot decides
-whether the HDMI framebuffer, the software-rendered desktop, Ethernet and the
-radios work.
+On October 20, the first tester reported no HDMI signal after approving the
+new OS in #136. No successful desktop boot is confirmed. This source correction
+removes the separate account-creation blocker; it does not diagnose or fix the
+HDMI failure. The already published `j773g-test.1` assets are unchanged. Hold
+new installations until the display failure is understood and a corrected kit
+is built and validated. Ethernet and radio operation also remain unverified.

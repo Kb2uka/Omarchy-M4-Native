@@ -29,6 +29,14 @@ TOOLS = all(shutil.which(tool) for tool in ('mkfs.ext4', 'debugfs', 'e2fsck'))
 REVISION = 'a' * 40
 SDDM_FILES = {path: f'J713 GPU file {index}\n'.encode() for index, path in enumerate(MODULE.ROOT_FILES)}
 BOOT = {name: f'{name} bytes'.encode() for name in MODULE.KEPT_BOOT}
+OWNER_DROPINS = {
+    '/usr/lib/systemd/system/omarchy-provision-owner.service.d/10-owner-assets.conf':
+        ROOT / 'packaging/j713-owner-assets-provision.conf',
+    '/usr/lib/systemd/system/systemd-user-sessions.service.d/10-owner-assets.conf':
+        ROOT / 'packaging/j713-owner-assets-session.conf',
+}
+AUDIO_GATE = '/etc/systemd/user/wireplumber.service.d/80-j713-audio-ready.conf'
+AUDIO_SOURCE = ROOT / 'packaging/j713-audio/wireplumber.service.d/80-j713-audio-ready.conf'
 OLD_DTB, NEW_DTB = b'J713 devicetree', b'J773g devicetree'
 digest = lambda data: hashlib.sha256(data).hexdigest()
 
@@ -37,8 +45,9 @@ def put(path, data, mode=0o644):
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, 'wb') as stream:
-        os.fchmod(stream.fileno(), mode)
         stream.write(data)
+        stream.flush()
+        os.fchmod(stream.fileno(), mode)
 
 
 class Kit:
@@ -53,6 +62,9 @@ class Kit:
         for link in MODULE.ROOT_LINKS:
             (tree / link.lstrip('/')).parent.mkdir(parents=True, exist_ok=True)
             os.symlink('/usr/lib/systemd/system/' + link.rsplit('/', 1)[1], tree / link.lstrip('/'))
+        for path, source in OWNER_DROPINS.items():
+            put(tree / path.lstrip('/'), source.read_bytes())
+        put(tree / AUDIO_GATE.lstrip('/'), AUDIO_SOURCE.read_bytes())
         put(tree / 'etc/hostname', b'omarchy\n')
         self.root = base / 'root.ext4'
         subprocess.run(['mkfs.ext4', '-q', '-F', '-E', 'root_owner=0:0', '-d', str(tree), str(self.root), '8M'],
@@ -166,6 +178,11 @@ class Derive(unittest.TestCase):
             self.assertEqual(os.stat(self.output / name).st_mode & 0o7777, mode, name)
         image = json.loads((self.output / 'IMAGE.json').read_bytes())
         self.assertEqual(image['root']['sha256'], receipt['root_sha256'])
+        self.assertEqual(image['j773g_test']['root_dropins_removed'], sorted(OWNER_DROPINS))
+        self.assertIn('no HDMI signal', image['qualification'])
+        self.assertIn('not qualified', image['qualification'])
+        self.assertEqual(json.loads((self.output / 'KIT.json').read_bytes())['qualification'],
+                         image['qualification'])
         self.assertEqual(image['j773g_test']['root_from_sha256'], self.fixture.root_sha)
         self.assertEqual(json.loads((self.output / 'KIT.json').read_bytes())['j773g_test']['derivation_revision'],
                          REVISION)
@@ -185,6 +202,39 @@ class Derive(unittest.TestCase):
         self.assertEqual(read(root, '/etc/hostname'), b'omarchy\n')
         self.assertEqual(subprocess.run(['e2fsck', '-fn', str(root)], capture_output=True).returncode, 0)
 
+    def test_owner_setup_has_no_j713_dependency_but_audio_safety_is_kept(self):
+        self.derive()
+        root = self.base / 'owner-setup.ext4'
+        with zipfile.ZipFile(self.output / 'os' / MODULE.PACKAGE) as archive:
+            root.write_bytes(archive.read('root.ext4'))
+        for path in OWNER_DROPINS:
+            with self.subTest(path=path):
+                self.assertFalse(MODULE.debugfs_exists('debugfs', root, path),
+                                 'Air-only owner-assets dependency still blocks mini provisioning')
+        self.assertEqual(read(root, AUDIO_GATE), AUDIO_SOURCE.read_bytes())
+        self.assertEqual(read(root, '/etc/hostname'), b'omarchy\n')
+
+    def test_unexpected_owner_dropin_is_refused(self):
+        for path in OWNER_DROPINS:
+            with self.subTest(path=path):
+                image = self.base / 'changed-dropin.ext4'
+                shutil.copyfile(self.fixture.root, image)
+                subprocess.run(['debugfs', '-w', '-R', 'rm ' + path, str(image)],
+                               check=True, capture_output=True)
+                with self.assertRaisesRegex(ValueError, 'Unexpected root drop-in'):
+                    with patch.dict(MODULE.ROOT_FILES,
+                                    {p: (digest(SDDM_FILES[p]), name)
+                                     for p, (_, name) in MODULE.ROOT_FILES.items()}):
+                        MODULE.patch_root(image)
+                self.assertEqual(read(image, '/etc/sddm.conf.d/99-m4.conf'),
+                                 SDDM_FILES['/etc/sddm.conf.d/99-m4.conf'])
+
+    def test_checkout_path_with_spaces_can_patch_the_root(self):
+        files = self.base / 'checkout with spaces' / 'packaging'
+        shutil.copytree(MODULE.FILES, files)
+        with patch.object(MODULE, 'FILES', files):
+            self.derive()
+
     def test_the_root_changes_are_exactly_the_reviewed_ones(self):
         self.assertEqual(sorted(MODULE.ROOT_FILES), ['/etc/sddm.conf.d/99-m4.conf',
                                                      '/etc/systemd/system/sddm.service.d/90-m4-staging.conf'])
@@ -194,6 +244,7 @@ class Derive(unittest.TestCase):
             '/etc/systemd/system/multi-user.target.wants/m4-video.service',
             '/etc/systemd/system/multi-user.target.wants/j713-owner-assets.service',
             '/etc/systemd/system/timers.target.wants/m4-channel-connect.timer'])
+        self.assertEqual(sorted(MODULE.ROOT_DROPINS), sorted(OWNER_DROPINS))
         self.assertEqual(MODULE.FIRMWARE, '26.6.2')
         self.assertEqual(sorted(MODULE.REPLACED_DOCS),
                          ['Install.command', 'KNOWN-LIMITATIONS.md', 'START-HERE.md', 'UPDATES.md'])
@@ -212,9 +263,11 @@ class Derive(unittest.TestCase):
         self.refused('Kit file changed: START-HERE.md')
 
     def test_a_kit_file_with_special_mode_bits_is_refused(self):
-        (self.fixture.kit / 'notices/LICENSE.md').unlink()
-        put(self.fixture.kit / 'notices/LICENSE.md', b'license\n', 0o1644)
-        self.refused('Unexpected kit file mode: notices/LICENSE.md')
+        for special in (0o1000, 0o2000, 0o4000):
+            with self.subTest(special=oct(special)):
+                (self.fixture.kit / 'notices/LICENSE.md').unlink()
+                put(self.fixture.kit / 'notices/LICENSE.md', b'license\n', special | 0o644)
+                self.refused('Unexpected kit file mode: notices/LICENSE.md')
 
     def test_an_unlisted_kit_file_is_refused(self):
         put(self.fixture.kit / 'extra.txt', b'x')

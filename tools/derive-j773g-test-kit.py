@@ -11,7 +11,7 @@ J713 kit is checked against its pins. The output kit changes only:
   firmware of the mini's installer profile;
 - Install.command, START-HERE.md, KNOWN-LIMITATIONS.md and UPDATES.md (packaging/j773g-test);
 - in the root image, the two SDDM files that tie the desktop to the J713 GPU,
-  and the start links of J713-only services that refuse on a mini anyway;
+  the start links of J713-only services, and the owner-assets dependencies;
 - KIT.json, IMAGE.json and SHA256SUMS, regenerated for those changes.
 """
 import argparse
@@ -65,10 +65,17 @@ ROOT_LINKS = (
     '/etc/systemd/system/multi-user.target.wants/j713-owner-assets.service',
     '/etc/systemd/system/timers.target.wants/m4-channel-connect.timer',
 )
+# Unit dependencies also start owner-assets after its target link is removed.
+ROOT_DROPINS = {
+    '/usr/lib/systemd/system/omarchy-provision-owner.service.d/10-owner-assets.conf':
+        'acef154cb62c6e97ec3c7106774d1b4ce8cabdfd538424fb9dcc2f4a1480e9bc',
+    '/usr/lib/systemd/system/systemd-user-sessions.service.d/10-owner-assets.conf':
+        '80f7b0786414de133a9b2ee3c83374e8fb53b7ea997b2046cc0dafe479fbdd46',
+}
 REPLACED_DOCS = {'Install.command': 0o755, 'START-HERE.md': 0o644, 'KNOWN-LIMITATIONS.md': 0o644, 'UPDATES.md': 0o644}
 REWRITTEN = {'KIT.json', 'IMAGE.json', 'SHA256SUMS', 'installer_data.json', 'os/' + OLD_PACKAGE, *REPLACED_DOCS}
-QUALIFICATION = ('J773g tester build derived from the J713 installer update 4 kit. Nobody has booted it on '
-                 'a Mac mini; it is not qualified for any Mac.')
+QUALIFICATION = ('J773g tester build derived from the J713 installer update 4 kit. The first tester '
+                 'reported no HDMI signal; no successful desktop boot is confirmed. It is not qualified for any Mac.')
 
 
 def require(condition, message):
@@ -97,7 +104,7 @@ def check_kit(kit):
         digest, name = line.split('  ', 1)
         require(not name.startswith('/') and '..' not in Path(name).parts, 'Unsafe kit path')
         require(sha(kit / name) == digest, 'Kit file changed: ' + name)
-        # The download packager accepts only these modes, and copies keep the source's mode.
+        # Require ordinary public kit modes; copies keep the source's mode.
         require((kit / name).stat().st_mode & 0o7777 in (0o644, 0o755), 'Unexpected kit file mode: ' + name)
         names.append(name)
     on_disk = {p.relative_to(kit).as_posix() for p in kit.rglob('*') if p.is_file()}
@@ -117,20 +124,25 @@ def debugfs_exists(debugfs, image, path):
 
 def patch_root(image, debugfs='debugfs', e2fsck='e2fsck'):
     """Replace the mini's root files and remove the J713-only start links, then check the filesystem."""
+    image = image.resolve()
     for path, (pin, _) in ROOT_FILES.items():
         require(sha_bytes(debugfs_read(debugfs, image, path)) == pin, 'Unexpected root file: ' + path)
     for link in ROOT_LINKS:
         require(debugfs_exists(debugfs, image, link), 'Missing root start link: ' + link)
+    for path, pin in ROOT_DROPINS.items():
+        require(sha_bytes(debugfs_read(debugfs, image, path)) == pin, 'Unexpected root drop-in: ' + path)
     commands = []
     for path, (_, name) in ROOT_FILES.items():
         directory, base = path.rsplit('/', 1)
-        commands += [f'cd {directory}', f'rm {base}', f'write {FILES / name} {base}',
+        commands += [f'cd {directory}', f'rm {base}', f'write {name} {base}',
                      f'sif {base} uid 0', f'sif {base} gid 0', f'sif {base} mode 0100644']
     commands += [f'rm {link}' for link in ROOT_LINKS]
+    commands += [f'rm {path}' for path in ROOT_DROPINS]
     with tempfile.NamedTemporaryFile('w', suffix='.debugfs') as script:
         script.write('\n'.join(commands) + '\n')
         script.flush()
-        subprocess.run([debugfs, '-w', '-f', script.name, str(image)], capture_output=True, check=True)
+        subprocess.run([debugfs, '-w', '-f', script.name, str(image)], cwd=FILES,
+                       capture_output=True, check=True)
     for path, (_, name) in ROOT_FILES.items():
         require(debugfs_read(debugfs, image, path) == (FILES / name).read_bytes(), 'Root file not replaced: ' + path)
         stat = subprocess.run([debugfs, '-R', 'stat ' + path, str(image)], capture_output=True, text=True).stdout
@@ -138,6 +150,8 @@ def patch_root(image, debugfs='debugfs', e2fsck='e2fsck'):
                 'Root file ownership or mode: ' + path)
     for link in ROOT_LINKS:
         require(not debugfs_exists(debugfs, image, link), 'Root start link not removed: ' + link)
+    for path in ROOT_DROPINS:
+        require(not debugfs_exists(debugfs, image, path), 'Root drop-in not removed: ' + path)
     check = subprocess.run([e2fsck, '-fn', str(image)], capture_output=True, text=True)
     require(check.returncode == 0, 'Root filesystem check failed: ' + check.stdout[-400:])
 
@@ -230,7 +244,8 @@ def assemble(kit, dtb_path, output, revision, debugfs, e2fsck):
     image['root'] = dict(image['root'], sha256=root_sha)
     image['qualification'] = QUALIFICATION
     image['j773g_test'] = dict(tester, root_from_sha256=OLD_ROOT_SHA256,
-                               root_files_replaced=sorted(ROOT_FILES), root_links_removed=list(ROOT_LINKS))
+                               root_files_replaced=sorted(ROOT_FILES), root_links_removed=list(ROOT_LINKS),
+                               root_dropins_removed=sorted(ROOT_DROPINS))
     write(output / 'IMAGE.json', canonical(image))
     files = {}
     for path in sorted(output.rglob('*')):
