@@ -108,6 +108,19 @@ class OwnerKeys(unittest.TestCase):
         self.assertEqual(self.config.read_text(), self.original)
         self.assertFalse(self.config.with_name('hyprland.lua.pre-m4-backlight').exists())
 
+    def test_commented_examples_do_not_count_as_custom_brightness_keys(self):
+        (self.home / 'bindings.lua').write_text(
+            '-- hl.unbind("XF86MonBrightnessUp")\n'
+            '  -- o.bind("XF86MonBrightnessDown", "Example", "example")\n')
+        self.assertEqual(BACKLIGHT.add_keys(self.config, True), 'added')
+        self.assertIn(BACKLIGHT.BINDS, self.config.read_text())
+
+    def test_active_custom_binding_with_command_flags_is_preserved(self):
+        (self.home / 'bindings.lua').write_text(
+            'o.bind("XF86MonBrightnessUp", "Custom", "custom-brightness --up")\n')
+        self.assertEqual(BACKLIGHT.add_keys(self.config, True), 'custom brightness bindings preserved')
+        self.assertEqual(self.config.read_text(), self.original)
+
     def test_symlink_configuration_cannot_modify_another_file(self):
         other = self.home / 'other'
         other.write_text(self.original)

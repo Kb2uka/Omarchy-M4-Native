@@ -209,7 +209,9 @@ def add_keys(path, apply):
             with os.fdopen(custom_fd, 'rb') as custom_stream:
                 require(stat.S_ISREG(os.fstat(custom_stream.fileno()).st_mode),
                         'Custom bindings are not a regular file')
-                if b'XF86MonBrightness' in custom_stream.read():
+                # Ignore whole-line examples, but preserve any active custom line.
+                if any(b'XF86MonBrightness' in line and not line.lstrip().startswith(b'--')
+                       for line in custom_stream.read().splitlines()):
                     return 'custom brightness bindings preserved'
         if not apply:
             return 'missing'
