@@ -25,10 +25,10 @@ release helpers do. Expected production API:
     RETAINED_PATCH_SHA256 = sha256 of that file
     IMPORTED_MANIFEST = ROOT / 'audio/j713/imported-source.sha256'
     KBUILD_ENV = {
-        'KBUILD_BUILD_TIMESTAMP': '2026-10-08 00:00:00',
-        'KBUILD_BUILD_USER': 'kb2uka',
-        'KBUILD_BUILD_HOST': 'm4-gravity-builder',
-        'KBUILD_BUILD_VERSION': '18',
+        'KBUILD_BUILD_TIMESTAMP': '2026-10-20',
+        'KBUILD_BUILD_USER': 'KB2UKA',
+        'KBUILD_BUILD_HOST': 'm4-build',
+        'KBUILD_BUILD_VERSION': '19',
     }
     AUDIO_MODULES = (
         'snd-soc-j713-group.ko', 'snd-soc-tas2764.ko', 'snd-soc-macaudio.ko',
@@ -46,7 +46,12 @@ There is no CLI flag that replaces a pin. main() accepts only:
 prepare() and build() accept the image only as 'sha256:' plus BUILDER_IMAGE.
 Relative patch paths are resolved from the repo root; tests may substitute
 absolute paths. An absolute archive member, a path that escapes the tree
-after stripping one leading component, or a symlink or hard link is refused.
+after stripping one leading component, a hard link, an absolute symlink, or a
+symlink whose target resolves outside the extracted kernel root is refused.
+A relative symlink that stays inside that root is extracted as a symlink,
+including a ../../../ target such as arch/arm64/tools/syscall_64.tbl. Regular
+files keep their archive mode (0755 stays executable, 0644 does not). Special
+members are refused.
 
 Order, and nothing is written to output before the input checks:
 
@@ -76,9 +81,13 @@ KCFLAGS=-Werror, J713_PROFILE=conservative-v1, and
 KBUILD_EXTRA_SYMBOLS=/reference-sound-exports.symvers. No daemon, Cargo,
 or speakersafetyd build is invoked.
 
-After docker, Module.symvers, .config, and include/config/kernel.release
-must still match KERNEL_INPUTS, and the supplemental file must still match
-SOUND_EXPORTS. Drift raises and does not write a receipt. Success copies
+After docker, Module.symvers, vmlinux.symvers, .config, and
+include/config/kernel.release must still match the archived inputs, and the
+supplemental file must still match SOUND_EXPORTS. The real archive hashes
+both symvers files as 5e3c2624c6a991bae503336137ce15071e51ef043edcd20ba1ad19df4e23d67c.
+vmlinux.symvers is compared with that archived export table even when
+Module.symvers is untouched. Drift raises and does not write a receipt.
+Success copies
 arch/arm64/boot/Image.gz to output/Image.gz and each module to
 output/modules/<name>.ko, and writes output/receipt.json. The receipt is
 also build()'s return value:
@@ -98,6 +107,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import stat
 import subprocess
 import tarfile
 import tempfile
@@ -126,10 +136,10 @@ PINNED_DRIVER_SHA256 = 'e4eebbee612eee32bd51ce370d412afc8cf62a9a7e087a3797c2c293
 RETAINED_PATCH = ROOT / 'patches-kernel/retained-hardening/dockchannel-packet-bounds.patch'
 KERNEL_RELEASE = '7.1.9-m4-gpu-backport-20261008'
 EXPECTED_ENV = {
-    'KBUILD_BUILD_TIMESTAMP': '2026-10-08 00:00:00',
-    'KBUILD_BUILD_USER': 'kb2uka',
-    'KBUILD_BUILD_HOST': 'm4-gravity-builder',
-    'KBUILD_BUILD_VERSION': '18',
+    'KBUILD_BUILD_TIMESTAMP': '2026-10-20',
+    'KBUILD_BUILD_USER': 'KB2UKA',
+    'KBUILD_BUILD_HOST': 'm4-build',
+    'KBUILD_BUILD_VERSION': '19',
 }
 
 
@@ -150,14 +160,26 @@ class HardenedBuildTests(unittest.TestCase):
         self.repo_retained = digest(RETAINED_PATCH)
         self.repo_driver = digest(PINNED_DRIVER)
 
-    def write_archive(self, files):
-        """files maps paths below the stripped top-level directory to bytes."""
+    def write_archive(self, files, links=(), modes=None):
+        """files maps paths below the stripped top-level directory to bytes.
+
+        links is (member path, link target) for relative symlinks. modes maps
+        a regular member path to its permission bits.
+        """
+        modes = modes or {}
         archive = self.base / ('archive-%d.tar.gz' % len(list(self.base.iterdir())))
         with tarfile.open(archive, 'w:gz') as packed:
             for name, data in files.items():
                 info = tarfile.TarInfo('linux/' + name)
                 info.size = len(data)
+                info.mode = modes.get(name, 0o644)
+                info.type = tarfile.REGTYPE
                 packed.addfile(info, io.BytesIO(data))
+            for name, target in links:
+                info = tarfile.TarInfo('linux/' + name)
+                info.type = tarfile.SYMTYPE
+                info.linkname = target
+                packed.addfile(info)
         return archive
 
     def kernel_files(self, dockchannel, macsmc=b'smc\n'):
@@ -174,15 +196,22 @@ class HardenedBuildTests(unittest.TestCase):
         }
         return files
 
-    def pins_for(self, files, archive, exports):
+    def pins_for(self, files, archive, exports, after_historical=None):
+        """after_historical is (dockchannel bytes, macsmc bytes) once the historical patches have applied.
+
+        The archive pins stay the extracted bytes. Callers that apply the synthetic
+        historical series must pass the post-patch bytes, because prepare requires
+        those hashes after the series and before the retained patch.
+        """
+        dock_after, mac_after = after_historical or (files[tool.DOCKCHANNEL], files[tool.MACSMC])
         inputs = {name: text_digest(files[name]) for name in tool.KERNEL_INPUTS}
         return {
             'KERNEL_ARCHIVE': digest(archive),
             'SOUND_EXPORTS': digest(exports),
             'KERNEL_INPUTS': inputs,
             'DOCKCHANNEL_BASE': text_digest(files[tool.DOCKCHANNEL]),
-            'DOCKCHANNEL_HISTORICAL': text_digest(files[tool.DOCKCHANNEL]),
-            'MACSMC_HISTORICAL': text_digest(files[tool.MACSMC]),
+            'DOCKCHANNEL_HISTORICAL': text_digest(dock_after),
+            'MACSMC_HISTORICAL': text_digest(mac_after),
         }
 
     def patch_file(self, name, body):
@@ -280,7 +309,9 @@ class HardenedBuildTests(unittest.TestCase):
         exports = self.base / 'exports'
         exports.write_bytes(b'supplemental\n')
         historical = self.historical_patches()
-        self.apply_pins(self.pins_for(files, archive, exports), historical[:2], historical[2])
+        self.apply_pins(self.pins_for(
+            files, archive, exports, after_historical=(b'alpha\nbeta\ngamma\n', b'smc\nlocked\n')),
+            historical[:2], historical[2])
         output = self.base / 'out'
         before = {path: digest(path) for path in (archive, exports, RETAINED_PATCH, PINNED_DRIVER)}
         tool.prepare(archive, exports, self.image(), output)
@@ -346,15 +377,20 @@ class HardenedBuildTests(unittest.TestCase):
             return archive
 
         cases = {
-            'symlink': tarfile.TarInfo('linux/link'),
+            'escaping-link': tarfile.TarInfo('linux/arch/arm64/tools/escape'),
+            'absolute-link': tarfile.TarInfo('linux/link'),
             'hardlink': tarfile.TarInfo('linux/hard'),
             'escape': tarfile.TarInfo('linux/../../outside'),
             'absolute': tarfile.TarInfo('/etc/passwd'),
+            'fifo': tarfile.TarInfo('linux/fifo'),
         }
-        cases['symlink'].type = tarfile.SYMTYPE
-        cases['symlink'].linkname = '/tmp/outside'
+        cases['escaping-link'].type = tarfile.SYMTYPE
+        cases['escaping-link'].linkname = '../../../../outside'
+        cases['absolute-link'].type = tarfile.SYMTYPE
+        cases['absolute-link'].linkname = '/tmp/outside'
         cases['hardlink'].type = tarfile.LNKTYPE
         cases['hardlink'].linkname = 'linux/.config'
+        cases['fifo'].type = tarfile.FIFOTYPE
         exports = self.base / 'exports'
         exports.write_bytes(b'supplemental\n')
         for name, member in cases.items():
@@ -367,6 +403,54 @@ class HardenedBuildTests(unittest.TestCase):
                         tool.prepare(archive, exports, self.image(), destination)
                 self.assertFalse(destination.exists())
                 self.assertFalse((self.base / 'outside').exists())
+
+    def test_prepare_keeps_internal_symlinks_and_their_targets(self):
+        files = self.kernel_files(b'alpha\n')
+        files['scripts/syscall.tbl'] = b'syscall table\n'
+        files['Documentation/process/changes.rst'] = b'changes\n'
+        links = (
+            ('arch/arm64/tools/syscall_64.tbl', '../../../scripts/syscall.tbl'),
+            ('Documentation/Changes', 'process/changes.rst'),
+        )
+        archive = self.write_archive(files, links=links)
+        exports = self.base / 'exports'
+        exports.write_bytes(b'supplemental\n')
+        historical = self.historical_patches()
+        self.apply_pins(self.pins_for(
+            files, archive, exports, after_historical=(b'alpha\nbeta\ngamma\n', b'smc\nlocked\n')),
+            historical[:2], historical[2])
+        output = self.base / 'linked'
+        tool.prepare(archive, exports, self.image(), output)
+        kernel = output / 'kernel'
+        syscall = kernel / 'arch/arm64/tools/syscall_64.tbl'
+        changes = kernel / 'Documentation/Changes'
+        self.assertTrue(syscall.is_symlink())
+        self.assertEqual(syscall.readlink().as_posix(), '../../../scripts/syscall.tbl')
+        self.assertEqual(syscall.read_bytes(), b'syscall table\n')
+        self.assertEqual((kernel / 'scripts/syscall.tbl').read_bytes(), b'syscall table\n')
+        self.assertTrue(changes.is_symlink())
+        self.assertEqual(changes.readlink().as_posix(), 'process/changes.rst')
+        self.assertEqual(changes.read_bytes(), b'changes\n')
+
+    def test_prepare_preserves_script_mode_and_ordinary_files(self):
+        files = self.kernel_files(b'alpha\n')
+        files['scripts/link-vmlinux.sh'] = b'#!/bin/sh\ntrue\n'
+        modes = {'scripts/link-vmlinux.sh': 0o755, '.config': 0o644}
+        archive = self.write_archive(files, modes=modes)
+        exports = self.base / 'exports'
+        exports.write_bytes(b'supplemental\n')
+        historical = self.historical_patches()
+        self.apply_pins(self.pins_for(
+            files, archive, exports, after_historical=(b'alpha\nbeta\ngamma\n', b'smc\nlocked\n')),
+            historical[:2], historical[2])
+        output = self.base / 'modes'
+        tool.prepare(archive, exports, self.image(), output)
+        kernel = output / 'kernel'
+        script = kernel / 'scripts/link-vmlinux.sh'
+        self.assertEqual(stat.S_IMODE(script.stat().st_mode), 0o755)
+        self.assertEqual(script.read_bytes(), b'#!/bin/sh\ntrue\n')
+        self.assertEqual(stat.S_IMODE((kernel / '.config').stat().st_mode), 0o644)
+        self.assertFalse((kernel / '.config').stat().st_mode & stat.S_IXUSR)
 
     def test_patch_failure_leaves_no_receipt(self):
         files = self.kernel_files(b'alpha\n')
@@ -456,13 +540,17 @@ class HardenedBuildTests(unittest.TestCase):
 
         return calls, run
 
-    def prepared_inputs(self):
+    def prepared_inputs(self, extra_files=None):
         files = self.kernel_files(b'alpha\n')
+        if extra_files:
+            files.update(extra_files)
         archive = self.write_archive(files)
         exports = self.base / 'exports'
         exports.write_bytes(b'supplemental\n')
         historical = self.historical_patches()
-        self.apply_pins(self.pins_for(files, archive, exports), historical[:2], historical[2])
+        self.apply_pins(self.pins_for(
+            files, archive, exports, after_historical=(b'alpha\nbeta\ngamma\n', b'smc\nlocked\n')),
+            historical[:2], historical[2])
         return archive, exports, files
 
     def test_build_records_artifact_hashes_and_immutable_docker_command(self):
@@ -555,6 +643,51 @@ class HardenedBuildTests(unittest.TestCase):
                         tool.build(archive, exports, self.image(), output)
                 self.assertFalse((output / 'receipt.json').exists())
                 self.assertEqual(digest(exports), export_before)
+
+    def test_vmlinux_symvers_drift_is_rejected_without_receipt(self):
+        # Real archive: vmlinux.symvers and Module.symvers are both
+        # 5e3c2624c6a991bae503336137ce15071e51ef043edcd20ba1ad19df4e23d67c.
+        table = b'exports\n'
+        archive, exports, files = self.prepared_inputs(extra_files={'vmlinux.symvers': table})
+        self.assertEqual(files['vmlinux.symvers'], files['Module.symvers'])
+        self.assertEqual(tool.KERNEL_INPUTS['Module.symvers'],
+                         '5e3c2624c6a991bae503336137ce15071e51ef043edcd20ba1ad19df4e23d67c')
+
+        def mutate(mounts):
+            kernel = mounts['/kernel']
+            (kernel / 'vmlinux.symvers').write_bytes(b'regenerated\n')
+            image = kernel / 'arch/arm64/boot/Image.gz'
+            image.parent.mkdir(parents=True, exist_ok=True)
+            image.write_bytes(b'candidate-image')
+            for name in tool.AUDIO_MODULES:
+                (mounts['/job'] / name).write_bytes(b'module:' + name.encode())
+
+        output = self.base / 'vmlinux-drift'
+        _calls, run = self.docker_runner(mutate=mutate)
+        with mock.patch.object(tool.subprocess, 'run', side_effect=run):
+            with self.assertRaises(RuntimeError):
+                tool.build(archive, exports, self.image(), output)
+        self.assertFalse((output / 'receipt.json').exists())
+        self.assertFalse((output / 'Image.gz').exists())
+        kernel = output / 'kernel'
+        self.assertEqual((kernel / 'Module.symvers').read_bytes(), files['Module.symvers'])
+        self.assertNotEqual((kernel / 'vmlinux.symvers').read_bytes(), files['vmlinux.symvers'])
+
+    def test_build_changes_image_and_keeps_both_symvers_tables(self):
+        table = b'exports\n'
+        archive, exports, files = self.prepared_inputs(extra_files={'vmlinux.symvers': table})
+        output = self.base / 'vmlinux-kept'
+        _calls, run = self.docker_runner()
+        with mock.patch.object(tool.subprocess, 'run', side_effect=run):
+            receipt = tool.build(archive, exports, self.image(), output)
+        kernel = output / 'kernel'
+        self.assertEqual((output / 'Image.gz').read_bytes(), b'candidate-image')
+        self.assertNotEqual((output / 'Image.gz').read_bytes(), table)
+        self.assertEqual((kernel / 'Module.symvers').read_bytes(), table)
+        self.assertEqual((kernel / 'vmlinux.symvers').read_bytes(), table)
+        self.assertEqual(receipt['exports']['module_symvers_before'], text_digest(table))
+        self.assertEqual(receipt['exports']['module_symvers_after'], text_digest(table))
+        self.assertTrue((output / 'receipt.json').exists())
 
 
 if __name__ == '__main__':
