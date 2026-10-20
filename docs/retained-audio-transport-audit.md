@@ -30,12 +30,19 @@ copy. Retained `mca.c` stays
 
 ## DockChannel packet bounds
 
-`patches-kernel/j713-input/dockchannel-packet-bounds.patch` is staged against
-the exact qualified driver
+`patches-kernel/retained-hardening/dockchannel-packet-bounds.patch` is staged
+against the exact qualified driver
 `e4eebbee612eee32bd51ce370d412afc8cf62a9a7e087a3797c2c29306cedfb4`.
 In [release-source.md](release-source.md) that identity is the driver after
-the archived startup-retry patch and the AFE action patch stack. The minimal
-patch, on the receive path only:
+the archived startup-retry patch and the AFE action patch stack. Those
+historical patches stay in `patches-kernel/j713-input`. The pending bounds
+patch is deliberately outside that directory: the linux-m4-omarchy channel
+payload pins the whole `patches-kernel/j713-input` tree at
+`1cf949ef443fd8c6d8744a2e3ae8e7e3a270628a`, so a new file there would change
+the binary source join. The pin, the assertion, and
+`packaging/channel-source-joins.json` are unchanged. The audio bclk patch
+already lives under `patches-kernel/j713-audio`, which is outside every
+pinned tree. The minimal patch, on the receive path only:
 
 - rejects interface 16 and 255 before any interface index;
 - requires a complete 8-byte subheader before ACK or work;
@@ -58,8 +65,17 @@ Hosted Linux CI, command `python -m unittest discover -s tests -p 'test_*.py' -v
   The normal audio products passed.
 
 On a leased Linux host the patched suite passed: 21 packet tests and 3 audio
-tests. Valid one-byte input reports are delivered unchanged; zero-length
-reports are rejected on both communication and ordinary input interfaces.
+tests. Those counts were already observed and stay the record. Valid
+one-byte input reports are delivered unchanged; zero-length reports are
+rejected on both communication and ordinary input interfaces.
+
+Hosted CI [run 39510068277](https://github.com/Kb2uka/Omarchy-M4-Native/actions/runs/39510068277)
+ran 1225 tests. The new packet and audio regressions passed. One existing
+provenance test failed:
+`test_channel_source_joins.ManifestTests.test_repository_channel_joins_pass_schema_and_match_pins`,
+because the bounds patch was still inside the pinned `j713-input` tree
+(`0d8e24036f31e1355a636e518a54496fff0f98ad` instead of
+`1cf949ef443fd8c6d8744a2e3ae8e7e3a270628a`). That is not a full-suite pass.
 
 Ten packet mutants were caught: drop the interface guard, allow 16, reject
 15, drop the minimum header, allow a 7-byte header, drop the zero-payload

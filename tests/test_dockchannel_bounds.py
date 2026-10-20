@@ -2,7 +2,7 @@
 
 The harness compiles the driver's checksum, packet, ACK, event, and report
 functions. By default that driver is a temporary copy of the pinned source
-with patches-kernel/j713-input/dockchannel-packet-bounds.patch applied.
+with patches-kernel/retained-hardening/dockchannel-packet-bounds.patch applied.
 DCHID_SOURCE bypasses the patch for baseline and mutant runs.
 """
 
@@ -14,7 +14,7 @@ import tempfile
 import unittest
 
 PIN = Path(__file__).resolve().parent / "fixtures" / "dockchannel" / "dockchannel-hid.c"
-PATCH = Path(__file__).resolve().parents[1] / "patches-kernel" / "j713-input" / "dockchannel-packet-bounds.patch"
+PATCH = Path(__file__).resolve().parents[1] / "patches-kernel" / "retained-hardening" / "dockchannel-packet-bounds.patch"
 HASH = "e4eebbee612eee32bd51ce370d412afc8cf62a9a7e087a3797c2c29306cedfb4"
 
 
