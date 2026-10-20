@@ -9,7 +9,7 @@ T8132** ([#136](https://github.com/Kb2uka/Omarchy-M4-Native/issues/136)). It
 is not for the M4 Pro mini or any other Mac. It is not endorsed by Omarchy,
 Asahi, Gravity or Apple.
 
-**Nobody has booted it on a Mac mini yet.** It is the 13-inch Air's
+**No successful desktop boot is confirmed on a Mac mini.** It is the 13-inch Air's
 installer update 4 with three changes for the mini:
 
 - the Mac mini devicetree (`docs/j773g-boot-dtb.md`);
@@ -24,7 +24,7 @@ stays installed and selectable at startup.
 
 | Part | This build |
 |---|---|
-| Display | HDMI only, at the resolution the Mac picked at startup. Connect the monitor to the **HDMI port before you power on**. USB-C monitors do not work. |
+| Display | HDMI is intended but unverified; the first tester saw no signal. Connect the monitor to the **HDMI port before you power on**. USB-C monitors do not work. |
 | Graphics | Software drawing (no GPU acceleration yet), so it is slower than the Air |
 | Keyboard and mouse | USB, in the **two rear USB-C ports nearest the HDMI port** (Gravity Linux names them back-left and back-middle; use a USB-C adapter or hub). The third rear port and the two front ports are not on yet, so if a keyboard does nothing, move it to another rear port. Bluetooth keyboards may work after setup. |
 | Network | Wired Ethernet is expected to work; Wi-Fi may |
@@ -65,8 +65,9 @@ bash Install.command --install --tester
 
 ## 3. First boot
 
-Choose **Omarchy M4** at startup. You will see a console, then the setup
-screen. Create your Linux username and password, and choose a timezone.
+Choose **Omarchy M4** at startup. If the console and setup screen appear,
+create your Linux username and password, and choose a timezone. The first
+tester saw no HDMI signal; these steps are not a confirmed working sequence.
 
 If the desktop does not appear, press **Control + Option + F2**. Sign in with
 the account you just created, then collect the logs below.

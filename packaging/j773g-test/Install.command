@@ -32,7 +32,7 @@ printf '%s\n' 'Verifying installer and source files. The system image takes long
 [[ $(uname -s) == Darwin && $(uname -m) == arm64 ]] || { echo 'Install from native ARM64 macOS.' >&2; exit 1; }
 [[ $(/usr/sbin/sysctl -n hw.model) == Mac16,10 ]] || { echo 'This tester build supports only Mac16,10 (J773g, M4 Mac mini).' >&2; exit 1; }
 [[ -t 0 && -t 1 && -r /dev/tty ]] || { echo 'Use a local Terminal on the target Mac mini.' >&2; exit 1; }
-printf '%s\n' 'TESTER BUILD: nobody has booted this build on an M4 Mac mini yet.' \
+printf '%s\n' 'TESTER BUILD: no successful desktop boot is confirmed; the first tester reported no HDMI signal.' \
   'Installation can cause data loss, boot failures and hardware problems.' \
   'Keep macOS and recovery, back up first, and read START-HERE.md.'
 read -r -p 'Type TEST to confirm you have a current backup and want this untested build: ' answer
