@@ -1,16 +1,25 @@
 """Width of the mca_fe_hw_params TDM bclk product.
 
-Extracts the else-branch assignment in mca_fe_hw_params and compiles that
-RHS with the function's real operand types. This checks evaluation width
-only. It does not validate hw_params or qualify hardware.
+By default the harness copies the retained audio/j713/kernel/mca.c into a
+temporary tree, requires its snapshot SHA256, and applies
+patches-kernel/j713-audio/mca-bclk-width.patch with
+patch -p1 --fuzz=0 --forward from that tree's root. It then extracts the
+else-branch assignment and compiles that RHS with the function's real
+operand types. MCA_SOURCE bypasses the patch so a baseline or mutant file
+can be measured directly. The retained file and its hash inventory stay
+unchanged.
+
+This checks evaluation width only. It does not validate hw_params, rewrite
+the imported source, or qualify deployed binaries.
 
 Shipped generic machine callers use 2*32, 8*32, and 16*16. The boundary
 pairs below are synthetic and are not a claim about caller reachability
 or about a J713 PCM overflow. J713 returns before this assignment.
-A cast applied to the product after the multiply still wraps; the later
-fix is to promote an operand before the multiply.
+The staged patch casts one operand to unsigned long before the multiply.
+A cast applied to the product after the multiply still wraps.
 """
 
+from hashlib import sha256
 import os
 import re
 import subprocess
@@ -20,7 +29,8 @@ from tempfile import TemporaryDirectory
 
 _ROOT = Path(__file__).resolve().parents[1]
 _DEFAULT_MCA = _ROOT / "audio" / "j713" / "kernel" / "mca.c"
-MCA_SOURCE = Path(os.environ.get("MCA_SOURCE", str(_DEFAULT_MCA)))
+_PATCH = _ROOT / "patches-kernel" / "j713-audio" / "mca-bclk-width.patch"
+_MCA_SHA256 = "6ee2fade6fc237cedb211c4bd198891e10b4fabac947070dce9bc55307628846"
 
 # (slot_width, slots, mathematical unsigned-long product)
 _NORMAL = ((32, 2, 64), (32, 8, 256), (16, 16, 256))
@@ -50,6 +60,33 @@ def bclk_product_rhs(source_text):
     if "tdm_slot_width" not in rhs or "tdm_slots" not in rhs:
         raise AssertionError("extracted RHS is not the slot product: %s" % rhs)
     return rhs
+
+
+def mca_source_text(directory):
+    """Return patched retained source, or MCA_SOURCE with no patch applied."""
+    if "MCA_SOURCE" in os.environ:
+        return Path(os.environ["MCA_SOURCE"]).read_text(encoding="utf-8")
+    data = _DEFAULT_MCA.read_bytes()
+    digest = sha256(data).hexdigest()
+    if digest != _MCA_SHA256:
+        raise AssertionError(
+            "retained mca.c SHA256 %s != %s; refusing to patch" % (digest, _MCA_SHA256)
+        )
+    dest = directory / "audio" / "j713" / "kernel" / "mca.c"
+    dest.parent.mkdir(parents=True)
+    dest.write_bytes(data)
+    applied = subprocess.run(
+        ["patch", "-p1", "--fuzz=0", "--forward", "-i", str(_PATCH)],
+        cwd=directory,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    if applied.returncode != 0:
+        raise AssertionError(applied.stderr or applied.stdout)
+    if sha256(_DEFAULT_MCA.read_bytes()).hexdigest() != _MCA_SHA256:
+        raise AssertionError("retained mca.c changed while applying the patch")
+    return dest.read_text(encoding="utf-8")
 
 
 def _rows(cases):
@@ -123,19 +160,27 @@ int main(int argc, char **argv)
 """ % (rhs, _rows(_NORMAL), _rows(_BOUNDARY))
 
 
+class RetainedMcaSnapshotTest(unittest.TestCase):
+    def test_snapshot_hash_remains(self):
+        data = _DEFAULT_MCA.read_bytes()
+        self.assertEqual(sha256(data).hexdigest(), _MCA_SHA256)
+
+
 class McaBclkArithmeticTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        source_text = MCA_SOURCE.read_text(encoding="utf-8")
-        cls.rhs = bclk_product_rhs(source_text)
         cls._tmp = TemporaryDirectory(prefix="mca-bclk-")
+        source_text = mca_source_text(Path(cls._tmp.name))
+        cls.rhs = bclk_product_rhs(source_text)
         src = Path(cls._tmp.name) / "bclk_ratio.c"
         cls.binary = Path(cls._tmp.name) / "bclk_ratio"
         src.write_text(_harness(cls.rhs), encoding="utf-8")
+        compiler = os.environ.get("CC", "cc")
         compiled = subprocess.run(
-            ["cc", "-std=c11", "-Wall", "-Werror", "-o", str(cls.binary), str(src)],
+            [compiler, "-std=c11", "-Wall", "-Werror", "-o", str(cls.binary), str(src)],
             capture_output=True,
             text=True,
+            timeout=20,
         )
         if compiled.returncode != 0:
             raise AssertionError(compiled.stderr or compiled.stdout)
@@ -149,6 +194,7 @@ class McaBclkArithmeticTest(unittest.TestCase):
             [str(self.binary), group],
             capture_output=True,
             text=True,
+            timeout=20,
         )
         self.assertEqual(
             result.returncode,

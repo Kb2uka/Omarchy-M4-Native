@@ -281,13 +281,15 @@ static int load_rx(struct dchid_hdr hdr, const void *payload, size_t length)
 	body = rx_data + sizeof(hdr);
 	if (payload && length)
 		memcpy(body, payload, length);
-	if (length % 4 != 0) {
-		if (length < 4)
-			return 2;
+	/*
+	 * Unaligned lengths, including 1..3, are malformed frames. Zero the
+	 * length+4 window and plant the compensating checksum in the first
+	 * word so the driver's accept rule still matches.
+	 */
+	if (length % 4 != 0)
 		memset(body, 0, length + 4);
-	} else {
+	else
 		memset(body + length, 0, 4);
-	}
 	sum = dchid_checksum(&hdr, sizeof(hdr));
 	sum += dchid_checksum(body, length + 4);
 	word = 0xffffffffu - sum;
@@ -314,9 +316,9 @@ static struct dchid_hdr report_hdr(u8 iface)
 	return hdr;
 }
 
-static int case_normal_report(void)
+static int case_normal_report_on(unsigned number, const char *name)
 {
-	struct dchid_hdr hdr = report_hdr(1);
+	struct dchid_hdr hdr = report_hdr((u8)number);
 	struct dchid_subhdr sub;
 	u8 body[12];
 	const u8 payload[4] = {0xde, 0xad, 0xbe, 0xef};
@@ -324,8 +326,8 @@ static int case_normal_report(void)
 	reset_state();
 	g_iface.hid = &g_hid;
 	g_iface.open = 1;
-	g_iface.index = 1;
-	g_dchid.ifaces[1] = &g_iface;
+	g_iface.index = (u8)number;
+	g_dchid.ifaces[number] = &g_iface;
 	memset(&sub, 0, sizeof(sub));
 	sub.length = sizeof(payload);
 	memset(body, 0, sizeof(body));
@@ -344,7 +346,7 @@ static int case_normal_report(void)
 		return fail("normal report leaked the worker");
 	if (await_count != 1)
 		return fail("normal report did not rearm receive");
-	return pass("normal_report");
+	return pass(name);
 }
 
 static int case_normal_ack(void)
@@ -446,6 +448,8 @@ static int case_short(size_t length, const char *name)
 	dchid_handle_packet(&g_dchid, sizeof(hdr));
 	if (report_count || init_calls || ready_calls || gpio_calls)
 		return fail("short subheader was delivered");
+	if (queued_iface != NULL)
+		return fail("short subheader queued work");
 	if (live_allocs != 0)
 		return fail("short subheader leaked the worker");
 	if (await_count != 1)
@@ -453,20 +457,23 @@ static int case_short(size_t length, const char *name)
 	return pass(name);
 }
 
-static int case_empty_comm_event(void)
+static int case_empty_comm_event_body(size_t length, const char *name)
 {
 	struct dchid_hdr hdr = report_hdr(IFACE_COMM);
 	struct dchid_subhdr sub;
 	u8 body[16];
 
+	if (length < sizeof(sub) || length > sizeof(body))
+		return 2;
 	reset_state();
 	g_dchid.ifaces[IFACE_COMM] = &g_iface;
 	memset(&sub, 0, sizeof(sub));
 	memset(body, 0, sizeof(body));
 	memcpy(body, &sub, sizeof(sub));
 	/* A zero-length event must not consume the following byte. */
-	body[sizeof(sub)] = EVENT_INIT;
-	if (load_rx(hdr, body, sizeof(body)) != 0)
+	if (length > sizeof(sub))
+		body[sizeof(sub)] = EVENT_INIT;
+	if (load_rx(hdr, body, length) != 0)
 		return 2;
 	dchid_handle_packet(&g_dchid, sizeof(hdr));
 	if (init_calls || ready_calls || gpio_calls || report_count)
@@ -475,7 +482,35 @@ static int case_empty_comm_event(void)
 		return fail("empty comm event leaked the worker");
 	if (await_count != 1)
 		return fail("empty comm event did not rearm receive");
-	return pass("empty_comm_event");
+	return pass(name);
+}
+
+static int case_comm_ready(void)
+{
+	struct dchid_hdr hdr = report_hdr(IFACE_COMM);
+	struct dchid_subhdr sub;
+	u8 body[12];
+	const u8 payload[2] = {EVENT_READY, 3};
+
+	reset_state();
+	g_dchid.ifaces[IFACE_COMM] = &g_iface;
+	memset(&sub, 0, sizeof(sub));
+	sub.length = sizeof(payload);
+	memset(body, 0, sizeof(body));
+	memcpy(body, &sub, sizeof(sub));
+	memcpy(body + sizeof(sub), payload, sizeof(payload));
+	if (load_rx(hdr, body, sizeof(body)) != 0)
+		return 2;
+	dchid_handle_packet(&g_dchid, sizeof(hdr));
+	if (ready_calls != 1)
+		return fail("READY event was not delivered once");
+	if (init_calls || gpio_calls || report_count)
+		return fail("READY event delivered another callback");
+	if (live_allocs != 0)
+		return fail("READY event leaked the worker");
+	if (await_count != 1)
+		return fail("READY event did not rearm receive");
+	return pass("comm_ready");
 }
 
 static int case_oversized(void)
@@ -542,7 +577,9 @@ int main(int argc, char **argv)
 		return 2;
 	}
 	if (!strcmp(argv[1], "normal_report"))
-		return case_normal_report();
+		return case_normal_report_on(1, "normal_report");
+	if (!strcmp(argv[1], "iface_15"))
+		return case_normal_report_on(15, "iface_15");
 	if (!strcmp(argv[1], "normal_ack"))
 		return case_normal_ack();
 	if (!strcmp(argv[1], "iface_16"))
@@ -551,12 +588,26 @@ int main(int argc, char **argv)
 		return case_iface(255, "iface_255");
 	if (!strcmp(argv[1], "short_0"))
 		return case_short(0, "short_0");
+	if (!strcmp(argv[1], "short_1"))
+		return case_short(1, "short_1");
+	if (!strcmp(argv[1], "short_2"))
+		return case_short(2, "short_2");
+	if (!strcmp(argv[1], "short_3"))
+		return case_short(3, "short_3");
 	if (!strcmp(argv[1], "short_4"))
 		return case_short(4, "short_4");
+	if (!strcmp(argv[1], "short_5"))
+		return case_short(5, "short_5");
+	if (!strcmp(argv[1], "short_6"))
+		return case_short(6, "short_6");
 	if (!strcmp(argv[1], "short_7"))
 		return case_short(7, "short_7");
 	if (!strcmp(argv[1], "empty_comm_event"))
-		return case_empty_comm_event();
+		return case_empty_comm_event_body(16, "empty_comm_event");
+	if (!strcmp(argv[1], "empty_comm_event_8"))
+		return case_empty_comm_event_body(8, "empty_comm_event_8");
+	if (!strcmp(argv[1], "comm_ready"))
+		return case_comm_ready();
 	if (!strcmp(argv[1], "oversized_subpayload"))
 		return case_oversized();
 	if (!strcmp(argv[1], "alloc_fail_rearm"))

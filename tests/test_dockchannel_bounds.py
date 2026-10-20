@@ -1,8 +1,9 @@
-"""Contract for the pinned DockChannel HID receive path.
+"""Contract for the DockChannel HID receive path.
 
-The harness compiles the pinned driver's checksum, packet, ACK, event, and
-report functions. Normal report and ACK follow that driver and pass.
-The other cases assert the safe contract: this pinned source fails them.
+The harness compiles the driver's checksum, packet, ACK, event, and report
+functions. By default that driver is a temporary copy of the pinned source
+with patches-kernel/j713-input/dockchannel-packet-bounds.patch applied.
+DCHID_SOURCE bypasses the patch for baseline and mutant runs.
 """
 
 from hashlib import sha256
@@ -13,8 +14,24 @@ import tempfile
 import unittest
 
 PIN = Path(__file__).resolve().parent / "fixtures" / "dockchannel" / "dockchannel-hid.c"
+PATCH = Path(__file__).resolve().parents[1] / "patches-kernel" / "j713-input" / "dockchannel-packet-bounds.patch"
 HASH = "e4eebbee612eee32bd51ce370d412afc8cf62a9a7e087a3797c2c29306cedfb4"
-SOURCE = Path(os.environ["DCHID_SOURCE"]) if "DCHID_SOURCE" in os.environ else PIN
+
+
+def driver_text(directory):
+    if "DCHID_SOURCE" in os.environ:
+        return Path(os.environ["DCHID_SOURCE"]).read_text()
+    dest = directory / "drivers" / "hid" / "dockchannel-hid" / "dockchannel-hid.c"
+    dest.parent.mkdir(parents=True)
+    dest.write_bytes(PIN.read_bytes())
+    subprocess.run(
+        ["patch", "-p1", "--fuzz=0", "--forward", "-i", str(PATCH)],
+        cwd=directory,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return dest.read_text()
 
 
 def between(source, start, end):
@@ -63,9 +80,9 @@ class PinnedDockChannelDriverTest(unittest.TestCase):
 class DockChannelBoundsTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        driver = SOURCE.read_text()
         cls.tmp = tempfile.TemporaryDirectory(prefix="dchid-bounds-")
         directory = Path(cls.tmp.name)
+        driver = driver_text(directory)
         source = directory / "dockchannel_bounds.c"
         source.write_text(build_source(driver))
         cls.exe = directory / "dockchannel_bounds"
@@ -105,6 +122,9 @@ class DockChannelBoundsTest(unittest.TestCase):
     def test_normal_ack(self):
         self.assert_pass("normal_ack")
 
+    def test_interface_15_normal_report(self):
+        self.assert_pass("iface_15")
+
     def test_interface_16_rejected_before_index(self):
         self.assert_pass("iface_16")
 
@@ -114,14 +134,35 @@ class DockChannelBoundsTest(unittest.TestCase):
     def test_short_subheader_0(self):
         self.assert_pass("short_0")
 
+    def test_short_subheader_1(self):
+        self.assert_pass("short_1")
+
+    def test_short_subheader_2(self):
+        self.assert_pass("short_2")
+
+    def test_short_subheader_3(self):
+        self.assert_pass("short_3")
+
     def test_short_subheader_4(self):
         self.assert_pass("short_4")
+
+    def test_short_subheader_5(self):
+        self.assert_pass("short_5")
+
+    def test_short_subheader_6(self):
+        self.assert_pass("short_6")
 
     def test_short_subheader_7(self):
         self.assert_pass("short_7")
 
     def test_empty_comm_event(self):
         self.assert_pass("empty_comm_event")
+
+    def test_empty_comm_event_exact_subheader(self):
+        self.assert_pass("empty_comm_event_8")
+
+    def test_comm_ready_event(self):
+        self.assert_pass("comm_ready")
 
     def test_oversized_subpayload_frees_worker(self):
         self.assert_pass("oversized_subpayload")
