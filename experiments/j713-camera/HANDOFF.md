@@ -1,0 +1,84 @@
+# Resume the camera investigation
+
+**DO NOT MERGE.** Work is paused. The camera is not functional, and the
+latest overlay packaging fix is not cleared for a hardware load.
+
+## State at pause
+
+- Both diagnostic modules were absent after the last live experiment.
+- All four temporary overlay nodes were absent.
+- All 16 tracked raw PMGR values and the boot identity matched their
+  recorded baseline after each experiment.
+- No firmware start, sensor programming, camera streaming, reboot,
+  shutdown, or suspend was performed.
+- The final source in `dartmap/` is the private R5 candidate, with identity
+  fields redacted for this checkpoint. `rvbar/` is the private R2 candidate.
+- The R5 module was built on the remote validation host and was **not
+  loaded on the Air**. No further hardware attempt is scheduled.
+
+## Immediate next step
+
+1. Recover the private `air-camera-20261020` evidence archive and read the
+   final continuation record. Preserve earlier failed attempts.
+2. Independently review the R5 delta: the real Makefile no longer invokes
+   `dtc -@`; the added contract test checks the actual generated payload.
+   Kernel C, DTS, emitter, and launcher logic are unchanged from R4.
+   The two independent reviews and arbitration for this delta are pending.
+3. Confirm the exact kernel, board, current boot identity, fresh ADT,
+   device ownership, power baseline, and absence of old probe resources.
+   Requalify every private launcher constant after a boot or kernel change.
+4. After review, rebuild and verify the exact artifact and embedded DTBO.
+   Use the mandatory qualified launcher for check-only, then validate-only.
+   Inspect all parameters and kernel logs before unloading.
+5. Perform at most one bounded scratch mapping experiment. Inspect all
+   results, explicitly recover pending cleanup if needed, compare the raw
+   PMGR/boot baseline, and unload only after resources are gone. Do not
+   interpret successful insertion as a successful experiment or retry the
+   forward mapping operation automatically.
+
+For a clean mapping result expect `result`, `first_error`, `cleanup_error`,
+`cleanup`, `verify`, and `fail_stage` all zero; `attempted=13`,
+`version=0x100001`, `map_total=5`, `lookup_count=5`, `readback_count=6`,
+`map_count=0`, `flags=0`, `retain=0`, `cleanup_pending=0`, and
+`power_restored=1`. These are **expected acceptance criteria**, not results
+already observed. Validate-only has no power writes and normally reports
+`power_restored=0`.
+
+## What the experiments establish
+
+The RVBAR observation is `0x10000000001` at physical register
+`0x48d050000`. COPROC control was zero and status was `0x0330006a`.
+Bit 0 of RVBAR was set; the address field was `0x10000000000`.
+This is a retained register observation, not proof that firmware can fetch
+instructions through a newly configured mapping. Do not replace it with a
+guessed CPU physical firmware address.
+
+The scratch diagnostic allocates five fresh zeroed 16 KiB pages at IOVAs
+`0x13ec000..0x1400000`. It uses three temporary ISP DART providers and SID0.
+Its explicit Linux DMA window is `[0, 2^36)`, selecting three page-table
+levels on this kernel; hardware IAS/OAS read as 42 bits. Software address
+lookup and register readback do not prove a DMA transaction or the
+firmware's high address alias.
+
+The RVBAR probe records COPROC state but does not add a CPU-halt predicate
+or revalidate every PMGR word immediately before its final read. The DART
+experiment has its own halt guards. Do not conflate those contracts.
+
+## Work still required after scratch mapping
+
+- Establish the M4 firmware mapping and address-tag contract using the
+  observed reset vector and earlier-chip references; keep the foundation's
+  unknown-address-mask refusal until justified.
+- Establish a bounded firmware start, handshake, and reliable shutdown
+  sequence before starting the processor. A control-register write alone
+  is not established as a complete firmware shutdown.
+- Resolve sensor identity, matching setfile, and streaming ABI. The ADT
+  selector used for the SoC layout is not a sensor identifier.
+- Integrate the real power, IRQ, mailbox, DMA lifetime, and firmware paths.
+  The foundation's broad register claims and generic power handling still
+  require reconciliation with the measured layout.
+- Capture real camera frames and validate normal camera applications,
+  cleanup, and repeated use before proposing package-channel integration.
+
+Do not install the experiments or relax the T8132 refusal merely because
+the foundation compiles. The checkpoint is intentionally unfinished.

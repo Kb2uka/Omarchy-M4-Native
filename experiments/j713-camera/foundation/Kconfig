@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config VIDEO_APPLE_ISP
+	tristate "Apple Silicon Image Signal Processor driver"
+	select VIDEOBUF2_CORE
+	select VIDEOBUF2_V4L2
+	select VIDEOBUF2_DMA_SG
+	select APPLE_PMP_REPORT
+	depends on ARCH_APPLE || COMPILE_TEST
+	depends on OF_ADDRESS
+	depends on V4L_PLATFORM_DRIVERS
+	depends on VIDEO_DEV
+	help
+	  Driver for the image signal processor that runs the built-in
+	  camera of Apple silicon machines. The ISP firmware is loaded by
+	  the bootloader. When a stream starts, the driver loads the
+	  calibration file for the detected camera module,
+	  apple/isp_<module>_<revision>XX.dat, from the firmware search
+	  path; if it is missing, the stream runs without calibration.
+
+config VIDEO_APPLE_ISP_KUNIT_TEST
+	bool "KUnit tests for the Apple ISP driver" if !KUNIT_ALL_TESTS
+	depends on VIDEO_APPLE_ISP && KUNIT
+	depends on KUNIT=y || VIDEO_APPLE_ISP=m
+	default KUNIT_ALL_TESTS
+	help
+	  Builds unit tests for the videobuf2 queue set-up and for the
+	  shared memory the firmware frees into the Apple ISP driver. They
+	  need no hardware. Only useful for kernel developers running KUnit.
+
+	  If unsure, say N.
+
+config VIDEO_APPLE_ISP_IPC_LAYOUT_KUNIT_TEST
+	tristate "Apple ISP IPC layout tests" if !KUNIT_ALL_TESTS
+	depends on KUNIT
+	default KUNIT_ALL_TESTS
+	help
+	  Test firmware-selected IPC ring extents, including 64-bit addresses,
+	  overflow, alignment and overlap with the channel table or other rings.
+	  These tests run without starting or accessing the ISP and do not
+	  require a supported Apple device or the ISP driver itself.

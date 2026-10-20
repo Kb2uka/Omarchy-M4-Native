@@ -1,0 +1,53 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * Temporary ISP DART masters for the private scratch-map diagnostic.
+ * dtc generates the local phandle fixups for iommus. Do not hand-write
+ * the DTBO. interrupt-parent is the numeric external AIC phandle 0x0d.
+ * The module guards that live phandle, cell count, and compatible before
+ * of_overlay_fdt_apply. This file does not modify existing nodes and does
+ * not describe an apple,t8132-isp or camera device.
+ *
+ * apple,dma-range is base 0 and size 1<<36 (/bits/ 64 <0 0x1000000000>).
+ * That is the Linux DMA window, not a claim that hardware IAS is 36.
+ */
+
+/ {
+	fragment@0 {
+		target-path = "/soc";
+		__overlay__ {
+			dart_isp0: iommu@48e8c0000 {
+				compatible = "apple,t8110-dart";
+				reg = <0x4 0x8e8c0000 0x0 0xc000>;
+				#iommu-cells = <1>;
+				interrupt-parent = <0x0d>;
+				interrupts = <0 387 4>;
+				apple,dma-range = /bits/ 64 <0x0 0x1000000000>;
+			};
+
+			dart_isp1: iommu@48e8e0000 {
+				compatible = "apple,t8110-dart";
+				reg = <0x4 0x8e8e0000 0x0 0xc000>;
+				#iommu-cells = <1>;
+				interrupt-parent = <0x0d>;
+				interrupts = <0 387 4>;
+				apple,dma-range = /bits/ 64 <0x0 0x1000000000>;
+			};
+
+			dart_isp2: iommu@48e900000 {
+				compatible = "apple,t8110-dart";
+				reg = <0x4 0x8e900000 0x0 0xc000>;
+				#iommu-cells = <1>;
+				interrupt-parent = <0x0d>;
+				interrupts = <0 387 4>;
+				apple,dma-range = /bits/ 64 <0x0 0x1000000000>;
+			};
+
+			j713-isp-dart-map-test {
+				compatible = "kb2uka,j713-isp-dart-map-test";
+				iommus = <&dart_isp0 0 &dart_isp1 0 &dart_isp2 0>;
+			};
+		};
+	};
+};
