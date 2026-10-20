@@ -324,8 +324,8 @@ class HardenedBuildTests(unittest.TestCase):
         self.assertEqual(names, sorted(path.relative_to(copied).as_posix()
                                        for path in copied.rglob('*') if path.is_file()))
         self.assertEqual((copied / 'mca.c').read_bytes(), (source / 'mca.c').read_bytes())
-        self.assertIn('bclk_ratio = tdm_slot_width * tdm_slots;', (copied / 'mca.c').read_text())
-        self.assertNotIn('(unsigned long)tdm_slot_width', (copied / 'mca.c').read_text())
+        self.assertIn('bclk_ratio = (unsigned long)tdm_slot_width * tdm_slots;',
+                      (copied / 'mca.c').read_text())
         for path, pin in before.items():
             self.assertEqual(digest(path), pin)
         self.assertFalse((output / 'receipt.json').exists())
@@ -647,11 +647,12 @@ class HardenedBuildTests(unittest.TestCase):
     def test_vmlinux_symvers_drift_is_rejected_without_receipt(self):
         # Real archive: vmlinux.symvers and Module.symvers are both
         # 5e3c2624c6a991bae503336137ce15071e51ef043edcd20ba1ad19df4e23d67c.
+        # Read the published pin before prepared_inputs() replaces KERNEL_INPUTS.
+        self.assertEqual(tool.KERNEL_INPUTS['Module.symvers'],
+                         '5e3c2624c6a991bae503336137ce15071e51ef043edcd20ba1ad19df4e23d67c')
         table = b'exports\n'
         archive, exports, files = self.prepared_inputs(extra_files={'vmlinux.symvers': table})
         self.assertEqual(files['vmlinux.symvers'], files['Module.symvers'])
-        self.assertEqual(tool.KERNEL_INPUTS['Module.symvers'],
-                         '5e3c2624c6a991bae503336137ce15071e51ef043edcd20ba1ad19df4e23d67c')
 
         def mutate(mounts):
             kernel = mounts['/kernel']
