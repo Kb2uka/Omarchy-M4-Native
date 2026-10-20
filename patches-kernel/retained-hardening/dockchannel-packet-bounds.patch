@@ -1,0 +1,52 @@
+--- a/drivers/hid/dockchannel-hid/dockchannel-hid.c
++++ b/drivers/hid/dockchannel-hid/dockchannel-hid.c
+@@ -1265,11 +1265,15 @@
+ 	if (shdr->length + sizeof(*shdr) > work->hdr.length) {
+ 		dev_err(dchid->dev, "Bad sub header length (%hu > %zu)\n",
+ 			shdr->length, work->hdr.length - sizeof(*shdr));
+-		return;
++		goto cleanup;
+ 	}
+ 
+ 	switch (type) {
+ 	case HID_INPUT_REPORT:
++		if (!shdr->length) {
++			dev_err(dchid->dev, "Received zero-length input report\n");
++			break;
++		}
+ 		if (work->hdr.iface == IFACE_COMM)
+ 			dchid_handle_event(dchid, payload, shdr->length);
+ 		else
+@@ -1280,6 +1284,7 @@
+ 		break;
+ 	}
+ 
++cleanup:
+ 	kfree(work);
+ }
+ 
+@@ -1356,9 +1361,15 @@
+ 		goto done;
+ 	}
+ 
++	if (hdr.length < sizeof(struct dchid_subhdr)) {
++		dev_err(dchid->dev, "Packet shorter than subheader (%u < %zu)\n",
++			hdr.length, sizeof(struct dchid_subhdr));
++		goto done;
++	}
+ 
+ 	if (hdr.iface >= MAX_INTERFACES) {
+ 		dev_err(dchid->dev, "Bad iface %d\n", hdr.iface);
++		goto done;
+ 	}
+ 
+ 	iface = dchid->ifaces[hdr.iface];
+@@ -1382,7 +1393,7 @@
+ 
+ 	work = kzalloc(sizeof(*work) + hdr.length, GFP_KERNEL);
+ 	if (!work)
+-		return;
++		goto done;
+ 
+ 	work->hdr = hdr;
+ 	work->iface = iface;
