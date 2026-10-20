@@ -14,7 +14,7 @@ revision `6420623289fe7544cb8589b658355e57f0290fcc`. It adds an experimental
 `j715ap` profile for the 15-inch Air, a `testing` board
 ([m4-boards.md](m4-boards.md), #142), with the same 26.5.1 image behind expert
 mode. It does not enable other Air models or M4 Pro/Max systems. The Mini's 26.6.2 requirement
-and the shared T8132 minimum remain unchanged; only J713 selects 26.5.1.
+and the shared T8132 minimum remain unchanged; J713 and J715 select 26.5.1.
 
 This is a recovery and firmware packaging checkpoint, not an installable Omarchy
 distribution. The complete boot chain, SSD root filesystem, owner setup,
