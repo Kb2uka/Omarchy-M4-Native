@@ -66,13 +66,15 @@ Order, and nothing is written to output before the input checks:
 5. Apply RETAINED_PATCH once, to that copied tree only.
 6. Copy audio/j713/kernel to output/mca. Do not apply the bclk patch.
 
-build() calls prepare(), then one docker run:
+build() calls prepare(), then one docker run. Host sides of -v are absolute
+paths to the prepared kernel tree, the supplemental exports file, and
+output/mca, including when archive, exports, and output were relative:
 
     docker run --rm --network none --pull never --entrypoint /bin/bash
       -e KBUILD_BUILD_*=... 
-      -v output/kernel:/kernel
-      -v EXPORTS:/reference-sound-exports.symvers:ro
-      -v output/mca:/job
+      -v /ABS/output/kernel:/kernel
+      -v /ABS/EXPORTS:/reference-sound-exports.symvers:ro
+      -v /ABS/output/mca:/job
       sha256:BUILDER_IMAGE -c SCRIPT
 
 SCRIPT runs make Image.gz, then make modules for M=/job, both with
@@ -86,7 +88,9 @@ include/config/kernel.release must still match the archived inputs, and the
 supplemental file must still match SOUND_EXPORTS. The real archive hashes
 both symvers files as 5e3c2624c6a991bae503336137ce15071e51ef043edcd20ba1ad19df4e23d67c.
 vmlinux.symvers is compared with that archived export table even when
-Module.symvers is untouched. Drift raises and does not write a receipt.
+Module.symvers is untouched. The real archive contains the file. A tree
+without vmlinux.symvers is refused after prepare and before docker, and
+does not write a receipt. Drift raises and does not write a receipt.
 Success copies
 arch/arm64/boot/Image.gz to output/Image.gz and each module to
 output/modules/<name>.ko, and writes output/receipt.json. The receipt is
@@ -97,6 +101,7 @@ also build()'s return value:
     image, kernel_archive, sound_exports,
     kernel {path, sha256, bytes}, modules {name: {sha256, bytes}},
     exports {module_symvers_before, module_symvers_after,
+             vmlinux_symvers_before, vmlinux_symvers_after,
              supplemental_before, supplemental_after},
     kernel_release, config_sha256, profile 'conservative-v1'
 
@@ -106,6 +111,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import stat
 import subprocess
@@ -187,6 +193,7 @@ class HardenedBuildTests(unittest.TestCase):
         files = {
             '.config': b'config\n',
             'Module.symvers': b'exports\n',
+            'vmlinux.symvers': b'exports\n',
             'include/generated/autoconf.h': b'autoconf\n',
             'include/config/auto.conf': b'auto\n',
             'include/generated/utsrelease.h': b'uts\n',
@@ -597,9 +604,12 @@ class HardenedBuildTests(unittest.TestCase):
             self.assertEqual(receipt['modules'][name], {
                 'sha256': digest(module), 'bytes': module.stat().st_size})
         symvers = text_digest(files['Module.symvers'])
+        vmlinux = text_digest(files['vmlinux.symvers'])
         self.assertEqual(receipt['exports'], {
             'module_symvers_before': symvers,
             'module_symvers_after': symvers,
+            'vmlinux_symvers_before': vmlinux,
+            'vmlinux_symvers_after': vmlinux,
             'supplemental_before': digest(exports),
             'supplemental_after': digest(exports),
         })
@@ -689,6 +699,58 @@ class HardenedBuildTests(unittest.TestCase):
         self.assertEqual(receipt['exports']['module_symvers_before'], text_digest(table))
         self.assertEqual(receipt['exports']['module_symvers_after'], text_digest(table))
         self.assertTrue((output / 'receipt.json').exists())
+
+    def test_missing_vmlinux_symvers_is_rejected_before_docker(self):
+        files = self.kernel_files(b'alpha\n')
+        del files['vmlinux.symvers']
+        archive = self.write_archive(files)
+        exports = self.base / 'exports-missing-vmlinux'
+        exports.write_bytes(b'supplemental\n')
+        historical = self.historical_patches()
+        self.apply_pins(self.pins_for(
+            files, archive, exports, after_historical=(b'alpha\nbeta\ngamma\n', b'smc\nlocked\n')),
+            historical[:2], historical[2])
+        output = self.base / 'missing-vmlinux'
+        calls, run = self.docker_runner()
+        with mock.patch.object(tool.subprocess, 'run', side_effect=run):
+            with self.assertRaises(RuntimeError):
+                tool.build(archive, exports, self.image(), output)
+        self.assertEqual(calls, [])
+        self.assertFalse((output / 'receipt.json').exists())
+
+    def test_relative_inputs_use_absolute_docker_mounts(self):
+        archive, exports, _files = self.prepared_inputs()
+        output_name = 'relative-built'
+        calls, run = self.docker_runner()
+        cwd = os.getcwd()
+        os.chdir(self.base)
+        self.addCleanup(os.chdir, cwd)
+        with mock.patch.object(tool.subprocess, 'run', side_effect=run):
+            tool.build(
+                os.path.relpath(archive, self.base),
+                os.path.relpath(exports, self.base),
+                self.image(),
+                output_name)
+        self.assertEqual(len(calls), 1)
+        mounts = {}
+        argv = calls[0]
+        index = 0
+        while index < len(argv):
+            if argv[index] == '-v':
+                host, guest = argv[index + 1].split(':', 1)
+                guest = guest.split(':', 1)[0]
+                mounts[guest] = host
+            index += 1
+        expected = {
+            '/kernel': (self.base / output_name / 'kernel').resolve(),
+            '/reference-sound-exports.symvers': exports.resolve(),
+            '/job': (self.base / output_name / 'mca').resolve(),
+        }
+        self.assertEqual(set(expected), set(mounts))
+        for guest, intended in expected.items():
+            host = mounts[guest]
+            self.assertTrue(os.path.isabs(host))
+            self.assertEqual(Path(host).resolve(), intended)
 
 
 if __name__ == '__main__':

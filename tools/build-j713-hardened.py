@@ -4,12 +4,14 @@
 """Build a candidate J713 kernel Image.gz and the five audio/j713/kernel modules.
 
 This does not qualify a native install. Pins are constants; the CLI cannot
-replace them. A full kernel make may rewrite Module.symvers; that drift is a
-blocker and is not accepted.
+replace them. A full kernel make may rewrite Module.symvers or vmlinux.symvers;
+that drift is a blocker and is not accepted. vmlinux.symvers is checked against
+the archived Module.symvers pin and is not a seventh kernel-inputs row.
 """
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -116,49 +118,96 @@ def require_pinned_inputs(archive, exports):
             refuse('imported source mismatch: ' + name)
 
 
-def member_relative(name):
+def require_extraction_python():
+    if sys.version_info < (3, 12):
+        refuse('kernel archive extraction requires Python 3.12 or newer (tarfile.data_filter)')
+
+
+def split_archived_name(name):
+    """Return (top directory, path under it). Refuse names that leave the tree.
+
+    One leading component is removed by the caller. Components of '..' are
+    refused here so a filter cannot strip them and then treat the remainder
+    as inside the destination.
+    """
     text = str(name).replace('\\', '/')
-    if text.startswith('/'):
+    if text.startswith('/') or os.path.isabs(text):
         refuse('absolute archive member: ' + text)
-    parts = [part for part in text.split('/') if part not in ('', '.')]
-    if not parts or any(part == '..' for part in parts):
+    raw = text.split('/')
+    if any(part == '..' for part in raw):
         refuse('archive member escapes the tree: ' + text)
-    stripped = parts[1:]
-    if any(part == '..' for part in stripped):
+    parts = [part for part in raw if part not in ('', '.')]
+    if not parts:
         refuse('archive member escapes the tree: ' + text)
-    return Path(*stripped) if stripped else None
+    return parts[0], parts[1:]
 
 
-def plan_archive(archive):
-    planned = []
+def refuse_symlink_destination(dest, relative_name):
+    current = Path(dest)
+    if current.is_symlink():
+        refuse('refusing to extract through an existing symlink: ' + relative_name)
+    for part in Path(relative_name).parts:
+        current = current / part
+        if current.is_symlink():
+            refuse('refusing to extract through an existing symlink: ' + relative_name)
+
+
+def filtered_member(member, dest):
+    """Strip one leading component, then apply tarfile.data_filter."""
+    if member.islnk():
+        refuse('refusing hard link: ' + member.name)
+    if not (member.isdir() or member.isfile() or member.issym()):
+        refuse('refusing special archive member: ' + member.name)
+    _root, rest = split_archived_name(member.name)
+    if not rest:
+        if not member.isdir():
+            refuse('archive member is outside the single top-level directory: ' + member.name)
+        return None
+    if member.issym() and (os.path.isabs(member.linkname) or str(member.linkname).startswith('/')):
+        refuse('refusing absolute symlink: ' + member.name)
+    stripped = member.replace(name='/'.join(rest), deep=False)
+    try:
+        filtered = tarfile.data_filter(stripped, os.fspath(dest))
+    except tarfile.FilterError:
+        refuse('refusing archive member: ' + member.name)
+    if filtered is None:
+        refuse('refusing archive member: ' + member.name)
+    refuse_symlink_destination(dest, filtered.name)
+    return filtered
+
+
+def preflight_archive(archive, kernel):
+    require_extraction_python()
+    roots = set()
+    seen = set()
     with tarfile.open(archive, 'r:gz') as packed:
-        for member in packed.getmembers():
-            if member.issym() or member.islnk():
-                refuse('refusing archive link; symlinks and hard links are not extracted: ' + member.name)
-            if not member.isdir() and not member.isfile():
-                refuse('refusing special archive member: ' + member.name)
-            planned.append((member.name, member.isdir(), member_relative(member.name)))
-    return planned
+        members = packed.getmembers()
+    if not members:
+        refuse('kernel archive is empty')
+    for member in members:
+        root, _rest = split_archived_name(member.name)
+        roots.add(root)
+        filtered = filtered_member(member, kernel)
+        if filtered is None:
+            continue
+        if filtered.name in seen and not member.isdir():
+            refuse('duplicate archive member: ' + member.name)
+        seen.add(filtered.name)
+    if len(roots) != 1:
+        refuse('kernel archive does not have one top-level directory')
 
 
-def extract_archive(archive, kernel, planned):
-    wanted = {name: (is_dir, relative) for name, is_dir, relative in planned}
+def extraction_filter(member, dest_path):
+    return filtered_member(member, dest_path)
+
+
+def extract_archive(archive, kernel):
     kernel.mkdir(parents=True)
     with tarfile.open(archive, 'r:gz') as packed:
-        for member in packed.getmembers():
-            is_dir, relative = wanted[member.name]
-            if relative is None:
-                continue
-            target = kernel / relative
-            if is_dir:
-                target.mkdir(parents=True, exist_ok=True)
-                continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            source = packed.extractfile(member)
-            if source is None:
-                refuse('archive member has no file body: ' + member.name)
-            with source, open(target, 'wb') as handle:
-                shutil.copyfileobj(source, handle)
+        try:
+            packed.extractall(kernel, filter=extraction_filter)
+        except tarfile.FilterError:
+            refuse('refusing archive member during extraction')
 
 
 def require_tree_pins(kernel):
@@ -203,12 +252,12 @@ def prepare(archive, exports, image, output):
     output = Path(output)
     require_image(image)
     require_pinned_inputs(archive, exports)
-    if output.exists():
+    if output.exists() or output.is_symlink():
         refuse('output already exists: ' + str(output))
-    planned = plan_archive(archive)
-    output.mkdir()
     kernel = output / 'kernel'
-    extract_archive(archive, kernel, planned)
+    preflight_archive(archive, kernel)
+    output.mkdir()
+    extract_archive(archive, kernel)
     require_tree_pins(kernel)
     for path in HISTORICAL_PATCHES:
         apply_patch(kernel, resolve_patch(path))
@@ -226,7 +275,25 @@ def docker_script():
     return 'set -euo pipefail\n' + common + ' Image.gz\n' + modules + '\n'
 
 
-def require_unchanged(kernel, exports, before_symvers, before_exports):
+def pinned_vmlinux_symvers(kernel):
+    """Hash vmlinux.symvers when the archive has one.
+
+    The six kernel-inputs rows stay unchanged. The file is the same export
+    table as Module.symvers in the pinned archive, and make Image rewrites it.
+    Synthetic archives that omit it are left alone.
+    """
+    path = kernel / 'vmlinux.symvers'
+    if not path.exists() and not path.is_symlink():
+        return None
+    if path.is_symlink() or not path.is_file():
+        refuse('vmlinux.symvers must be a regular file')
+    digest = sha256_file(path)
+    if digest != KERNEL_INPUTS['Module.symvers']:
+        refuse('vmlinux.symvers does not match the archived Module.symvers pin')
+    return digest
+
+
+def require_unchanged(kernel, exports, before_symvers, before_exports, before_vmlinux):
     after_symvers = sha256_file(kernel / 'Module.symvers')
     after_exports = sha256_file(exports)
     if after_symvers != before_symvers or after_symvers != KERNEL_INPUTS['Module.symvers']:
@@ -237,13 +304,26 @@ def require_unchanged(kernel, exports, before_symvers, before_exports):
     for name, pinned in KERNEL_INPUTS.items():
         if sha256_file(kernel / name) != pinned:
             refuse('kernel input drifted: ' + name)
+    path = kernel / 'vmlinux.symvers'
+    if before_vmlinux is None:
+        if path.exists() or path.is_symlink():
+            refuse('vmlinux.symvers appeared during the kernel build')
+        after_vmlinux = None
+    else:
+        if path.is_symlink() or not path.is_file():
+            refuse('vmlinux.symvers changed during the kernel build; '
+                   'a regenerated export table does not replace the archived pin')
+        after_vmlinux = sha256_file(path)
+        if after_vmlinux != before_vmlinux or after_vmlinux != KERNEL_INPUTS['Module.symvers']:
+            refuse('vmlinux.symvers changed during the kernel build; '
+                   'a regenerated export table does not replace the archived pin')
     release = (kernel / 'include/config/kernel.release').read_text().strip()
     if release != KERNEL_RELEASE:
         refuse('kernel release drifted')
-    return after_symvers, after_exports
+    return after_symvers, after_exports, after_vmlinux
 
 
-def publish(output, kernel, archive, exports, before_symvers, after_symvers, before_exports, after_exports):
+def publish(output, kernel, archive, exports, before_symvers, after_symvers, before_exports, after_exports, before_vmlinux, after_vmlinux):
     image_source = kernel / 'arch/arm64/boot/Image.gz'
     if not image_source.is_file():
         refuse('kernel Image.gz was not produced')
@@ -283,6 +363,9 @@ def publish(output, kernel, archive, exports, before_symvers, after_symvers, bef
         'config_sha256': sha256_file(kernel / '.config'),
         'profile': PROFILE,
     }
+    if before_vmlinux is not None:
+        receipt['exports']['vmlinux_symvers_before'] = before_vmlinux
+        receipt['exports']['vmlinux_symvers_after'] = after_vmlinux
     (output / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
     return receipt
 
@@ -295,6 +378,7 @@ def build(archive, exports, image, output):
     kernel = output / 'kernel'
     before_symvers = sha256_file(kernel / 'Module.symvers')
     before_exports = sha256_file(exports)
+    before_vmlinux = pinned_vmlinux_symvers(kernel)
     command = [
         'docker', 'run', '--rm', '--network', 'none', '--pull', 'never',
         '--entrypoint', '/bin/bash',
@@ -312,8 +396,11 @@ def build(archive, exports, image, output):
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or '').strip()
         refuse('kernel build failed' + ((': ' + detail) if detail else ''))
-    after_symvers, after_exports = require_unchanged(kernel, exports, before_symvers, before_exports)
-    return publish(output, kernel, archive, exports, before_symvers, after_symvers, before_exports, after_exports)
+    after_symvers, after_exports, after_vmlinux = require_unchanged(
+        kernel, exports, before_symvers, before_exports, before_vmlinux)
+    return publish(
+        output, kernel, archive, exports, before_symvers, after_symvers,
+        before_exports, after_exports, before_vmlinux, after_vmlinux)
 
 
 def main(argv):
