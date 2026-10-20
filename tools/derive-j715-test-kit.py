@@ -14,8 +14,8 @@ The J713 kit is checked against its pins. The output kit changes only:
 - the installer definition: OS name, OS package, devicetree and kernel;
 - Install.command, START-HERE.md, KNOWN-LIMITATIONS.md and UPDATES.md (packaging/j715-test);
 - in the root image: the GPU module that admits the J715 and its pin, m4-gpu-start's
-  board check, the session placement that admits the J715, and the start links of
-  the J713-only services that refuse a J715 anyway;
+  board check, the session placement that admits the J715, and the start links and
+  drop-ins of the J713-only services that refuse a J715 anyway;
 - the J715 sources beside the kit's source bundle, and KIT.json, IMAGE.json and
   SHA256SUMS, regenerated for those changes.
 """
@@ -96,6 +96,13 @@ ROOT_LINKS = (
     '/etc/systemd/system/multi-user.target.wants/m4-video.service',
     '/etc/systemd/system/multi-user.target.wants/j713-owner-assets.service',
     '/etc/systemd/system/timers.target.wants/m4-channel-connect.timer',
+)
+# Drop-ins that pull the J713 owner options service in without its start link. The
+# provisioning one Requires it, so its J713 board check would fail the first-boot user
+# setup and leave SDDM with no account.
+ROOT_DROPINS = (
+    '/usr/lib/systemd/system/omarchy-provision-owner.service.d/10-owner-assets.conf',
+    '/usr/lib/systemd/system/systemd-user-sessions.service.d/10-owner-assets.conf',
 )
 # Sources the kit adds beside its source bundle: published path -> repository path.
 SOURCES = {
@@ -228,6 +235,8 @@ def patch_root(image, gpu_module, debugfs='debugfs', e2fsck='e2fsck'):
     changes = root_changes(debugfs, image, gpu_module)
     for link in ROOT_LINKS:
         require('Inode:' in debugfs_stat(debugfs, image, link), 'Missing root start link: ' + link)
+    for dropin in ROOT_DROPINS:
+        require('Inode:' in debugfs_stat(debugfs, image, dropin), 'Missing root drop-in: ' + dropin)
     with tempfile.TemporaryDirectory(prefix='j715-root-') as scratch:
         commands = []
         for index, (path, (data, mode)) in enumerate(sorted(changes.items())):
@@ -236,7 +245,7 @@ def patch_root(image, gpu_module, debugfs='debugfs', e2fsck='e2fsck'):
             directory, base = path.rsplit('/', 1)
             commands += [f'cd {directory}', f'rm {base}', f'write {staged} {base}',
                          f'sif {base} uid 0', f'sif {base} gid 0', f'sif {base} mode 0100{mode:o}']
-        commands += [f'rm {link}' for link in ROOT_LINKS]
+        commands += [f'rm {path}' for path in ROOT_LINKS + ROOT_DROPINS]
         script = Path(scratch) / 'commands.debugfs'
         script.write_text('\n'.join(commands) + '\n')
         subprocess.run([debugfs, '-w', '-f', str(script), str(image)], capture_output=True, check=True)
@@ -245,8 +254,8 @@ def patch_root(image, gpu_module, debugfs='debugfs', e2fsck='e2fsck'):
         stat = debugfs_stat(debugfs, image, path)
         require(re.search(r'Mode:\s+0' + f'{mode:o}', stat) and re.search(r'User:\s+0\s+Group:\s+0\b', stat),
                 'Root file ownership or mode: ' + path)
-    for link in ROOT_LINKS:
-        require('Inode:' not in debugfs_stat(debugfs, image, link), 'Root start link not removed: ' + link)
+    for path in ROOT_LINKS + ROOT_DROPINS:
+        require('Inode:' not in debugfs_stat(debugfs, image, path), 'Root file not removed: ' + path)
     check = subprocess.run([e2fsck, '-fn', str(image)], capture_output=True, text=True)
     require(check.returncode == 0, 'Root filesystem check failed: ' + check.stdout[-400:])
     return {path: sha_bytes(data) for path, (data, _) in changes.items()}
@@ -368,7 +377,7 @@ def assemble(kit, dtb_path, kernel_path, gpu_module, output, revision, debugfs, 
     image['gpu_module'] = dict(image['gpu_module'], sha256=GPU_NEW, replaces_sha256=GPU_OLD,
                                issues=image['gpu_module']['issues'] + [142])
     image['j715_test'] = dict(tester, root_from_sha256=OLD_ROOT_SHA256, root_files=root_files,
-                              root_links_removed=list(ROOT_LINKS),
+                              root_links_removed=list(ROOT_LINKS), root_dropins_removed=list(ROOT_DROPINS),
                               installer_files={name: pins[1] for name, pins in INSTALLER_FILES.items()},
                               sources=dict(SOURCES))
     write(output / 'IMAGE.json', canonical(image))

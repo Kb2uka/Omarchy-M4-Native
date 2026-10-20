@@ -26,6 +26,7 @@ The tool changes only the following:
 | `/usr/local/bin/m4-gpu-start` | Refuses any board but `apple,j713` | Also accepts `apple,j715` |
 | New-user session placement (`/etc/skel/.local/lib/omarchy/m4-session-placement.py`) | J713 only | `tools/m4-session-placement.py`, which admits the J715 |
 | Start links removed | — | `m4-j713-audio-register`, `speakersafetyd-j713`, `m4-video`, `j713-owner-assets`, `m4-channel-connect.timer` |
+| Drop-ins removed | — | `10-owner-assets.conf` of `omarchy-provision-owner.service` and of `systemd-user-sessions.service` |
 | Sources added | — | `source/j715/`: the kernel patch, both installer patches, `g16.rs` and `j715-board.dtso` |
 | `KIT.json`, `IMAGE.json`, `SHA256SUMS` | — | Regenerated, with a `j715_test` record of the source kit, revision and changes; `kernel_native_startup_qualified` is false |
 
@@ -68,6 +69,13 @@ has a failure action, so leaving them enabled would only log failures. The
 update timer would retry every 20 minutes for ever. The root filesystem keeps
 their files; only the start links go. The image's filesystem UUID is
 unchanged, so the installer's root identity check still holds.
+
+The owner options service (`j713-owner-assets`) is also pulled in without
+its start link: first-boot user setup `Requires` it and `Permit User Sessions`
+`Wants` it, through two `10-owner-assets.conf` drop-ins. On the first J715
+install with only the start link gone, the service refused the board, the user
+setup failed on the dependency, and SDDM came up with no account to log in to.
+The kit removes both drop-ins as well.
 
 ## Build
 

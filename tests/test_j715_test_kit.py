@@ -107,6 +107,8 @@ class Kit:
         for link in MODULE.ROOT_LINKS:
             (tree / link.lstrip('/')).parent.mkdir(parents=True, exist_ok=True)
             os.symlink('/usr/lib/systemd/system/' + link.rsplit('/', 1)[1], tree / link.lstrip('/'))
+        for dropin in MODULE.ROOT_DROPINS:
+            put(tree / dropin.lstrip('/'), b'[Unit]\nRequires=j713-owner-assets.service\n')
         put(tree / 'etc/hostname', b'omarchy\n')
         self.root = base / 'root.ext4'
         subprocess.run(['mkfs.ext4', '-q', '-F', '-E', 'root_owner=0:0', '-d', str(tree), str(self.root), '8M'],
@@ -272,8 +274,8 @@ class Derive(unittest.TestCase):
         for path, mode in ((MODULE.GPU_MODULE, '0644'), (MODULE.GPU_SUMS, '0664'), (MODULE.GPU_START, '0755'),
                            (MODULE.PLACEMENT, '0644')):
             self.assertRegex(stat(root, path), r'Mode:\s+' + mode + r'\b', path)
-        for link in MODULE.ROOT_LINKS:
-            self.assertNotIn('Inode:', stat(root, link))
+        for path in MODULE.ROOT_LINKS + MODULE.ROOT_DROPINS:
+            self.assertNotIn('Inode:', stat(root, path))
         self.assertEqual(read(root, '/etc/hostname'), b'omarchy\n')
         self.assertEqual(subprocess.run(['e2fsck', '-fn', str(root)], capture_output=True).returncode, 0)
         old_tar, new_tar = tar_files(self.fixture.kit / 'installer-macos.tar.gz'), \
@@ -301,6 +303,9 @@ class Derive(unittest.TestCase):
             '/etc/systemd/system/multi-user.target.wants/m4-video.service',
             '/etc/systemd/system/multi-user.target.wants/j713-owner-assets.service',
             '/etc/systemd/system/timers.target.wants/m4-channel-connect.timer'])
+        self.assertEqual(list(MODULE.ROOT_DROPINS), [
+            '/usr/lib/systemd/system/omarchy-provision-owner.service.d/10-owner-assets.conf',
+            '/usr/lib/systemd/system/systemd-user-sessions.service.d/10-owner-assets.conf'])
         self.assertEqual(MODULE.GPU_START_LINE[1],
                          b'grep -zFxq -e apple,j713 -e apple,j715 /sys/firmware/devicetree/base/compatible\n')
         self.assertEqual(MODULE.FIRMWARE, '26.5.1')
@@ -343,6 +348,10 @@ class Derive(unittest.TestCase):
     def test_a_missing_start_link_is_refused(self):
         with patch.object(MODULE, 'ROOT_LINKS', MODULE.ROOT_LINKS + ('/etc/systemd/system/x.wants/y.service',)):
             self.refused('Missing root start link')
+
+    def test_a_missing_owner_options_drop_in_is_refused(self):
+        with patch.object(MODULE, 'ROOT_DROPINS', MODULE.ROOT_DROPINS + ('/usr/lib/systemd/system/x.d/y.conf',)):
+            self.refused('Missing root drop-in')
 
     def test_an_installer_patch_that_needs_fuzz_is_refused(self):
         self.fixture.patch.write_bytes(installer_patch().replace(b'\n update 4 main.py\n', b'\n update 4 other\n'))
