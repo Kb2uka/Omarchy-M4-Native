@@ -34,7 +34,7 @@ TAG, REPO, FPR = CHANNEL['release_tag'], CHANNEL['repository'], CHANNEL['signing
 SETUP = 'omarchy-m4-setup.py'
 CONNECT = 'm4-connect.sh'
 CONNECT_HASH = '@SETUP_SHA256@'
-SOURCE_ARCHIVE = 'release-integration.tar.gz'
+SOURCE_ARCHIVE = 'release-integration-{revision}.tar.gz'
 SOURCE_REVISION = 'release-integration-revision.txt'
 NOTES = ('Signed pacman repository for the experimental M4 build ([issue #49]'
          '(https://github.com/Kb2uka/Omarchy-M4-Native/issues/49)). Owners connect once with '
@@ -198,6 +198,11 @@ def publish(directory):
     require(key.strip(), 'PACKAGE_SIGNING_KEY is not available')
     with tempfile.TemporaryDirectory(prefix='m4-publish-') as scratch:
         scratch = Path(scratch)
+        revision = source_revision(ROOT)
+        source_name = SOURCE_ARCHIVE.format(revision=revision)
+        source_archive = scratch / source_name
+        build_source_archive(source_archive, revision)
+        source_sig = scratch / (source_name + '.sig')
         os.environ['GNUPGHOME'] = str(scratch / 'gnupg')
         (scratch / 'gnupg').mkdir(mode=0o700)
         run('gpg', '--batch', '--import', input=key, text=True)
@@ -211,6 +216,27 @@ def publish(directory):
         repo, published, uploads = scratch / 'repo', scratch / 'published', []
         repo.mkdir()
         published.mkdir()
+        # Each clean revision gets an immutable archive, so an interrupted
+        # signature upload cannot wedge publication of a later revision.
+        if source_name in assets:
+            run('gh', 'release', 'download', TAG, '-D', published, '-p', source_name)
+            published_archive = published / source_name
+            require(published_archive.read_bytes() == source_archive.read_bytes(),
+                    'Published source archive differs from its committed revision: ' + source_name)
+            valid_signature = False
+            if source_name + '.sig' in assets:
+                run('gh', 'release', 'download', TAG, '-D', published, '-p', source_name + '.sig')
+                valid_signature = signed(published / (source_name + '.sig'), published_archive)
+            if not valid_signature:
+                # Exact equality with the clean rebuild is required before repair.
+                sign(source_archive)
+                run('gh', 'release', 'upload', TAG, '--clobber', source_sig)
+            print('kept published ' + source_name)
+        else:
+            sign(source_archive)
+            run('gh', 'release', 'upload', TAG, source_archive)
+            run('gh', 'release', 'upload', TAG, '--clobber', source_sig)
+
         for package in sorted(directory.glob('*.pkg.tar.zst')):
             name, signature = package.name, repo / (package.name + '.sig')
             if name in assets:
@@ -229,46 +255,6 @@ def publish(directory):
             shutil.copyfile(package, repo / name)
             sign(repo / name)
             uploads.append((repo / name, signature))
-
-        # Bundle and sign the committed integration source. Published copies
-        # live separately so gh never has to overwrite a newly built archive.
-        revision = source_revision(ROOT)
-        source_archive = scratch / SOURCE_ARCHIVE
-        build_source_archive(source_archive, revision)
-        source_sig = scratch / (SOURCE_ARCHIVE + '.sig')
-        if SOURCE_ARCHIVE in assets:
-            run('gh', 'release', 'download', TAG, '-D', published, '-p', SOURCE_ARCHIVE)
-            published_archive = published / SOURCE_ARCHIVE
-            matches_source = published_archive.read_bytes() == source_archive.read_bytes()
-            if SOURCE_ARCHIVE + '.sig' in assets:
-                run('gh', 'release', 'download', TAG, '-D', published, '-p', SOURCE_ARCHIVE + '.sig')
-                published_sig = published / (SOURCE_ARCHIVE + '.sig')
-                if signed(published_sig, published_archive):
-                    if matches_source:
-                        print('kept published ' + SOURCE_ARCHIVE)
-                    else:
-                        sign(source_archive)
-                        run('gh', 'release', 'upload', TAG, '--clobber', source_archive)
-                        run('gh', 'release', 'upload', TAG, '--clobber', source_sig)
-                elif matches_source:
-                    # The archive is the trusted clean revision, so an interrupted
-                    # replacement can safely resume by replacing only its signature.
-                    sign(source_archive)
-                    run('gh', 'release', 'upload', TAG, '--clobber', source_sig)
-                    print('repaired published ' + SOURCE_ARCHIVE + ' signature')
-                else:
-                    # Never replace an invalid archive: it is not proven to be the
-                    # committed source that this run is authorised to publish.
-                    verify(published_sig, published_archive)
-            else:
-                sign(source_archive)
-                if not matches_source:
-                    run('gh', 'release', 'upload', TAG, '--clobber', source_archive)
-                run('gh', 'release', 'upload', TAG, '--clobber', source_sig)
-        else:
-            sign(source_archive)
-            run('gh', 'release', 'upload', TAG, source_archive)
-            run('gh', 'release', 'upload', TAG, '--clobber', source_sig)
 
         packages = sorted(repo.glob('*.pkg.tar.zst'))
         run('repo-add', '--sign', '--key', FPR, repo / f'{REPO}.db.tar.gz', *packages)
@@ -313,11 +299,11 @@ def publish(directory):
             print('verified ' + name)
         served(SETUP, lambda d: d == setup.read_bytes(), 'Published setup script differs')
         served(CONNECT, lambda d: d == connect.read_bytes(), 'Published connect script differs')
-        (check / SOURCE_ARCHIVE).write_bytes(served(SOURCE_ARCHIVE, lambda d: d == source_archive.read_bytes(),
+        (check / source_name).write_bytes(served(source_name, lambda d: d == source_archive.read_bytes(),
                                                     'Published source archive differs'))
-        served(SOURCE_ARCHIVE + '.sig', signs(check / (SOURCE_ARCHIVE + '.sig'), check / SOURCE_ARCHIVE),
-               'Bad or foreign signature on ' + SOURCE_ARCHIVE)
-        print('verified ' + SOURCE_ARCHIVE)
+        served(source_name + '.sig', signs(check / (source_name + '.sig'), check / source_name),
+               'Bad or foreign signature on ' + source_name)
+        print('verified ' + source_name)
 
 
 def main():

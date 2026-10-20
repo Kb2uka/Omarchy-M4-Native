@@ -452,7 +452,7 @@ package's contents without a new version.
   the private key as `PACKAGE_SIGNING_KEY`. It keeps already-published package
   files and verifies their signatures, then signs and uploads new ones. It
   repairs an interrupted earlier run by signing an unsigned published package.
-  The corresponding integration source archive (`release-integration.tar.gz`)
+  The corresponding integration source archive (`release-integration-<commit>.tar.gz`)
   is packaged, signed, and published alongside packages and databases. The
   separately pinned source archives named by package joins are not yet channel
   assets. The signed databases go up last, whenever they are missing, unsigned
@@ -531,9 +531,14 @@ first. Joins stay `unverified` until a byte-identical rebuild is recorded:
 
 ### Published source artifact
 
+Each full commit has an immutable archive name, so interrupted signature
+uploads can be retried without blocking later revisions or replacing older
+source. Existing archive bytes must match the clean rebuild before a missing
+or corrupt signature can be repaired.
+
 With each channel publish, the committed repository integration source is
-packaged into `release-integration.tar.gz` and signed with the channel key
-(`release-integration.tar.gz.sig`). The publisher refuses tracked local edits,
+packaged into `release-integration-<commit>.tar.gz` and signed with the channel key
+(`release-integration-<commit>.tar.gz.sig`). The publisher refuses tracked local edits,
 uses `git archive` at `HEAD`, and records that revision in
 `release-integration-revision.txt` inside the archive. It includes tracked
 integration files except `AGENTS.md` and `CLAUDE.md`; it does not claim to
