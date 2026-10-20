@@ -276,15 +276,12 @@ def docker_script():
 
 
 def pinned_vmlinux_symvers(kernel):
-    """Hash vmlinux.symvers when the archive has one.
+    """Require a regular vmlinux.symvers matching the archived Module.symvers pin.
 
-    The six kernel-inputs rows stay unchanged. The file is the same export
-    table as Module.symvers in the pinned archive, and make Image rewrites it.
-    Synthetic archives that omit it are left alone.
+    The six kernel-inputs rows stay unchanged. The real archive contains this
+    file as the same export table, and make Image rewrites it.
     """
     path = kernel / 'vmlinux.symvers'
-    if not path.exists() and not path.is_symlink():
-        return None
     if path.is_symlink() or not path.is_file():
         refuse('vmlinux.symvers must be a regular file')
     digest = sha256_file(path)
@@ -305,18 +302,13 @@ def require_unchanged(kernel, exports, before_symvers, before_exports, before_vm
         if sha256_file(kernel / name) != pinned:
             refuse('kernel input drifted: ' + name)
     path = kernel / 'vmlinux.symvers'
-    if before_vmlinux is None:
-        if path.exists() or path.is_symlink():
-            refuse('vmlinux.symvers appeared during the kernel build')
-        after_vmlinux = None
-    else:
-        if path.is_symlink() or not path.is_file():
-            refuse('vmlinux.symvers changed during the kernel build; '
-                   'a regenerated export table does not replace the archived pin')
-        after_vmlinux = sha256_file(path)
-        if after_vmlinux != before_vmlinux or after_vmlinux != KERNEL_INPUTS['Module.symvers']:
-            refuse('vmlinux.symvers changed during the kernel build; '
-                   'a regenerated export table does not replace the archived pin')
+    if path.is_symlink() or not path.is_file():
+        refuse('vmlinux.symvers changed during the kernel build; '
+               'a regenerated export table does not replace the archived pin')
+    after_vmlinux = sha256_file(path)
+    if after_vmlinux != before_vmlinux or after_vmlinux != KERNEL_INPUTS['Module.symvers']:
+        refuse('vmlinux.symvers changed during the kernel build; '
+               'a regenerated export table does not replace the archived pin')
     release = (kernel / 'include/config/kernel.release').read_text().strip()
     if release != KERNEL_RELEASE:
         refuse('kernel release drifted')
@@ -362,19 +354,28 @@ def publish(output, kernel, archive, exports, before_symvers, after_symvers, bef
         'kernel_release': KERNEL_RELEASE,
         'config_sha256': sha256_file(kernel / '.config'),
         'profile': PROFILE,
+        'patches': {**HISTORICAL_PATCH_SHA256, RETAINED_PATCH: RETAINED_PATCH_SHA256},
+        'build_environment': dict(KBUILD_ENV),
+        'imported_source_sha256': sha256_file(IMPORTED_MANIFEST),
     }
-    if before_vmlinux is not None:
-        receipt['exports']['vmlinux_symvers_before'] = before_vmlinux
-        receipt['exports']['vmlinux_symvers_after'] = after_vmlinux
+    receipt['exports']['vmlinux_symvers_before'] = before_vmlinux
+    receipt['exports']['vmlinux_symvers_after'] = after_vmlinux
     (output / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
     return receipt
 
 
+def write_build_log(output, result):
+    stdout = result.stdout if result.stdout is not None else ''
+    stderr = result.stderr if result.stderr is not None else ''
+    (output / 'build.log').write_text(stdout + stderr)
+
+
 def build(archive, exports, image, output):
-    prepare(archive, exports, image, output)
+    archive = Path(archive).resolve()
+    exports = Path(exports).resolve()
     output = Path(output)
-    archive = Path(archive)
-    exports = Path(exports)
+    prepare(archive, exports, image, output)
+    output = output.resolve()
     kernel = output / 'kernel'
     before_symvers = sha256_file(kernel / 'Module.symvers')
     before_exports = sha256_file(exports)
@@ -393,6 +394,7 @@ def build(archive, exports, image, output):
         '-c', docker_script(),
     ])
     result = subprocess.run(command, check=False, text=True, capture_output=True)
+    write_build_log(output, result)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or '').strip()
         refuse('kernel build failed' + ((': ' + detail) if detail else ''))
