@@ -578,6 +578,19 @@ static int case_alloc_fail(void)
 	return pass("alloc_fail_rearm");
 }
 
+static int case_all_invalid_ifaces(void)
+{
+	unsigned i;
+	int rc;
+
+	for (i = MAX_INTERFACES; i <= 255; i++) {
+		rc = case_iface(i, "all_invalid_ifaces");
+		if (rc != 0)
+			return rc;
+	}
+	return pass("all_invalid_ifaces");
+}
+
 int main(int argc, char **argv)
 {
 	if (argc != 2) {
@@ -596,6 +609,8 @@ int main(int argc, char **argv)
 		return case_iface(16, "iface_16");
 	if (!strcmp(argv[1], "iface_255"))
 		return case_iface(255, "iface_255");
+	if (!strcmp(argv[1], "all_invalid_ifaces"))
+		return case_all_invalid_ifaces();
 	if (!strcmp(argv[1], "short_0"))
 		return case_short(0, "short_0");
 	if (!strcmp(argv[1], "short_1"))

@@ -134,6 +134,9 @@ class DockChannelBoundsTest(unittest.TestCase):
     def test_interface_255_rejected_before_index(self):
         self.assert_pass("iface_255")
 
+    def test_all_invalid_interfaces(self):
+        self.assert_pass("all_invalid_ifaces")
+
     def test_short_subheader_0(self):
         self.assert_pass("short_0")
 

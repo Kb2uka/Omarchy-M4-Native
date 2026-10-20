@@ -64,8 +64,8 @@ Hosted Linux CI, command `python -m unittest discover -s tests -p 'test_*.py' -v
   at `13c6dab`: 1214 tests, those 8 plus the audio boundary case failed.
   The normal audio products passed.
 
-On a leased Linux host the patched suite passed: 21 packet tests and 3 audio
-tests. Those counts were already observed and stay the record. Valid
+On a leased Linux host the patched suite passed: 22 packet tests and 3 audio
+tests. Valid
 one-byte input reports are delivered unchanged; zero-length reports are
 rejected on both communication and ordinary input interfaces.
 
@@ -75,14 +75,18 @@ provenance test failed:
 `test_channel_source_joins.ManifestTests.test_repository_channel_joins_pass_schema_and_match_pins`,
 because the bounds patch was still inside the pinned `j713-input` tree
 (`0d8e24036f31e1355a636e518a54496fff0f98ad` instead of
-`1cf949ef443fd8c6d8744a2e3ae8e7e3a270628a`). That is not a full-suite pass.
+`1cf949ef443fd8c6d8744a2e3ae8e7e3a270628a`). That failure was corrected by moving the patch without changing its bytes.
+[Run 39510535504](https://github.com/Kb2uka/Omarchy-M4-Native/actions/runs/39510535504)
+then passed all 1225 tests. The final invalid-interface sweep adds one case;
+its complete CI result is recorded on the pull request.
 
-Ten packet mutants were caught: drop the interface guard, allow 16, reject
+Eleven packet mutants were caught: drop the interface guard, allow 16, reject
 15, drop the minimum header, allow a 7-byte header, drop the zero-payload
 guard, drop the bad-length free, drop allocation-failure rearm, reject valid
 one-byte reports, and restrict zero-length rejection to the communication
-interface. The last two survived the initial tests and failed after the
-boundary cases were added. Three audio mutants were caught: remove the
+interface, and reject only invalid interfaces 16 and 255. The last three
+survived the initial tests and failed after the boundary cases and the
+complete invalid-interface sweep (16 through 255) were added. Three audio mutants were caught: remove the
 widening, cast after the multiply, and hard-code the default product.
 
 An ingress `< 8` to `<= 8` mutant survives: an eight-byte body has no
