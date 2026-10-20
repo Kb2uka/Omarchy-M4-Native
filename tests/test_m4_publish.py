@@ -4,6 +4,7 @@
 import hashlib
 import importlib.util
 import io
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -30,6 +31,7 @@ class Release:
 
     def __init__(self, fingerprint=MODULE.FPR):
         self.exists, self.assets, self.uploads, self.fingerprint = False, {}, [], fingerprint
+        self.fail_upload = {}
 
     def run(self, *command, **options):
         command = [str(part) for part in command]
@@ -41,10 +43,16 @@ class Release:
             directory = Path(command[command.index('-D') + 1])
             for index, word in enumerate(command):
                 if word == '-p':
-                    (directory / command[index + 1]).write_bytes(self.assets[command[index + 1]])
+                    target = directory / command[index + 1]
+                    if target.exists():
+                        raise subprocess.CalledProcessError(1, command)
+                    target.write_bytes(self.assets[command[index + 1]])
         elif command[:3] == ['gh', 'release', 'upload']:
             clobber = '--clobber' in command
             for path in (Path(c) for c in command[3:] if c not in (MODULE.TAG, '--clobber')):
+                if self.fail_upload.get(path.name, 0):
+                    self.fail_upload[path.name] -= 1
+                    raise subprocess.CalledProcessError(1, command)
                 if path.name in self.assets and not clobber:
                     raise subprocess.CalledProcessError(1, command)
                 self.assets[path.name] = path.read_bytes()
@@ -82,8 +90,8 @@ class Release:
             return '\n'.join(self.assets)
         raise AssertionError('unexpected output command: ' + ' '.join(command))
 
-    def view(self, command, capture_output=False):
-        return types.SimpleNamespace(returncode=0 if self.exists else 1)
+    def view(self):
+        return self.exists
 
     def fetch(self, name, attempts=4):
         if name not in self.assets:
@@ -109,17 +117,39 @@ class PublishTests(unittest.TestCase):
                            ('omarchy-m4-keyring-20261012-1-any.pkg.tar.zst', b'keyring')):
             (self.built / name).write_bytes(data)
         self.release = Release()
+        self.source_revision = subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip()
 
-    def publish(self, release=None):
+    @property
+    def source_name(self):
+        return MODULE.SOURCE_ARCHIVE.format(revision=self.source_revision)
+
+    def test_interrupted_publish_does_not_block_a_later_revision(self):
+        head = self.source_revision
+        self.source_revision = subprocess.check_output(
+            ['git', '-C', str(ROOT), 'rev-parse', 'HEAD~2'], text=True).strip()
+        self.publish()
+        self.source_revision = subprocess.check_output(
+            ['git', '-C', str(ROOT), 'rev-parse', 'HEAD~1'], text=True).strip()
+        self.release.fail_upload[self.source_name + '.sig'] = 1
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.publish()
+        self.source_revision = head
+        self.publish()
+        self.assertEqual(self.release.assets[self.source_name + '.sig'],
+                         signature(self.release.assets[self.source_name]))
+
+    def publish(self, release=None, **kwargs):
         release = release or self.release
         with mock.patch.object(MODULE, 'run', release.run), \
              mock.patch.object(MODULE, 'output', release.output), \
              mock.patch.object(MODULE, 'fetch', release.fetch), \
              mock.patch.object(MODULE, 'signed', signed), \
-             mock.patch.object(MODULE.subprocess, 'run', release.view), \
+             mock.patch.object(MODULE, 'release_exists', release.view), \
+             mock.patch.object(MODULE, 'source_revision', return_value=self.source_revision) as revision, \
              mock.patch.dict(os.environ, {'PACKAGE_SIGNING_KEY': 'private key'}), \
              mock.patch('builtins.print'):
-            MODULE.publish(self.built)
+            MODULE.publish(self.built, **kwargs)
+            revision.assert_called_once_with(MODULE.ROOT)
 
     def test_first_publication(self):
         self.publish()
@@ -130,6 +160,94 @@ class PublishTests(unittest.TestCase):
             self.assertEqual(self.release.assets[package.name + '.sig'], signature(package.read_bytes()))
         self.assertEqual(self.release.uploads[-1], f'{REPO}.db.sig', 'the client-facing database goes last')
         self.assertIn(MODULE.SETUP, names)
+        self.assertIn(self.source_name, names)
+        self.assertEqual(self.release.assets[self.source_name + '.sig'],
+                         signature(self.release.assets[self.source_name]))
+        with tarfile.open(fileobj=io.BytesIO(self.release.assets[self.source_name]), mode='r:gz') as archive:
+            member_names = archive.getnames()
+            self.assertIn('packaging/omarchy-m4/channel.json', member_names)
+            self.assertNotIn('AGENTS.md', member_names)
+            self.assertNotIn('CLAUDE.md', member_names)
+            self.assertEqual(archive.extractfile(MODULE.SOURCE_REVISION).read().decode().strip(),
+                             self.source_revision)
+
+    def test_missing_source_archive_signature_is_repaired(self):
+        self.publish()
+        del self.release.assets[self.source_name + '.sig']
+        self.release.uploads.clear()
+        self.publish()
+        self.assertIn(self.source_name + '.sig', self.release.assets)
+        self.assertIn(self.source_name + '.sig', self.release.uploads)
+
+    def test_stale_served_source_archive_fails(self):
+        self.publish()
+        real_fetch = self.release.fetch
+        self.release.fetch = (lambda name, attempts=4:
+                              b'stale source' if name == self.source_name else real_fetch(name))
+        with mock.patch.object(MODULE.time, 'sleep'), self.assertRaises(SystemExit) as raised:
+            self.publish()
+        self.assertIn('Published source archive differs', str(raised.exception))
+
+    def test_changed_archive_at_the_same_revision_is_refused(self):
+        self.publish()
+        self.release.assets[self.source_name] = b'other source archive'
+        self.release.assets[self.source_name + '.sig'] = signature(b'other source archive')
+        before = self.release.assets.copy()
+        self.release.uploads.clear()
+        with self.assertRaisesRegex(SystemExit, 'differs from its committed revision'):
+            self.publish()
+        self.assertEqual(self.release.assets, before)
+        self.assertEqual(self.release.uploads, [])
+
+    def test_interrupted_source_publication_is_repaired_on_retry(self):
+        self.release.fail_upload[self.source_name + '.sig'] = 1
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.publish()
+        self.assertIn(self.source_name, self.release.assets)
+        self.assertNotIn(self.source_name + '.sig', self.release.assets)
+        self.release.uploads.clear()
+        self.publish()
+        self.assertEqual(self.release.assets[self.source_name + '.sig'],
+                         signature(self.release.assets[self.source_name]))
+        self.assertNotIn(self.source_name, self.release.uploads)
+
+    def test_corrupt_signature_on_matching_archive_is_repaired(self):
+        self.publish()
+        self.release.assets[self.source_name + '.sig'] = b'broken signature'
+        self.release.uploads.clear()
+        self.publish()
+        self.assertEqual(self.release.assets[self.source_name + '.sig'],
+                         signature(self.release.assets[self.source_name]))
+        self.assertNotIn(self.source_name, self.release.uploads)
+
+    def test_corrupt_served_source_signature_is_refused(self):
+        self.publish()
+        real_fetch = self.release.fetch
+        self.release.fetch = lambda name, attempts=4: (b'foreign signature'
+            if name == self.source_name + '.sig' else real_fetch(name))
+        with mock.patch.object(MODULE.time, 'sleep'), self.assertRaisesRegex(SystemExit, 'Bad or foreign signature'):
+            self.publish()
+
+    def test_untrusted_unsigned_archive_is_not_replaced(self):
+        self.publish()
+        self.release.assets[self.source_name] = b'untrusted source'
+        del self.release.assets[self.source_name + '.sig']
+        self.release.uploads.clear()
+        with self.assertRaisesRegex(SystemExit, 'differs from its committed revision'):
+            self.publish()
+        self.assertEqual(self.release.uploads, [])
+
+    def test_foreign_source_signature_for_untrusted_archive_refuses_without_uploading(self):
+        self.publish()
+        self.release.assets[self.source_name] = b'untrusted archive'
+        self.release.assets[self.source_name + '.sig'] = b'foreign signature'
+        assets = self.release.assets.copy()
+        self.release.uploads.clear()
+        with self.assertRaises(SystemExit) as raised:
+            self.publish()
+        self.assertIn('differs from its committed revision', str(raised.exception))
+        self.assertEqual(self.release.assets, assets)
+        self.assertEqual(self.release.uploads, [])
 
     def test_connect_script_carries_the_published_setup_hash(self):
         self.publish()
@@ -272,6 +390,54 @@ class PublishTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.publish(release)
         self.assertEqual(release.assets, {})
+
+
+class ReleaseExistsTests(unittest.TestCase):
+    def test_release_view_exit_status_is_checked(self):
+        for code in (0, 1):
+            with self.subTest(code=code), mock.patch.object(
+                    MODULE.subprocess, 'run', return_value=types.SimpleNamespace(returncode=code)) as run:
+                self.assertEqual(MODULE.release_exists(), code == 0)
+                run.assert_called_once_with(['gh', 'release', 'view', MODULE.TAG], capture_output=True)
+
+
+class SourceArchiveTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.tree = Path(self.temp.name) / 'source'
+        self.tree.mkdir()
+        subprocess.run(['git', 'init', '-q', str(self.tree)], check=True)
+        subprocess.run(['git', '-C', str(self.tree), 'config', 'user.email', 'test@example.invalid'], check=True)
+        subprocess.run(['git', '-C', str(self.tree), 'config', 'user.name', 'Test User'], check=True)
+        (self.tree / 'kept.txt').write_text('first\n')
+        (self.tree / 'AGENTS.md').write_text('excluded\n')
+        (self.tree / 'CLAUDE.md').write_text('excluded\n')
+        subprocess.run(['git', '-C', str(self.tree), 'add', '.'], check=True)
+        subprocess.run(['git', '-C', str(self.tree), 'commit', '-qm', 'initial'], check=True)
+
+    def archive(self, name):
+        target = self.tree / name
+        revision = MODULE.source_revision(self.tree)
+        MODULE.build_source_archive(target, revision, self.tree)
+        return target, revision
+
+    def test_archive_is_deterministic_and_committed(self):
+        first, revision = self.archive('first.tar.gz')
+        second, _ = self.archive('second.tar.gz')
+        self.assertEqual(first.read_bytes(), second.read_bytes())
+        with tarfile.open(first, 'r:gz') as archive:
+            self.assertEqual(archive.getnames(), ['kept.txt', MODULE.SOURCE_REVISION])
+            self.assertEqual(archive.extractfile(MODULE.SOURCE_REVISION).read().decode(), revision + '\n')
+        (self.tree / 'kept.txt').write_text('uncommitted\n')
+        with self.assertRaisesRegex(SystemExit, 'tracked changes'):
+            MODULE.source_revision(self.tree)
+
+    def test_git_failure_refuses_source_archive(self):
+        with mock.patch.object(MODULE.subprocess, 'check_output',
+                               side_effect=subprocess.CalledProcessError(1, ['git'])):
+            with self.assertRaisesRegex(SystemExit, 'Git source archive input failed'):
+                MODULE.source_revision(self.tree)
 
 
 if __name__ == '__main__':
