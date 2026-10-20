@@ -1,0 +1,19 @@
+--- a/gpu/j713/asahi/g16.rs
++++ b/gpu/j713/asahi/g16.rs
+@@ -10,12 +10,15 @@ use kernel::{c_str, device::Core, platform, prelude::*};
+ 
+ const PAGE_SIZE: u64 = 0x4000;
+ 
++/// The Air path admits the Airs whose GPU bring-up was measured: the 13-inch
++/// (J713) and the 15-inch (J715, a testing board), which share the T8132 GPU and
++/// its 26.5.1 firmware.
+ fn firmware_allowed(firmware: &[u8], board: &[u8], probe_only: bool) -> bool {
+     firmware == b"mBoot-18000.161.10\0"
+         || (probe_only
+             && firmware == b"mBoot-18000.120.36\0"
+             && board.ends_with(&[0])
+-            && board.split(|&v| v == 0).any(|v| v == b"apple,j713")
++            && board.split(|&v| v == 0).any(|v| v == b"apple,j713" || v == b"apple,j715")
+             && board.split(|&v| v == 0).any(|v| v == b"apple,t8132"))
+ }
+ 

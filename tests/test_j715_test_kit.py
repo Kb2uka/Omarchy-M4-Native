@@ -40,6 +40,14 @@ GPU_SUMS = (f'{digest(b"mesa")}  /opt/m4-mesa/lib/libgallium.so\n'
 GPU_START = b'#!/bin/sh\nset -e\n' + MODULE.GPU_START_LINE[0] + b'exec /usr/bin/true\n'
 PLACEMENT = b'# J713 session placement\n'
 BOOT = {name: f'{name} bytes'.encode() for name in MODULE.KEPT_BOOT}
+OWNER_DROPINS = {
+    '/usr/lib/systemd/system/omarchy-provision-owner.service.d/10-owner-assets.conf':
+        ROOT / 'packaging/j713-owner-assets-provision.conf',
+    '/usr/lib/systemd/system/systemd-user-sessions.service.d/10-owner-assets.conf':
+        ROOT / 'packaging/j713-owner-assets-session.conf',
+}
+AUDIO_GATE = '/etc/systemd/user/wireplumber.service.d/80-j713-audio-ready.conf'
+AUDIO_SOURCE = ROOT / 'packaging/j713-audio/wireplumber.service.d/80-j713-audio-ready.conf'
 OLD_DTB, NEW_DTB = b'J713 devicetree', b'J715 devicetree'
 OLD_KERNEL, NEW_KERNEL = b'J713 kernel', b'J715 kernel'
 INSTALLER_OLD = {name: f'update 4 {name}\nj713ap\n'.encode() for name in MODULE.INSTALLER_FILES}
@@ -107,8 +115,9 @@ class Kit:
         for link in MODULE.ROOT_LINKS:
             (tree / link.lstrip('/')).parent.mkdir(parents=True, exist_ok=True)
             os.symlink('/usr/lib/systemd/system/' + link.rsplit('/', 1)[1], tree / link.lstrip('/'))
-        for dropin in MODULE.ROOT_DROPINS:
-            put(tree / dropin.lstrip('/'), b'[Unit]\nRequires=j713-owner-assets.service\n')
+        for path, source in OWNER_DROPINS.items():
+            put(tree / path.lstrip('/'), source.read_bytes())
+        put(tree / AUDIO_GATE.lstrip('/'), AUDIO_SOURCE.read_bytes())
         put(tree / 'etc/hostname', b'omarchy\n')
         self.root = base / 'root.ext4'
         subprocess.run(['mkfs.ext4', '-q', '-F', '-E', 'root_owner=0:0', '-d', str(tree), str(self.root), '8M'],
@@ -270,12 +279,14 @@ class Derive(unittest.TestCase):
         self.assertEqual(read(root, MODULE.GPU_SUMS), GPU_SUMS.replace(digest(GPU_OLD).encode(),
                                                                       digest(GPU_NEW).encode()))
         self.assertEqual(read(root, MODULE.GPU_START), GPU_START.replace(*MODULE.GPU_START_LINE))
-        self.assertEqual(read(root, MODULE.PLACEMENT), (ROOT / 'tools/m4-session-placement.py').read_bytes())
+        self.assertEqual(digest(read(root, MODULE.PLACEMENT)), MODULE.PLACEMENT_SOURCE[3])
+        self.assertEqual(digest((self.output / 'source/j715/g16.rs').read_bytes()), MODULE.G16_SOURCE[3])
         for path, mode in ((MODULE.GPU_MODULE, '0644'), (MODULE.GPU_SUMS, '0664'), (MODULE.GPU_START, '0755'),
                            (MODULE.PLACEMENT, '0644')):
             self.assertRegex(stat(root, path), r'Mode:\s+' + mode + r'\b', path)
-        for path in MODULE.ROOT_LINKS + MODULE.ROOT_DROPINS:
+        for path in (*MODULE.ROOT_LINKS, *MODULE.ROOT_DROPINS):
             self.assertNotIn('Inode:', stat(root, path))
+        self.assertEqual(read(root, AUDIO_GATE), AUDIO_SOURCE.read_bytes())
         self.assertEqual(read(root, '/etc/hostname'), b'omarchy\n')
         self.assertEqual(subprocess.run(['e2fsck', '-fn', str(root)], capture_output=True).returncode, 0)
         old_tar, new_tar = tar_files(self.fixture.kit / 'installer-macos.tar.gz'), \
@@ -303,9 +314,9 @@ class Derive(unittest.TestCase):
             '/etc/systemd/system/multi-user.target.wants/m4-video.service',
             '/etc/systemd/system/multi-user.target.wants/j713-owner-assets.service',
             '/etc/systemd/system/timers.target.wants/m4-channel-connect.timer'])
-        self.assertEqual(list(MODULE.ROOT_DROPINS), [
-            '/usr/lib/systemd/system/omarchy-provision-owner.service.d/10-owner-assets.conf',
-            '/usr/lib/systemd/system/systemd-user-sessions.service.d/10-owner-assets.conf'])
+        self.assertEqual(sorted(MODULE.ROOT_DROPINS), sorted(OWNER_DROPINS))
+        for path, source in OWNER_DROPINS.items():
+            self.assertEqual(MODULE.ROOT_DROPINS[path], digest(source.read_bytes()), path)
         self.assertEqual(MODULE.GPU_START_LINE[1],
                          b'grep -zFxq -e apple,j713 -e apple,j715 /sys/firmware/devicetree/base/compatible\n')
         self.assertEqual(MODULE.FIRMWARE, '26.5.1')
@@ -341,17 +352,30 @@ class Derive(unittest.TestCase):
                                                  MODULE.GPU_START: start, MODULE.PLACEMENT: PLACEMENT})
         self.refused('Unexpected m4-gpu-start')
 
-    def test_a_different_root_file_is_refused(self):
-        with patch.object(MODULE, 'PLACEMENT_SOURCE', self.dtb):
-            self.refused('Unexpected J715 session placement')
+    def test_a_changed_live_gate_is_refused(self):
+        for name in ('PLACEMENT_SOURCE', 'G16_SOURCE'):
+            path, _, kit_patch, result = getattr(MODULE, name)
+            with self.subTest(name=name), patch.object(MODULE, name, (path, digest(b'other'), kit_patch, result)):
+                self.refused('Unexpected repository file: ' + path)
+
+    def test_a_kit_patch_that_does_not_give_the_pinned_result_is_refused(self):
+        for name in ('PLACEMENT_SOURCE', 'G16_SOURCE'):
+            path, base, kit_patch, _ = getattr(MODULE, name)
+            with self.subTest(name=name), patch.object(MODULE, name, (path, base, kit_patch, digest(b'other'))):
+                self.refused('Unexpected patched file: ' + path)
 
     def test_a_missing_start_link_is_refused(self):
         with patch.object(MODULE, 'ROOT_LINKS', MODULE.ROOT_LINKS + ('/etc/systemd/system/x.wants/y.service',)):
             self.refused('Missing root start link')
 
     def test_a_missing_owner_options_drop_in_is_refused(self):
-        with patch.object(MODULE, 'ROOT_DROPINS', MODULE.ROOT_DROPINS + ('/usr/lib/systemd/system/x.d/y.conf',)):
-            self.refused('Missing root drop-in')
+        with patch.dict(MODULE.ROOT_DROPINS, {'/usr/lib/systemd/system/x.d/y.conf': digest(b'[Unit]\n')}):
+            self.refused('Unexpected root drop-in')
+
+    def test_a_changed_owner_options_drop_in_is_refused(self):
+        for path in OWNER_DROPINS:
+            with self.subTest(path=path), patch.dict(MODULE.ROOT_DROPINS, {path: digest(b'other')}):
+                self.refused('Unexpected root drop-in: ' + path)
 
     def test_an_installer_patch_that_needs_fuzz_is_refused(self):
         self.fixture.patch.write_bytes(installer_patch().replace(b'\n update 4 main.py\n', b'\n update 4 other\n'))
@@ -379,14 +403,21 @@ class Sources(unittest.TestCase):
     def test_the_real_pins_are_complete(self):
         for value in (MODULE.KIT_SHA256, MODULE.SUMS_SHA256, MODULE.OLD_ROOT_SHA256, MODULE.OLD_DTB[1],
                       MODULE.OLD_KERNEL[1], MODULE.DTB[1], MODULE.KERNEL[1], MODULE.GPU_OLD, MODULE.GPU_NEW,
-                      MODULE.GPU_SUMS_OLD, MODULE.GPU_START_OLD, MODULE.PLACEMENT_OLD, MODULE.PLACEMENT_NEW,
+                      MODULE.GPU_SUMS_OLD, MODULE.GPU_START_OLD, MODULE.PLACEMENT_OLD,
+                      *MODULE.PLACEMENT_SOURCE[1::2], *MODULE.G16_SOURCE[1::2],
                       *MODULE.KEPT_BOOT.values(), *(pin for pins in MODULE.INSTALLER_FILES.values() for pin in pins)):
             self.assertRegex(value, r'^[0-9a-f]{64}$')
 
-    def test_the_kit_sources_exist_and_the_placement_admits_the_j715(self):
+    def test_the_kit_sources_exist_and_the_live_gates_still_refuse_the_j715(self):
         for source in MODULE.SOURCES.values():
             self.assertTrue((ROOT / source).is_file(), source)
-        self.assertEqual(digest((ROOT / 'tools/m4-session-placement.py').read_bytes()), MODULE.PLACEMENT_NEW)
+        for path, base, kit_patch, _ in (MODULE.PLACEMENT_SOURCE, MODULE.G16_SOURCE):
+            with self.subTest(path=path):
+                self.assertEqual(digest((ROOT / path).read_bytes()), base)
+                self.assertNotIn(b'apple,j715', (ROOT / path).read_bytes())
+                text = kit_patch.read_text()
+                self.assertEqual(re.findall(r'^\+\+\+ b/(\S+)', text, re.M), [path])
+                self.assertIn('+', ''.join(line[0] for line in text.splitlines() if 'apple,j715' in line))
 
     def test_the_installer_patch_changes_only_the_pinned_files(self):
         text = (ROOT / 'packaging/j715-test/installer-j715.patch').read_text()

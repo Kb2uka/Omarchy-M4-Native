@@ -14,7 +14,8 @@ The J713 kit is checked against its pins. The output kit changes only:
 - the installer definition: OS name, OS package, devicetree and kernel;
 - Install.command, START-HERE.md, KNOWN-LIMITATIONS.md and UPDATES.md (packaging/j715-test);
 - in the root image: the GPU module that admits the J715 and its pin, m4-gpu-start's
-  board check, the session placement that admits the J715, and the start links and
+  board check, the session placement patched to admit the J715 (the live gates keep
+  refusing a testing board), and the start links and
   drop-ins of the J713-only services that refuse a J715 anyway;
 - the J715 sources beside the kit's source bundle, and KIT.json, IMAGE.json and
   SHA256SUMS, regenerated for those changes.
@@ -86,8 +87,17 @@ GPU_START_LINE = (b'grep -zFxq apple,j713 /sys/firmware/devicetree/base/compatib
                   b'grep -zFxq -e apple,j713 -e apple,j715 /sys/firmware/devicetree/base/compatible\n')
 PLACEMENT = '/etc/skel/.local/lib/omarchy/m4-session-placement.py'
 PLACEMENT_OLD = '21c8ebb8cd3239dc0bad07bd8aa57e054c0c59c6aae04c59fc7f6a356fb7e642'
-PLACEMENT_SOURCE = ROOT / 'tools/m4-session-placement.py'  # admits apple,j715
-PLACEMENT_NEW = '38886367c2186c7eb22c4790347180323b57ddb6cb3c0a6e21d5afd8a73f29df'
+# The live gates keep refusing a testing board, so the kit patches its own copies to
+# admit the J715: the session placement in the root, and g16.rs (the source of the
+# GPU module) beside the kit's sources. Each is (repository path, base, patch, result).
+PLACEMENT_SOURCE = ('tools/m4-session-placement.py',
+                    '4f535a3c4dc67f87cb4e17faad95cde022aac3521681aa13b71245bb7aedf54d',
+                    FILES / 'm4-session-placement-j715.patch',
+                    '38886367c2186c7eb22c4790347180323b57ddb6cb3c0a6e21d5afd8a73f29df')
+G16_SOURCE = ('gpu/j713/asahi/g16.rs',
+              'eb72d85b6d5ad2dbdbf7070d6381f3e309f06eff4f4d079fc4e0835e6e8e197c',
+              FILES / 'g16-j715.patch',
+              'aa88fa303e53fb287743d29b5ec20a00843a6a12fce0f715e6ea7960be3e1320')
 # Start links of services whose board gates refuse a J715, and the update timer that
 # would retry a refused channel setup for ever (as in the J773g tester kit).
 ROOT_LINKS = (
@@ -97,19 +107,22 @@ ROOT_LINKS = (
     '/etc/systemd/system/multi-user.target.wants/j713-owner-assets.service',
     '/etc/systemd/system/timers.target.wants/m4-channel-connect.timer',
 )
-# Drop-ins that pull the J713 owner options service in without its start link. The
-# provisioning one Requires it, so its J713 board check would fail the first-boot user
-# setup and leave SDDM with no account.
-ROOT_DROPINS = (
-    '/usr/lib/systemd/system/omarchy-provision-owner.service.d/10-owner-assets.conf',
-    '/usr/lib/systemd/system/systemd-user-sessions.service.d/10-owner-assets.conf',
-)
+# Drop-ins that pull the J713 owner options service in without its start link, with
+# their sha256 (as in the J773g tester kit). The provisioning one Requires it, so its
+# J713 board check would fail the first-boot user setup and leave SDDM with no account.
+ROOT_DROPINS = {
+    '/usr/lib/systemd/system/omarchy-provision-owner.service.d/10-owner-assets.conf':
+        'acef154cb62c6e97ec3c7106774d1b4ce8cabdfd538424fb9dcc2f4a1480e9bc',
+    '/usr/lib/systemd/system/systemd-user-sessions.service.d/10-owner-assets.conf':
+        '80f7b0786414de133a9b2ee3c83374e8fb53b7ea997b2046cc0dafe479fbdd46',
+}
 # Sources the kit adds beside its source bundle: published path -> repository path.
 SOURCES = {
     'source/j715/dockchannel-hid-accept-j715.patch': 'patches-kernel/j715-input/dockchannel-hid-accept-j715.patch',
     'source/j715/installer-j715.patch': 'packaging/j715-test/installer-j715.patch',
     'source/j715/installer-j715-tests.patch': 'packaging/j715-test/installer-j715-tests.patch',
-    'source/j715/g16.rs': 'gpu/j713/asahi/g16.rs',
+    'source/j715/g16-j715.patch': 'packaging/j715-test/g16-j715.patch',
+    'source/j715/m4-session-placement-j715.patch': 'packaging/j715-test/m4-session-placement-j715.patch',
     'source/j715/j715-board.dtso': 'patches/j715-board.dtso',
 }
 REPLACED_DOCS = {'Install.command': 0o755, 'START-HERE.md': 0o644, 'KNOWN-LIMITATIONS.md': 0o644, 'UPDATES.md': 0o644}
@@ -167,6 +180,23 @@ def patched_installer_files(old):
         return {name: (Path(scratch) / PATCH_PATHS.get(name, name)).read_bytes() for name in old}
 
 
+def patched_source(path, base, patch, result):
+    """Apply a kit patch exactly to a repository file at its pinned base; return the result."""
+    data = (ROOT / path).read_bytes()
+    require(sha_bytes(data) == base, 'Unexpected repository file: ' + path)
+    with tempfile.TemporaryDirectory(prefix='j715-source-') as scratch:
+        target = Path(scratch) / path
+        target.parent.mkdir(parents=True)
+        target.write_bytes(data)
+        run = subprocess.run(['patch', '-p1', '--batch', '--forward', '--no-backup-if-mismatch', '-i', str(patch)],
+                             cwd=scratch, capture_output=True, text=True)
+        require(run.returncode == 0 and 'offset' not in run.stdout and 'fuzz' not in run.stdout,
+                'Kit patch did not apply exactly: ' + patch.name)
+        data = target.read_bytes()
+    require(sha_bytes(data) == result, 'Unexpected patched file: ' + path)
+    return data
+
+
 def repack_installer(source, destination):
     """Copy the update 4 installer, replacing only the four profile files, deterministically."""
     with tarfile.open(source, 'r:gz') as old:
@@ -219,8 +249,7 @@ def root_changes(debugfs, image, gpu_module):
     require(sha_bytes(start) == GPU_START_OLD and start.count(GPU_START_LINE[0]) == 1, 'Unexpected m4-gpu-start')
     placement = debugfs_read(debugfs, image, PLACEMENT)
     require(sha_bytes(placement) == PLACEMENT_OLD, 'Unexpected root session placement')
-    new_placement = PLACEMENT_SOURCE.read_bytes()
-    require(sha_bytes(new_placement) == PLACEMENT_NEW, 'Unexpected J715 session placement')
+    new_placement = patched_source(*PLACEMENT_SOURCE)
     return {
         GPU_MODULE: (gpu, 0o644),
         GPU_SUMS: (sums.replace(old_line, f'{GPU_NEW}  {GPU_MODULE}\n'.encode()), 0o664),
@@ -234,8 +263,8 @@ def patch_root(image, gpu_module, debugfs='debugfs', e2fsck='e2fsck'):
     changes = root_changes(debugfs, image, gpu_module)
     for link in ROOT_LINKS:
         require('Inode:' in debugfs_stat(debugfs, image, link), 'Missing root start link: ' + link)
-    for dropin in ROOT_DROPINS:
-        require('Inode:' in debugfs_stat(debugfs, image, dropin), 'Missing root drop-in: ' + dropin)
+    for path, pin in ROOT_DROPINS.items():
+        require(sha_bytes(debugfs_read(debugfs, image, path)) == pin, 'Unexpected root drop-in: ' + path)
     with tempfile.TemporaryDirectory(prefix='j715-root-') as scratch:
         commands = []
         for index, (path, (data, mode)) in enumerate(sorted(changes.items())):
@@ -244,7 +273,7 @@ def patch_root(image, gpu_module, debugfs='debugfs', e2fsck='e2fsck'):
             directory, base = path.rsplit('/', 1)
             commands += [f'cd {directory}', f'rm {base}', f'write {staged} {base}',
                          f'sif {base} uid 0', f'sif {base} gid 0', f'sif {base} mode 0100{mode:o}']
-        commands += [f'rm {path}' for path in ROOT_LINKS + ROOT_DROPINS]
+        commands += [f'rm {path}' for path in (*ROOT_LINKS, *ROOT_DROPINS)]
         script = Path(scratch) / 'commands.debugfs'
         script.write_text('\n'.join(commands) + '\n')
         subprocess.run([debugfs, '-w', '-f', str(script), str(image)], capture_output=True, check=True)
@@ -253,7 +282,7 @@ def patch_root(image, gpu_module, debugfs='debugfs', e2fsck='e2fsck'):
         stat = debugfs_stat(debugfs, image, path)
         require(re.search(r'Mode:\s+0' + f'{mode:o}', stat) and re.search(r'User:\s+0\s+Group:\s+0\b', stat),
                 'Root file ownership or mode: ' + path)
-    for path in ROOT_LINKS + ROOT_DROPINS:
+    for path in (*ROOT_LINKS, *ROOT_DROPINS):
         require('Inode:' not in debugfs_stat(debugfs, image, path), 'Root file not removed: ' + path)
     check = subprocess.run([e2fsck, '-fn', str(image)], capture_output=True, text=True)
     require(check.returncode == 0, 'Root filesystem check failed: ' + check.stdout[-400:])
@@ -363,6 +392,7 @@ def assemble(kit, dtb_path, kernel_path, gpu_module, output, revision, debugfs, 
         require(not (output / name).exists(), 'Source name already in the kit: ' + name)
         (output / name).parent.mkdir(parents=True, exist_ok=True)
         write(output / name, (ROOT / source).read_bytes())
+    write(output / 'source/j715/g16.rs', patched_source(*G16_SOURCE))
     write(output / 'installer_data.json', canonical(installer_data(json.loads((kit / 'installer_data.json').read_bytes()))))
     tester = {'board': 'J715', 'model': 'Mac16,13', 'label': LABEL, 'derived_from_kit_sha256': KIT_SHA256,
               'derivation_revision': revision, 'firmware': FIRMWARE}
@@ -376,9 +406,10 @@ def assemble(kit, dtb_path, kernel_path, gpu_module, output, revision, debugfs, 
     image['gpu_module'] = dict(image['gpu_module'], sha256=GPU_NEW, replaces_sha256=GPU_OLD,
                                issues=image['gpu_module']['issues'] + [142])
     image['j715_test'] = dict(tester, root_from_sha256=OLD_ROOT_SHA256, root_files=root_files,
-                              root_links_removed=list(ROOT_LINKS), root_dropins_removed=list(ROOT_DROPINS),
+                              root_links_removed=list(ROOT_LINKS), root_dropins_removed=sorted(ROOT_DROPINS),
                               installer_files={name: pins[1] for name, pins in INSTALLER_FILES.items()},
-                              sources=dict(SOURCES))
+                              sources=dict(SOURCES, **{'source/j715/g16.rs': G16_SOURCE[0] + ' with ' +
+                                                       G16_SOURCE[2].relative_to(ROOT).as_posix()}))
     write(output / 'IMAGE.json', canonical(image))
     files = {}
     for path in sorted(output.rglob('*')):

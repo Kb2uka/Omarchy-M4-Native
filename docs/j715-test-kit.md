@@ -22,13 +22,21 @@ The tool changes only the following:
 | OS name and package | "…(experimental J713)", `omarchy-j713-0.1.0-alpha.1.zip` | "…(J715 tester)", `omarchy-j715-0.1.0-alpha.1-test.1.zip` |
 | `Install.command` | Mac16,12 only | Mac16,13 only, with `--install --tester` and a typed `TEST` confirmation; Widevine off |
 | `START-HERE.md`, `KNOWN-LIMITATIONS.md`, `UPDATES.md` | J713 instructions, limits and update channel | The J715 versions in [packaging/j715-test](../packaging/j715-test/) |
-| GPU module (`/opt/m4-gpu/asahi_m4.ko` and its line in `runtime.sha256`) | `de0337a7…`, J713 only | `55831cf4…`, built from `gpu/j713` with `apple,j715` in the Air board check |
+| GPU module (`/opt/m4-gpu/asahi_m4.ko` and its line in `runtime.sha256`) | `de0337a7…`, J713 only | `55831cf4…`, built from `gpu/j713` with `packaging/j715-test/g16-j715.patch` (`apple,j715` in the Air board check) |
 | `/usr/local/bin/m4-gpu-start` | Refuses any board but `apple,j713` | Also accepts `apple,j715` |
-| New-user session placement (`/etc/skel/.local/lib/omarchy/m4-session-placement.py`) | J713 only | `tools/m4-session-placement.py`, which admits the J715 |
+| New-user session placement (`/etc/skel/.local/lib/omarchy/m4-session-placement.py`) | J713 only | `tools/m4-session-placement.py` with `packaging/j715-test/m4-session-placement-j715.patch`, which admits the J715 |
 | Start links removed | — | `m4-j713-audio-register`, `speakersafetyd-j713`, `m4-video`, `j713-owner-assets`, `m4-channel-connect.timer` |
 | Drop-ins removed | — | `10-owner-assets.conf` of `omarchy-provision-owner.service` and of `systemd-user-sessions.service` |
-| Sources added | — | `source/j715/`: the kernel patch, both installer patches, `g16.rs` and `j715-board.dtso` |
+| Sources added | — | `source/j715/`: the kernel patch, both installer patches, both gate patches, the patched `g16.rs` and `j715-board.dtso` |
 | `KIT.json`, `IMAGE.json`, `SHA256SUMS` | — | Regenerated, with a `j715_test` record of the source kit, revision and changes; `kernel_native_startup_qualified` is false |
+
+### Why the gates are patched in the kit
+
+`docs/m4-boards.md` keeps every live gate refusing a `testing` board, so
+`gpu/j713/asahi/g16.rs` and `tools/m4-session-placement.py` still refuse the
+J715 in the repository. The kit applies its own two patches to pinned copies
+of them and checks the results. The GPU module was built from the patched
+`g16.rs`, which the kit carries as `source/j715/g16.rs`.
 
 ### Why the kernel changes
 
@@ -75,7 +83,8 @@ its start link: first-boot user setup `Requires` it and `Permit User Sessions`
 `Wants` it, through two `10-owner-assets.conf` drop-ins. On the first J715
 install with only the start link gone, the service refused the board, the user
 setup failed on the dependency, and SDDM came up with no account to log in to.
-The kit removes both drop-ins as well.
+The kit removes both drop-ins as well, after checking their sha256 as the
+J773g tester kit does, and keeps the WirePlumber audio gate.
 
 ## Build
 
@@ -99,8 +108,10 @@ accepts `-j715-test.N` release tags for this kit.
 
 ## Not known yet
 
-One J715 has installed this kit (KIT.json `6d6f8f7f…`, derivation
-`60f404c`, the same kit as now apart from its documents). First-boot user
+One J715 has installed this kit (KIT.json `6d6f8f7f…`, from an earlier
+revision of this branch). The kit derived now differs from it only in its
+documents and the two gate patches in `source/j715/`: its root has the same
+files, modes, links and contents. First-boot user
 setup, the desktop with GPU acceleration, the built-in keyboard and trackpad,
 Wi-Fi with the `kos` firmware, both USB-C ports, restart and shut down worked,
 Bluetooth started, and no system unit failed. WirePlumber does not start: update 4's
