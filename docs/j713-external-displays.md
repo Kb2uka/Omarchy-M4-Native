@@ -3,22 +3,28 @@
 A monitor plugged straight into a USB-C port, or through a Thunderbolt dock,
 shows nothing on the M4 Air under Linux, and this project cannot fix that yet
 ([issue #58](https://github.com/Kb2uka/Omarchy-M4-Native/issues/58)). A
-**USB display adapter** works instead: a DisplayLink adapter or dock, an older
-DisplayLink USB 2.0 adapter, or a GUD display. `omarchy-m4-update` installs
-what the kernel side needs.
+USB display adapters use a separate path. `omarchy-m4-update` supplies the
+DisplayLink kernel module and library; a virtual display passed the Air test
+below. A physical DisplayLink adapter and its manager have not been qualified.
+Older DisplayLink USB 2.0 and GUD adapters have kernel drivers, but driver
+availability alone is not a hardware test.
 
 | Connection | Works? | Why |
 | --- | --- | --- |
 | USB-C monitor (DisplayPort Alt Mode), USB-C to HDMI/DP cable or adapter | No | Needs Apple's display coprocessor (DCP), which Linux cannot drive on M4 yet |
 | Thunderbolt dock or monitor | No; whether a dock's own USB ports work over plain USB is untested | Same: Thunderbolt carries DisplayPort from the same DCP |
-| DisplayLink adapter or dock (DL-3xxx, DL-5xxx, DL-6xxx chips) | Yes, after the setup below | Runs over USB; `omarchy-m4-evdi` from `omarchy-m4-update` plus Synaptics' DisplayLinkManager |
-| Older DisplayLink USB 2.0 adapters (DL-1x0, DL-1x5) | Yes, no setup | The kernel's `udl` driver |
-| GUD USB displays | Yes, no setup | The kernel's `gud` driver |
+| DisplayLink adapter or dock (DL-3xxx, DL-5xxx, DL-6xxx chips) | Kernel half tested; physical adapter unqualified | Runs over USB; `omarchy-m4-evdi` from `omarchy-m4-update` plus Synaptics' DisplayLinkManager |
+| Older DisplayLink USB 2.0 adapters (DL-1x0, DL-1x5) | Driver available; hardware unqualified here | The kernel's `udl` driver |
+| GUD USB displays | Driver available; hardware unqualified here | The kernel's `gud` driver |
 
 **A plain USB-C to HDMI or DisplayPort cable or adapter does not work, and
 neither do a Thunderbolt dock's display ports** (for example an Anker Prime
-Thunderbolt 5 dock). They all carry DisplayPort from the DCP. For a second
-screen, use an adapter or dock whose specifications say **DisplayLink**.
+Thunderbolt 5 dock). They all carry DisplayPort from the DCP. Testing the USB display path requires an adapter or dock whose specifications
+say **DisplayLink**; it is not yet a qualified purchase recommendation.
+
+The native panel backlight added in #146 uses a limited DCP brightness command
+while retaining the boot framebuffer. It does not add display modesetting or
+external display output.
 
 ## Why USB-C and Thunderbolt monitors do not work
 
@@ -79,8 +85,9 @@ yay -S displaylink
 sudo systemctl enable --now displaylink.service
 ```
 
-Then plug the adapter into either USB-C port. Its monitors appear in Hyprland
-as `DVI-I-1`, `DVI-I-2` and so on. Omarchy's default monitor rule uses
+For hardware testing, plug the adapter into either USB-C port. If the manager
+and adapter work, their monitors should appear in Hyprland as `DVI-I-1`,
+`DVI-I-2` and so on. Omarchy's default monitor rule uses
 `scale = "auto"`, which gave 2 on a 1080p screen in the test below; to set a
 scale for one monitor, add a line to `~/.config/hypr/monitors.lua`:
 
