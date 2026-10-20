@@ -1,7 +1,11 @@
 # J713 protected audio source package
 
-This source package assembles the exact J713 audio stack qualified on the
-custom `7.1.9-m4-gpu-backport-20261008` ARM64 kernel. It is an explicit,
+This source package contains the J713 audio stack for the custom
+`7.1.9-m4-gpu-backport-20261008` ARM64 kernel. The MCA arithmetic correction
+now changes one module from the historical qualified build; see the
+[hardening evidence and qualification gate](../../docs/retained-audio-transport-audit.md).
+`qualified.json` still identifies the historical binaries, and packaging
+refuses a changed binary until its own qualification is recorded. It is an explicit,
 fail-closed addition to a pending ext4 owner image. It does not alter a running
 system, change the kernel, or handle arbitrary Apple models.
 
@@ -71,7 +75,7 @@ historical custom kernel/toolchain are still external prerequisites. A successfu
 compilation alone does not authorize different binary hashes. Compare outputs
 with `qualified.json`; a changed output requires its own review and qualification.
 The recipe records toolchain image IDs and preserves the Rust linker map. A
-fresh leased build of this packaged source reproduced all seven qualified module
+fresh leased build of the historical source reproduced all seven qualified module
 hashes and the daemon hash byte for byte; this does not distribute the external
 container images or complete historical kernel build inputs.
 
