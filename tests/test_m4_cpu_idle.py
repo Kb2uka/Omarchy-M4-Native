@@ -669,6 +669,19 @@ class CpuIdleOrderlyRetry(unittest.TestCase):
 
                     self.assert_struck(journal)
 
+    def test_failed_boot_list_with_valid_stdout_keeps_the_exact_refusal_and_marker(self):
+        self.attempt(self.IDLE + '\n')
+        original = self.marker().read_bytes()
+
+        def journal(args):
+            code, output = self.journal(args)
+            return (1 if args == self.LIST else code), output
+
+        self.assert_struck(journal)
+        self.assertEqual(self.journal_calls, [self.LIST])
+        self.assertEqual(self.marker().read_bytes(), original)
+        self.assertEqual(self.run_mode('inspect', Machine(self.root))['state'], 'struck')
+
     def test_legacy_mtime_must_match_exactly_one_boot(self):
         match = self.boots[0]
         for boots in ([], [dict(match, first_entry=2000001)], [dict(match, last_entry=1999999)],
@@ -848,6 +861,18 @@ class CpuIdleOrderlyRetry(unittest.TestCase):
         self.assertEqual(machine.markers, [self.IDLE + '\nboot_id=' + self.CURRENT + '\n'])
         self.assertFalse(self.marker().exists())
         journal.assert_not_called()
+
+    def test_start_with_an_orderly_legacy_marker_never_uses_automatic_retry(self):
+        self.attempt(self.IDLE + '\n')
+        journal = mock.Mock(wraps=self.journal)
+        machine = Machine(self.root)
+        report = self.run_mode('start', machine, journal)
+        journal.assert_not_called()
+        self.assertEqual(report['state'], 'loaded')
+        self.assertEqual(machine.commands, [self.idle_insmod()])
+        self.assertEqual(machine.markers, [self.IDLE + '\nboot_id=' + self.CURRENT + '\n'])
+        self.assertFalse(report['status'].startswith(self.RETRIED))
+        self.assertFalse(self.marker().exists())
 
     def test_new_idle_and_guard_markers_record_the_normalized_boot_id(self):
         machine = Machine(self.root)
