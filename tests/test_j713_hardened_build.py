@@ -64,7 +64,10 @@ Order, and nothing is written to output before the input checks:
    audio/j713. Require MODULE_CERTIFICATE to be a regular file, not a
    symlink, whose sha256 is MODULE_CERTIFICATE_SHA256. The certificate is
    public; it contains no private key and the build does not generate one.
-   Refuse an output path that already exists.
+   Refuse an output path that already exists. Preflight the archive, then
+   probe output's parent: a temporary directory there gets a file named
+   case-probe and the build stops when CASE-PROBE is the same file.
+   Remove that probe before creating output.
 3. Extract the gzip archive into output/kernel with one leading component
    removed. Verify KERNEL_INPUTS and DOCKCHANNEL_BASE.
 4. Apply HISTORICAL_PATCHES with patch -p1 --fuzz=0 --forward, in order,
@@ -72,7 +75,9 @@ Order, and nothing is written to output before the input checks:
 5. Apply RETAINED_PATCH once, to that copied tree only.
 6. Copy only the kernel/ rows of IMPORTED_MANIFEST into output/mca.
    Each source must be a regular non-symlink file whose bytes still match
-   the manifest. Unlisted working-tree files, including Kbuild, stale
+   the manifest. The read opens with O_NONBLOCK so a FIFO that replaces a
+   listed file after the precheck cannot block; fstat then refuses it.
+   Unlisted working-tree files, including Kbuild, stale
    .ko/.o/.cmd, and unlisted .c, are not copied. Do not apply the bclk
    patch. Copy the pinned certificate to
    output/kernel/certs/qualified-module-certificate.pem.
@@ -89,7 +94,8 @@ output/mca, including when archive, exports, and output were relative:
       sha256:BUILDER_IMAGE -c SCRIPT
 
 SCRIPT starts with set -euo pipefail, then runs make Image.gz, then
-make modules for M=/job, both with
+make modules for M=/job. The first make exiting non-zero stops the script;
+the module make does not run. Both invocations use
 ARCH=arm64 LLVM=1 LOCALVERSION= and
 CONFIG_MODULE_SIG_KEY=certs/qualified-module-certificate.pem. That
 non-default key stops the kernel from generating a certificate. The module
@@ -108,7 +114,9 @@ without vmlinux.symvers is refused after prepare and before docker, and
 does not write a receipt. Drift raises and does not write a receipt.
 Success copies
 arch/arm64/boot/Image.gz to output/Image.gz and each module to
-output/modules/<name>.ko, and writes output/receipt.json. The receipt is
+output/modules/<name>.ko, and writes output/receipt.json. Omitting any one
+of AUDIO_MODULES after a successful docker run, with Image.gz and the other
+modules present, refuses that module and writes no receipt. The receipt is
 also build()'s return value:
 
     schema 1, kind 'j713-hardened-kernel-candidate',
@@ -726,6 +734,26 @@ class HardenedBuildTests(unittest.TestCase):
         self.assertFalse((output / 'Image.gz').exists())
 
     def test_export_and_release_drift_are_rejected(self):
+        # require_unchanged checks Module.symvers, then the KERNEL_INPUTS loop.
+        # include/config/kernel.release is one of those pins, so its byte change
+        # is reported as kernel input drift before the later release-string check.
+        reasons = {
+            'exports': 'Module.symvers changed during the kernel build',
+            'config': 'kernel input drifted: .config',
+            'release': 'kernel input drifted: include/config/kernel.release',
+        }
+
+        def complete_then(mutate_input):
+            def mutate(mounts):
+                kernel = mounts['/kernel']
+                image = kernel / 'arch/arm64/boot/Image.gz'
+                image.parent.mkdir(parents=True, exist_ok=True)
+                image.write_bytes(b'candidate-image')
+                for module in tool.AUDIO_MODULES:
+                    (mounts['/job'] / module).write_bytes(b'module:' + module.encode())
+                mutate_input(mounts)
+            return mutate
+
         def cases():
             def exports(mounts):
                 path = mounts['/kernel'] / 'Module.symvers'
@@ -741,13 +769,15 @@ class HardenedBuildTests(unittest.TestCase):
 
         archive, exports, _files = self.prepared_inputs()
         export_before = digest(exports)
-        for name, mutate in cases().items():
+        for name, mutate_input in cases().items():
             output = self.base / ('drift-' + name)
-            _calls, run = self.docker_runner(mutate=mutate)
+            _calls, run = self.docker_runner(mutate=complete_then(mutate_input))
             with self.subTest(drift=name):
                 with mock.patch.object(tool.subprocess, 'run', side_effect=run):
-                    with self.assertRaises(RuntimeError):
+                    with self.assertRaises(RuntimeError) as caught:
                         tool.build(archive, exports, self.image(), output)
+                self.assertIn(reasons[name], str(caught.exception))
+                self.assertNotIn('kernel Image.gz was not produced', str(caught.exception))
                 self.assertFalse((output / 'receipt.json').exists())
                 self.assertEqual(digest(exports), export_before)
 
@@ -773,8 +803,10 @@ class HardenedBuildTests(unittest.TestCase):
         output = self.base / 'vmlinux-drift'
         _calls, run = self.docker_runner(mutate=mutate)
         with mock.patch.object(tool.subprocess, 'run', side_effect=run):
-            with self.assertRaises(RuntimeError):
+            with self.assertRaises(RuntimeError) as caught:
                 tool.build(archive, exports, self.image(), output)
+        self.assertIn('vmlinux.symvers changed during the kernel build', str(caught.exception))
+        self.assertNotIn('kernel Image.gz was not produced', str(caught.exception))
         self.assertFalse((output / 'receipt.json').exists())
         self.assertFalse((output / 'Image.gz').exists())
         kernel = output / 'kernel'
@@ -810,8 +842,9 @@ class HardenedBuildTests(unittest.TestCase):
         output = self.base / 'missing-vmlinux'
         calls, run = self.docker_runner()
         with mock.patch.object(tool.subprocess, 'run', side_effect=run):
-            with self.assertRaises(RuntimeError):
+            with self.assertRaises(RuntimeError) as caught:
                 tool.build(archive, exports, self.image(), output)
+        self.assertIn('vmlinux.symvers must be a regular file', str(caught.exception))
         self.assertEqual(calls, [])
         self.assertFalse((output / 'receipt.json').exists())
 
@@ -1100,6 +1133,74 @@ class HardenedBuildTests(unittest.TestCase):
         self.assertEqual(source.read_bytes(), b'drifted after precheck\n')
         self.assertEqual((audio / 'kernel' / 'Makefile').read_bytes(), pinned['kernel/Makefile'])
 
+    def test_copy_audio_modules_refuses_fifo_replacing_listed_source(self):
+        """A FIFO swapped in after the manifest precheck is refused without blocking.
+
+        require_pinned_inputs is not called: hashing the FIFO would open it
+        for a blocking read. copy_audio_modules opens the path itself.
+        """
+        audio, manifest, pinned, _extras, _archive, _exports = self.pinned_audio_fixture()
+        source = audio / 'kernel' / 'mca.c'
+        self.assertEqual(source.read_bytes(), pinned['kernel/mca.c'])
+        source.unlink()
+        os.mkfifo(source)
+        output = self.base / 'fifo-mca'
+        output.mkdir()
+        with mock.patch.object(tool, 'AUDIO', audio), \
+             mock.patch.object(tool, 'IMPORTED_MANIFEST', manifest):
+            with self.assertRaises(RuntimeError) as caught:
+                tool.copy_audio_modules(output)
+        self.assertIn('kernel/mca.c', str(caught.exception))
+        self.assertIn('regular file', str(caught.exception))
+        self.assertFalse((output / 'mca').exists())
+        self.assertTrue(stat.S_ISFIFO(source.stat().st_mode))
+
+    def test_prepare_refuses_case_insensitive_destination(self):
+        """A parent that aliases CASE-PROBE to case-probe never receives output.
+
+        Path.exists is patched only for that basename. A real filesystem
+        prepare of the same inputs still succeeds, and neither path changes
+        the pinned inputs.
+        """
+        archive, exports, _files = self.prepared_inputs()
+        watched = (
+            archive,
+            exports,
+            ROOT / 'audio/j713/imported-source.sha256',
+            ROOT / 'audio/j713/kernel/mca.c',
+            RETAINED_PATCH,
+        )
+        before = {path: digest(path) for path in watched}
+        output = self.base / 'case-folded'
+        real_exists = Path.exists
+
+        def exists(path):
+            if Path(path).name == 'CASE-PROBE':
+                return True
+            return real_exists(path)
+
+        with mock.patch.object(Path, 'exists', exists):
+            with self.assertRaises(RuntimeError) as caught:
+                tool.prepare(archive, exports, self.image(), output)
+        self.assertIn('case-sensitive', str(caught.exception))
+        self.assertFalse(real_exists(output))
+        leftovers = [
+            path for path in self.base.rglob('*')
+            if 'case-probe' in path.name.lower() or path.name.startswith('.j713-case-')
+        ]
+        self.assertEqual(leftovers, [])
+        for path, pin in before.items():
+            self.assertEqual(digest(path), pin)
+
+        real_output = self.base / 'case-real'
+        tool.prepare(archive, exports, self.image(), real_output)
+        copied = real_output / 'mca' / 'mca.c'
+        self.assertTrue(copied.is_file())
+        self.assertFalse(copied.is_symlink())
+        self.assertEqual(copied.read_bytes(), (ROOT / 'audio/j713/kernel/mca.c').read_bytes())
+        for path, pin in before.items():
+            self.assertEqual(digest(path), pin)
+
     def test_sound_exports_mismatch_is_rejected_before_output(self):
         files = self.kernel_files(b'alpha\n')
         archive = self.write_archive(files)
@@ -1227,6 +1328,37 @@ class HardenedBuildTests(unittest.TestCase):
                 else:
                     self.assertFalse((output / 'modules' / 'apple-admac.ko').exists())
 
+    def test_each_omitted_audio_module_is_rejected_when_other_outputs_exist(self):
+        archive, exports, _files = self.prepared_inputs()
+        for skipped in tool.AUDIO_MODULES:
+            def mutate(mounts, skipped=skipped):
+                kernel = mounts['/kernel']
+                image = kernel / 'arch/arm64/boot/Image.gz'
+                image.parent.mkdir(parents=True, exist_ok=True)
+                image.write_bytes(b'candidate-image')
+                for name in tool.AUDIO_MODULES:
+                    if name != skipped:
+                        (mounts['/job'] / name).write_bytes(b'module:' + name.encode())
+
+            output = self.base / ('missing-one-' + skipped)
+            _calls, run = self.docker_runner(mutate=mutate)
+            with self.subTest(skipped=skipped):
+                with mock.patch.object(tool.subprocess, 'run', side_effect=run):
+                    with self.assertRaises(RuntimeError) as caught:
+                        tool.build(archive, exports, self.image(), output)
+                self.assertIn('audio module was not produced: ' + skipped, str(caught.exception))
+                self.assertNotIn('kernel Image.gz was not produced', str(caught.exception))
+                self.assertFalse((output / 'receipt.json').exists())
+                self.assertFalse((output / 'modules' / skipped).exists())
+                job = output / 'mca'
+                for name in tool.AUDIO_MODULES:
+                    produced = job / name
+                    if name == skipped:
+                        self.assertFalse(produced.exists())
+                    else:
+                        self.assertTrue(produced.is_file())
+                        self.assertEqual(produced.read_bytes(), b'module:' + name.encode())
+
     def test_docker_script_sets_errexit_nounset_and_pipefail(self):
         script = tool.docker_script()
         self.assertTrue(script.startswith('set -euo pipefail\n'))
@@ -1236,6 +1368,32 @@ class HardenedBuildTests(unittest.TestCase):
         self.assertEqual(len(make_lines), 2)
         self.assertIn('Image.gz', make_lines[0])
         self.assertIn('M=/job', make_lines[1])
+
+        # No pipeline in the script exercises pipefail. errexit is what stops
+        # the second make. The stub's second invocation would succeed.
+        bindir = self.base / 'stub-make'
+        bindir.mkdir()
+        log = self.base / 'make-invocations'
+        stub = bindir / 'make'
+        stub.write_text(
+            '#!/bin/sh\n'
+            'printf \'%s\\n\' "$*" >> "$STUB_MAKE_LOG"\n'
+            'count=$(wc -l < "$STUB_MAKE_LOG")\n'
+            'if [ "$count" -eq 1 ]; then\n'
+            '  exit 9\n'
+            'fi\n'
+            'exit 0\n'
+        )
+        stub.chmod(0o755)
+        env = os.environ.copy()
+        env['PATH'] = str(bindir) + os.pathsep + env.get('PATH', '')
+        env['STUB_MAKE_LOG'] = str(log)
+        result = subprocess.run(
+            ['/bin/bash', '-c', script], env=env, capture_output=True, text=True, check=False)
+        self.assertNotEqual(result.returncode, 0)
+        invocations = log.read_text().splitlines()
+        self.assertEqual(len(invocations), 1)
+        self.assertEqual('make ' + invocations[0], make_lines[0])
 
 
 if __name__ == '__main__':

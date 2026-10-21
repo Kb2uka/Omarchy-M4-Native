@@ -35,6 +35,17 @@ which already contains the correction.
 `audio/j713/qualified.json` continues to identify historical binaries and is
 left unchanged. Changing source does not make a new module qualified.
 
+The candidate recipe copies only `kernel/` rows from
+`audio/j713/imported-source.sha256`. Each listed path must be a relative name
+under that directory. The recipe reads those regular files once, checks the
+manifest digest, and writes those bytes into `output/mca`. It does not copy
+other working-tree files. `patches-kernel/j713-audio/mca-bclk-width.patch`
+remains in the tree as the historical record of the correction; the recipe
+still does not apply it to current source. Before `output` is created, the
+recipe probes `output`'s parent with a temporary `case-probe` file and refuses
+the build when `CASE-PROBE` names that same file. Archive member names are
+left unchanged.
+
 ## DockChannel bounds
 
 The build recipe applies
@@ -90,10 +101,12 @@ still used the default certificate rule also produced a different kernel and
 is not selected. The current recipe is the pinned public certificate build
 below.
 
-Two independent fresh builds of that recipe produced byte-identical
-`Image.gz`, all five audio modules, and the build receipt. `cmp` and `diff`
-between those outputs reported no differences. Both receipts set
-`native_qualified` and `fresh_install_qualified` to false.
+Two independent fresh builds of that earlier pinned-certificate recipe
+produced byte-identical `Image.gz`, all five audio modules, and the build
+receipt. `cmp` and `diff` between those outputs reported no differences.
+Both receipts set `native_qualified` and `fresh_install_qualified` to false.
+Those hashes are not a rebuild of the source-closure and case-sensitive
+destination check above.
 
 | Artifact | SHA-256 |
 | --- | --- |

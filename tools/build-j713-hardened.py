@@ -13,9 +13,11 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -270,11 +272,105 @@ def require_historical_tree(kernel):
         refuse('macsmc hash after historical patches does not match the pin')
 
 
+def kernel_manifest_entries():
+    """Return (manifest name, relative parts, digest) for kernel/ rows only.
+
+    The manifest is the trusted file list. Components are still rejected when
+    they are absolute, empty, '.' or '..', so a listed name cannot leave
+    audio/j713/kernel or the destination tree.
+    """
+    entries = []
+    for name, pinned in load_sha_map(IMPORTED_MANIFEST).items():
+        text = str(name)
+        if not text.startswith('kernel/'):
+            continue
+        relative = text[len('kernel/'):]
+        if (
+            '\\' in text or '\x00' in text or text.startswith('/') or os.path.isabs(text)
+            or relative == '' or relative.startswith('/')
+        ):
+            refuse('imported source path is not a safe relative path: ' + text)
+        parts = relative.split('/')
+        if not parts or any(part in ('', '.', '..') for part in parts):
+            refuse('imported source path is not a safe relative path: ' + text)
+        entries.append((text, tuple(parts), pinned))
+    if not entries:
+        refuse('imported kernel manifest is empty')
+    return entries
+
+
+def read_regular_manifest_source(parts, label):
+    """Read one listed kernel file once. Symlink ancestors and special files fail closed."""
+    current = AUDIO
+    if current.is_symlink():
+        refuse('imported source is not a regular file: ' + label)
+    for part in ('kernel',) + parts:
+        current = current / part
+        if current.is_symlink():
+            refuse('imported source is not a regular file: ' + label)
+    try:
+        # O_NONBLOCK: a FIFO swapped in after the precheck must not block in open.
+        # Regular files ignore it. fstat below still rejects every non-regular file.
+        handle = os.open(current, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        refuse('imported source is not a regular file: ' + label)
+    try:
+        info = os.fstat(handle)
+        if not stat.S_ISREG(info.st_mode):
+            refuse('imported source is not a regular file: ' + label)
+        chunks = []
+        while True:
+            block = os.read(handle, 1024 * 1024)
+            if not block:
+                break
+            chunks.append(block)
+    finally:
+        os.close(handle)
+    return b''.join(chunks)
+
+
 def copy_audio_modules(output):
-    source = AUDIO / 'kernel'
+    verified = []
+    for name, parts, pinned in kernel_manifest_entries():
+        data = read_regular_manifest_source(parts, name)
+        if hashlib.sha256(data).hexdigest() != pinned:
+            refuse('imported source mismatch: ' + name)
+        verified.append((parts, data))
     destination = output / 'mca'
-    shutil.copytree(source, destination)
+    if destination.exists() or destination.is_symlink():
+        refuse('audio module destination already exists: ' + str(destination))
+    destination.mkdir()
+    for parts, data in verified:
+        cursor = destination
+        for part in parts[:-1]:
+            cursor = cursor / part
+            if cursor.is_symlink():
+                refuse('imported source is not a regular file: ' + '/'.join(('kernel',) + parts))
+            cursor.mkdir(exist_ok=True)
+        target = cursor / parts[-1]
+        if target.exists() or target.is_symlink():
+            refuse('imported source is not a regular file: ' + '/'.join(('kernel',) + parts))
+        target.write_bytes(data)
     # The copied tree is already the widened MCA. Do not apply mca-bclk-width.patch.
+
+
+def require_case_sensitive_destination(parent):
+    """Refuse a parent filesystem that treats case-probe and CASE-PROBE as one file.
+
+    Linux trees contain legitimate case variants, so archive names are not
+    rewritten. The probe is removed on success and on refusal.
+    """
+    parent = Path(parent)
+    if parent.is_symlink() or not parent.is_dir():
+        refuse('destination parent is not a directory: ' + str(parent))
+    temporary = tempfile.TemporaryDirectory(prefix='.j713-case-', dir=parent)
+    try:
+        directory = Path(temporary.name)
+        (directory / 'case-probe').write_bytes(b'case-probe')
+        if (directory / 'CASE-PROBE').exists():
+            refuse('destination filesystem is not case-sensitive: ' + str(parent))
+    finally:
+        temporary.cleanup()
 
 
 def prepare(archive, exports, image, output):
@@ -287,6 +383,7 @@ def prepare(archive, exports, image, output):
         refuse('output already exists: ' + str(output))
     kernel = output / 'kernel'
     preflight_archive(archive, kernel)
+    require_case_sensitive_destination(output.parent)
     output.mkdir()
     extract_archive(archive, kernel)
     require_tree_pins(kernel)
