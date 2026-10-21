@@ -637,6 +637,72 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual(machine.boot, machine.boot_before)
         self.assertEqual((machine.root / MODULE.PACMAN_LOCK).read_bytes(), b'another transaction')
 
+    def test_same_release_pair_outside_the_allowlist_refuses_before_writes(self):
+        """A third and fourth known hash, same release, are not a kernel transition.
+
+        The video manifest is already pinned to the packaged kernel. Owner boot
+        arguments, initramfs, and stage2 match. The real ``KERNEL_TRANSITIONS``
+        set is left as shipped. Nothing may be written.
+        """
+        third, fourth = kernel(3), kernel(4)
+        loader = LOADER + b' owner-stage2'
+        bootargs = b'chosen.bootargs=root=PARTUUID=abcd dockchannel_hid.m4_power_v2=1\n'
+        firmware = b'070701 owner-kept'
+        initramfs = b'm1n1_initramfs' + struct.pack('<I', len(firmware)) + firmware
+        current = boot(kernel_bytes=third, dtb=D1, loader=loader, bootargs=bootargs, initramfs=initramfs)
+        machine = Machine(self, boot_bytes=current, package_kernel=fourth, package_dtb=D1)
+        releases = {sha(third): RELEASE, sha(fourth): RELEASE}
+        patcher = mock.patch.dict(MODULE.KNOWN_KERNELS, releases, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.assertEqual(
+            {tuple(pair) for pair in MODULE.KERNEL_TRANSITIONS},
+            {(OLD_KERNEL, NEW_KERNEL), (NEW_KERNEL, OLD_KERNEL)})
+        video = {'boot_kernel_sha256': sha(fourth), 'kernel_release': RELEASE, 'owner_panel': 'kept'}
+        raw = json.dumps(video, indent=4).encode() + b'\n'
+        machine.put(MODULE.VIDEO_MANIFEST, raw)
+        audio = (machine.root / MODULE.AUDIO_MANIFEST).read_bytes()
+        code, _, err = machine.run('--apply')
+        self.assertEqual(code, 1, err)
+        self.assertIn('not qualified', err)
+        self.assertEqual(machine.boot, current)
+        self.assertIsNone(machine.previous)
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), raw)
+        self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
+        self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+
+    def test_rollback_of_an_unlisted_kernel_pair_refuses_before_writes(self):
+        """Previous may change the kernel only for an allowlisted pair.
+
+        Owner segments match and both hashes are known on one release. The
+        pair is not in ``KERNEL_TRANSITIONS``.
+        """
+        third, fourth = kernel(3), kernel(4)
+        loader = LOADER + b' owner-stage2'
+        bootargs = b'chosen.bootargs=root=PARTUUID=abcd dockchannel_hid.m4_power_v2=1\n'
+        firmware = b'070701 owner-kept'
+        initramfs = b'm1n1_initramfs' + struct.pack('<I', len(firmware)) + firmware
+        current = boot(kernel_bytes=fourth, dtb=D1, loader=loader, bootargs=bootargs, initramfs=initramfs)
+        older = boot(kernel_bytes=third, dtb=D1, loader=loader, bootargs=bootargs, initramfs=initramfs)
+        machine = Machine(self, boot_bytes=current, package_kernel=fourth, package_dtb=D1)
+        patcher = mock.patch.dict(
+            MODULE.KNOWN_KERNELS, {sha(third): RELEASE, sha(fourth): RELEASE}, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        machine.put(MODULE.BOOT + MODULE.PREVIOUS, older)
+        video = {'boot_kernel_sha256': sha(fourth), 'kernel_release': RELEASE, 'owner_panel': 'kept'}
+        raw = json.dumps(video, indent=4).encode() + b'\n'
+        machine.put(MODULE.VIDEO_MANIFEST, raw)
+        audio = (machine.root / MODULE.AUDIO_MANIFEST).read_bytes()
+        code, _, err = machine.run('--rollback', '--apply')
+        self.assertEqual(code, 1, err)
+        self.assertIn('not qualified', err)
+        self.assertEqual(machine.boot, current)
+        self.assertEqual(machine.previous, older)
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), raw)
+        self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
+        self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+
 
 def video_with_pin(raw, pin):
     """Parsed manifest with only ``boot_kernel_sha256`` replaced."""
