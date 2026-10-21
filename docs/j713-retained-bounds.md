@@ -29,12 +29,12 @@ restriction allowed the corrected candidate to load hardened MCA while
 preserving the other component pins.
 
 The initial successful candidate used boot package `1-16` and speaker package
-`1-3`. Final packages `1-18` and `1-4`, built from
+`1-3`. Subsequently validated packages `1-18` and `1-4`, built from
 `0bcf42915012521ac7b40e3d3ba5735304c40b9b`, were subsequently installed through
 the same normal updater and real ALPM hook. Their archive SHA-256 values are
 `632a8f4a981488e7dc9c815e73b5e43f4df7be4bcd564541a64cf0beb608dd8e`
 (boot) and `cdc127fd16e463e86ce78db41dc79aa219f994549460a4e16cb73b7fa37e9e2b`
-(speaker). The final campaign repeated rollback, held update, explicit reapply
+(speaker). That campaign repeated rollback, held update, explicit reapply
 and an unchanged repeat boot on 2026-10-21:
 
 | Check | Observed result |
@@ -58,7 +58,7 @@ a claim that every service was identical across boots. Its installed package
 remained `1-3`. All eight packages outside boot and speaker retained the
 production package bytes and installed versions.
 
-The final rollback boot was `ccd9ddfe-c143-416e-aaa4-8c45140f0ac5`, reapply was
+That rollback boot was `ccd9ddfe-c143-416e-aaa4-8c45140f0ac5`, reapply was
 `45eef097-f160-46f2-9065-eb7d1b0f7062`, and repeat was
 `e6283eeb-982f-4108-a9c9-eee244400f71`. Rollback restored the complete baseline
 boot object `d03bc6d9fcd125c3b9624f369697a08d36570731c6419960d68534246f8279ed`;
@@ -89,6 +89,10 @@ Automated enumeration and playback do not establish those results.
 Before public-channel promotion, complete manual built-in keyboard and trackpad
 acceptance, listening, suspend/resume and fresh-install qualification. This
 develop-branch validation does not satisfy those remaining release checks.
+
+The follow-up recovery changes are undergoing review and remote regression
+checks. Their next package revisions require a separate installed-Air campaign;
+the observations above establish the earlier `1-18`/`1-4` package behavior only.
 
 The signed sandbox package test separately checks dependency installation,
 unchanged base-package payload, idempotence and signer rejection. It uses a
