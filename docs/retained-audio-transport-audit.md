@@ -85,11 +85,20 @@ Fourteen packet mutants and three arithmetic mutants were rejected by these
 tests. They independently remove the initialization guards, weaken packet
 bounds, omit cleanup/rearm, reject valid reports, remove operand widening,
 cast after multiplication, or substitute a constant product. Six earlier
-builder mutants were already caught. On Homebase, Python 3.14, the builder
-suite is 23 tests and all pass. Five review mutants that previously survived
-are now caught: removing the DER hash check, the read-only export mount, the
-explicit entrypoint, duplicate-member rejection, or extraction-through-symlink
-rejection. The restored suite still passes.
+builder mutants were already caught. The closure baseline was 32 tests with
+3 failures, and the case-probe test failed as well. The final fixes copy
+only manifest-listed regular files after verifying their hashes, and they
+refuse a case-insensitive output filesystem. On Homebase, Python 3.14, at
+`91dabdf`, the builder suite is 35 tests and all pass. Five earlier review
+mutants are caught again at that commit: removing the DER hash check, the
+read-only export mount, the explicit entrypoint, duplicate-member rejection,
+or extraction-through-symlink rejection. The explicit-entrypoint mutant
+fails directly when the command lacks `--entrypoint`: the command-contract
+assertion raises `ValueError`, which is the test failure rather than an
+infrastructure failure. Three further closure mutants fail their assertions:
+restoring `copytree` so an unlisted file is copied (the targeted copy test),
+omitting the copy digest, and omitting the case-probe call. With those
+fixes restored, the same 35 tests pass.
 
 A full ARM64 baseline kernel and then the hardened kernel linked with
 LLVM 21.1.8 and Rust 1.93.1. All five `audio/j713/kernel` modules also linked
@@ -101,32 +110,38 @@ still used the default certificate rule also produced a different kernel and
 is not selected. The current recipe is the pinned public certificate build
 below.
 
-Two independent fresh builds of that earlier pinned-certificate recipe
+Two independent fresh builds at `8ee57be` of the pinned-certificate recipe
 produced byte-identical `Image.gz`, all five audio modules, and the build
 receipt. `cmp` and `diff` between those outputs reported no differences.
-Both receipts set `native_qualified` and `fresh_install_qualified` to false.
-Those hashes are not a rebuild of the source-closure and case-sensitive
-destination check above.
+Those two builds are the earlier pinned-certificate recipe. A third clean
+build of the final `91dabdf` recipe, which adds the source-closure copy and
+the case-probe check, completed on Homebase. Against one of the earlier
+outputs (build A), `cmp` of `Image.gz`, `cmp` of the receipt, and `diff -qr`
+of all five modules each exited 0. The image remains 18,900,939 bytes and the MCA module
+remains 79,152 bytes, at the hashes below. The full 5,896-byte trust region was
+verified independently and matches the original qualified kernel hash below;
+that hash is unchanged. The matched receipt still sets `native_qualified`
+and `fresh_install_qualified` to false.
 
 | Artifact | SHA-256 |
 | --- | --- |
 | Current recipe Image.gz, 18,900,939 bytes | `ca1fff571cf1b9d8c0b07b2e97ba0a5402f93c1b7a2d54ea2c07e24a8b70f9d0` |
 | Hardened MCA module, 79,152 bytes | `fb941df4d55c4f2093b4595e0392aaf97ffe3a250228518b18a4f70568bf7454` |
-| Built-in trust region, 5,896 bytes, both builds | `77f3aad25837130e2e41d6750019a0e526365eeda0bfd17f2c45bb7df28cc0cc` |
+| Built-in trust region, 5,896 bytes | `77f3aad25837130e2e41d6750019a0e526365eeda0bfd17f2c45bb7df28cc0cc` |
 | Configuration, unchanged | `14b4437b2b195e912a2ab614d28761acd3dc79f886d4487964aa0912616a3a6e` |
 | Both export tables, unchanged | `5e3c2624c6a991bae503336137ce15071e51ef043edcd20ba1ad19df4e23d67c` |
 | Speaker group, reproduced unchanged | `aaad802eb136ff6cb915feaa123001b3eb848bc2f038d0a5b71c8e2ff35d2581` |
 
 The 5,896-byte trust region is the built-in certificate region of `Image.gz`.
-On both fresh builds its hash matches the original qualified Air `Image`
-exactly. That match is a public embedded region, not a signature and not
-possession of a private key. ADMAC, macaudio, TAS2764 and the speaker group
-reproduced their historical qualified hashes. MCA is the only one of the five
-audio modules that differs from the historical qualified module; its candidate
-hash and size are unchanged from the earlier hardened candidate. The speaker
-group source join names its five unchanged build inputs individually at the
-original revision, alongside the configured kernel and supplemental export
-archives. MCA implementation is not linked into that module.
+The full region was verified independently. Its hash matches the original
+qualified Air `Image` and is unchanged. That match is a public embedded
+region, not a signature and not possession of a private key. ADMAC, macaudio,
+TAS2764 and the speaker group reproduced their historical qualified hashes.
+MCA is the only one of the five audio modules that differs from the historical
+qualified module; its candidate hash and size are unchanged from the earlier
+hardened candidate. This source change does not modify package source joins.
+The historical speaker-group join remains unchanged here. MCA implementation
+is not linked into that module.
 
 The recipe now pins the public certificate recovered from qualified kernel
 `c3704cfd2afb7760e73f0b9939a68864a30bd916fcd478bd960e538373123dc9`.
@@ -139,8 +154,10 @@ the default key-generation rule. The archived configuration and its signature
 verification policy remain unchanged. Automatic module signing remains disabled;
 these outputs are not claimed to be signed. The recipe checks the copied PEM
 and generated DER before writing a receipt and records the make override.
-The two fresh builds above are that pinned-certificate recipe. Their receipts
-record the same PEM and DER hashes. No private key is in the tree or the
+The two builds at `8ee57be` are that pinned-certificate recipe. The final
+`91dabdf` build uses the same certificate pin and adds the source-closure
+copy and case-probe check. Its receipt matches earlier build A, including
+the same PEM and DER hashes. No private key is in the tree or the
 receipt, and these outputs are not claimed to be signed.
 
 ## Reproduce a candidate
@@ -163,20 +180,28 @@ install a kernel or update a qualified manifest.
 
 ## Native and delivery gate
 
-The two pinned-certificate builds match, and the builder, packet and MCA
-mutants above are caught. Independent review is still in progress. Issue 43
-is not closed. No installation or reboot of this candidate has been performed,
-so `native_qualified` and `fresh_install_qualified` stay false. Before
-replacing qualified binaries, native boot and repeat boot, keyboard/trackpad
-input, protected audio, GPU and video checks remain required. Suspend is not
-part of this qualification.
+[Pull request 156](https://github.com/Kb2uka/Omarchy-M4-Native/pull/156)
+changes the source and the build only. It does not publish a channel.
+Native testing and package migration are in the dependent
+[pull request 157](https://github.com/Kb2uka/Omarchy-M4-Native/pull/157).
+On the installed J713, an initial upgrade, rollback, reapply, and repeat
+boot completed with this same image and MCA module
+(`ca1fff571cf1b9d8c0b07b2e97ba0a5402f93c1b7a2d54ea2c07e24a8b70f9d0`,
+18,900,939 bytes;
+`fb941df4d55c4f2093b4595e0392aaf97ffe3a250228518b18a4f70568bf7454`,
+79,152 bytes). The evidence for that session is in the companion pull
+request. Final review and recovery fixes for the rollout are still pending.
+Issue 43 is not closed. Build receipts keep `native_qualified` and
+`fresh_install_qualified` false because the builder does not qualify
+hardware. A fresh install, suspend, human listening, and physical typing
+were not performed.
 
-Hosted CI on test commit `d75dfea` passed 1,264 Linux tests in 79.107 seconds,
-and the Rust, macOS and policy jobs on run `39523356852` also passed. That
-run is not the full pull-request security workflow. The earlier full source
-pull request at `de6194f` had every check passing, including 1,262 Linux
-tests. Package migration is separate dependent work and is not implemented
-by the source change.
+Hosted CI for source commit `91dabdf39993fb7f01ea2a4db55a2c686e6e0ba5`
+passed 1,276 Linux tests in 60.340 seconds on run `39527305580`. The Rust,
+macOS, and policy jobs on that run passed. CodeQL run `39527305617`,
+security run `39527305599`, and package run `39527305639` passed. Each of
+these runs is that source commit. A later documentation-only commit is
+outside these results.
 
 Before channel promotion, the kernel needs a reviewed video-manifest and boot
 transition; MCA needs a matching audio-manifest transition. Rollback must
