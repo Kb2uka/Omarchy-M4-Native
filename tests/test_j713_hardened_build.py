@@ -67,7 +67,11 @@ Order, and nothing is written to output before the input checks:
    Refuse an output path that already exists. Preflight the archive, then
    probe output's parent: a temporary directory there gets a file named
    case-probe and the build stops when CASE-PROBE is the same file.
-   Remove that probe before creating output.
+   Remove that probe before creating output. Successful prepare and build
+   tests require a case-sensitive TMPDIR, the same rule production enforces
+   on the destination parent. Case-insensitive APFS refuses extraction. A
+   case-sensitive APFS volume is a suitable TMPDIR and runs those tests in
+   the ordinary way.
 3. Extract the gzip archive into output/kernel with one leading component
    removed. Verify KERNEL_INPUTS and DOCKCHANNEL_BASE.
 4. Apply HISTORICAL_PATCHES with patch -p1 --fuzz=0 --forward, in order,
@@ -140,6 +144,7 @@ ssl.PEM_cert_to_DER_cert before a mutate hook runs.
 
 Patch and docker go through this module's subprocess.run.
 """
+import errno
 import hashlib
 import importlib.util
 import io
@@ -149,6 +154,7 @@ from pathlib import Path
 import ssl
 import stat
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -1020,6 +1026,25 @@ class HardenedBuildTests(unittest.TestCase):
                 self.assertFalse((output / 'receipt.json').exists())
                 self.assertFalse((output / 'Image.gz').exists())
 
+    def test_kernel_manifest_refuses_backslash_component(self):
+        """A manifest name with one backslash is an unsafe relative path.
+
+        The shipped manifest has no such row. kernel_manifest_entries refuses
+        the literal component before any source file is opened.
+        """
+        literal = 'kernel/sub\\mca.c'
+        self.assertEqual(literal.count('\\'), 1)
+        manifest = self.base / 'backslash-imported-source.sha256'
+        manifest.write_text('%s  %s\n' % (text_digest(b'backslash-boundary\n'), literal))
+        loaded = manifest.read_text().split(None, 1)[1].strip()
+        self.assertEqual(loaded, literal)
+        with mock.patch.object(tool, 'IMPORTED_MANIFEST', manifest):
+            with self.assertRaises(RuntimeError) as caught:
+                tool.kernel_manifest_entries()
+        self.assertEqual(
+            str(caught.exception),
+            'imported source path is not a safe relative path: ' + literal)
+
     def pinned_audio_fixture(self, symlink_mca=False):
         """Temporary AUDIO tree whose manifest pins only kernel/Makefile and kernel/mca.c.
 
@@ -1098,6 +1123,87 @@ class HardenedBuildTests(unittest.TestCase):
         }
         self.assertEqual(after, before)
 
+    def test_copy_audio_modules_refuses_existing_destination(self):
+        """An existing output/mca is refused before any file is copied.
+
+        The helper contract is RuntimeError 'audio module destination already
+        exists'. A directory, a regular file, a symlink to a separate sentinel
+        directory, and a dangling symlink keep their type, bytes, and link
+        target. The outside sentinel stays put and the output tree gains no files.
+        """
+        audio, manifest, _pinned, _extras, _archive, _exports = self.pinned_audio_fixture()
+        source = audio / 'kernel'
+
+        def file_bytes(root):
+            return {
+                path.relative_to(root).as_posix(): path.read_bytes()
+                for path in sorted(root.iterdir())
+                if path.is_file() and not path.is_symlink()
+            }
+
+        def node_record(path):
+            if path.is_symlink():
+                return ('symlink', os.readlink(path))
+            if path.is_file():
+                return ('file', path.read_bytes())
+            if path.is_dir():
+                children = []
+                for child in sorted(path.rglob('*'), key=lambda item: item.as_posix()):
+                    relative = child.relative_to(path).as_posix()
+                    if child.is_symlink():
+                        children.append((relative, 'symlink', os.readlink(child)))
+                    elif child.is_file():
+                        children.append((relative, 'file', child.read_bytes()))
+                    else:
+                        children.append((relative, 'dir'))
+                return ('dir', tuple(children))
+            return ('missing',)
+
+        outside = self.base / 'outside-sentinel'
+        outside.write_bytes(b'outside-sentinel\n')
+        cases = []
+
+        directory_output = self.base / 'existing-directory'
+        directory_output.mkdir()
+        directory_dest = directory_output / 'mca'
+        directory_dest.mkdir()
+        (directory_dest / 'sentinel').write_bytes(b'directory-sentinel\n')
+        cases.append(('directory', directory_output, []))
+
+        file_output = self.base / 'existing-file'
+        file_output.mkdir()
+        (file_output / 'mca').write_bytes(b'file-sentinel\n')
+        cases.append(('file', file_output, []))
+
+        linked = self.base / 'linked-sentinel-dir'
+        linked.mkdir()
+        (linked / 'sentinel').write_bytes(b'linked-sentinel\n')
+        link_output = self.base / 'existing-symlink'
+        link_output.mkdir()
+        (link_output / 'mca').symlink_to(linked)
+        cases.append(('symlink', link_output, [linked]))
+
+        dangling_target = self.base / 'dangling-mca-target'
+        dangling_output = self.base / 'existing-dangling'
+        dangling_output.mkdir()
+        (dangling_output / 'mca').symlink_to(dangling_target)
+        cases.append(('dangling', dangling_output, [dangling_target]))
+
+        source_before = file_bytes(source)
+        for kind, output, extras in cases:
+            with self.subTest(kind=kind):
+                watched = [output, outside, *extras]
+                before = [node_record(path) for path in watched]
+                with mock.patch.object(tool, 'AUDIO', audio), \
+                     mock.patch.object(tool, 'IMPORTED_MANIFEST', manifest):
+                    with self.assertRaises(RuntimeError) as caught:
+                        tool.copy_audio_modules(output)
+                self.assertEqual(
+                    str(caught.exception),
+                    'audio module destination already exists: ' + str(output / 'mca'))
+                self.assertEqual([node_record(path) for path in watched], before)
+                self.assertEqual(file_bytes(source), source_before)
+
     def test_copy_audio_modules_refuses_symlink_listed_source(self):
         audio, manifest, pinned, _extras, archive, exports = self.pinned_audio_fixture(
             symlink_mca=True)
@@ -1117,6 +1223,105 @@ class HardenedBuildTests(unittest.TestCase):
         self.assertTrue(source.is_symlink())
         self.assertEqual(source.read_bytes(), pinned['kernel/mca.c'])
 
+    def test_copy_audio_modules_refuses_symlink_source_ancestor(self):
+        """audio/kernel as a directory symlink is refused when the leaves are regular.
+
+        Makefile and mca.c stay regular files with their pinned hashes, so
+        require_pinned_inputs accepts the fixture. copy_audio_modules then
+        refuses a non-regular source, creates no output/mca, and leaves the
+        directory symlink and source bytes unchanged.
+        """
+        audio, manifest, pinned, extras, archive, exports = self.pinned_audio_fixture()
+        kernel = audio / 'kernel'
+        real_kernel = self.base / 'real-kernel'
+        kernel.rename(real_kernel)
+        kernel.symlink_to(real_kernel)
+        link_before = os.readlink(kernel)
+        self.assertFalse(audio.is_symlink())
+        self.assertEqual(next(iter(pinned)), 'kernel/Makefile')
+        for name in ('Makefile', 'mca.c'):
+            leaf = real_kernel / name
+            self.assertFalse(leaf.is_symlink())
+            self.assertTrue(leaf.is_file())
+            self.assertEqual(leaf.read_bytes(), pinned['kernel/' + name])
+            self.assertFalse((kernel / name).is_symlink())
+            self.assertTrue((kernel / name).is_file())
+        source_before = {
+            name: (real_kernel / name).read_bytes()
+            for name in ('Makefile', 'mca.c', *extras)
+        }
+        output = self.base / 'ancestor-symlink'
+        output.mkdir()
+        pins = self.audio_pins(audio, manifest, archive, exports)
+        with pins[0], pins[1], pins[2], pins[3]:
+            tool.require_pinned_inputs(archive, exports)
+            with self.assertRaises(RuntimeError) as caught:
+                tool.copy_audio_modules(output)
+        self.assertEqual(
+            str(caught.exception),
+            'imported source is not a regular file: kernel/Makefile')
+        self.assertFalse((output / 'mca').exists())
+        self.assertFalse((output / 'mca').is_symlink())
+        self.assertTrue(kernel.is_symlink())
+        self.assertEqual(os.readlink(kernel), link_before)
+        self.assertFalse(real_kernel.is_symlink())
+        for name, data in source_before.items():
+            leaf = real_kernel / name
+            self.assertFalse(leaf.is_symlink())
+            self.assertEqual(leaf.read_bytes(), data)
+
+    def test_copy_audio_modules_refuses_symlink_audio_root(self):
+        """A directory symlink used as AUDIO is refused before the path walk.
+
+        The real kernel leaves stay regular files. require_pinned_inputs
+        accepts their hashes. copy_audio_modules creates no output/mca and
+        leaves the root symlink and source bytes unchanged.
+        """
+        audio, manifest, pinned, extras, archive, exports = self.pinned_audio_fixture()
+        real_audio = self.base / 'real-audio-root'
+        audio.rename(real_audio)
+        linked = self.base / 'audio-root-link'
+        linked.symlink_to(real_audio)
+        manifest = real_audio / 'imported-source.sha256'
+        link_before = os.readlink(linked)
+        real_kernel = real_audio / 'kernel'
+        self.assertTrue(linked.is_symlink())
+        self.assertFalse(real_kernel.is_symlink())
+        self.assertFalse((linked / 'kernel').is_symlink())
+        self.assertTrue(real_kernel.is_dir())
+        self.assertEqual(next(iter(pinned)), 'kernel/Makefile')
+        for name in ('Makefile', 'mca.c'):
+            leaf = real_kernel / name
+            walked = linked / 'kernel' / name
+            self.assertFalse(leaf.is_symlink())
+            self.assertTrue(leaf.is_file())
+            self.assertEqual(leaf.read_bytes(), pinned['kernel/' + name])
+            self.assertFalse(walked.is_symlink())
+            self.assertTrue(walked.is_file())
+        source_before = {
+            name: (real_kernel / name).read_bytes()
+            for name in ('Makefile', 'mca.c', *extras)
+        }
+        output = self.base / 'audio-root-out'
+        output.mkdir()
+        pins = self.audio_pins(linked, manifest, archive, exports)
+        with pins[0], pins[1], pins[2], pins[3]:
+            tool.require_pinned_inputs(archive, exports)
+            with self.assertRaises(RuntimeError) as caught:
+                tool.copy_audio_modules(output)
+        self.assertEqual(
+            str(caught.exception),
+            'imported source is not a regular file: kernel/Makefile')
+        self.assertFalse((output / 'mca').exists())
+        self.assertFalse((output / 'mca').is_symlink())
+        self.assertTrue(linked.is_symlink())
+        self.assertEqual(os.readlink(linked), link_before)
+        self.assertFalse(real_audio.is_symlink())
+        for name, data in source_before.items():
+            leaf = real_kernel / name
+            self.assertFalse(leaf.is_symlink())
+            self.assertEqual(leaf.read_bytes(), data)
+
     def test_copy_audio_modules_refuses_source_changed_after_precheck(self):
         audio, manifest, pinned, _extras, archive, exports = self.pinned_audio_fixture()
         source = audio / 'kernel' / 'mca.c'
@@ -1134,25 +1339,64 @@ class HardenedBuildTests(unittest.TestCase):
         self.assertEqual((audio / 'kernel' / 'Makefile').read_bytes(), pinned['kernel/Makefile'])
 
     def test_copy_audio_modules_refuses_fifo_replacing_listed_source(self):
-        """A FIFO swapped in after the manifest precheck is refused without blocking.
+        """A FIFO in place of a listed source is refused without blocking this test.
 
-        require_pinned_inputs is not called: hashing the FIFO would open it
-        for a blocking read. copy_audio_modules opens the path itself.
+        The real copier runs in a child process. Missing O_NONBLOCK makes
+        os.open wait on the FIFO; the parent bounds that wait at five seconds.
+        require_pinned_inputs is not called: hashing the FIFO would block on
+        its own. FIFO creation skips only this test.
         """
+        if not hasattr(os, 'mkfifo'):
+            self.skipTest('FIFO creation is unsupported')
         audio, manifest, pinned, _extras, _archive, _exports = self.pinned_audio_fixture()
         source = audio / 'kernel' / 'mca.c'
         self.assertEqual(source.read_bytes(), pinned['kernel/mca.c'])
         source.unlink()
-        os.mkfifo(source)
+        try:
+            os.mkfifo(source)
+        except OSError as exc:
+            unsupported = set()
+            for name in ('ENOTSUP', 'EOPNOTSUPP', 'ENOSYS'):
+                value = getattr(errno, name, None)
+                if value is not None:
+                    unsupported.add(value)
+            if exc.errno not in unsupported:
+                raise
+            self.skipTest('FIFO creation is unsupported')
         output = self.base / 'fifo-mca'
         output.mkdir()
-        with mock.patch.object(tool, 'AUDIO', audio), \
-             mock.patch.object(tool, 'IMPORTED_MANIFEST', manifest):
-            with self.assertRaises(RuntimeError) as caught:
-                tool.copy_audio_modules(output)
-        self.assertIn('kernel/mca.c', str(caught.exception))
-        self.assertIn('regular file', str(caught.exception))
+        # 86 is the child status only when copy_audio_modules raised RuntimeError.
+        child = (
+            'import importlib.util\n'
+            'import sys\n'
+            'from pathlib import Path\n'
+            'builder, audio, manifest, output = sys.argv[1:5]\n'
+            'spec = importlib.util.spec_from_file_location(\n'
+            "    'j713_hardened_build_child', builder)\n"
+            'module = importlib.util.module_from_spec(spec)\n'
+            'spec.loader.exec_module(module)\n'
+            'module.AUDIO = Path(audio)\n'
+            'module.IMPORTED_MANIFEST = Path(manifest)\n'
+            'try:\n'
+            '    module.copy_audio_modules(Path(output))\n'
+            'except RuntimeError as refusal:\n'
+            '    print(refusal, flush=True)\n'
+            '    raise SystemExit(86)\n'
+            'raise SystemExit(0)\n'
+        )
+        builder = ROOT / 'tools/build-j713-hardened.py'
+        try:
+            result = subprocess.run(
+                [sys.executable, '-c', child, str(builder), str(audio), str(manifest), str(output)],
+                timeout=5, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        except subprocess.TimeoutExpired:
+            self.fail('copy_audio_modules blocked on a FIFO')
+        self.assertEqual(result.returncode, 86, result.stderr)
+        self.assertEqual(
+            result.stdout.strip(),
+            'imported source is not a regular file: kernel/mca.c')
         self.assertFalse((output / 'mca').exists())
+        self.assertFalse((output / 'mca').is_symlink())
         self.assertTrue(stat.S_ISFIFO(source.stat().st_mode))
 
     def test_prepare_refuses_case_insensitive_destination(self):

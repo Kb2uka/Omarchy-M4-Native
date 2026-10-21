@@ -132,7 +132,8 @@ and `fresh_install_qualified` to false.
 | Both export tables, unchanged | `5e3c2624c6a991bae503336137ce15071e51ef043edcd20ba1ad19df4e23d67c` |
 | Speaker group, reproduced unchanged | `aaad802eb136ff6cb915feaa123001b3eb848bc2f038d0a5b71c8e2ff35d2581` |
 
-The 5,896-byte trust region is the built-in certificate region of `Image.gz`.
+The 5,896-byte trust region is in the decompressed `Image`, starting at
+byte offset 42,950,656. Decompress `Image.gz` before reading that region.
 The full region was verified independently. Its hash matches the original
 qualified Air `Image` and is unchanged. That match is a public embedded
 region, not a signature and not possession of a private key. ADMAC, macaudio,
