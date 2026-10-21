@@ -14,7 +14,10 @@ A write that lands and then raises is retried with the same command. The
 journal clears and owner boot segments stay with the unrelated video fields.
 A rollback that dies after the boot write still finishes on the retry, and
 the durable boot-compose hold remains so the packaged Image is not composed
-back. Show and hide name that pending journal when they refuse.
+back. Show and hide name that pending journal when they refuse. A pending apply
+that still has the boot-compose hold names
+``sudo m4-boot-compose --resume-updates --apply``, not ordinary ``--apply``.
+An unsafe hold inspected while choosing that command is a notch refusal.
 
 Root space for the two snapshots is the root filesystem only when that is
 where the store lives. The nearest existing parent of the snapshot directory
@@ -26,6 +29,7 @@ needs only the margin.
 import contextlib
 import io
 import json
+import os
 from pathlib import Path
 import struct
 import types
@@ -308,6 +312,108 @@ class NotchPendingJournalTests(unittest.TestCase):
                     self.assertEqual(self.snapshot(air, compose), before)
                     self.assertFalse((air.root / compose.PACMAN_LOCK).exists())
                     self.refuse(air, compose, action)
+
+    def test_held_apply_journal_names_resume_updates_and_can_be_resumed(self):
+        """An apply journal beside a real hold is not resumed with ordinary --apply.
+
+        Show and hide name ``--resume-updates --apply`` and write nothing.
+        Ordinary compose keeps the hold. That explicit command then commits.
+        """
+        resume = 'sudo m4-boot-compose --resume-updates --apply'
+        ordinary = 'sudo m4-boot-compose --apply'
+        for action, loader in (('show', notch_tests.STOCK_LOADER), ('hide', notch_tests.NOTCH_LOADER)):
+            with self.subTest(action=action):
+                air, compose = self.air(loader)
+                live = notch_tests.boot(loader=loader, kernel=notch_tests.K1)
+                other = notch_tests.boot(loader=loader, kernel=notch_tests.K2)
+                air.put(NOTCH.BOOT, live)
+                air.put(compose.KERNEL, notch_tests.K2)
+                air.put(compose.DTB, notch_tests.D1)
+                plant(types.SimpleNamespace(module=compose, put=air.put), 'apply', live, other,
+                      notch_tests.sha(notch_tests.K2))
+                hold_path = air.root / compose.HOLD
+                hold_path.write_bytes(b'held\n')
+                before = self.snapshot(air, compose)
+                audio = (air.root / compose.AUDIO_MANIFEST).read_bytes()
+                with self.assertRaises(NOTCH.Refused) as caught:
+                    getattr(NOTCH, action)(air.root)
+                message = str(caught.exception)
+                self.assertNotIn('Traceback', message)
+                self.assertIn(resume, message)
+                self.assertNotIn(ordinary, message.replace(resume, ''))
+                self.assertEqual(self.snapshot(air, compose), before)
+                self.assertEqual(hold_path.read_bytes(), b'held\n')
+                self.assertIsNone(before[NOTCH.BACKUP])
+                self.assertFalse((air.root / NOTCH.PACMAN_LOCK).exists())
+
+                code, out, err = run_module(NOTCH, air.root, '--' + action)
+                self.assertEqual(code, 1, out + err)
+                self.assertEqual(out, '')
+                self.assertNotIn('Traceback', err)
+                self.assertTrue(err.startswith('m4-notch: refused:'))
+                self.assertIn(resume, err)
+                self.assertNotIn(ordinary, err.replace(resume, ''))
+                self.assertEqual(self.snapshot(air, compose), before)
+                self.assertEqual(hold_path.read_bytes(), b'held\n')
+
+                code, out, err = run_module(compose, air.root, '--apply')
+                self.assertEqual(code, 1, out + err)
+                self.assertEqual(out, '')
+                self.assertIn(resume, err)
+                self.assertEqual(hold_path.read_bytes(), b'held\n')
+                self.assertEqual((air.root / compose.BOOT).read_bytes(), live)
+                self.assertEqual(self.snapshot(air, compose), before)
+
+                code, out, err = run_module(compose, air.root, '--resume-updates', '--apply')
+                self.assertEqual((code, err), (0, ''), err)
+                self.assertEqual((air.root / compose.BOOT).read_bytes(), other)
+                self.assertEqual((air.root / (compose.BOOT + compose.PREVIOUS)).read_bytes(), live)
+                self.assertFalse(hold_path.exists())
+                self.assertFalse((air.root / compose.JOURNAL).exists())
+                video = json.loads((air.root / compose.VIDEO_MANIFEST).read_bytes())
+                self.assertEqual(video['boot_kernel_sha256'], notch_tests.sha(notch_tests.K2))
+                self.assertEqual(video['owner_panel'], 'kept')
+                self.assertEqual((air.root / compose.AUDIO_MANIFEST).read_bytes(), audio)
+                self.assertEqual((air.root / compose.KERNEL).read_bytes(), notch_tests.K2)
+                self.assertIsNone(self.snapshot(air, compose)[NOTCH.BACKUP])
+
+    def test_unsafe_hold_beside_a_journal_is_a_notch_refusal(self):
+        """A symlink hold inspected while naming the resume command does not traceback.
+
+        The composer's refusal becomes notch's own refusal. Show and hide write
+        nothing, and the symlink is left in place.
+        """
+        for action, loader in (('show', notch_tests.STOCK_LOADER), ('hide', notch_tests.NOTCH_LOADER)):
+            with self.subTest(action=action):
+                air, compose = self.air(loader)
+                live = notch_tests.boot(loader=loader, kernel=notch_tests.K1)
+                other = notch_tests.boot(loader=loader, kernel=notch_tests.K2)
+                air.put(NOTCH.BOOT, live)
+                plant(types.SimpleNamespace(module=compose, put=air.put), 'apply', live, other,
+                      notch_tests.sha(notch_tests.K2))
+                hold_path = air.root / compose.HOLD
+                hold_path.symlink_to('journal')
+                before = self.snapshot(air, compose)
+                with self.assertRaises(NOTCH.Refused) as caught:
+                    getattr(NOTCH, action)(air.root)
+                self.assertIs(type(caught.exception), NOTCH.Refused)
+                self.assertIn('symlink', str(caught.exception))
+                self.assertNotIn('Traceback', str(caught.exception))
+                self.assertTrue(hold_path.is_symlink())
+                self.assertEqual(self.snapshot(air, compose), before)
+                self.assertIsNone(before[NOTCH.BACKUP])
+                self.assertFalse((air.root / NOTCH.PACMAN_LOCK).exists())
+
+                code, out, err = run_module(NOTCH, air.root, '--' + action)
+                self.assertEqual(code, 1, out + err)
+                self.assertEqual(out, '')
+                self.assertNotIn('Traceback', err)
+                self.assertTrue(err.startswith('m4-notch: refused:'))
+                self.assertIn('symlink', err)
+                self.assertTrue(hold_path.is_symlink())
+                self.assertEqual(os.readlink(hold_path), 'journal')
+                self.assertEqual(self.snapshot(air, compose), before)
+                self.assertFalse((air.root / NOTCH.PACMAN_LOCK).exists())
 
 
 class RootSpaceTests(unittest.TestCase):

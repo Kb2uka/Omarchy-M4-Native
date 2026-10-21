@@ -37,6 +37,18 @@ initramfs bytes. ``--resume-updates`` without ``--apply``, with ``--rollback``,
 or from the package hook, is refused. A release that fails before any write
 leaves every byte in place. A release that fails after the video pin keeps
 the hold and the apply journal; ordinary compose does not continue it.
+Inspection of that held apply journal, and a rollback asked while it is
+pending, name ``sudo m4-boot-compose --resume-updates --apply``. Ordinary
+``--apply`` does not clear the hold. With no hold, a pending apply still
+names ordinary ``--apply`` and a pending rollback still names
+``--rollback --apply``.
+
+A hold path that is missing is absent. A regular hold file is present. A
+directory or FIFO there is refused without being opened, and a symlink hold
+keeps its own refusal. Copy-back whose video pin is a list or object refuses
+before any boot, manifest, journal, or hold write. Read-only inspection of a
+pending apply or rollback whose boot matches neither snapshot refuses the
+same way apply does, and writes nothing.
 
 A same-kernel rollback (devicetree only, or the backlight tree with its
 handoff loader) stores both boot objects before it renames anything. A failure
@@ -62,6 +74,7 @@ import json
 import os
 from pathlib import Path
 import random
+import stat
 import struct
 import tempfile
 import types
@@ -1658,6 +1671,246 @@ class ComposeTests(unittest.TestCase):
         self.assertIn('m4-boot-compose', err)
         self.assertIn('--rollback', err)
         self.assertIn('--apply', err)
+
+    def protected_bytes(self, machine):
+        """Boot, manifests, journal, snapshots, and hold bytes. No hold open."""
+        paths = [MODULE.BOOT, MODULE.BOOT + MODULE.PREVIOUS, MODULE.VIDEO_MANIFEST,
+                 MODULE.AUDIO_MANIFEST, MODULE.KERNEL, MODULE.DTB, BOOT_JOURNAL, BOOT_HOLD]
+        snap_dir = machine.root / BOOT_SNAPSHOTS
+        if snap_dir.is_dir():
+            paths.extend(BOOT_SNAPSHOTS + '/' + item.name for item in snap_dir.iterdir())
+        found = {}
+        for relative in paths:
+            path = machine.root / relative
+            try:
+                mode = os.lstat(path).st_mode
+            except FileNotFoundError:
+                found[relative] = None
+                continue
+            if stat.S_ISLNK(mode):
+                found[relative] = ('symlink', os.readlink(path))
+            elif stat.S_ISDIR(mode):
+                found[relative] = ('dir',)
+            elif stat.S_ISFIFO(mode):
+                found[relative] = ('fifo',)
+            elif stat.S_ISREG(mode):
+                found[relative] = path.read_bytes()
+            else:
+                found[relative] = ('other', stat.S_IFMT(mode))
+        return found
+
+    def test_pending_guidance_names_the_command_that_actually_resumes(self):
+        """A held apply journal must not be described as ordinary ``--apply``.
+
+        The hold file and the apply journal are both real. Inspection and the
+        opposite rollback name ``--resume-updates --apply`` and write nothing.
+        Ordinary ``--apply`` keeps the hold. That resume command then commits.
+        Without a hold, apply and rollback keep their ordinary commands.
+        """
+        resume = 'sudo m4-boot-compose --resume-updates --apply'
+        ordinary = 'sudo m4-boot-compose --apply'
+        packaged = kernel(31)
+        machine = self.transition(package_kernel=packaged)
+        restored = machine.boot_before
+        updated = boot(kernel_bytes=packaged, dtb=D1, loader=LOADER + b' notch')
+        self.assertNotEqual(restored, updated)
+        plant_journal(machine, 'apply', restored, updated, sha(packaged))
+        machine.put(BOOT_HOLD, b'held\n')
+        before = self.protected_bytes(machine)
+        self.assertEqual(before[BOOT_HOLD], b'held\n')
+        self.assertIsNotNone(before[BOOT_JOURNAL])
+
+        code, out, err = machine.run()
+        self.assertEqual((code, err), (0, ''), err)
+        receipt = json.loads(out)
+        self.assertEqual(receipt['operation'], 'apply')
+        self.assertFalse(receipt['applied'])
+        self.assertEqual(receipt['resume'], resume)
+        self.assertIn(resume, receipt['status'])
+        self.assertNotIn('--rollback', receipt['status'])
+        self.assertEqual(self.protected_bytes(machine), before)
+
+        code, out, err = machine.run('--rollback')
+        self.assertEqual((code, err), (0, ''), err)
+        receipt = json.loads(out)
+        self.assertEqual(receipt['resume'], resume)
+        self.assertIn(resume, receipt['status'])
+        self.assertNotIn(ordinary, receipt['status'].replace(resume, ''))
+        self.assertEqual(self.protected_bytes(machine), before)
+
+        code, out, err = machine.run('--rollback', '--apply')
+        self.assertEqual(code, 1, out + err)
+        self.assertEqual(out, '')
+        self.assertNotIn('Traceback', err)
+        self.assertIn('apply transition is pending', err)
+        self.assertIn(resume, err)
+        self.assertNotIn(ordinary, err.replace(resume, ''))
+        self.assertEqual(self.protected_bytes(machine), before)
+
+        code, out, err = machine.run('--apply')
+        self.assertEqual(code, 1, out + err)
+        self.assertEqual(out, '')
+        self.assertNotIn('Traceback', err)
+        self.assertIn(resume, err)
+        self.assertEqual(self.protected_bytes(machine), before)
+        self.assertEqual((machine.root / BOOT_HOLD).read_bytes(), b'held\n')
+        self.assertTrue((machine.root / BOOT_JOURNAL).is_file())
+
+        code, out, err = machine.run('--resume-updates', '--apply')
+        self.assertEqual((code, err), (0, ''), err)
+        self.assertNotIn('Traceback', err)
+        self.assertEqual(machine.boot, updated)
+        self.assertEqual(machine.previous, restored)
+        self.assertFalse((machine.root / BOOT_HOLD).exists())
+        self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+        parsed = json.loads((machine.root / MODULE.VIDEO_MANIFEST).read_bytes())
+        self.assertEqual(parsed['boot_kernel_sha256'], sha(packaged))
+        self.assertEqual((parsed['owner_panel'], parsed['notch']), ('kept', 'owner'))
+        self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), before[MODULE.AUDIO_MANIFEST])
+        self.assertEqual((machine.root / MODULE.KERNEL).read_bytes(), before[MODULE.KERNEL])
+        self.assertEqual((machine.root / MODULE.DTB).read_bytes(), before[MODULE.DTB])
+
+        bare = self.transition(package_kernel=packaged)
+        plant_journal(bare, 'apply', bare.boot_before, updated, sha(packaged))
+        self.assertFalse((bare.root / BOOT_HOLD).exists())
+        bare_before = self.protected_bytes(bare)
+        code, out, err = bare.run()
+        self.assertEqual((code, err), (0, ''), err)
+        receipt = json.loads(out)
+        self.assertEqual(receipt['resume'], ordinary)
+        self.assertIn(ordinary, receipt['status'])
+        self.assertNotIn('resume-updates', receipt['status'])
+        self.assertEqual(self.protected_bytes(bare), bare_before)
+        code, out, err = bare.run('--rollback', '--apply')
+        self.assertEqual(code, 1, out + err)
+        self.assertIn(ordinary, err)
+        self.assertNotIn('resume-updates', err)
+        self.assertEqual(self.protected_bytes(bare), bare_before)
+
+    def test_nonregular_hold_is_refused_and_a_regular_hold_still_blocks(self):
+        """A directory or FIFO hold is not absent, so ordinary apply cannot undo it.
+
+        The positive case is a regular hold file: inspection and apply report
+        the hold and leave the boot image. A symlink hold keeps the symlink
+        refusal. Nothing opens a FIFO.
+        """
+        def fresh():
+            machine = Machine(self)
+            self.assertNotEqual(machine.boot, boot(dtb=D2))
+            return machine
+
+        regular = fresh()
+        regular.put(BOOT_HOLD, b'held\n')
+        before = self.protected_bytes(regular)
+        for args in ((), ('--apply',)):
+            with self.subTest(kind='regular', args=args):
+                code, out, err = regular.run(*args)
+                self.assertEqual((code, err), (0, ''), err)
+                receipt = json.loads(out)
+                self.assertFalse(receipt['applied'])
+                self.assertEqual(receipt['status'], MODULE.HELD_STATUS)
+                self.assertEqual(regular.boot, before[MODULE.BOOT])
+                self.assertIsNone(regular.previous)
+                self.assertEqual((regular.root / BOOT_HOLD).read_bytes(), b'held\n')
+                self.assertEqual(self.protected_bytes(regular), before)
+
+        for kind in ('directory', 'fifo', 'symlink'):
+            machine = fresh()
+            hold = machine.root / BOOT_HOLD
+            hold.parent.mkdir(parents=True, exist_ok=True)
+            if kind == 'directory':
+                hold.mkdir()
+            elif kind == 'fifo':
+                os.mkfifo(hold)
+            else:
+                target = hold.parent / 'hold-target'
+                target.write_bytes(b'held\n')
+                hold.symlink_to(target.name)
+            before = self.protected_bytes(machine)
+            for args in ((), ('--apply',)):
+                with self.subTest(kind=kind, args=args):
+                    code, out, err = machine.run(*args)
+                    self.assertEqual(code, 1, out + err)
+                    self.assertEqual(out, '')
+                    self.assertNotIn('Traceback', err)
+                    if kind == 'symlink':
+                        self.assertIn('symlink', err)
+                    else:
+                        self.assertIn('not a regular file', err)
+                    self.assertNotIn('takes effect at next boot', err)
+                    self.assertEqual(machine.boot, before[MODULE.BOOT])
+                    self.assertIsNone(machine.previous)
+                    self.assertEqual(self.protected_bytes(machine), before)
+                    self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+                    self.assertFalse((machine.root / MODULE.PACMAN_LOCK).exists())
+
+    def test_copy_back_refuses_a_non_string_video_pin_before_writes(self):
+        """Copy-back must refuse a list or object video pin without a traceback.
+
+        ``boot.bin`` already equals ``boot.bin.previous``. Inspection and apply
+        both stop before the journal, the hold, and every protected file change.
+        """
+        image = boot(kernel_bytes=K1, dtb=D1)
+        for pin in ([], {}):
+            machine = Machine(self, boot_bytes=image, package_kernel=K1, package_dtb=D1)
+            machine.put(MODULE.BOOT + MODULE.PREVIOUS, image)
+            raw = (json.dumps({'boot_kernel_sha256': pin, 'kernel_release': RELEASE,
+                               'owner_panel': 'kept'}) + '\n').encode()
+            machine.put(MODULE.VIDEO_MANIFEST, raw)
+            before = self.protected_bytes(machine)
+            self.assertEqual(before[MODULE.BOOT], image)
+            self.assertEqual(before[MODULE.BOOT + MODULE.PREVIOUS], image)
+            self.assertIsNone(before[BOOT_JOURNAL])
+            self.assertIsNone(before[BOOT_HOLD])
+            for args in (('--rollback',), ('--rollback', '--apply')):
+                with self.subTest(pin=type(pin).__name__, args=args):
+                    code, out, err = machine.run(*args)
+                    self.assertEqual(code, 1, out + err)
+                    self.assertEqual(out, '')
+                    self.assertNotIn('Traceback', err)
+                    self.assertIn('not qualified', err)
+                    self.assertEqual(self.protected_bytes(machine), before)
+                    self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), raw)
+                    self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+                    self.assertFalse((machine.root / BOOT_HOLD).exists())
+
+    def test_inspection_refuses_pending_boot_on_neither_snapshot(self):
+        """Read-only inspection refuses a boot that is neither pending snapshot.
+
+        Apply already rejects that boot when it commits. These calls do not
+        apply: a pending apply is inspected with no arguments, and a pending
+        rollback with ``--rollback`` only. Neither invocation may write.
+        """
+        packaged = kernel(12)
+        desired = boot(kernel_bytes=packaged, dtb=D1, loader=LOADER + b' notch')
+        neither = boot(kernel_bytes=K1, dtb=D2, loader=LOADER + b' notch')
+
+        def planted(operation):
+            machine = self.transition(package_kernel=packaged)
+            self.assertNotIn(neither, (machine.boot_before, desired))
+            if operation == 'apply':
+                plant_journal(machine, 'apply', machine.boot_before, desired, sha(packaged))
+            else:
+                plant_journal(machine, 'rollback', desired, machine.boot_before, sha(K1))
+            machine.put(MODULE.BOOT, neither)
+            machine.put(MODULE.BOOT + MODULE.PREVIOUS, b'decoy previous')
+            loaded = MODULE.load_journal(machine.root)
+            self.assertEqual(loaded['operation'], operation)
+            self.assertNotIn(machine.boot, (loaded['from_bytes'], loaded['to_bytes']))
+            return machine
+
+        for operation, args in (('apply', ()), ('rollback', ('--rollback',))):
+            with self.subTest(operation=operation):
+                machine = planted(operation)
+                before = self.protected_bytes(machine)
+                code, out, err = machine.run(*args)
+                self.assertEqual(code, 1, out + err)
+                self.assertEqual(out, '')
+                self.assertNotIn('Traceback', err)
+                self.assertIn('neither side', err)
+                assert_unresolved_recovery(self, err)
+                self.assertEqual(self.protected_bytes(machine), before)
+                self.assertFalse((machine.root / MODULE.PACMAN_LOCK).exists())
 
 
 def video_with_pin(raw, pin):
