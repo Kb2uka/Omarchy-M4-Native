@@ -17,6 +17,7 @@ import contextlib
 import io
 import json
 from pathlib import Path
+import struct
 import types
 import unittest
 from unittest import mock
@@ -202,6 +203,62 @@ class NotchPendingJournalTests(unittest.TestCase):
                 with self.subTest(label=label, action=action):
                     air, compose = self.air(loader)
                     setup(air, compose, air.boot_bytes())
+                    self.refuse(air, compose, action)
+
+    def test_journal_refuses_wrong_video_pin_and_foreign_owner_before_writes(self):
+        """A planted journal whose snapshot hashes match must still be refused.
+
+        The video pin and the owner check run after the snapshot hash check.
+        ``save_journal`` cannot build these fixtures: it rejects them itself.
+        Inspection, apply, and notch show/hide all stop before any write.
+        """
+        def foreign_bootargs(live):
+            loader = notch_tests.STOCK_LOADER if live.startswith(notch_tests.STOCK_LOADER) else notch_tests.NOTCH_LOADER
+            other = (loader + b'chosen.bootargs=root=UUID=other-machine\n' + notch_tests.K2 +
+                     notch_tests.D1 + notch_tests.INITRAMFS)
+            return live, other, notch_tests.sha(notch_tests.K2), 'same owner'
+
+        def foreign_initramfs(live):
+            loader = notch_tests.STOCK_LOADER if live.startswith(notch_tests.STOCK_LOADER) else notch_tests.NOTCH_LOADER
+            firmware = b'070701 other machine firmware'
+            initramfs = b'm1n1_initramfs' + struct.pack('<I', len(firmware)) + firmware
+            other = loader + notch_tests.BOOTARGS + notch_tests.K2 + notch_tests.D1 + initramfs
+            return live, other, notch_tests.sha(notch_tests.K2), 'same owner'
+
+        def wrong_pin(live):
+            other = notch_tests.boot(
+                loader=notch_tests.STOCK_LOADER if live.startswith(notch_tests.STOCK_LOADER)
+                else notch_tests.NOTCH_LOADER, kernel=notch_tests.K2)
+            # Valid hash of the source kernel, not the target. The snapshot files
+            # are stored under the digest of these exact bytes.
+            return live, other, notch_tests.sha(notch_tests.K1), 'video pin'
+
+        for label, build in (('wrong-video-pin', wrong_pin), ('foreign-bootargs', foreign_bootargs),
+                             ('foreign-initramfs', foreign_initramfs)):
+            for action, loader in (('show', notch_tests.STOCK_LOADER), ('hide', notch_tests.NOTCH_LOADER)):
+                with self.subTest(label=label, action=action):
+                    air, compose = self.air(loader)
+                    live = air.boot_bytes()
+                    from_bytes, to_bytes, pin, reason = build(live)
+                    planted = types.SimpleNamespace(module=compose, put=air.put)
+                    plant(planted, 'apply', from_bytes, to_bytes, pin)
+                    self.assertEqual((air.root / (compose.SNAPSHOTS + '/' + compose.sha(from_bytes))).read_bytes(),
+                                     from_bytes)
+                    self.assertEqual((air.root / (compose.SNAPSHOTS + '/' + compose.sha(to_bytes))).read_bytes(),
+                                     to_bytes)
+                    with self.assertRaises(compose.Refused) as refused:
+                        compose.load_journal(air.root)
+                    self.assertIn(reason, str(refused.exception))
+                    before = self.snapshot(air, compose)
+                    code, out, err = run_module(compose, air.root)
+                    self.assertEqual(code, 1, out + err)
+                    self.assertIn(reason, err)
+                    self.assertEqual(self.snapshot(air, compose), before)
+                    code, out, err = run_module(compose, air.root, '--apply')
+                    self.assertEqual(code, 1, out + err)
+                    self.assertIn(reason, err)
+                    self.assertEqual(self.snapshot(air, compose), before)
+                    self.assertFalse((air.root / compose.PACMAN_LOCK).exists())
                     self.refuse(air, compose, action)
 
 

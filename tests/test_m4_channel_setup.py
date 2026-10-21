@@ -224,6 +224,84 @@ class SetupTests(unittest.TestCase):
             self.assertTrue(self.setup_with(FakeSystem(self.root))['restart_needed'],
                             'speaker hold does not hide a pending MCA swap')
 
+    def component_bytes(self, name):
+        """Installed path, staged path, hold, and rollback marker for one audio component."""
+        if name == 'speaker':
+            return (MODULE.SPEAKER_MODULE, MODULE.SPEAKER_STAGED, MODULE.SPEAKER_HOLD,
+                    'var/lib/omarchy-m4/speaker-module/rollback', 'snd_soc_j713_group')
+        return (MODULE.MCA_MODULE, MODULE.MCA_STAGED, MODULE.MCA_HOLD,
+                'var/lib/omarchy-m4/mca-module/rollback', 'snd_soc_apple_mca')
+
+    def plant_audio(self, name, installed, staged, pins):
+        """Module bytes plus that component's manifest pins. ``pins`` is sha256/size/note."""
+        module, staged_path, _, _, component = self.component_bytes(name)
+        self.put(module, installed)
+        self.put(staged_path, staged)
+        document = {
+            'kernel_release': '7.1.9-m4-gpu-backport-20261008',
+            'files': {'/' + module: pins['sha256']},
+            'file_metadata': {module: {'sha256': pins['sha256'], 'size': pins['size'], 'mode': 420}},
+            'module_artifacts': {component: {
+                'module': component, 'note': pins['note'], 'path': '/' + module,
+                'sha256': pins['sha256'], 'size': pins['size']}},
+            'modules': {component: pins['note']},
+        }
+        self.put(MODULE.MANIFESTS[1], json.dumps(document, indent=2, sort_keys=True) + '\n')
+
+    def test_pending_rollback_needs_a_restart_ahead_of_hold(self):
+        """A rollback marker is a boot write even when the module bytes already match.
+
+        Boot handles the rollback marker before the hold marker, so a hold does
+        not cancel it. The other component's hold does not hide it. A hold with
+        no rollback marker and matching bytes still needs no restart.
+        """
+        fixed = 'fixed module bytes'
+        stock_pins = {'sha256': 'ab' * 32, 'size': len('stock module bytes'), 'note': 'stock-note'}
+        for name in ('speaker', 'mca'):
+            with self.subTest(component=name):
+                self.setUp()
+                module, _, hold, rollback, _ = self.component_bytes(name)
+                self.plant_audio(name, fixed, fixed, stock_pins)
+                self.put(rollback, '')
+                self.put(hold, '')
+                other = 'mca' if name == 'speaker' else 'speaker'
+                _, _, other_hold, _, _ = self.component_bytes(other)
+                self.put(other_hold, '')
+                pending = MODULE.speaker_pending if name == 'speaker' else MODULE.mca_pending
+                other_pending = MODULE.mca_pending if name == 'speaker' else MODULE.speaker_pending
+                self.assertTrue(pending(self.root))
+                self.assertFalse(other_pending(self.root))
+                result = self.setup_with(FakeSystem(self.root))
+                self.assertEqual((result['restart_needed'], result['status']),
+                                 (True, 'connected; restart once to apply the update'))
+                (self.root / rollback).unlink()
+                self.assertFalse(pending(self.root))
+                self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'])
+
+    def test_forward_interruption_needs_a_restart_when_bytes_already_match(self):
+        """New module bytes with the old manifest pins still boot into a manifest write.
+
+        Comparing only the staged file to the installed file reports no restart.
+        Each component is independent of the other's hold.
+        """
+        stock, fixed = 'stock module bytes', 'fixed module bytes'
+        stock_pins = {'sha256': MODULE.hashlib.sha256(stock.encode()).hexdigest(), 'size': len(stock),
+                      'note': 'stock-note-value'}
+        for name in ('speaker', 'mca'):
+            with self.subTest(component=name):
+                self.setUp()
+                self.plant_audio(name, fixed, fixed, stock_pins)
+                other = 'mca' if name == 'speaker' else 'speaker'
+                _, _, other_hold, _, _ = self.component_bytes(other)
+                self.put(other_hold, '')
+                pending = MODULE.speaker_pending if name == 'speaker' else MODULE.mca_pending
+                other_pending = MODULE.mca_pending if name == 'speaker' else MODULE.speaker_pending
+                self.assertTrue(pending(self.root))
+                self.assertFalse(other_pending(self.root))
+                result = self.setup_with(FakeSystem(self.root))
+                self.assertEqual((result['restart_needed'], result['status']),
+                                 (True, 'connected; restart once to apply the update'))
+
     def test_restart_reported_when_a_gpu_swap_is_pending(self):
         alpha1 = b'alpha.1 gpu module'
         with mock.patch.object(MODULE, 'GPU_STOCK', MODULE.hashlib.sha256(alpha1).hexdigest()):
