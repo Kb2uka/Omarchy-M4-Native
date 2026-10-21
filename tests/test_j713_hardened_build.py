@@ -193,11 +193,12 @@ class HardenedBuildTests(unittest.TestCase):
         self.repo_retained = digest(RETAINED_PATCH)
         self.repo_driver = digest(PINNED_DRIVER)
 
-    def write_archive(self, files, links=(), modes=None):
+    def write_archive(self, files, links=(), modes=None, trailing=()):
         """files maps paths below the stripped top-level directory to bytes.
 
         links is (member path, link target) for relative symlinks. modes maps
-        a regular member path to its permission bits.
+        a regular member path to its permission bits. trailing is extra
+        (path, bytes) regular members written after links, so a path can repeat.
         """
         modes = modes or {}
         archive = self.base / ('archive-%d.tar.gz' % len(list(self.base.iterdir())))
@@ -213,6 +214,12 @@ class HardenedBuildTests(unittest.TestCase):
                 info.type = tarfile.SYMTYPE
                 info.linkname = target
                 packed.addfile(info)
+            for name, data in trailing:
+                info = tarfile.TarInfo('linux/' + name)
+                info.size = len(data)
+                info.mode = modes.get(name, 0o644)
+                info.type = tarfile.REGTYPE
+                packed.addfile(info, io.BytesIO(data))
         return archive
 
     def kernel_files(self, dockchannel, macsmc=b'smc\n'):
@@ -438,6 +445,27 @@ class HardenedBuildTests(unittest.TestCase):
                 self.assertFalse(destination.exists())
                 self.assertFalse((self.base / 'outside').exists())
 
+    def test_prepare_rejects_duplicate_regular_member_before_output(self):
+        files = self.kernel_files(b'alpha\n')
+        duplicate = files['.config']
+        archive = self.write_archive(files, trailing=(('.config', duplicate),))
+        with tarfile.open(archive, 'r:gz') as packed:
+            configs = [member for member in packed.getmembers() if member.name == 'linux/.config']
+        self.assertEqual(len(configs), 2)
+        self.assertTrue(all(member.isfile() and not member.isdir() for member in configs))
+        self.assertEqual([member.size for member in configs], [len(duplicate), len(duplicate)])
+        exports = self.base / 'exports-duplicate'
+        exports.write_bytes(b'supplemental\n')
+        historical = self.historical_patches()
+        self.apply_pins(self.pins_for(
+            files, archive, exports, after_historical=(b'alpha\nbeta\ngamma\n', b'smc\nlocked\n')),
+            historical[:2], historical[2])
+        output = self.base / 'duplicate-member'
+        with self.assertRaises(RuntimeError) as caught:
+            tool.prepare(archive, exports, self.image(), output)
+        self.assertIn('duplicate archive member', str(caught.exception))
+        self.assertFalse(output.exists())
+
     def test_prepare_keeps_internal_symlinks_and_their_targets(self):
         files = self.kernel_files(b'alpha\n')
         files['scripts/syscall.tbl'] = b'syscall table\n'
@@ -465,6 +493,31 @@ class HardenedBuildTests(unittest.TestCase):
         self.assertTrue(changes.is_symlink())
         self.assertEqual(changes.readlink().as_posix(), 'process/changes.rst')
         self.assertEqual(changes.read_bytes(), b'changes\n')
+
+    def test_extract_refuses_file_through_internal_symlink_directory(self):
+        """A symlink directory whose target stays inside the kernel root is kept.
+
+        A later regular member that descends through that symlink is refused
+        while extracting. data_filter accepts the member because realpath stays
+        inside the destination; the file must not be written through the link.
+        """
+        files = self.kernel_files(b'alpha\n')
+        planted = b'planted-through-link\n'
+        archive = self.write_archive(
+            files,
+            links=(('certs', 'include/config'),),
+            trailing=(('certs/planted', planted),),
+        )
+        kernel = self.base / 'through-symlink'
+        with self.assertRaises(RuntimeError) as caught:
+            tool.extract_archive(archive, kernel)
+        self.assertIn('refusing to extract through an existing symlink', str(caught.exception))
+        self.assertTrue((kernel / 'certs').is_symlink())
+        self.assertEqual((kernel / 'certs').readlink().as_posix(), 'include/config')
+        release = kernel / 'include/config/kernel.release'
+        self.assertEqual(release.read_bytes(), (KERNEL_RELEASE + '\n').encode())
+        self.assertFalse((kernel / 'include/config/planted').exists())
+        self.assertNotIn(planted, release.read_bytes())
 
     def test_prepare_preserves_script_mode_and_ordinary_files(self):
         files = self.kernel_files(b'alpha\n')
@@ -599,7 +652,15 @@ class HardenedBuildTests(unittest.TestCase):
         with mock.patch.object(tool.subprocess, 'run', side_effect=run):
             receipt = tool.build(archive, exports, self.image(), output)
         self.assertEqual(len(calls), 1)
-        command = ' '.join(calls[0])
+        command_args = calls[0]
+        entrypoint = command_args.index('--entrypoint')
+        self.assertEqual(command_args[entrypoint:entrypoint + 2], ['--entrypoint', '/bin/bash'])
+        self.assertLess(entrypoint, command_args.index('-c'))
+        volumes = [command_args[index + 1] for index, arg in enumerate(command_args) if arg == '-v']
+        self.assertIn(
+            str(exports.resolve()) + ':/reference-sound-exports.symvers:ro',
+            volumes)
+        command = ' '.join(command_args)
         self.assertIn('--network none', command)
         self.assertIn('--pull never', command)
         self.assertNotIn('--privileged', command)
@@ -895,12 +956,24 @@ class HardenedBuildTests(unittest.TestCase):
             write_outputs(mounts)
             (mounts['/kernel'] / 'certs/signing_key.x509').unlink()
 
-        def mutated(mounts):
+        def longer(mounts):
             write_outputs(mounts)
             der = mounts['/kernel'] / 'certs/signing_key.x509'
             der.write_bytes(der.read_bytes() + b'\x00')
+            self.assertGreater(der.stat().st_size, SIGNING_KEY_DER_BYTES)
 
-        for name, mutate in {'missing': missing, 'mutated': mutated}.items():
+        def same_length(mounts):
+            write_outputs(mounts)
+            der = mounts['/kernel'] / 'certs/signing_key.x509'
+            original = der.read_bytes()
+            self.assertEqual(len(original), SIGNING_KEY_DER_BYTES)
+            flipped = bytearray(original)
+            flipped[10] ^= 0xff
+            der.write_bytes(bytes(flipped))
+            self.assertEqual(der.stat().st_size, SIGNING_KEY_DER_BYTES)
+            self.assertNotEqual(digest(der), MODULE_CERTIFICATE_DER_SHA256)
+
+        for name, mutate in {'missing': missing, 'longer': longer, 'same-length': same_length}.items():
             output = self.base / ('der-' + name)
             _calls, run = self.docker_runner(mutate=mutate)
             with self.subTest(der=name):
