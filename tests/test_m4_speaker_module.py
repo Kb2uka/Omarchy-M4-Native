@@ -656,6 +656,118 @@ class SpeakerModule(unittest.TestCase):
         self.assertEqual('/' + reloaded.MODULE, artifact['path'])
         self.assertEqual(spec['kernel_release'], reloaded.RELEASE)
 
+    def stock_mca_on_fixed_speaker(self, owner):
+        """Fixed speaker, stock MCA, and no component backup.
+
+        The speaker is already fixed, so a speaker boot never enters ``apply``.
+        MCA is the stock module with stock pins and no ``mca-module`` directory.
+        """
+        document = with_mca(manifest(FIXED), identity(MCA_OLD, MCA_OLD_NOTE))
+        document['owner_calibration'] = owner
+        self.put(MODULE.MODULE, NEW)
+        self.put(MODULE.STAGED, NEW)
+        self.put(MCA_MODULE, MCA_OLD)
+        self.put(MCA_STAGED, MCA_NEW)
+        return document
+
+    def test_stock_mca_boot_applies_noncanonical_manifest_and_rollback_keeps_owner_edits(self):
+        """Valid alpha.1 JSON that is not ``serialize`` bytes still applies MCA.
+
+        ``package-j713-audio`` and ``prepare-j713-release`` write
+        ``json.dumps(..., indent=2, sort_keys=True) + '\\n'``. An installed
+        manifest can be those bytes without the final newline, or the same
+        object with different indentation and key order. Boot must apply the
+        stock MCA module, leave the fixed speaker and owner keys in place, and
+        store the original manifest bytes as the backup. A later owner edit
+        survives MCA rollback, which puts the stock MCA pins back.
+        """
+        owner = {'gain': 3, 'label': 'installed'}
+        document = self.stock_mca_on_fixed_speaker(owner)
+        canonical = MODULE.serialize(document)
+        forms = {
+            'no trailing newline': canonical[:-1],
+            'different indent and key order': json.dumps(document, indent=4).encode(),
+        }
+        for label, raw in forms.items():
+            with self.subTest(label):
+                self.setUp()
+                document = self.stock_mca_on_fixed_speaker(owner)
+                self.assertNotEqual(raw, MODULE.serialize(document))
+                self.assertEqual(json.loads(raw), document)
+                self.manifest.write_bytes(raw)
+                self.assertFalse((self.root / MCA_STATE).exists())
+                self.assertFalse((self.root / MODULE.STATE).exists())
+                code, report = self.run_tool('--component', 'mca')
+                self.assertEqual(code, 0, self.last_error)
+                self.assertEqual(report['state'], 'stock')
+                code, report = self.run_tool('--boot', '--component', 'mca')
+                self.assertEqual(code, 0, self.last_error)
+                self.assertIn('applied', report['status'])
+                self.assertEqual((self.root / MODULE.MODULE).read_bytes(), NEW)
+                self.assertEqual((self.root / MCA_MODULE).read_bytes(), MCA_NEW)
+                applied = json.loads(self.manifest.read_bytes())
+                self.assertEqual(applied['owner_calibration'], owner)
+                self.assertEqual(applied['modules'][MODULE.NAME], FIXED['note'])
+                self.assertEqual(applied['files']['/' + MODULE.MODULE], FIXED['sha256'])
+                self.assertEqual(applied['modules'][MCA_NAME], MCA_NEW_NOTE)
+                self.assertEqual(applied['module_artifacts'][MCA_NAME]['sha256'],
+                                 hashlib.sha256(MCA_NEW).hexdigest())
+                self.assertEqual(applied['file_metadata'][MCA_MODULE]['size'], len(MCA_NEW))
+                stage = self.root / MCA_STATE
+                self.assertEqual((stage / 'alpha1-module.ko').read_bytes(), MCA_OLD)
+                self.assertEqual((stage / 'alpha1-manifest.json').read_bytes(), raw)
+                self.assertFalse((self.root / MODULE.STATE).exists())
+                live = json.loads(self.manifest.read_bytes())
+                live['owner_calibration'] = {'gain': 9, 'label': 'later'}
+                live['owner_note'] = 'kept'
+                self.manifest.write_bytes(MODULE.serialize(live))
+                self.assertEqual(self.run_tool('--rollback', '--component', 'mca')[0], 0)
+                code, report = self.run_tool('--boot', '--component', 'mca')
+                self.assertEqual(code, 0, self.last_error)
+                self.assertIn('rolled back', report['status'])
+                self.assertEqual((self.root / MCA_MODULE).read_bytes(), MCA_OLD)
+                self.assertEqual((self.root / MODULE.MODULE).read_bytes(), NEW)
+                restored = json.loads(self.manifest.read_bytes())
+                self.assertEqual(restored['modules'][MCA_NAME], MCA_OLD_NOTE)
+                self.assertEqual(restored['module_artifacts'][MCA_NAME]['sha256'],
+                                 hashlib.sha256(MCA_OLD).hexdigest())
+                self.assertEqual(restored['module_artifacts'][MCA_NAME]['note'], MCA_OLD_NOTE)
+                self.assertEqual(restored['files']['/' + MCA_MODULE], hashlib.sha256(MCA_OLD).hexdigest())
+                self.assertEqual(restored['file_metadata'][MCA_MODULE]['sha256'],
+                                 hashlib.sha256(MCA_OLD).hexdigest())
+                self.assertEqual(restored['file_metadata'][MCA_MODULE]['size'], len(MCA_OLD))
+                self.assertEqual(restored['modules'][MODULE.NAME], FIXED['note'])
+                self.assertEqual(restored['files']['/' + MODULE.MODULE], FIXED['sha256'])
+                self.assertEqual(restored['owner_calibration'], {'gain': 9, 'label': 'later'})
+                self.assertEqual(restored['owner_note'], 'kept')
+                self.assertTrue((stage / 'hold').exists())
+                self.assertFalse((self.root / MODULE.STATE).exists())
+
+    def test_malformed_manifest_or_unknown_mca_pins_stay_unchanged(self):
+        """A broken manifest or pins that are not stock or fixed is left as it is."""
+        owner = {'gain': 3, 'label': 'installed'}
+        document = self.stock_mca_on_fixed_speaker(owner)
+        cases = {
+            'malformed': b'{"kernel_release":',
+            'unknown pin without newline': MODULE.serialize(
+                with_mca(manifest(FIXED), {**identity(MCA_OLD, MCA_OLD_NOTE), 'note': 'not-a-stock-note'})
+            )[:-1],
+        }
+        for label, raw in cases.items():
+            with self.subTest(label):
+                self.setUp()
+                self.stock_mca_on_fixed_speaker(owner)
+                self.manifest.write_bytes(raw)
+                before = (self.manifest.read_bytes(),
+                          (self.root / MODULE.MODULE).read_bytes(),
+                          (self.root / MCA_MODULE).read_bytes())
+                self.assertEqual(self.run_tool('--boot', '--component', 'mca')[0], 1)
+                self.assertEqual((self.manifest.read_bytes(),
+                                  (self.root / MODULE.MODULE).read_bytes(),
+                                  (self.root / MCA_MODULE).read_bytes()), before)
+                self.assertFalse((self.root / MCA_STATE).exists())
+                self.assertFalse((self.root / MODULE.STATE).exists())
+
 
 if __name__ == '__main__':
     unittest.main()
