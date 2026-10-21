@@ -885,6 +885,119 @@ class SetupTests(unittest.TestCase):
                             self.assert_audio_pending(name, False)
                             self.assertEqual(snapshot(), before)
 
+    def test_enotdir_rollback_marker_is_not_audio_work(self):
+        """A regular file in place of the state directory is not an absent marker.
+
+        Stock bytes, stock pins, and a fixed staged module would be pending
+        if the marker were missing. The state directory is a regular file, so
+        lstat of the rollback path raises ENOTDIR and the component is not
+        pending. The other component keeps that same stock stage with no
+        state directory: its marker lstat is ENOENT and it stays pending.
+        The occupied file, both modules, the manifest, both staged files,
+        and the other component's state stay as planted. Current is not the
+        fixture: it is already not pending when the marker is only absent.
+        """
+        occupied = b'not-a-state-directory'
+        unrelated = (
+            MODULE.GPU_HOLD.rpartition('/')[0],
+            MODULE.HEADPHONES_STATE,
+            MODULE.CPU_IDLE_STATE,
+            MODULE.BACKLIGHT_STATE,
+        )
+
+        def described(path):
+            if path.is_symlink():
+                return ('symlink', os.readlink(path))
+            if not path.exists():
+                return ('absent',)
+            info = path.lstat()
+            mode = stat.S_IMODE(info.st_mode)
+            if stat.S_ISREG(info.st_mode):
+                return ('file', mode, path.read_bytes())
+            if stat.S_ISDIR(info.st_mode):
+                return ('directory', mode, tuple(sorted(child.name for child in path.iterdir())))
+            return ('other', mode, stat.S_IFMT(info.st_mode))
+
+        def pin_keys(name):
+            module_rel, _, _, _ = self.component_paths(name)
+            _, _, stock, _, component_name = self._audio_identities(name)
+            document = json.loads((self.root / MODULE.MANIFESTS[1]).read_text())
+            metadata = document['file_metadata'][module_rel]
+            artifact = document['module_artifacts'][component_name]
+            self.assertEqual(set(metadata), {'sha256', 'size', 'mode'})
+            self.assertEqual(set(artifact), {'module', 'note', 'path', 'sha256', 'size'})
+            self.assertEqual(document['files']['/' + module_rel], stock['sha256'])
+            self.assertEqual(metadata['sha256'], stock['sha256'])
+            self.assertEqual(metadata['size'], stock['size'])
+            self.assertEqual(artifact['note'], stock['note'])
+            self.assertEqual(artifact['sha256'], stock['sha256'])
+            self.assertEqual(artifact['size'], stock['size'])
+            self.assertEqual(document['modules'][component_name], stock['note'])
+
+        with self._patch_audio_identities():
+            self._assert_patched_identities()
+            for name in ('speaker', 'mca'):
+                with self.subTest(component=name):
+                    self.setUp()
+                    other = 'mca' if name == 'speaker' else 'speaker'
+                    self.plant_audio_state(name, 'stock', 'stock', staged='fixed')
+                    self.plant_audio_state(other, 'stock', 'stock', staged='fixed')
+                    module_rel, staged_rel, hold_rel, rollback_rel = self.component_paths(name)
+                    other_module, other_staged, other_hold, other_rollback = self.component_paths(other)
+                    stock_bytes, fixed_bytes, _, _, _ = self._audio_identities(name)
+                    other_stock, other_fixed, _, _, _ = self._audio_identities(other)
+                    self.assertEqual((self.root / module_rel).read_bytes(), stock_bytes)
+                    self.assertEqual((self.root / staged_rel).read_bytes(), fixed_bytes)
+                    self.assertEqual((self.root / other_module).read_bytes(), other_stock)
+                    self.assertEqual((self.root / other_staged).read_bytes(), other_fixed)
+                    pin_keys(name)
+                    pin_keys(other)
+                    state_rel = hold_rel.rpartition('/')[0]
+                    state_path = self.root / state_rel
+                    self.assertFalse(state_path.is_symlink())
+                    if state_path.is_dir():
+                        self.assertEqual([child.name for child in state_path.iterdir()], [])
+                        self.assertTrue(state_path.resolve().is_relative_to(self.root.resolve()))
+                        state_path.rmdir()
+                    self.assertFalse(state_path.exists())
+                    state_path.parent.mkdir(parents=True, exist_ok=True)
+                    state_path.write_bytes(occupied)
+                    state_path.chmod(0o640)
+                    self.assertTrue(state_path.is_file())
+                    self.assertFalse(state_path.is_dir())
+                    self.assertFalse(state_path.is_symlink())
+                    self.assertTrue(stat.S_ISREG(state_path.lstat().st_mode))
+                    self.assertEqual(stat.S_IMODE(state_path.lstat().st_mode), 0o640)
+                    with self.assertRaises(NotADirectoryError):
+                        (self.root / rollback_rel).lstat()
+                    hold_path = self.root / hold_rel
+                    self.assertFalse(hold_path.is_symlink() or hold_path.exists())
+                    other_state = self.root / other_hold.rpartition('/')[0]
+                    self.assertFalse(other_state.exists())
+                    self.assertFalse(other_state.is_symlink())
+                    with self.assertRaises(FileNotFoundError):
+                        (self.root / other_rollback).lstat()
+
+                    def snapshot():
+                        return (described(state_path),
+                                described(self.root / module_rel),
+                                described(self.root / other_module),
+                                described(self.root / MODULE.MANIFESTS[0]),
+                                described(self.root / MODULE.MANIFESTS[1]),
+                                described(self.root / staged_rel),
+                                described(self.root / other_staged),
+                                described(other_state),
+                                tuple(described(self.root / rel) for rel in unrelated))
+
+                    before = snapshot()
+                    if name == 'speaker':
+                        self.assertFalse(MODULE.speaker_pending(self.root))
+                        self.assertTrue(MODULE.mca_pending(self.root))
+                    else:
+                        self.assertFalse(MODULE.mca_pending(self.root))
+                        self.assertTrue(MODULE.speaker_pending(self.root))
+                    self.assertEqual(snapshot(), before)
+
     def test_audio_identities_match_the_speaker_helper(self):
         """Updater identities are the helper's full stock and fixed records.
 
