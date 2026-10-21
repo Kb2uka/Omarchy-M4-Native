@@ -196,33 +196,37 @@ class SetupTests(unittest.TestCase):
         self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'already swapped')
 
     def test_restart_reported_when_mca_is_pending_and_boot_is_already_current(self):
-        """MCA staged against the known old module needs a restart; boot itself is current.
+        """MCA staged against different bytes needs a restart; boot itself is current.
 
-        ``MCA_MODULE``, ``MCA_STAGED``, and ``MCA_HOLD`` match the speaker trio.
-        ``create=True`` supplies them on a checkout that does not define them yet.
+        The shipped MCA paths are the tool's own constants, independent of the
+        speaker paths. Synthetic bytes are enough for this advisory comparison
+        of the staged file with the installed file.
         """
-        mca_module = ('usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/'
-                      'snd-soc-apple-mca.ko')
-        mca_staged = 'usr/lib/omarchy-m4/j713-audio/snd-soc-apple-mca.ko'
-        mca_hold = 'var/lib/omarchy-m4/mca-module/hold'
-        with mock.patch.object(MODULE, 'MCA_MODULE', mca_module, create=True), \
-             mock.patch.object(MODULE, 'MCA_STAGED', mca_staged, create=True), \
-             mock.patch.object(MODULE, 'MCA_HOLD', mca_hold, create=True):
-            self.put(MODULE.MCA_MODULE, 'known old mca')
-            self.put(MODULE.MCA_STAGED, 'staged mca')
-            result = self.setup_with(FakeSystem(self.root))
-            self.assertEqual((result['restart_needed'], result['status']),
-                             (True, 'connected; restart once to apply the update'))
-            self.put(MODULE.MCA_MODULE, 'staged mca')
-            self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'same bytes')
-            self.put(MODULE.MCA_MODULE, 'known old mca')
-            self.put(MODULE.MCA_HOLD, '')
-            self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'],
-                             'mca hold: nothing applies')
-            (self.root / MODULE.MCA_HOLD).unlink()
-            self.put(MODULE.SPEAKER_HOLD, '')
-            self.assertTrue(self.setup_with(FakeSystem(self.root))['restart_needed'],
-                            'speaker hold does not hide a pending MCA swap')
+        self.assertEqual(
+            MODULE.MCA_MODULE,
+            'usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-apple-mca.ko')
+        self.assertEqual(MODULE.MCA_STAGED, 'usr/lib/omarchy-m4/j713-audio/snd-soc-apple-mca.ko')
+        self.assertEqual(MODULE.MCA_HOLD, 'var/lib/omarchy-m4/mca-module/hold')
+        self.assertEqual(MODULE.MCA_ROLLBACK, 'var/lib/omarchy-m4/mca-module/rollback')
+        self.assertNotEqual(MODULE.MCA_MODULE, MODULE.SPEAKER_MODULE)
+        self.assertNotEqual(MODULE.MCA_STAGED, MODULE.SPEAKER_STAGED)
+        self.assertNotEqual(MODULE.MCA_HOLD, MODULE.SPEAKER_HOLD)
+        self.assertNotEqual(MODULE.MCA_ROLLBACK, MODULE.SPEAKER_ROLLBACK)
+        self.put(MODULE.MCA_MODULE, 'known old mca')
+        self.put(MODULE.MCA_STAGED, 'staged mca')
+        result = self.setup_with(FakeSystem(self.root))
+        self.assertEqual((result['restart_needed'], result['status']),
+                         (True, 'connected; restart once to apply the update'))
+        self.put(MODULE.MCA_MODULE, 'staged mca')
+        self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'same bytes')
+        self.put(MODULE.MCA_MODULE, 'known old mca')
+        self.put(MODULE.MCA_HOLD, '')
+        self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'],
+                         'mca hold: nothing applies')
+        (self.root / MODULE.MCA_HOLD).unlink()
+        self.put(MODULE.SPEAKER_HOLD, '')
+        self.assertTrue(self.setup_with(FakeSystem(self.root))['restart_needed'],
+                        'speaker hold does not hide a pending MCA swap')
 
     def component_bytes(self, name):
         """Installed path, staged path, hold, and rollback marker for one audio component."""
@@ -401,6 +405,10 @@ class SetupTests(unittest.TestCase):
         self.assertNotIn('keeps booting', lowered)
         self.assertIn('boot', lowered)
         self.assertIn('resume', lowered)
+        self.assertIn('pending operation', lowered)
+        self.assertIn('m4-boot-compose', message)
+        after_resume = lowered[lowered.rfind('resume'):]
+        self.assertRegex(after_resume, r'rerun omarchy-m4-update')
 
     def test_install_failure_after_boot_write_keeps_the_partial_transition(self):
         # Package install runs the boot hook. The hook can write boot.bin and
