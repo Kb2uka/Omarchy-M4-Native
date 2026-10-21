@@ -21,6 +21,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import struct
 import sys
 import zlib
@@ -219,9 +220,14 @@ def transition_kind(old, new):
     and does not consult the table. ``listed`` is an exact KERNEL_TRANSITIONS
     pair whose two hashes are both in KNOWN_KERNELS and share one release.
     Every other change, including another same-release pair, is ``refused``.
+    A value that is not a string is ``refused`` before allowlist membership,
+    which would otherwise raise ``TypeError`` for a list or object pin.
     """
     if old == new:
         return 'same'
+    # Membership hashes the pair. A list or object pin must refuse, not TypeError.
+    if not isinstance(old, str) or not isinstance(new, str):
+        return 'refused'
     if ((old, new) in KERNEL_TRANSITIONS and old in KNOWN_KERNELS and new in KNOWN_KERNELS
             and KNOWN_KERNELS[old] == KNOWN_KERNELS[new]):
         return 'listed'
@@ -378,11 +384,29 @@ def load_journal(root):
             'from_kernel': old, 'to_kernel': new}
 
 
-def pending_receipt(journal):
+def resume_command(root, journal):
+    """The explicit command that continues this pending journal.
+
+    Ordinary apply and rollback stay ``--apply`` and ``--rollback --apply``.
+    An apply journal left beside a hold, including an interrupted
+    ``--resume-updates --apply``, continues only with that resume command.
+    A pending rollback does not consult the hold: ``--resume-updates`` cannot
+    be combined with ``--rollback``.
+    """
+    if journal['operation'] == 'rollback':
+        return 'sudo m4-boot-compose --rollback --apply'
+    if hold_present(root):
+        return 'sudo m4-boot-compose --resume-updates --apply'
+    return 'sudo m4-boot-compose --apply'
+
+
+def pending_receipt(journal, root):
+    command = resume_command(root, journal)
     return {'applied': False, 'operation': journal['operation'],
             'from_sha256': journal['from_sha256'], 'to_sha256': journal['to_sha256'],
+            'resume': command,
             'status': 'transition pending (' + journal['operation'] +
-                      '); resume with the same operation, nothing was replayed'}
+                      '); resume with ' + command + ', nothing was replayed'}
 
 
 def snapshot_anchor(root):
@@ -615,10 +639,23 @@ def write_boot(boot_path, desired):
 
 
 def hold_present(root):
+    """True only for a regular hold file. A missing path is false.
+
+    A symlink keeps its refusal. Any other existing node, including a
+    directory or FIFO, is refused. ``lstat`` does not open the node, so a
+    FIFO cannot block, and it does not follow a symlink. Those nodes are not
+    an absent hold: ordinary apply must not undo a held boot.
+    """
     path = root / HOLD
-    if path.is_symlink():
+    try:
+        mode = os.lstat(path).st_mode
+    except FileNotFoundError:
+        return False
+    if stat.S_ISLNK(mode):
         raise Refused('Boot compose hold is a symlink: ' + str(path))
-    return path.is_file()
+    if not stat.S_ISREG(mode):
+        raise Refused('Boot compose hold is not a regular file: ' + str(path))
+    return True
 
 
 def create_hold(root):
@@ -730,13 +767,13 @@ def compose(root, apply=False, resume_updates=False):
     if journal is not None:
         require_journal_boot(root, journal)
         if not apply:
-            return pending_receipt(journal)
+            return pending_receipt(journal, root)
         if journal['operation'] != 'apply':
-            raise Refused('A rollback transition is pending. Resume with sudo m4-boot-compose --rollback --apply',
+            raise Refused('A rollback transition is pending. Resume with ' + resume_command(root, journal),
                           pending=True)
         if hold_present(root) and not resume_updates:
-            raise Refused('A held boot release was interrupted. Resume it with '
-                          'sudo m4-boot-compose --resume-updates --apply', pending=True)
+            raise Refused('A held boot release was interrupted. Resume it with ' +
+                          resume_command(root, journal), pending=True)
         resumed = journal_changes(journal)
         resume(root, journal)
     elif hold_present(root):
@@ -796,9 +833,9 @@ def rollback(root, apply=False):
     if journal is not None:
         require_journal_boot(root, journal)
         if not apply:
-            return pending_receipt(journal)
+            return pending_receipt(journal, root)
         if journal['operation'] != 'rollback':
-            raise Refused('An apply transition is pending. Resume with sudo m4-boot-compose --apply',
+            raise Refused('An apply transition is pending. Resume with ' + resume_command(root, journal),
                           pending=True)
         # Protected eligibility and the space commit will use, before a new hold.
         # An existing hold is left untouched when either check refuses.

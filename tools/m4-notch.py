@@ -201,12 +201,10 @@ def guard(root, data):
         compose = composer()
         try:
             journal = compose.load_journal(root)
+            command = None if journal is None else compose.resume_command(root, journal)
         except compose.Refused as error:
             raise Refused(str(error)) from error
-        if journal is not None:
-            command = 'sudo m4-boot-compose --apply'
-            if journal['operation'] == 'rollback':
-                command = 'sudo m4-boot-compose --rollback --apply'
+        if command is not None:
             raise Refused('A ' + journal['operation'] +
                           ' boot transition is pending in the journal. Resume it first with ' + command)
         require((root / BOOT).read_bytes() == data, 'boot.bin changed while working; nothing changed, run it again')
