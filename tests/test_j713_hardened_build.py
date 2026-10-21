@@ -1522,10 +1522,12 @@ class HardenedBuildTests(unittest.TestCase):
         """The case probe runs through a symlinked directory output parent.
 
         An alias onto a simulated case-insensitive filesystem must refuse
-        before creating output and clean up its probe. Path.exists is
-        patched only for the CASE-PROBE basename. A real filesystem prepare
-        of the same inputs still succeeds, and neither path changes the
-        pinned inputs.
+        before creating output and clean up its probe. Path.exists reports
+        CASE-PROBE only when its resolved parent chain stays inside the real
+        directory or that directory symlink. A probe created anywhere else
+        is not case-insensitive, so prepare must not refuse. A real
+        filesystem prepare of the same inputs still succeeds, and neither
+        path changes the pinned inputs.
         """
         archive, exports, _files = self.prepared_inputs()
         watched = (
@@ -1550,9 +1552,28 @@ class HardenedBuildTests(unittest.TestCase):
         self.assertEqual(output.parent, alias)
         self.assertTrue(output.parent.is_symlink())
         real_exists = Path.exists
+        destination_parents = []
+        for root in (real, alias):
+            try:
+                destination_parents.append(Path(os.path.realpath(root)))
+            except OSError:
+                continue
+
+        def within_destination(candidate):
+            # realpath resolves the parent chain and does not re-enter Path.exists.
+            # A missing CASE-PROBE leaf and a lexical '..' cannot fake containment.
+            try:
+                resolved = Path(os.path.realpath(candidate.parent))
+            except OSError:
+                return False
+            for root in destination_parents:
+                if resolved == root or root in resolved.parents:
+                    return True
+            return False
 
         def exists(path):
-            if Path(path).name == 'CASE-PROBE':
+            candidate = Path(path)
+            if candidate.name == 'CASE-PROBE' and within_destination(candidate):
                 return True
             return real_exists(path)
 
