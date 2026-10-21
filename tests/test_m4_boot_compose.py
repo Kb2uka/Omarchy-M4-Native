@@ -48,10 +48,12 @@ names ordinary ``--apply`` and a pending rollback still names
 
 A hold path that is missing is absent. A regular hold file is present. A
 directory or FIFO there is refused without being opened, and a symlink hold
-keeps its own refusal. Copy-back whose video pin is a list or object refuses
-before any boot, manifest, journal, or hold write. Read-only inspection of a
-pending apply or rollback whose boot matches neither snapshot refuses the
-same way apply does, and writes nothing.
+keeps its own refusal. An lstat failure other than a missing path, including
+permission denied and not a directory, is refused and is not an absent hold.
+Copy-back whose video pin is a list or object refuses before any boot,
+manifest, journal, or hold write. Read-only inspection of a pending apply or
+rollback whose boot matches neither snapshot refuses the same way apply does,
+and writes nothing.
 
 A same-kernel rollback (devicetree only, or the backlight tree with its
 handoff loader) stores both boot objects before it renames anything. A failure
@@ -72,6 +74,7 @@ The journal and its snapshots stay. Other preflight refusals, where nothing
 was pending, may still say that ``boot.bin`` was not changed.
 """
 import contextlib
+import errno
 import gzip
 import hashlib
 import importlib.util
@@ -2057,6 +2060,89 @@ class ComposeTests(unittest.TestCase):
         self.assertIn(ordinary, err)
         self.assertNotIn('resume-updates', err)
         self.assertEqual(self.protected_bytes(bare), bare_before)
+
+    def test_hold_lstat_error_refuses_and_the_same_tree_stays_held(self):
+        """A non-missing lstat failure on the hold is not an absent hold.
+
+        The hold file and a pending apply are real. Inspection and ordinary
+        ``--apply`` reach ``hold_present``. PermissionError and
+        NotADirectoryError from lstat of that hold path only refuse with exit
+        1 and the OSError text, and they print no success receipt. Boot,
+        manifests, the journal, its snapshots, the hold, and previous stay
+        put. With lstat working again, that same tree is held: inspection
+        names ``--resume-updates --apply`` and ordinary ``--apply`` does not
+        replay the journal.
+        """
+        resume = 'sudo m4-boot-compose --resume-updates --apply'
+        ordinary = 'sudo m4-boot-compose --apply'
+        cases = ((PermissionError, errno.EACCES), (NotADirectoryError, errno.ENOTDIR))
+        for error_type, number in cases:
+            with self.subTest(error=error_type.__name__):
+                packaged = kernel(34)
+                machine = self.transition(package_kernel=packaged)
+                restored = machine.boot_before
+                updated = boot(kernel_bytes=packaged, dtb=D1, loader=LOADER + b' notch')
+                self.assertNotEqual(restored, updated)
+                plant_journal(machine, 'apply', restored, updated, sha(packaged))
+                machine.put(BOOT_HOLD, b'held\n')
+                machine.put(MODULE.BOOT + MODULE.PREVIOUS, b'decoy previous')
+                before = self.protected_bytes(machine)
+                self.assertEqual(before[BOOT_HOLD], b'held\n')
+                self.assertEqual(before[MODULE.BOOT + MODULE.PREVIOUS], b'decoy previous')
+                self.assertEqual(before[BOOT_SNAPSHOTS + '/' + sha(restored)], restored)
+                self.assertEqual(before[BOOT_SNAPSHOTS + '/' + sha(updated)], updated)
+                self.assertIsNotNone(before[BOOT_JOURNAL])
+                hold_name = os.path.normpath(os.fspath(machine.root / BOOT_HOLD))
+                real_lstat = os.lstat
+                refused = str(error_type(number, os.strerror(number), hold_name))
+
+                def fail_hold_lstat(path, *args, _real=real_lstat, _name=hold_name,
+                                    _type=error_type, _number=number, **kwargs):
+                    # Only this hold path. Every other lstat stays the real call.
+                    if os.path.normpath(os.fspath(path)) == _name:
+                        raise _type(_number, os.strerror(_number), _name)
+                    return _real(path, *args, **kwargs)
+
+                with mock.patch.object(MODULE.os, 'lstat', side_effect=fail_hold_lstat):
+                    for label, args in (('inspect', ()), ('apply', ('--apply',))):
+                        with self.subTest(command=label):
+                            code, out, err = machine.run(*args)
+                            self.assertEqual(code, 1, out + err)
+                            self.assertEqual(out, '')
+                            self.assertNotIn('Traceback', err)
+                            self.assertIn('m4-boot-compose: refused:', err)
+                            self.assertIn(refused, err)
+                            self.assertNotIn('boot.bin was not changed', err)
+                            self.assertNotIn('takes effect at next boot', err)
+                            self.assertNotIn(MODULE.HELD_STATUS, out)
+                            self.assertNotIn('current', out)
+                            self.assertFalse((machine.root / MODULE.PACMAN_LOCK).exists())
+                self.assertEqual(self.protected_bytes(machine), before)
+
+                code, out, err = machine.run()
+                self.assertEqual((code, err), (0, ''), err)
+                receipt = json.loads(out)
+                self.assertEqual(receipt['operation'], 'apply')
+                self.assertFalse(receipt['applied'])
+                self.assertEqual(receipt['resume'], resume)
+                self.assertIn(resume, receipt['status'])
+                self.assertNotIn(ordinary, receipt['status'].replace(resume, ''))
+                self.assertNotEqual(receipt['status'], 'current')
+                self.assertNotIn(MODULE.HELD_STATUS, out)
+                self.assertEqual(self.protected_bytes(machine), before)
+
+                code, out, err = machine.run('--apply')
+                self.assertEqual(code, 1, out + err)
+                self.assertEqual(out, '')
+                self.assertNotIn('Traceback', err)
+                self.assertIn('held boot release was interrupted', err)
+                self.assertIn(resume, err)
+                self.assertNotIn(refused, err)
+                self.assertNotIn('takes effect at next boot', err)
+                self.assertNotIn('boot.bin was not changed', err)
+                self.assertEqual(self.protected_bytes(machine), before)
+                self.assertEqual((machine.root / BOOT_HOLD).read_bytes(), b'held\n')
+                self.assertFalse((machine.root / MODULE.PACMAN_LOCK).exists())
 
     def test_nonregular_hold_is_refused_and_a_regular_hold_still_blocks(self):
         """A directory or FIFO hold is not absent, so ordinary apply cannot undo it.
