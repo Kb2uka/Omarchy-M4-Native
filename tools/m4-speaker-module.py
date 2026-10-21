@@ -19,9 +19,13 @@ writes no directory or marker. A reverse state is finished only when a
 rollback marker is already present with a valid stock backup; a new request
 does not create that marker. A boot that finds stock bytes, stock pins, a
 valid stock backup, and that marker clears the marker and stays held.
-Inspection of that held stock reports that nothing applies. A markerless
-reverse state reports the refusal and recovery from the verified stock backup.
-Inspection is the default.
+Inspection only reads. A known state with an existing regular rollback marker
+and a valid stock backup reports that rollback as requested and names the
+component in the restart guidance, ahead of hold. Held stock, or a held
+forward interruption, without that pending rollback reports that nothing
+applies. A markerless reverse state reports the refusal and recovery from the
+verified stock backup. A marker with an invalid backup or state does not
+promise restoration. Inspection is the default.
 """
 import argparse
 import hashlib
@@ -379,9 +383,21 @@ def run(root, mode, component='speaker'):
         else:
             raise Refused('Unknown ' + selected['component'] + ' module state; nothing was changed')
     else:
-        if report['state'] == 'reverse' and not report['rollback_requested']:
+        # Read-only, in the same order as boot. No marker or backup is created.
+        intent = stage / 'rollback'
+        regular_marker = intent.is_file() and not intent.is_symlink()
+        known = report['state'] in ('stock', 'fixed', 'interrupted', 'reverse')
+        _, module_backup, manifest_backup = backup_paths(root, selected)
+        backup_ok = (known and report['rollback_requested'] and
+                     valid_stock_backup(module_backup, manifest_backup, selected))
+        if known and regular_marker and backup_ok:
+            report['status'] = ('rollback requested; restart to restore the alpha.1 '
+                                + selected['component'] + ' module')
+        elif report['state'] == 'reverse' and not report['rollback_requested']:
             report['status'] = ('refused; nothing was changed; recover from the verified stock backup')
-        elif report['state'] == 'stock' and report['held']:
+        elif known and report['rollback_requested'] and not backup_ok:
+            report['status'] = 'refused; nothing was changed; recovery required'
+        elif report['held'] and report['state'] in ('stock', 'interrupted'):
             report['status'] = 'held after a rollback; nothing applied'
         else:
             report['status'] = {'fixed': 'current', 'stock': 'staged; applies at the next boot',
