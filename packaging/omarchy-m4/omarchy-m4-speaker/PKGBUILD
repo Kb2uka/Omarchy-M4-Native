@@ -4,7 +4,7 @@
 # tools/build-m4-packages.py. The module source is audio/j713/kernel/ in the repository.
 pkgname=omarchy-m4-speaker
 pkgver=1
-pkgrel=2
+pkgrel=3
 pkgdesc='Applies the fixed J713 speaker protection module (#61) at the next boot'
 arch=('aarch64')
 url='https://github.com/Kb2uka/Omarchy-M4-Native'
@@ -14,7 +14,7 @@ options=('!strip' '!debug')
 source=('m4-speaker-module.py' '20-m4-speaker-module.conf' '25-m4-mca-module.conf' 'MIT.txt' 'GPL-2.0-only.txt'
         "snd-soc-j713-group.ko::${url}/releases/download/package-inputs/snd-soc-j713-group-aaad802e.ko"
         "snd-soc-apple-mca.ko::${url}/releases/download/package-inputs/snd-soc-apple-mca-fb941df4.ko")
-sha256sums=('80f596b55d17b037d9f417513398817f03c04dd9a6d4a7904f7143d47ec4ddbd'
+sha256sums=('30b4f44dd07de3d5975b64eb660711c56d7a75cd1b5e2ae48f75b6a0c09ee771'
             '30f71811f89039d0448b0186a7224f9545746690685eb7c0b3106467cbce65fc'
             '1e14c4cbcb80953b3bc88144f7d7a269da7f7b65b6f1eafb3bc6e0191394fcb5'
             'b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5'

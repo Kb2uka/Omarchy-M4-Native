@@ -259,7 +259,8 @@ def apply(root, report, manifest, raw, component='speaker'):
     staged = regular(root / selected['staged'])
     identity = selected['fixed']
     require(sha(staged) == identity['sha256'] and len(staged) == identity['size'], 'Staged module differs from the pin')
-    require(serialize(manifest) == raw, 'Audio manifest is not in the alpha.1 format; nothing was changed')
+    # Identity is the inspected pins, the staged module, and the stock backup.
+    # A valid manifest may omit the final newline or use another indent or key order.
     module = root / selected['module']
     if report['state'] == 'stock':
         prepare_backup(root, selected, raw)

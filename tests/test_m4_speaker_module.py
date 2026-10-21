@@ -189,7 +189,8 @@ class SpeakerModule(unittest.TestCase):
             'other module': lambda: self.put(MODULE.MODULE, b'someone else'),
             'one pin edited': lambda: self.install(OLD, {**manifest(STOCK), 'modules': {MODULE.NAME: 'x',
                                                                                          'snd_soc_tas2764': 'amp'}}),
-            'not the image format': lambda: self.manifest.write_text(json.dumps(manifest(STOCK))),
+            'compact json with a wrong pin': lambda: self.manifest.write_text(json.dumps(
+                {**manifest(STOCK), 'modules': {MODULE.NAME: 'x', 'snd_soc_tas2764': 'amp'}})),
             'staged module differs': lambda: self.put(MODULE.STAGED, b'tampered'),
             'other kernel': lambda: self.install(OLD, {**manifest(STOCK), 'kernel_release': 'other'}),
         }
