@@ -48,6 +48,19 @@ def covers_protected(path, protected):
     return path.endswith('/') and any(p.startswith(path) for p in protected)
 
 
+BOOT_VERSION = '1-15'
+SPEAKER_VERSION = '1-2'
+
+
+def write_size(root, relative, size):
+    """Sparse file whose stat size is the pin. The checker reads size, not payload bytes."""
+    path = Path(root) / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open('wb') as handle:
+        handle.truncate(size)
+    return path
+
+
 class RecipeTests(unittest.TestCase):
     def test_a_directory_over_a_protected_path_is_caught(self):
         self.assertTrue(covers_protected('usr/lib/', CHANNEL['protected_paths']))
@@ -240,18 +253,38 @@ class PolicyTests(unittest.TestCase):
                     CHECK.check_package(CHANNEL, *self.package('omarchy-m4-gst-audio', files, info=case_info,
                                                                version='1.28.7-1'))
 
+    def speaker_files(self):
+        """Speaker package pins plus the fixed MCA module, its size, and both drop-ins."""
+        tool = (ROOT / 'tools/m4-speaker-module.py').read_bytes()
+        files = {path: (0o644, digest) for path, digest in CHANNEL['speaker_module'].items()}
+        files.update({path: (0o644, digest) for path, digest in CHANNEL['mca_module'].items()})
+        files['usr/bin/m4-speaker-module'] = (0o755, hashlib.sha256(tool).hexdigest())
+        files[CHECK.SPEAKER_DROP_IN] = (
+            0o644, file_sha('packaging/omarchy-m4/omarchy-m4-speaker/20-m4-speaker-module.conf'))
+        files[CHECK.MCA_DROP_IN] = (
+            0o644, file_sha('packaging/omarchy-m4/omarchy-m4-speaker/25-m4-mca-module.conf'))
+        return files
+
+    def speaker_package(self, files):
+        """Unpack the helper source and a correctly sized MCA file beside the listed pins."""
+        package, info, files, root = self.package('omarchy-m4-speaker', files, version=SPEAKER_VERSION)
+        tool = root / 'usr/bin/m4-speaker-module'
+        tool.parent.mkdir(parents=True, exist_ok=True)
+        tool.write_bytes((ROOT / 'tools/m4-speaker-module.py').read_bytes())
+        for relative in CHANNEL['mca_module']:
+            write_size(root, relative, CHANNEL['mca_identity']['size'])
+        return package, info, files, root
+
     def test_speaker_package_must_be_the_pin(self):
-        good = {path: (0o644, digest) for path, digest in CHANNEL['speaker_module'].items()}
-        good['usr/bin/m4-speaker-module'] = (0o755, file_sha('tools/m4-speaker-module.py'))
-        good[CHECK.SPEAKER_DROP_IN] = (0o644, file_sha('packaging/omarchy-m4/omarchy-m4-speaker/20-m4-speaker-module.conf'))
-        CHECK.check_package(CHANNEL, *self.package('omarchy-m4-speaker', good))
+        good = self.speaker_files()
+        CHECK.check_package(CHANNEL, *self.speaker_package(good))
         staged = next(iter(CHANNEL['speaker_module']))
         for files, message in (({**good, staged: (0o644, '0' * 64)}, 'differs from the pin'),
                                ({**good, 'usr/bin/m4-speaker-module': (0o755, '0' * 64)}, 'tool differs'),
                                ({**good, CHECK.SPEAKER_DROP_IN: (0o644, '0' * 64)}, 'drop-in differs')):
             with self.subTest(message):
                 with self.assertRaisesRegex(ValueError, message):
-                    CHECK.check_package(CHANNEL, *self.package('omarchy-m4-speaker', files))
+                    CHECK.check_package(CHANNEL, *self.speaker_package(files))
 
     def test_boot_package_must_bring_the_gpu_headphone_cpu_and_evdi_packages(self):
         realtime = (PACKAGING / 'omarchy-m4-boot/speakersafetyd-j713-realtime.conf').read_bytes()
@@ -409,12 +442,13 @@ class PolicyTests(unittest.TestCase):
             self.assertIn(f"'{digest}'", sums)
 
     def boot_package(self, files, info=None):
-        return Path('omarchy-m4-boot-1-4-aarch64.pkg.tar.zst'), info or self.boot_info(), files, self.boot_root
+        info = info or self.boot_info()
+        return (Path(f"omarchy-m4-boot-{info['pkgver'][0]}-aarch64.pkg.tar.zst"), info, files, self.boot_root)
 
     def boot_info(self):
-        return {'pkgname': ['omarchy-m4-boot'], 'pkgver': ['1-4'], 'arch': ['aarch64'],
+        return {'pkgname': ['omarchy-m4-boot'], 'pkgver': [BOOT_VERSION], 'arch': ['aarch64'],
                 'depend': ['python', 'pacman', 'omarchy-m4-gpu', 'omarchy-m4-headphones', 'omarchy-m4-cpu',
-                           'omarchy-m4-evdi', 'omarchy-m4-backlight']}
+                           'omarchy-m4-evdi', 'omarchy-m4-backlight', 'omarchy-m4-speaker>=1-2']}
 
     def boot_files(self):
         """A boot package that passes every check except the ones under test, unpacked on disk."""
@@ -427,6 +461,8 @@ class PolicyTests(unittest.TestCase):
         (self.boot_root / 'usr/bin/m4-boot-compose').write_bytes(composer)
         notch = (ROOT / 'tools/m4-notch.py').read_bytes()
         (self.boot_root / 'usr/bin/m4-notch').write_bytes(notch)
+        pin = CHANNEL['boot_kernel']
+        write_size(self.boot_root, pin['path'], pin['image_bytes'])
         return {**{path: (0o644, digest) for path, digest in CHANNEL['backlight_loaders'].items()},
                 'usr/bin/m4-notch': (0o755, hashlib.sha256(notch).hexdigest()),
                 CHECK.NOTCH_UNIT: (0o644, file_sha('packaging/omarchy-m4/omarchy-m4-boot/omarchy-m4-notch.service')),
@@ -434,7 +470,8 @@ class PolicyTests(unittest.TestCase):
                 'usr/share/libalpm/hooks/90-omarchy-m4-boot.hook': (0o644, hashlib.sha256(hook).hexdigest()),
                 'usr/lib/omarchy-m4/j713.dtb': (0o644, CHANNEL['devicetree']['sha256']),
                 'usr/bin/omarchy-m4-update': (0o755, file_sha('tools/omarchy-m4-update')),
-                'usr/lib/omarchy-m4/m4-channel-setup.py': (0o644, file_sha('tools/m4-channel-setup.py'))}
+                'usr/lib/omarchy-m4/m4-channel-setup.py': (0o644, file_sha('tools/m4-channel-setup.py')),
+                pin['path']: (0o644, pin['image_sha256'])}
 
     def test_boot_package_requires_both_pinned_handoff_variants(self):
         realtime = (PACKAGING / 'omarchy-m4-boot/speakersafetyd-j713-realtime.conf').read_bytes()

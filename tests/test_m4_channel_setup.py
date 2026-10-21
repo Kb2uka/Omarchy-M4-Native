@@ -40,14 +40,21 @@ Include = /etc/pacman.d/mirrorlist
 class FakeSystem:
     """Records commands; answers like a machine with alpha.1 installed."""
 
-    def __init__(self, root, fail=(), boot_status='current', change_boot=False, installed=('linux-m4-omarchy',)):
+    def __init__(self, root, fail=(), boot_status='current', change_boot=False, installed=('linux-m4-omarchy',),
+                 boot_then_fail=()):
         self.root, self.fail, self.status, self.change_boot = root, fail, boot_status, change_boot
-        self.installed = installed
+        self.installed, self.boot_then_fail = installed, boot_then_fail
         self.commands, self.refresh_config = [], None
 
     def __call__(self, command, check=False, capture_output=False, text=False, stdout=None, stderr=None):
         self.commands.append(command)
-        if 'm4-boot-compose' in ' '.join(map(str, command)):
+        joined = ' '.join(map(str, command))
+        # An ALPM hook or the composer can replace boot.bin and still exit failed
+        # (verification or journal cleanup). The setup message must not deny that.
+        if any(word in command or word in joined for word in self.boot_then_fail):
+            (self.root / MODULE.BOOT).write_bytes(b'partial-transition')
+            return types.SimpleNamespace(returncode=1, stdout='', stderr='verification failed')
+        if 'm4-boot-compose' in joined:
             return types.SimpleNamespace(returncode=0, stdout=json.dumps({'status': self.status}), stderr='')
         if '-Sy' in command:
             self.refresh_config = Path(command[command.index('--config') + 1]).read_text()
@@ -308,6 +315,31 @@ class SetupTests(unittest.TestCase):
                     self.setup_with(FakeSystem(self.root, fail=(word,)))
                 self.assertEqual((self.root / MODULE.CONF).read_text(), AIR_CONF)
                 self.assertFalse((self.root / MODULE.SNIPPET).exists())
+
+    def assert_pending_boot_wording(self, message):
+        lowered = message.lower()
+        self.assertNotIn('unchanged', lowered)
+        self.assertNotIn('not changed', lowered)
+        self.assertNotIn('keeps booting', lowered)
+        self.assertIn('boot', lowered)
+        self.assertIn('resume', lowered)
+
+    def test_install_failure_after_boot_write_keeps_the_partial_transition(self):
+        # Package install runs the boot hook. The hook can write boot.bin and
+        # then fail verification; the refusal must not claim the file is unchanged.
+        with self.assertRaises(MODULE.Refused) as caught:
+            self.setup_with(FakeSystem(self.root, boot_then_fail=('--needed',)))
+        self.assertEqual((self.root / MODULE.BOOT).read_bytes(), b'partial-transition')
+        self.assertEqual((self.root / MODULE.CONF).read_text(), AIR_CONF)
+        self.assert_pending_boot_wording(str(caught.exception))
+
+    def test_composer_refusal_after_boot_write_keeps_the_partial_transition(self):
+        # Composer can replace boot.bin and then fail journal cleanup. The
+        # refusal must not claim the machine still boots the previous image.
+        with self.assertRaises(MODULE.Refused) as caught:
+            self.setup_with(FakeSystem(self.root, boot_then_fail=('m4-boot-compose',)))
+        self.assertEqual((self.root / MODULE.BOOT).read_bytes(), b'partial-transition')
+        self.assert_pending_boot_wording(str(caught.exception))
 
     def test_existing_snippet_is_put_back_after_a_failure(self):
         self.put(MODULE.SNIPPET, '[omarchy-m4]\nServer = https://old.invalid\n')

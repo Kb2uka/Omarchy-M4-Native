@@ -336,12 +336,14 @@ def connect(root, apply, server, key, fingerprint, output):
                 (root / SNIPPET).unlink(missing_ok=True)
             elif current != wanted:
                 write(root / SNIPPET, current, conf.stat().st_mode & 0o777)
-            raise Refused(str(error) + '; pacman.conf was restored and boot.bin was not changed') from error
+            raise Refused(str(error) + '; pacman.conf was restored and the boot update may be partial. '
+                          'Inspect m4-boot-compose and resume the pending operation it reports '
+                          'after fixing the cause') from error
     boot = machine.compose()
     require(boot in ('current', 'updated; takes effect at next boot'),
-            'The packages are installed, but boot.bin is not in step with them '
-            f'({boot}); boot.bin keeps booting what it booted before. See the message above, '
-            'fix the cause, then run this again')
+            'The packages are installed, but the boot update needs attention: boot.bin is not in step with them '
+            f'({boot}). See the detailed message above, then inspect m4-boot-compose and resume '
+            'the pending operation it reports after fixing the cause')
     machine.start_notifier()
     restart = (boot_digest(root) != before or speaker_pending(root) or mca_pending(root) or
                gpu_pending(root) or headphones_pending(root) or cpu_idle_pending(root) or
