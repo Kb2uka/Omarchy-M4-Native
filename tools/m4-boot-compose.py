@@ -970,7 +970,7 @@ def main(argv=None):
         if not pending and not recovery_uncertain(args.root):
             suffix = '. boot.bin was not changed.'
         elif journal_path_present(args.root):
-            suffix = ('. Unresolved boot recovery: inspect ' + JOURNAL +
+            suffix = ('. Unresolved boot recovery: inspect ' + str(args.root / JOURNAL) +
                       ' and resume only the operation recorded there. '
                       'Do not assume boot.bin is unchanged.')
         elif pending:
