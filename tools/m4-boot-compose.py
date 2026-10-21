@@ -193,23 +193,16 @@ def check_protected(root, kernel_sha):
 def transition_kind(old, new):
     """How a kernel-hash change is allowed.
 
-    ``listed`` is an exact KERNEL_TRANSITIONS pair that shares one release.
-    ``historical`` is a same-release pair whose hashes are not in that table
-    (fixture kernels, or a devicetree update that also carries an already
-    qualified kernel). ``refused`` is any other hash change. ``same`` is not a
-    kernel change; devicetree-only updates do not consult the table.
+    ``same`` is not a kernel change. A devicetree-only update keeps this result
+    and does not consult the table. ``listed`` is an exact KERNEL_TRANSITIONS
+    pair whose two hashes are both in KNOWN_KERNELS and share one release.
+    Every other change, including another same-release pair, is ``refused``.
     """
     if old == new:
         return 'same'
-    if (old, new) in KERNEL_TRANSITIONS:
-        if old in KNOWN_KERNELS and new in KNOWN_KERNELS and KNOWN_KERNELS[old] == KNOWN_KERNELS[new]:
-            return 'listed'
-        return 'refused'
-    governed = {item for pair in KERNEL_TRANSITIONS for item in pair}
-    if not KERNEL_TRANSITIONS or old in governed or new in governed:
-        return 'refused'
-    if old in KNOWN_KERNELS and new in KNOWN_KERNELS and KNOWN_KERNELS[old] == KNOWN_KERNELS[new]:
-        return 'historical'
+    if ((old, new) in KERNEL_TRANSITIONS and old in KNOWN_KERNELS and new in KNOWN_KERNELS
+            and KNOWN_KERNELS[old] == KNOWN_KERNELS[new]):
+        return 'listed'
     return 'refused'
 
 
@@ -338,15 +331,23 @@ def pending_receipt(journal):
                       '); resume with the same operation, nothing was replayed'}
 
 
-def require_space(root, from_bytes, to_bytes):
-    """Root filesystem and EFI must hold the snapshots, the previous file, and the new boot."""
+def require_space(root, from_bytes, to_bytes, *, snapshots=True):
+    """EFI always holds the previous file and the new boot.
+
+    Root pays for both snapshots plus the safety margin only while those files
+    are still to be saved. Once they exist, commit and resume need the margin
+    alone: it covers replacing the video manifest and leaves the same reserve.
+    """
     boot_path = root / BOOT
     efi = os.statvfs(boot_path.parent)
     require(efi.f_bavail * efi.f_frsize >= len(from_bytes) + len(to_bytes) + MARGIN,
             'Not enough free space on the EFI partition')
     anchor = root if root.is_dir() else boot_path.parent
     rootfs = os.statvfs(anchor)
-    require(rootfs.f_bavail * rootfs.f_frsize >= len(from_bytes) + len(to_bytes) + MARGIN,
+    root_need = MARGIN
+    if snapshots:
+        root_need += len(from_bytes) + len(to_bytes)
+    require(rootfs.f_bavail * rootfs.f_frsize >= root_need,
             'Not enough free space on the root filesystem')
 
 
@@ -403,7 +404,7 @@ def clear_journal(root):
 
 def commit_transition(root, journal):
     """Previous from the snapshot, then the video pin, then boot. Clear the journal last."""
-    require_space(root, journal['from_bytes'], journal['to_bytes'])
+    require_space(root, journal['from_bytes'], journal['to_bytes'], snapshots=False)
     boot_path = root / BOOT
     current = read_regular(boot_path, 'boot.bin (is the EFI partition mounted at /boot/efi?)')
     require(current in (journal['from_bytes'], journal['to_bytes']),
@@ -543,6 +544,8 @@ def compose(root, apply=False):
                        rollback='sudo m4-boot-compose --rollback --apply')
         receipt['boot_sha256'] = sha(desired)
         return receipt
+    require(kind == 'same',
+            'The installed video stack is not qualified for kernel ' + sha(parse(desired)['kernel']))
     replace(boot_path, current, desired)
     receipt.update(applied=True, status='updated; takes effect at next boot', previous=str(previous),
                    rollback='sudo m4-boot-compose --rollback --apply')
@@ -585,7 +588,10 @@ def rollback(root, apply=False):
     if older == current or not apply:
         return receipt
     old_kernel, new_kernel = sha(now['kernel']), sha(then['kernel'])
-    if transition_kind(old_kernel, new_kernel) == 'listed':
+    kind = transition_kind(old_kernel, new_kernel)
+    if kind == 'refused':
+        raise Refused('The installed video stack is not qualified for kernel ' + new_kernel)
+    if kind == 'listed':
         check_listed(root, old_kernel, new_kernel)
         journal = save_journal(root, 'rollback', current, older, new_kernel)
         resume(root, journal)

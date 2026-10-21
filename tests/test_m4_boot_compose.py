@@ -2,9 +2,10 @@
 # Copyright (c) 2026 KB2UKA
 """boot.bin composer: splice only kernel and devicetree, refuse everything unknown.
 
-Kernel bytes move only for a pair listed in ``KERNEL_TRANSITIONS`` whose two
-hashes share one entry in ``KNOWN_KERNELS``. A devicetree-only update does not
-consult that set. Applying a pair replaces the boot kernel and the video
+Kernel bytes move only for an exact pair listed in ``KERNEL_TRANSITIONS``.
+Both hashes must be in ``KNOWN_KERNELS`` and must share one release. Sharing
+that release is not, by itself, a transition. A devicetree-only update does
+not consult that set. Applying a pair replaces the boot kernel and the video
 manifest's ``boot_kernel_sha256`` only; owner boot arguments, initramfs, the
 devicetree, the stage2 notch preference, the audio manifest, and every other
 video-manifest key and value stay. That contract is semantic: unrelated JSON
@@ -243,11 +244,25 @@ BOOT_JOURNAL = 'var/lib/omarchy-m4/boot-compose/journal'
 BOOT_SNAPSHOTS = 'var/lib/omarchy-m4/boot-compose/snapshots'
 
 
+def approve_synthetic_k1_k2(test, module, root):
+    """Register the fixture K1→K2 pair only. Other hashes stay unlisted."""
+    pairs = set(module.KERNEL_TRANSITIONS)
+    pairs.add((sha(K1), sha(K2)))
+    pairs.add((sha(K2), sha(K1)))
+    patcher = mock.patch.object(module, 'KERNEL_TRANSITIONS', pairs)
+    patcher.start()
+    test.addCleanup(patcher.stop)
+    modules = root / 'usr/lib/modules' / module.KNOWN_KERNELS[sha(K2)]
+    if not modules.is_dir():
+        modules.mkdir(parents=True)
+
+
 def scenario_newer_devicetree_kept(test, module):
     machine = Machine(test, module, boot_bytes=boot(dtb=D4), package_kernel=K2)
     patcher = mock.patch.dict(module.KNOWN_DTBS, {sha(D4): 'cpufreq'})
     patcher.start()
     test.addCleanup(patcher.stop)
+    approve_synthetic_k1_k2(test, module, machine.root)
     machine.manifests(sha(K2))
     code, out, err = machine.run('--apply')
     test.assertEqual((code, err), (0, ''))
@@ -292,6 +307,7 @@ class ComposeTests(unittest.TestCase):
 
     def test_qualified_kernel_change(self):
         machine = Machine(self, package_kernel=K2)
+        approve_synthetic_k1_k2(self, MODULE, machine.root)
         machine.manifests(sha(K2))
         code, out, _ = machine.run('--apply')
         self.assertEqual(code, 0)

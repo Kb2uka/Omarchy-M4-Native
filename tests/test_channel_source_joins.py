@@ -247,12 +247,23 @@ class ChannelBinaryJoinTests(unittest.TestCase):
         filename = next(iter(inputs))
         del fake_joins['binaries'][filename]
         good = {path: (0o644, digest) for path, digest in CHANNEL['speaker_module'].items()}
-        good['usr/bin/m4-speaker-module'] = (0o755, hashlib.sha256((ROOT / 'tools/m4-speaker-module.py').read_bytes()).hexdigest())
+        helper = (ROOT / 'tools/m4-speaker-module.py').read_bytes()
+        good['usr/bin/m4-speaker-module'] = (0o755, hashlib.sha256(helper).hexdigest())
         good[CHECK.SPEAKER_DROP_IN] = (0o644, hashlib.sha256((ROOT / 'packaging/omarchy-m4/omarchy-m4-speaker/20-m4-speaker-module.conf').read_bytes()).hexdigest())
-        package = Path('omarchy-m4-speaker-1-1-aarch64.pkg.tar.zst')
-        info = {'pkgname': ['omarchy-m4-speaker'], 'pkgver': ['1-1'], 'arch': ['aarch64']}
+        good.update((path, (0o644, digest)) for path, digest in CHANNEL['mca_module'].items())
+        mca_drop = (ROOT / 'packaging/omarchy-m4/omarchy-m4-speaker/25-m4-mca-module.conf').read_bytes()
+        good[CHECK.MCA_DROP_IN] = (0o644, hashlib.sha256(mca_drop).hexdigest())
+        package = Path('omarchy-m4-speaker-1-2-aarch64.pkg.tar.zst')
+        info = {'pkgname': ['omarchy-m4-speaker'], 'pkgver': ['1-2'], 'arch': ['aarch64']}
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
+            installed = root / 'usr/bin/m4-speaker-module'
+            installed.parent.mkdir(parents=True)
+            installed.write_bytes(helper)
+            for path in CHANNEL['mca_module']:
+                staged = root / path
+                staged.parent.mkdir(parents=True, exist_ok=True)
+                staged.write_bytes(b'\0' * CHANNEL['mca_identity']['size'])
             with self.assertRaisesRegex(ValueError, 'downloads binary without a source join'):
                 CHECK.check_package(CHANNEL, package, info, good, root, joins=fake_joins)
 
