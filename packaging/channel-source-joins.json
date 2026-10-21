@@ -130,8 +130,12 @@
     "snd-soc-j713-group-aaad802e.ko": {
       "sha256": "aaad802eb136ff6cb915feaa123001b3eb848bc2f038d0a5b71c8e2ff35d2581",
       "license": "GPL-2.0-only",
-      "correspondence": "unverified",
+      "correspondence": "rebuilt-identical",
       "sources": [
+        {
+          "tree": "tools/build-j713-hardened.py",
+          "commit": "a12adc729363586263d9818b460e187a5fda0152"
+        },
         {
           "tree": "audio/j713/kernel/Makefile",
           "commit": "1114297c752c1c1e5245ce7a4f85507f4c53fcf7"
@@ -161,7 +165,7 @@
           "sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362"
         }
       ],
-      "evidence": "J713 speaker group driver. Source closure at 1114297c is audio/j713/kernel/Makefile, j713-speaker-group.c, j713-speaker-group.h, j713-audio.c, and j713-audio.h. The group module links j713-speaker-group.o and j713-audio.o only; MCA (mca.c, snd-soc-apple-mca) is not linked into the group. Built on the alpha.1 kernel-controller tree with reference-sound-exports.symvers (clang 21.1.8). Byte-identical rebuild is not claimed."
+      "evidence": "J713 speaker group driver. Source closure at 1114297c is audio/j713/kernel/Makefile, j713-speaker-group.c, j713-speaker-group.h, j713-audio.c, and j713-audio.h. The group module links j713-speaker-group.o and j713-audio.o only; MCA (mca.c, snd-soc-apple-mca) is not linked into the group. Built on the alpha.1 kernel-controller tree with reference-sound-exports.symvers (clang 21.1.8). Two independent fresh builds of tools/build-j713-hardened.py at a12adc729363586263d9818b460e187a5fda0152, in homebase m4-gravity-builder:20261008 (sha256:b2069edb8a23761d9211559fe632f5464aebc4cdfa9558d0f4c93211890fd7b1), reproduced snd-soc-j713-group.ko aaad802eb136ff6cb915feaa123001b3eb848bc2f038d0a5b71c8e2ff35d2581 at 52000 bytes, with matching receipts. KBUILD_BUILD_TIMESTAMP 2026-10-20 and KBUILD_BUILD_VERSION 19 were unchanged, as were config 14b4437b2b195e912a2ab614d28761acd3dc79f886d4487964aa0912616a3a6e and the Module.symvers and reference-sound exports. Source correspondence only; native qualification remains false. The build checkout was 8ee57bea0d4f26d92a47f730743ec8d5563de56d; every recipe source path listed at a12adc729363586263d9818b460e187a5fda0152 was compared with that checkout and has identical git content."
     },
     "snd-soc-j713-headphones-2e743937.ko": {
       "sha256": "2e743937b4bd8315ec6dba6bef4bbfbf197d4bf6f8688761954579192df48244",
@@ -306,6 +310,110 @@
         }
       ],
       "evidence": "Issue #58: USB external displays. libevdi.so.1.15.1 (soname libevdi.so.1, needs only libc) from the unchanged upstream v1.15.1 archive, built by display/evdi/build.sh library in homebase m4-gravity-mesa-arm-builder:20261008 (ed20ced8), --network none. Two builds in separate job directories on 2026-10-17 gave the same bytes. Used by evdi_probe on the owner's Air."
+    },
+    "j713-retained-bounds-ca1fff57-Image.gz": {
+      "sha256": "ca1fff571cf1b9d8c0b07b2e97ba0a5402f93c1b7a2d54ea2c07e24a8b70f9d0",
+      "license": "GPL-2.0-only",
+      "correspondence": "rebuilt-identical",
+      "sources": [
+        {
+          "tree": "tools/build-j713-hardened.py",
+          "commit": "a12adc729363586263d9818b460e187a5fda0152"
+        },
+        {
+          "tree": "audio/j713/kernel",
+          "commit": "a12adc729363586263d9818b460e187a5fda0152"
+        },
+        {
+          "tree": "audio/j713/imported-source.sha256",
+          "commit": "a12adc729363586263d9818b460e187a5fda0152"
+        },
+        {
+          "tree": "audio/j713/kernel-inputs.sha256",
+          "commit": "a12adc729363586263d9818b460e187a5fda0152"
+        },
+        {
+          "tree": "patches-kernel/j713-input/dockchannel-start-retry.patch",
+          "commit": "a12adc729363586263d9818b460e187a5fda0152"
+        },
+        {
+          "tree": "patches-kernel/j713-input/macsmc-key-info-lock.patch",
+          "commit": "a12adc729363586263d9818b460e187a5fda0152"
+        },
+        {
+          "tree": "patches-kernel/j713-input/dockchannel-afe-action.patch",
+          "commit": "a12adc729363586263d9818b460e187a5fda0152"
+        },
+        {
+          "tree": "patches-kernel/retained-hardening/dockchannel-packet-bounds.patch",
+          "commit": "a12adc729363586263d9818b460e187a5fda0152"
+        },
+        {
+          "tree": "patches-kernel/retained-hardening/qualified-module-certificate.pem",
+          "commit": "a12adc729363586263d9818b460e187a5fda0152"
+        },
+        {
+          "archive": "source/kernel-controller.tar.gz",
+          "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/reference-sound-exports.symvers",
+          "sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362"
+        }
+      ],
+      "evidence": "Source correspondence for Image.gz from tools/build-j713-hardened.py at a12adc729363586263d9818b460e187a5fda0152. The recipe copies audio/j713/kernel, checks audio/j713/imported-source.sha256 and audio/j713/kernel-inputs.sha256, applies the three HISTORICAL_PATCHES and patches-kernel/retained-hardening/dockchannel-packet-bounds.patch, and installs the public patches-kernel/retained-hardening/qualified-module-certificate.pem. Two independent fresh builds in homebase m4-gravity-builder:20261008 (sha256:b2069edb8a23761d9211559fe632f5464aebc4cdfa9558d0f4c93211890fd7b1) produced byte-identical Image.gz (ca1fff571cf1b9d8c0b07b2e97ba0a5402f93c1b7a2d54ea2c07e24a8b70f9d0, 18900939 bytes), all five audio modules, and receipts. KBUILD_BUILD_TIMESTAMP 2026-10-20 and KBUILD_BUILD_VERSION 19 were unchanged. config 14b4437b2b195e912a2ab614d28761acd3dc79f886d4487964aa0912616a3a6e was unchanged, and Module.symvers 5e3c2624c6a991bae503336137ce15071e51ef043edcd20ba1ad19df4e23d67c and reference-sound exports 9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362 matched before and after. Native qualification remains false. The build checkout was 8ee57bea0d4f26d92a47f730743ec8d5563de56d; every recipe source path listed at a12adc729363586263d9818b460e187a5fda0152 was compared with that checkout and has identical git content."
+    },
+    "snd-soc-apple-mca-fb941df4.ko": {
+      "sha256": "fb941df4d55c4f2093b4595e0392aaf97ffe3a250228518b18a4f70568bf7454",
+      "license": "GPL-2.0-only",
+      "correspondence": "rebuilt-identical",
+      "sources": [
+        {
+          "tree": "tools/build-j713-hardened.py",
+          "commit": "a12adc729363586263d9818b460e187a5fda0152"
+        },
+        {
+          "tree": "audio/j713/kernel",
+          "commit": "a12adc729363586263d9818b460e187a5fda0152"
+        },
+        {
+          "tree": "audio/j713/imported-source.sha256",
+          "commit": "a12adc729363586263d9818b460e187a5fda0152"
+        },
+        {
+          "tree": "audio/j713/kernel-inputs.sha256",
+          "commit": "a12adc729363586263d9818b460e187a5fda0152"
+        },
+        {
+          "tree": "patches-kernel/j713-input/dockchannel-start-retry.patch",
+          "commit": "a12adc729363586263d9818b460e187a5fda0152"
+        },
+        {
+          "tree": "patches-kernel/j713-input/macsmc-key-info-lock.patch",
+          "commit": "a12adc729363586263d9818b460e187a5fda0152"
+        },
+        {
+          "tree": "patches-kernel/j713-input/dockchannel-afe-action.patch",
+          "commit": "a12adc729363586263d9818b460e187a5fda0152"
+        },
+        {
+          "tree": "patches-kernel/retained-hardening/dockchannel-packet-bounds.patch",
+          "commit": "a12adc729363586263d9818b460e187a5fda0152"
+        },
+        {
+          "tree": "patches-kernel/retained-hardening/qualified-module-certificate.pem",
+          "commit": "a12adc729363586263d9818b460e187a5fda0152"
+        },
+        {
+          "archive": "source/kernel-controller.tar.gz",
+          "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/reference-sound-exports.symvers",
+          "sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362"
+        }
+      ],
+      "evidence": "Source correspondence for snd-soc-apple-mca.ko from the same tools/build-j713-hardened.py recipe at a12adc729363586263d9818b460e187a5fda0152 that builds Image.gz. The recipe copies audio/j713/kernel, including mca.c, and uses the same imported-source manifest, kernel-inputs manifest, three HISTORICAL_PATCHES, retained DockChannel patch, and public qualified-module-certificate.pem. Two independent fresh builds in homebase m4-gravity-builder:20261008 (sha256:b2069edb8a23761d9211559fe632f5464aebc4cdfa9558d0f4c93211890fd7b1) produced byte-identical snd-soc-apple-mca.ko (fb941df4d55c4f2093b4595e0392aaf97ffe3a250228518b18a4f70568bf7454, 79152 bytes), Image.gz, the other four audio modules, and receipts. KBUILD_BUILD_TIMESTAMP 2026-10-20 and KBUILD_BUILD_VERSION 19 were unchanged. config 14b4437b2b195e912a2ab614d28761acd3dc79f886d4487964aa0912616a3a6e was unchanged, and Module.symvers 5e3c2624c6a991bae503336137ce15071e51ef043edcd20ba1ad19df4e23d67c and reference-sound exports 9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362 matched before and after. Native qualification remains false. The build checkout was 8ee57bea0d4f26d92a47f730743ec8d5563de56d; every recipe source path listed at a12adc729363586263d9818b460e187a5fda0152 was compared with that checkout and has identical git content."
     }
   }
 }
