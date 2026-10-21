@@ -5,10 +5,15 @@
 
 Runs on a hosted runner as an ordinary user with sudo. A throwaway key signs a
 local copy of the repository. The sandbox carries an alpha.1-style
-linux-m4-omarchy -1, a synthetic boot.bin around the real packaged kernel and
+linux-m4-omarchy -1, a synthetic boot.bin around the real base kernel and
 devicetree, and stand-ins for the protected video, Widevine, audio and speaker
-files. The setup script must connect it twice without changing those files or
-boot.bin, and pacman must refuse a database signed by an untrusted key.
+files. The first signed update moves that boot object to the retained-bounds
+kernel and changes only the video boot_kernel_sha256 plus boot.bin. A second
+run leaves that state in place. pacman must refuse a database signed by an
+untrusted key.
+
+The sandbox installs the legacy stubs with --noscriptlet and then runs
+m4-boot-compose itself. That is not proof the ALPM hook fired.
 """
 import argparse
 import hashlib
@@ -48,6 +53,16 @@ package() {
   printf 'alpha.1 package kernel' | install -Dm644 /dev/stdin "$pkgdir/usr/lib/omarchy-m4/Image.gz"
 }
 ''' % RELEASE
+OLD_SPEAKER = '''pkgname=omarchy-m4-speaker
+pkgver=1
+pkgrel=1
+arch=(aarch64)
+depends=(python)
+package() { install -Dm644 /dev/null "$pkgdir/usr/bin/m4-speaker-module"; }
+'''
+# Live module the next boot would replace. Left in place until a separate boot qualification.
+MCA_LIVE = f'usr/lib/omarchy/j713-audio/{RELEASE}/modules/snd-soc-apple-mca.ko'
+MCA_STAND_IN = b'legacy mca stand-in\n'
 PROTECTED = {
     'opt/m4-video/20261011/mesa/lib/libgallium-26.3.0-devel.so': b'decoder mesa',
     'opt/m4-gpu/asahi_m4.ko': b'gpu module',
@@ -120,7 +135,7 @@ def boot_bin(kernel, dtb, loader):
     return loader + args + kernel + dtb + b'm1n1_initramfs' + struct.pack('<I', len(initramfs)) + initramfs
 
 
-def sandbox(root, old, stub):
+def sandbox(root, old, stub, old_speaker):
     for name in ('var/lib/pacman', 'var/cache/pacman/pkg', 'var/log', 'etc/pacman.d/hooks',
                  'etc/pacman.d/gnupg', 'srv/core', 'boot/efi/omarchy', 'sys/firmware/devicetree/base'):
         (root / name).mkdir(parents=True, exist_ok=True)
@@ -137,24 +152,47 @@ def sandbox(root, old, stub):
         (root / name).write_bytes(data)
     kernel_sha = CHANNEL['kernel']['image_sha256']
     for name, data in (('etc/omarchy/j713-video-manifest.json',
-                        {'boot_kernel_sha256': kernel_sha, 'kernel_release': RELEASE}),
+                        {'boot_kernel_sha256': kernel_sha, 'kernel_release': RELEASE,
+                         'owner_panel': 'custom-kept'}),
                        ('etc/omarchy/j713-audio-manifest.json', {'kernel_release': RELEASE})):
         (root / name).parent.mkdir(parents=True, exist_ok=True)
         (root / name).write_text(json.dumps(data) + '\n')
+    live = root / MCA_LIVE
+    live.parent.mkdir(parents=True, exist_ok=True)
+    live.write_bytes(MCA_STAND_IN)
     sudo('chown', '-R', 'root:root', root)
     pacman = ['pacman', '--root', root, '--dbpath', root / 'var/lib/pacman', '--config', root / 'etc/pacman.conf',
               '--cachedir', root / 'var/cache/pacman/pkg', '--gpgdir', root / 'etc/pacman.d/gnupg',
               '--hookdir', root / 'etc/pacman.d/hooks', '--logfile', root / 'var/log/pacman.log']
     sudo(*pacman, '-Sy')
-    sudo(*pacman, '-U', '--noconfirm', '--noscriptlet', stub, old)
+    sudo(*pacman, '-U', '--noconfirm', '--noscriptlet', stub, old, old_speaker)
     sudo('pacman-key', '--gpgdir', root / 'etc/pacman.d/gnupg', '--init')
     return pacman
 
 
 def snapshot(root):
     names = [*PROTECTED, 'boot/efi/omarchy/boot.bin', 'etc/omarchy/j713-video-manifest.json',
-             'etc/omarchy/j713-audio-manifest.json']
-    return {name: sha(Path(root / name).read_bytes()) for name in names}
+             'etc/omarchy/j713-audio-manifest.json', MCA_LIVE]
+    return {name: sha((root / name).read_bytes()) for name in names}
+
+
+def base_payload(package, scratch):
+    """Extract the unchanged base kernel package and return its file table."""
+    checker = runpy.run_path(str(ROOT / 'tools/check-m4-packages.py'))
+    dest = scratch / 'base-kernel'
+    dest.mkdir()
+    _info, files = checker['extract'](package, dest)
+    return files
+
+
+def assert_base_kernel(root, files):
+    """The installed base image and every module still match that package."""
+    compared = 0
+    for path, (_mode, digest) in files.items():
+        if path == 'usr/lib/omarchy-m4/Image.gz' or path.startswith('usr/lib/modules/'):
+            require(sha((root / path).read_bytes()) == digest, 'Base kernel file differs: ' + path)
+            compared += 1
+    require(compared > 1000, 'Base kernel comparison did not cover the module tree')
 
 
 def main():
@@ -172,18 +210,23 @@ def main():
             local.mkdir()
             makepkg(scratch / 'stub', STUB, local)
             makepkg(scratch / 'old-kernel', OLD_KERNEL, local)
+            makepkg(scratch / 'old-speaker', OLD_SPEAKER, local)
             env, fingerprint, armored = new_key(scratch / 'gnupg', 'M4 channel e2e <e2e@invalid>')
             signed_repository(scratch / 'repo', packages, env, fingerprint)
             root = scratch / 'root'
             root.mkdir()
             kernel = member(by_name['linux-m4-omarchy'], 'usr/lib/omarchy-m4/Image.gz')
+            require(sha(kernel) == CHANNEL['kernel']['image_sha256'], 'Base package image is not the pinned kernel')
             dtb = member(by_name['omarchy-m4-boot'], 'usr/lib/omarchy-m4/j713.dtb')
             (root / 'boot/efi/omarchy').mkdir(parents=True)
             loader = member(by_name['omarchy-m4-boot'], 'usr/lib/omarchy-m4/backlight/stage2-hidden.bin')
             (root / 'boot/efi/omarchy/boot.bin').write_bytes(boot_bin(kernel, dtb, loader))
             old, = local.glob('linux-m4-omarchy-*.pkg.tar.zst')
+            old_speaker, = local.glob('omarchy-m4-speaker-1-1-*.pkg.tar.zst')
             stub, = local.glob('e2e-system-*.pkg.tar.zst')
-            pacman = sandbox(root, old, stub)
+            # --noscriptlet: the legacy stubs do not run hooks. Later setup calls the composer explicitly.
+            pacman = sandbox(root, old, stub, old_speaker)
+            base_files = base_payload(by_name['linux-m4-omarchy'], scratch)
             before = snapshot(root)
             key = scratch / 'key.asc'
             key.write_text(armored)
@@ -192,16 +235,17 @@ def main():
             plan = json.loads(sudo(*setup, capture_output=True, text=True).stdout)
             require(plan['applied'] is False and plan['pacman_conf_changes'], 'Inspection did not plan the change')
             require(snapshot(root) == before, 'Inspection changed files')
-            # The first run is the setup script an Air already has from omarchy-m4-boot 1-5,
-            # which lists none of the GPU, headphone, CPU, USB-display or backlight
-            # packages. The boot package's dependencies must install all of them.
+            # Synthetic selector for this sandbox, not a copy of a released setup script.
+            # It omits the packages an older request did not name, including speaker.
+            # omarchy-m4-boot's versioned dependency must still bring speaker 1-2.
+            omitted = BROUGHT_BY_BOOT + ('omarchy-m4-speaker',)
             source = (ROOT / 'tools/m4-channel-setup.py').read_text()
             listed = source[source.index('PACKAGES = ('):source.index(')', source.index('PACKAGES = (')) + 1]
-            older = scratch / 'm4-channel-setup-1-5.py'
+            older = scratch / 'm4-channel-setup-older.py'
             older.write_text(source.replace(listed, 'PACKAGES = (' + ', '.join(
-                repr(p) for p in CHANNEL['packages'] if p not in BROUGHT_BY_BOOT) + ')'))
-            require(not any(p in older.read_text().split('PACKAGES = (')[1].split(')')[0] for p in BROUGHT_BY_BOOT),
-                    'The 1-5 setup script stand-in still lists a package the boot package brings')
+                repr(p) for p in CHANNEL['packages'] if p not in omitted) + ')'))
+            require(not any(p in older.read_text().split('PACKAGES = (')[1].split(')')[0] for p in omitted),
+                    'The older request stand-in still lists a package the boot package brings')
             results = []
             for attempt in range(2):
                 command = [setup[0], older, *setup[2:]] if attempt == 0 else setup
@@ -210,15 +254,44 @@ def main():
                 require(result.returncode == 0, f'Setup attempt {attempt + 1} failed')
                 results.append(json.loads(result.stdout))
                 if attempt == 0:
-                    for brought in BROUGHT_BY_BOOT:
+                    for brought in omitted:
                         require(brought not in results[0]['install'] and
                                 run(*pacman, '-Q', brought, check=False).returncode == 0,
-                                'The first run from the 1-5 setup script did not install ' + brought)
+                                'The first run from the older request did not install ' + brought)
+                    require('omarchy-m4-speaker 1-2' in run(*pacman, '-Q', 'omarchy-m4-speaker',
+                                                           capture_output=True, text=True).stdout,
+                            'The boot dependency did not upgrade the speaker stub to 1-2')
+                    after_first = snapshot(root)
+                    assert_base_kernel(root, base_files)
                 conf = (root / 'etc/pacman.conf').read_text()
                 require(conf.count('Include = ' + str(root / 'etc/pacman.d/omarchy-m4.conf')) == 1,
                         'The channel include is missing or duplicated')
-            require(all(r['status'].startswith('connected') and r['boot'] == 'current' and
-                        r['restart_needed'] is False for r in results), 'Setup did not report a current boot.bin')
+            require(results[0]['status'].startswith('connected') and
+                    results[0]['boot'] == 'updated; takes effect at next boot' and
+                    results[0]['restart_needed'] is True, 'The first update did not move the old boot object')
+            require(results[1]['status'].startswith('connected') and results[1]['boot'] == 'current' and
+                    results[1]['restart_needed'] is True,
+                    'The second run was not idempotent while the staged MCA still differs from the live stand-in')
+            require(snapshot(root) == after_first, 'The second run changed boot, video, or a protected file')
+            assert_base_kernel(root, base_files)
+            compose = runpy.run_path(str(ROOT / 'tools/m4-boot-compose.py'))
+            before_boot = compose['parse']((root / 'boot/efi/omarchy/boot.bin.previous').read_bytes())
+            after_boot = compose['parse']((root / 'boot/efi/omarchy/boot.bin').read_bytes())
+            require(sha(before_boot['kernel']) == CHANNEL['kernel']['image_sha256'] and
+                    sha(after_boot['kernel']) == CHANNEL['boot_kernel']['image_sha256'],
+                    'boot.bin did not move from the base kernel to the retained-bounds image')
+            require(all(before_boot[name] == after_boot[name] for name in ('bootargs', 'dtb', 'initramfs', 'loader')),
+                    'The boot update changed more than the kernel')
+            video = json.loads((root / 'etc/omarchy/j713-video-manifest.json').read_text())
+            require(video == {'boot_kernel_sha256': CHANNEL['boot_kernel']['image_sha256'],
+                              'kernel_release': RELEASE, 'owner_panel': 'custom-kept'},
+                    'The video manifest changed something other than boot_kernel_sha256')
+            audio = json.loads((root / 'etc/omarchy/j713-audio-manifest.json').read_text())
+            require(audio == {'kernel_release': RELEASE}, 'The audio manifest changed')
+            protected_now = {name: sha((root / name).read_bytes()) for name in PROTECTED}
+            protected_before = {name: before[name] for name in PROTECTED}
+            require(protected_now == protected_before, 'A protected file changed')
+            require((root / MCA_LIVE).read_bytes() == MCA_STAND_IN, 'The live MCA stand-in was replaced')
             repos = run('pacman-conf', '--config', root / 'etc/pacman.conf', '--repo-list',
                         capture_output=True, text=True).stdout.split()
             require(repos == ['omarchy-m4', 'core'], 'The channel is not searched first: ' + ' '.join(repos))
@@ -229,7 +302,7 @@ def main():
             require(sha((root / 'usr/lib/omarchy-m4/Image.gz').read_bytes()) == CHANNEL['kernel']['image_sha256'],
                     'The installed kernel image is not the pinned kernel')
             require(len(list((root / 'usr/lib/modules' / RELEASE).rglob('*.ko'))) > 1000, 'Modules are missing')
-            require(snapshot(root) == before, 'A protected file or boot.bin changed')
+            require(snapshot(root) == after_first, 'Staging checks changed boot, video, or a protected file')
             for path, digest in CHANNEL['gst_audio'].items():
                 require(sha((root / path).read_bytes()) == digest, 'GStreamer sink missing or wrong: ' + path)
             require((root / 'usr/lib/systemd/system/speakersafetyd-j713.service.d/50-realtime.conf').is_file(),
@@ -238,6 +311,11 @@ def main():
                 require(sha((root / path).read_bytes()) == digest, 'Staged speaker module missing or wrong: ' + path)
             require((root / 'usr/lib/systemd/system/m4-j713-audio-register.service.d/20-m4-speaker-module.conf').is_file()
                     and os.access(root / 'usr/bin/m4-speaker-module', os.X_OK), 'The speaker module step is missing')
+            for path, digest in CHANNEL['mca_module'].items():
+                require(sha((root / path).read_bytes()) == digest, 'Staged MCA module missing or wrong: ' + path)
+            mca_drop = ROOT / 'packaging/omarchy-m4/omarchy-m4-speaker/25-m4-mca-module.conf'
+            installed_drop = root / 'usr/lib/systemd/system/m4-j713-audio-register.service.d/25-m4-mca-module.conf'
+            require(installed_drop.read_bytes() == mca_drop.read_bytes(), 'The MCA drop-in is not the packaged file')
             for path, digest in CHANNEL['gpu_module'].items():
                 require(sha((root / path).read_bytes()) == digest, 'Staged GPU module missing or wrong: ' + path)
             require((root / 'usr/lib/systemd/system/m4-gpu.service.d/20-m4-gpu-module.conf').is_file()
