@@ -28,6 +28,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -608,6 +609,58 @@ class SpeakerModule(unittest.TestCase):
         self.put(MCA_STAGED, MCA_NEW)
         self.put(MODULE.STAGED, NEW)
         return document
+
+    def test_rollback_and_boot_markers_are_owner_only(self):
+        """A new rollback marker and the hold written on the next boot are empty and mode 0600.
+
+        The process umask is 0 for the request and the boot, so the mode is the
+        creation mode, and the previous umask is restored afterwards. Speaker
+        and MCA are separate: the other component's module and markers stay.
+        """
+        previous = os.umask(0)
+        try:
+            for name in ('speaker', 'mca'):
+                with self.subTest(component=name):
+                    self.setUp()
+                    selected = self.component(name)
+                    other_stage = self.root / (MCA_STATE if name == 'speaker' else MODULE.STATE)
+                    self.install_both(OLD, STOCK, MCA_OLD, identity(MCA_OLD, MCA_OLD_NOTE),
+                                      {'gain': 2, 'label': name})
+                    self.assertEqual(self.run_tool('--boot', *selected['args'])[0], 0)
+                    stage = self.root / selected['state']
+                    other = self.root / selected['other_module']
+                    self.assertEqual(other.read_bytes(), selected['other_bytes'])
+                    self.assertFalse((stage / 'rollback').exists())
+                    self.assertFalse((stage / 'hold').exists())
+                    self.assertFalse((other_stage / 'rollback').exists())
+                    self.assertFalse((other_stage / 'hold').exists())
+                    code, report = self.run_tool('--rollback', *selected['args'])
+                    self.assertEqual(code, 0, self.last_error)
+                    self.assertEqual(report['status'],
+                                     'rollback requested; restart to restore the alpha.1 ' + name + ' module')
+                    rollback_marker = stage / 'rollback'
+                    self.assertTrue(rollback_marker.is_file())
+                    self.assertFalse(rollback_marker.is_symlink())
+                    self.assertEqual(rollback_marker.read_bytes(), b'')
+                    self.assertEqual(rollback_marker.stat().st_mode & 0o777, 0o600)
+                    self.assertFalse((stage / 'hold').exists())
+                    self.assertEqual(other.read_bytes(), selected['other_bytes'])
+                    self.assertFalse((other_stage / 'rollback').exists())
+                    self.assertFalse((other_stage / 'hold').exists())
+                    code, report = self.run_tool('--boot', *selected['args'])
+                    self.assertEqual(code, 0, self.last_error)
+                    self.assertEqual(report['status'], 'rolled back to the alpha.1 ' + name + ' module')
+                    hold = stage / 'hold'
+                    self.assertTrue(hold.is_file())
+                    self.assertFalse(hold.is_symlink())
+                    self.assertEqual(hold.read_bytes(), b'')
+                    self.assertEqual(hold.stat().st_mode & 0o777, 0o600)
+                    self.assertFalse(rollback_marker.exists())
+                    self.assertEqual(other.read_bytes(), selected['other_bytes'])
+                    self.assertFalse((other_stage / 'rollback').exists())
+                    self.assertFalse((other_stage / 'hold').exists())
+        finally:
+            os.umask(previous)
 
     def test_rollback_power_cut_before_clearing_intent_finishes_on_retry(self):
         """Stock bytes and pins with hold and the rollback marker still present.
