@@ -140,9 +140,13 @@ def regular(path):
 
 
 def marker(path):
-    """Create an empty marker and fsync its directory."""
+    """Create an empty owner-only marker and fsync its directory.
+
+    The mode applies only when this call creates the file. An existing marker
+    keeps its mode and contents.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o644)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     os.close(fd)
     directory = os.open(path.parent, os.O_DIRECTORY)
     try:
