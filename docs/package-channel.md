@@ -384,6 +384,9 @@ whose public-channel counterpart is older. An empty transaction still runs
 boot composition and reports recovery/restart status. Query errors or diagnostics,
 including configuration warnings, stop installation; resolve the reported cause
 before retrying. This selection does not perform a general system upgrade.
+The restart flag describes work observed by that updater run; it does not
+persist a reboot acknowledgement for boot-only changes. Follow the restart
+instruction from the original update even if a later rerun reports no new work.
 
 MCA inspection is `sudo m4-speaker-module --component mca`. A rollback request
 is `sudo m4-speaker-module --component mca --rollback`; it requires a verified
