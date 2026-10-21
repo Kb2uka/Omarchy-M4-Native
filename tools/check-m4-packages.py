@@ -29,6 +29,8 @@ CHANNEL = ROOT / 'packaging/omarchy-m4/channel.json'
 REALTIME = 'usr/lib/systemd/system/speakersafetyd-j713.service.d/50-realtime.conf'
 NOTCH_UNIT = 'usr/lib/systemd/user/omarchy-m4-notch.service'
 SPEAKER_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/20-m4-speaker-module.conf'
+MCA_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/25-m4-mca-module.conf'
+SPEAKER_DEP = 'omarchy-m4-speaker>=1-5'
 GPU_DROP_IN = 'usr/lib/systemd/system/m4-gpu.service.d/20-m4-gpu-module.conf'
 HEADPHONES_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/30-m4-headphones.conf'
 CPU_IDLE_UNIT = 'usr/lib/systemd/system/m4-cpu-idle.service'
@@ -279,6 +281,23 @@ def check_package(channel, package, info, files, root, joins=None):
         require('omarchy-m4-cpu' in names, 'Boot package must require the CPU idle package')
         require('omarchy-m4-evdi' in names, 'Boot package must require the USB display package')
         require('omarchy-m4-backlight' in names, 'Boot package must require the native backlight package')
+        require(SPEAKER_DEP in info.get('depend', []),
+                'Boot package must require ' + SPEAKER_DEP)
+        boot_kernel = channel['boot_kernel']
+        image = files.get(boot_kernel['path'])
+        require(image and image[1] == boot_kernel['image_sha256'],
+                'Boot package does not carry the pinned boot kernel')
+        require((root / boot_kernel['path']).stat().st_size == boot_kernel['image_bytes'],
+                'Boot kernel image size differs from the pin')
+        require(boot_kernel['release'] == kernel['release'],
+                'Boot kernel release differs from the base kernel')
+        require(policy['KERNEL'] == boot_kernel['path'],
+                'Composer kernel path is not the retained-bounds image')
+        require(policy['KNOWN_KERNELS'].get(boot_kernel['image_sha256']) == boot_kernel['release'],
+                'Composer does not map the boot kernel release')
+        forward = (kernel['image_sha256'], boot_kernel['image_sha256'])
+        require(forward in policy['KERNEL_TRANSITIONS'] and (forward[1], forward[0]) in policy['KERNEL_TRANSITIONS'],
+                'Boot kernel transition pair is not exact')
         # Both notch preferences must carry the display handoff required by this DT.
         for path, digest in channel['backlight_loaders'].items():
             require(files.get(path) == (0o644, digest), 'Staged display handoff stage2 differs from the pin: ' + path)
@@ -299,6 +318,17 @@ def check_package(channel, package, info, files, root, joins=None):
         require(files.get('usr/bin/m4-speaker-module') == (0o755, sha(tool)), 'Packaged speaker module tool differs')
         drop_in = (ROOT / 'packaging/omarchy-m4/omarchy-m4-speaker/20-m4-speaker-module.conf').read_bytes()
         require(files.get(SPEAKER_DROP_IN) == (0o644, sha(drop_in)), 'Speaker module drop-in differs')
+        mca_drop = (ROOT / 'packaging/omarchy-m4/omarchy-m4-speaker/25-m4-mca-module.conf').read_bytes()
+        require(files.get(MCA_DROP_IN) == (0o644, sha(mca_drop)), 'MCA module drop-in differs')
+        identity = channel['mca_identity']
+        helper = runpy.run_path(str(root / 'usr/bin/m4-speaker-module'))
+        staged = helper['MCA_STAGED']
+        require(files.get(staged, (0, ''))[1] == channel['mca_module'].get(staged),
+                'Staged MCA module differs from the pin: ' + staged)
+        require((root / staged).stat().st_size == identity['size'],
+                'Staged MCA module size differs from the pin')
+        require(helper['MCA_FIXED'] == identity and channel['mca_module'].get(staged) == identity['sha256'],
+                'MCA helper identity differs from the channel pin')
     elif name == 'omarchy-m4-gpu':
         for path, digest in channel['gpu_module'].items():
             require(files.get(path, (0, ''))[1] == digest, 'Staged GPU module differs from the pin: ' + path)

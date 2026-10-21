@@ -197,6 +197,16 @@ def guard(root, data):
                       + str(root / PACMAN_LOCK) + ' was left behind and can be removed)') from None
     os.close(fd)
     try:
+        # Before any backup or boot write: a pending or corrupt compose journal owns boot.bin.
+        compose = composer()
+        try:
+            journal = compose.load_journal(root)
+            command = None if journal is None else compose.resume_command(root, journal)
+        except compose.Refused as error:
+            raise Refused(str(error)) from error
+        if command is not None:
+            raise Refused('A ' + journal['operation'] +
+                          ' boot transition is pending in the journal. Resume it first with ' + command)
         require((root / BOOT).read_bytes() == data, 'boot.bin changed while working; nothing changed, run it again')
         yield
     finally:
