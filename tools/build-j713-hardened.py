@@ -45,6 +45,12 @@ HISTORICAL_PATCH_SHA256 = {
 }
 RETAINED_PATCH = 'patches-kernel/retained-hardening/dockchannel-packet-bounds.patch'
 RETAINED_PATCH_SHA256 = '6f628efb429dfb4ff76f77db742dcbfd2848f3715b6936c9ab759cebe9d21583'
+MODULE_CERTIFICATE = 'patches-kernel/retained-hardening/qualified-module-certificate.pem'
+MODULE_CERTIFICATE_SHA256 = 'db92215adb9de23e9bba226ca17332b27c3bff5981346163cc68a4239fcd40b5'
+MODULE_CERTIFICATE_DER_SHA256 = '4b61a05d46fbbdd907dc03ea9b96ebdad0bec4dc11b3a7cf874243efeb1ae66a'
+MODULE_SIG_KEY = 'certs/qualified-module-certificate.pem'
+SIGNING_KEY_DER = 'certs/signing_key.x509'
+SIGNING_KEY_DER_BYTES = 1324
 IMPORTED_MANIFEST = AUDIO / 'imported-source.sha256'
 KBUILD_ENV = {
     'KBUILD_BUILD_TIMESTAMP': '2026-10-20',
@@ -116,6 +122,31 @@ def require_pinned_inputs(archive, exports):
         source = AUDIO / name
         if not source.is_file() or sha256_file(source) != pinned:
             refuse('imported source mismatch: ' + name)
+    require_module_certificate(resolve_patch(MODULE_CERTIFICATE))
+
+
+def require_module_certificate(path):
+    """The qualified certificate is a public PEM. The build does not generate a key."""
+    if path.is_symlink() or not path.is_file():
+        refuse('module certificate must be a regular file: ' + str(path))
+    if sha256_file(path) != MODULE_CERTIFICATE_SHA256:
+        refuse('module certificate does not match the pinned hash')
+
+
+def copy_module_certificate(kernel):
+    source = resolve_patch(MODULE_CERTIFICATE)
+    destination = kernel / 'certs/qualified-module-certificate.pem'
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(source.read_bytes())
+
+
+def require_signing_key_der(kernel):
+    """extract-cert writes this DER from the pinned public PEM. It is not a signature."""
+    path = kernel / SIGNING_KEY_DER
+    if path.is_symlink() or not path.is_file():
+        refuse('signing_key.x509 must be a regular file')
+    if path.stat().st_size != SIGNING_KEY_DER_BYTES or sha256_file(path) != MODULE_CERTIFICATE_DER_SHA256:
+        refuse('signing_key.x509 does not match the pinned public certificate')
 
 
 def require_extraction_python():
@@ -264,14 +295,18 @@ def prepare(archive, exports, image, output):
     require_historical_tree(kernel)
     apply_patch(kernel, resolve_patch(RETAINED_PATCH))
     copy_audio_modules(output)
+    copy_module_certificate(kernel)
 
 
 def docker_script():
-    common = 'make -C /kernel ARCH=arm64 LLVM=1 LOCALVERSION= -j6'
+    # A non-default CONFIG_MODULE_SIG_KEY skips certs/Makefile key generation.
+    # extract-cert reads the public PEM only. CONFIG_MODULE_SIG_ALL stays as archived.
+    key = 'CONFIG_MODULE_SIG_KEY=' + MODULE_SIG_KEY
+    common = 'make -C /kernel ARCH=arm64 LLVM=1 LOCALVERSION= %s -j6' % key
     modules = (
-        'make -C /kernel ARCH=arm64 LLVM=1 LOCALVERSION= KCFLAGS=-Werror '
+        'make -C /kernel ARCH=arm64 LLVM=1 LOCALVERSION= %s KCFLAGS=-Werror '
         'J713_PROFILE=%s KBUILD_EXTRA_SYMBOLS=/reference-sound-exports.symvers '
-        'M=/job -j6 modules' % PROFILE)
+        'M=/job -j6 modules' % (key, PROFILE))
     return 'set -euo pipefail\n' + common + ' Image.gz\n' + modules + '\n'
 
 
@@ -312,6 +347,8 @@ def require_unchanged(kernel, exports, before_symvers, before_exports, before_vm
     release = (kernel / 'include/config/kernel.release').read_text().strip()
     if release != KERNEL_RELEASE:
         refuse('kernel release drifted')
+    require_module_certificate(kernel / 'certs/qualified-module-certificate.pem')
+    require_signing_key_der(kernel)
     return after_symvers, after_exports, after_vmlinux
 
 
@@ -354,6 +391,9 @@ def publish(output, kernel, archive, exports, before_symvers, after_symvers, bef
         'kernel_release': KERNEL_RELEASE,
         'config_sha256': sha256_file(kernel / '.config'),
         'profile': PROFILE,
+        'module_certificate_sha256': MODULE_CERTIFICATE_SHA256,
+        'module_certificate_der_sha256': MODULE_CERTIFICATE_DER_SHA256,
+        'make_overrides': {'CONFIG_MODULE_SIG_KEY': MODULE_SIG_KEY},
         'patches': {**HISTORICAL_PATCH_SHA256, RETAINED_PATCH: RETAINED_PATCH_SHA256},
         'build_environment': dict(KBUILD_ENV),
         'imported_source_sha256': sha256_file(IMPORTED_MANIFEST),

@@ -25,6 +25,7 @@ release helpers do. Expected production API:
     RETAINED_PATCH_SHA256 = sha256 of that file
     MODULE_CERTIFICATE = 'patches-kernel/retained-hardening/qualified-module-certificate.pem'
     MODULE_CERTIFICATE_SHA256 = sha256 of that public certificate
+    MODULE_CERTIFICATE_DER_SHA256 = sha256 of its 1324-byte DER form
     IMPORTED_MANIFEST = ROOT / 'audio/j713/imported-source.sha256'
     KBUILD_ENV = {
         'KBUILD_BUILD_TIMESTAMP': '2026-10-20',
@@ -115,11 +116,15 @@ also build()'s return value:
              supplemental_before, supplemental_after},
     kernel_release, config_sha256, profile 'conservative-v1',
     module_certificate_sha256 = MODULE_CERTIFICATE_SHA256,
+    module_certificate_der_sha256 = MODULE_CERTIFICATE_DER_SHA256,
     make_overrides['CONFIG_MODULE_SIG_KEY'] =
         'certs/qualified-module-certificate.pem'
 
 require_unchanged() refuses publication when the copied certificate is no
-longer that pin. A docker mutation of the copy writes no receipt.
+longer that pin, or when kernel/certs/signing_key.x509 is missing, a symlink,
+or not the 1324-byte DER of that PEM (MODULE_CERTIFICATE_DER_SHA256). A docker
+mutation of either file writes no receipt. The mock writes that DER with
+ssl.PEM_cert_to_DER_cert before a mutate hook runs.
 
 Patch and docker go through this module's subprocess.run.
 """
@@ -129,6 +134,7 @@ import io
 import json
 import os
 from pathlib import Path
+import ssl
 import stat
 import subprocess
 import tarfile
@@ -159,7 +165,9 @@ RETAINED_PATCH = ROOT / 'patches-kernel/retained-hardening/dockchannel-packet-bo
 KERNEL_RELEASE = '7.1.9-m4-gpu-backport-20261008'
 MODULE_CERTIFICATE = 'patches-kernel/retained-hardening/qualified-module-certificate.pem'
 MODULE_CERTIFICATE_SHA256 = 'db92215adb9de23e9bba226ca17332b27c3bff5981346163cc68a4239fcd40b5'
+MODULE_CERTIFICATE_DER_SHA256 = '4b61a05d46fbbdd907dc03ea9b96ebdad0bec4dc11b3a7cf874243efeb1ae66a'
 MODULE_SIG_KEY = 'certs/qualified-module-certificate.pem'
+SIGNING_KEY_DER_BYTES = 1324
 EXPECTED_ENV = {
     'KBUILD_BUILD_TIMESTAMP': '2026-10-20',
     'KBUILD_BUILD_USER': 'KB2UKA',
@@ -554,6 +562,11 @@ class HardenedBuildTests(unittest.TestCase):
                     guest = guest.split(':', 1)[0]
                     mounts[guest] = Path(host)
                 index += 1
+            # Same path the kernel build writes: <kernel>/certs/signing_key.x509.
+            der_path = mounts['/kernel'] / 'certs/signing_key.x509'
+            der_path.parent.mkdir(parents=True, exist_ok=True)
+            pem = (ROOT / MODULE_CERTIFICATE).read_bytes().decode('ascii')
+            der_path.write_bytes(ssl.PEM_cert_to_DER_cert(pem))
             if mutate:
                 mutate(mounts)
             else:
@@ -778,12 +791,16 @@ class HardenedBuildTests(unittest.TestCase):
         path = self.certificate_path()
         data = path.read_bytes()
         self.assertEqual(text_digest(data), MODULE_CERTIFICATE_SHA256)
+        der = ssl.PEM_cert_to_DER_cert(data.decode('ascii'))
+        self.assertEqual(len(der), SIGNING_KEY_DER_BYTES)
+        self.assertEqual(text_digest(der), MODULE_CERTIFICATE_DER_SHA256)
         self.assertNotIn(b'PRIVATE KEY', data)
         self.assertIn(b'-----BEGIN CERTIFICATE-----', data)
         self.assertFalse(path.is_symlink())
         self.assertFalse(Path(MODULE_CERTIFICATE).is_absolute())
         self.assertEqual(getattr(tool, 'MODULE_CERTIFICATE', None), MODULE_CERTIFICATE)
         self.assertEqual(getattr(tool, 'MODULE_CERTIFICATE_SHA256', None), MODULE_CERTIFICATE_SHA256)
+        self.assertEqual(getattr(tool, 'MODULE_CERTIFICATE_DER_SHA256', None), MODULE_CERTIFICATE_DER_SHA256)
 
     def test_build_overrides_module_sig_key_and_records_pinned_certificate(self):
         archive, exports, files = self.prepared_inputs()
@@ -803,6 +820,12 @@ class HardenedBuildTests(unittest.TestCase):
         self.assertFalse(copied.is_symlink())
         self.assertEqual(copied.read_bytes(), committed)
         self.assertEqual(receipt['module_certificate_sha256'], MODULE_CERTIFICATE_SHA256)
+        self.assertEqual(receipt['module_certificate_der_sha256'], MODULE_CERTIFICATE_DER_SHA256)
+        der = output / 'kernel/certs/signing_key.x509'
+        self.assertTrue(der.is_file())
+        self.assertFalse(der.is_symlink())
+        self.assertEqual(der.stat().st_size, SIGNING_KEY_DER_BYTES)
+        self.assertEqual(digest(der), MODULE_CERTIFICATE_DER_SHA256)
         self.assertEqual(receipt['make_overrides']['CONFIG_MODULE_SIG_KEY'], MODULE_SIG_KEY)
         self.assertEqual((output / 'kernel/.config').read_bytes(), files['.config'])
         self.assertEqual(self.certificate_path().read_bytes(), committed)
@@ -856,6 +879,36 @@ class HardenedBuildTests(unittest.TestCase):
         self.assertFalse((output / 'receipt.json').exists())
         self.assertFalse((output / 'Image.gz').exists())
         self.assertEqual(self.certificate_path().read_bytes(), committed)
+
+    def test_missing_or_mutated_signing_der_writes_no_receipt(self):
+        archive, exports, _files = self.prepared_inputs()
+
+        def write_outputs(mounts):
+            kernel = mounts['/kernel']
+            image = kernel / 'arch/arm64/boot/Image.gz'
+            image.parent.mkdir(parents=True, exist_ok=True)
+            image.write_bytes(b'candidate-image')
+            for name in tool.AUDIO_MODULES:
+                (mounts['/job'] / name).write_bytes(b'module:' + name.encode())
+
+        def missing(mounts):
+            write_outputs(mounts)
+            (mounts['/kernel'] / 'certs/signing_key.x509').unlink()
+
+        def mutated(mounts):
+            write_outputs(mounts)
+            der = mounts['/kernel'] / 'certs/signing_key.x509'
+            der.write_bytes(der.read_bytes() + b'\x00')
+
+        for name, mutate in {'missing': missing, 'mutated': mutated}.items():
+            output = self.base / ('der-' + name)
+            _calls, run = self.docker_runner(mutate=mutate)
+            with self.subTest(der=name):
+                with mock.patch.object(tool.subprocess, 'run', side_effect=run):
+                    with self.assertRaises(RuntimeError):
+                        tool.build(archive, exports, self.image(), output)
+                self.assertFalse((output / 'receipt.json').exists())
+                self.assertFalse((output / 'Image.gz').exists())
 
 
 if __name__ == '__main__':
