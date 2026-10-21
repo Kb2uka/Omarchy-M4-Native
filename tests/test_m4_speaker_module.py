@@ -18,8 +18,11 @@ finishes it. The reverse (old module bytes, new pins) is resumed only when
 this component's rollback marker and a valid backup are present. A fixed
 component with no valid stock module and manifest backup refuses ``--rollback``
 before that marker is written. Read-only inspection of a held stock rollback
-reports that nothing applies. A markerless reverse state describes the refusal
-and recovery from the verified backup.
+reports that nothing applies. A valid rollback marker and stock backup on
+fixed, reverse, or restored stock reports that rollback as pending or
+requested and tells the owner to restart. A held forward interruption with no
+marker reports that nothing applies. A markerless reverse state describes the
+refusal and recovery from the verified backup.
 """
 import hashlib
 import importlib.util
@@ -865,6 +868,101 @@ class SpeakerModule(unittest.TestCase):
                                   (self.root / selected['other_module']).read_bytes()), before)
                 self.assertFalse((stage / 'rollback').exists())
                 self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
+
+    def test_inspect_pending_rollback_and_held_forward_interruption(self):
+        """Read-only inspection of both components agrees with the next boot.
+
+        Fixed, reverse, and restored stock with a valid marker and stock backup
+        report a pending or requested rollback and restart guidance. Restored
+        stock still has the hold marker. That report is not current, not waiting
+        for a request, and not an ordinary hold. A held forward interruption
+        with no marker says nothing applies and does not promise the next boot.
+        Unknown stays unknown. A markerless reverse stays refused. Bytes and
+        markers stay as planted.
+        """
+        rows = (
+            dict(situation='fixed', live='fixed', marker=True, hold=False,
+                 state='fixed', expect='pending'),
+            dict(situation='reverse', live='reverse', marker=True, hold=False,
+                 state='reverse', expect='pending'),
+            dict(situation='restored', live='stock', marker=True, hold=True,
+                 state='stock', expect='pending'),
+            dict(situation='held-forward', live='interrupted', marker=False, hold=True,
+                 state='interrupted', expect='held'),
+            dict(situation='unknown', live='unknown', marker=False, hold=False,
+                 state='unknown', expect='unknown'),
+            dict(situation='markerless-reverse', live='reverse', marker=False, hold=False,
+                 state='reverse', expect='refused'),
+        )
+
+        def live_bytes(kind, selected):
+            stock_bytes, fixed_bytes = selected['stock_bytes'], selected['fixed_bytes']
+            stock_record, fixed_record = selected['stock'], selected['fixed']
+            unknown = b'unknown-' + selected['name'].encode()
+            return {'fixed': (fixed_bytes, fixed_record),
+                    'reverse': (stock_bytes, fixed_record),
+                    'stock': (stock_bytes, stock_record),
+                    'interrupted': (fixed_bytes, stock_record),
+                    'unknown': (unknown, stock_record)}[kind]
+
+        def snapshot(selected):
+            other_state = MCA_STATE if selected['name'] == 'speaker' else MODULE.STATE
+            return (self.manifest.read_bytes(),
+                    (self.root / selected['module']).read_bytes(),
+                    (self.root / selected['other_module']).read_bytes(),
+                    (self.root / MODULE.STAGED).read_bytes(),
+                    (self.root / MCA_STAGED).read_bytes(),
+                    self.state_files(self.root / selected['state']),
+                    self.state_files(self.root / other_state))
+
+        for name in ('speaker', 'mca'):
+            for row in rows:
+                with self.subTest(component=name, situation=row['situation']):
+                    self.setUp()
+                    selected = self.component(name)
+                    owner = {'gain': 4, 'label': name + '-' + row['situation']}
+                    module_bytes, record = live_bytes(row['live'], selected)
+                    if name == 'speaker':
+                        self.install_both(module_bytes, record, MCA_OLD,
+                                          identity(MCA_OLD, MCA_OLD_NOTE), owner)
+                    else:
+                        self.install_both(OLD, STOCK, module_bytes, record, owner)
+                    if row['live'] != 'unknown':
+                        saved = with_mca(manifest(STOCK), identity(MCA_OLD, MCA_OLD_NOTE))
+                        self.put(selected['state'] + '/alpha1-module.ko', selected['stock_bytes'])
+                        self.put(selected['state'] + '/alpha1-manifest.json', MODULE.serialize(saved))
+                    if row['marker']:
+                        self.put(selected['state'] + '/rollback', b'')
+                    if row['hold']:
+                        self.put(selected['state'] + '/hold', b'')
+                    before = snapshot(selected)
+                    code, report = self.run_tool(*selected['args'])
+                    self.assertEqual(code, 0, self.last_error)
+                    self.assertEqual(report['state'], row['state'])
+                    self.assertEqual(report['rollback_requested'], row['marker'])
+                    self.assertEqual(report['held'], row['hold'])
+                    status = report['status']
+                    if row['expect'] == 'pending':
+                        self.assertRegex(status, r'(?i)\brollback\b')
+                        self.assertRegex(status, r'(?i)\b(?:pending|requested)\b')
+                        self.assertRegex(status, r'(?i)\brestart\b')
+                        self.assertIn(name, status)
+                        self.assertNotRegex(status, r'(?i)waiting for (?:a )?(?:rollback )?request')
+                        self.assertNotRegex(status, r'(?i)\bcurrent\b')
+                        self.assertNotRegex(status, r'(?i)nothing applied|held after a rollback')
+                    elif row['expect'] == 'held':
+                        self.assertEqual(status, 'held after a rollback; nothing applied')
+                        self.assertNotIn('next boot', status)
+                        self.assertNotRegex(status, r'(?i)\bcompletes\b')
+                    elif row['expect'] == 'unknown':
+                        self.assertEqual(status, 'unknown state; the fix will not be applied')
+                    else:
+                        self.assertEqual(status, 'refused; nothing was changed; '
+                                         'recover from the verified stock backup')
+                        self.assertNotRegex(status, r'(?i)waiting for a rollback')
+                        self.assertNotIn('restart', status)
+                    self.assertEqual(snapshot(selected), before)
+                    self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
 
     def test_pinned_mca_identity_matches_qualified_spec_and_fixed_pin(self):
         """Pinned sha256, size, and note literals agree with each other.

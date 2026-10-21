@@ -408,8 +408,10 @@ class SetupTests(unittest.TestCase):
 
         Fixture digests stand in for the two SHA identities. Fresh stock does not
         need a backup. Forward interruption is pending only with a stock backup
-        and a regular staged file of the fixed identity. A recognized result is
-        pending work, not a promise that every later boot write succeeds.
+        and a regular staged file of the fixed identity. Reverse (stock module,
+        fixed pins) stays not pending when that staged file is the fixed module,
+        with or without a stock backup, while the marker is absent. A recognized
+        result is pending work, not a promise that every later boot write succeeds.
         """
         cases = (
             dict(installed='stock', pin='stock', staged='fixed', needed=True, label='stock to fixed'),
@@ -438,6 +440,10 @@ class SetupTests(unittest.TestCase):
                  label='reverse without a marker'),
             dict(installed='stock', pin='fixed', staged='stock', backup='stock', needed=False,
                  label='reverse backup without a marker'),
+            dict(installed='stock', pin='fixed', staged='fixed', needed=False,
+                 label='reverse fixed stage without a marker'),
+            dict(installed='stock', pin='fixed', staged='fixed', backup='stock', needed=False,
+                 label='reverse fixed stage with stock backup and no marker'),
             dict(installed='unknown', pin='stock', staged='fixed', needed=False, label='unknown module bytes'),
             dict(installed='unknown', pin='matches', staged='fixed', needed=False,
                  label='unknown bytes are not a known pin'),
