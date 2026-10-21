@@ -78,11 +78,14 @@ A full ARM64 baseline kernel and then the hardened kernel linked with
 LLVM 21.1.8 and Rust 1.93.1. All five `audio/j713/kernel` modules also linked
 with `J713_PROFILE=conservative-v1`, `KCFLAGS=-Werror` and pinned supplemental
 sound exports. This initial candidate build was incremental after the full
-baseline reconstruction; it is not yet proof of a clean run of the new recipe.
+baseline reconstruction. A subsequent clean recipe run built all five modules
+identically, but the kernel differed because its default signing-certificate
+rule generated a new key. Neither of those kernel artifacts is selected for
+deployment.
 
 | Artifact | SHA-256 |
 | --- | --- |
-| Hardened Image.gz, 18,900,954 bytes | `a7a160b6686652d7ae93218593d015febf9cc7ab0ef838148e551116befeb05e` |
+| Initial incremental Image.gz, 18,900,954 bytes | `a7a160b6686652d7ae93218593d015febf9cc7ab0ef838148e551116befeb05e` |
 | Hardened MCA module, 79,152 bytes | `fb941df4d55c4f2093b4595e0392aaf97ffe3a250228518b18a4f70568bf7454` |
 | Configuration, unchanged | `14b4437b2b195e912a2ab614d28761acd3dc79f886d4487964aa0912616a3a6e` |
 | Both export tables, unchanged | `5e3c2624c6a991bae503336137ce15071e51ef043edcd20ba1ad19df4e23d67c` |
@@ -93,6 +96,19 @@ changed among these five modules. The speaker group source join names its
 five unchanged build inputs individually at the original revision, alongside
 the configured kernel and supplemental export archives. MCA implementation
 is not linked into that module.
+
+The recipe now pins the public certificate recovered from qualified kernel
+`c3704cfd2afb7760e73f0b9939a68864a30bd916fcd478bd960e538373123dc9`.
+Its PEM hash is `db92215adb9de23e9bba226ca17332b27c3bff5981346163cc68a4239fcd40b5`;
+its 1,324-byte DER hash is
+`4b61a05d46fbbdd907dc03ea9b96ebdad0bec4dc11b3a7cf874243efeb1ae66a`.
+Only the public certificate is included. Both make commands explicitly select
+`CONFIG_MODULE_SIG_KEY=certs/qualified-module-certificate.pem`, which bypasses
+the default key-generation rule. The archived configuration and its signature
+verification policy remain unchanged. Automatic module signing remains disabled;
+these outputs are not claimed to be signed. The recipe checks the copied PEM
+and generated DER before writing a receipt and records the make override.
+Two fresh builds with this pinned certificate remain to be compared.
 
 ## Reproduce a candidate
 
@@ -114,10 +130,10 @@ install a kernel or update a qualified manifest.
 
 ## Native and delivery gate
 
-A clean recipe run and independent review are still in progress. Before
+Clean reproducibility checks and independent review are still in progress. Before
 replacing qualified binaries, native boot and repeat boot, keyboard/trackpad
 input, protected audio, GPU and video checks remain required. Suspend is not
-part of this qualification. An owner performs any restart.
+part of this qualification.
 
 Before channel promotion, the kernel needs a reviewed video-manifest and boot
 transition; MCA needs a matching audio-manifest transition. Rollback must
