@@ -70,8 +70,11 @@ Order, and nothing is written to output before the input checks:
 4. Apply HISTORICAL_PATCHES with patch -p1 --fuzz=0 --forward, in order,
    then require DOCKCHANNEL_HISTORICAL and MACSMC_HISTORICAL.
 5. Apply RETAINED_PATCH once, to that copied tree only.
-6. Copy audio/j713/kernel to output/mca. Do not apply the bclk patch.
-   Copy the pinned certificate to
+6. Copy only the kernel/ rows of IMPORTED_MANIFEST into output/mca.
+   Each source must be a regular non-symlink file whose bytes still match
+   the manifest. Unlisted working-tree files, including Kbuild, stale
+   .ko/.o/.cmd, and unlisted .c, are not copied. Do not apply the bclk
+   patch. Copy the pinned certificate to
    output/kernel/certs/qualified-module-certificate.pem.
 
 build() calls prepare(), then one docker run. Host sides of -v are absolute
@@ -85,7 +88,8 @@ output/mca, including when archive, exports, and output were relative:
       -v /ABS/output/mca:/job
       sha256:BUILDER_IMAGE -c SCRIPT
 
-SCRIPT runs make Image.gz, then make modules for M=/job, both with
+SCRIPT starts with set -euo pipefail, then runs make Image.gz, then
+make modules for M=/job, both with
 ARCH=arm64 LLVM=1 LOCALVERSION= and
 CONFIG_MODULE_SIG_KEY=certs/qualified-module-certificate.pem. That
 non-default key stops the kernel from generating a certificate. The module
@@ -982,6 +986,256 @@ class HardenedBuildTests(unittest.TestCase):
                         tool.build(archive, exports, self.image(), output)
                 self.assertFalse((output / 'receipt.json').exists())
                 self.assertFalse((output / 'Image.gz').exists())
+
+    def pinned_audio_fixture(self, symlink_mca=False):
+        """Temporary AUDIO tree whose manifest pins only kernel/Makefile and kernel/mca.c.
+
+        Kbuild, a stale module, object debris, and an unlisted .c sit beside
+        those two files. require_pinned_inputs hashes listed rows only.
+        """
+        audio = self.base / ('audio-fixture-%s' % ('link' if symlink_mca else 'files'))
+        kernel = audio / 'kernel'
+        kernel.mkdir(parents=True)
+        makefile = b'obj-m += mca.o\n'
+        mca = b'int mca(void) { return 1; }\n'
+        (kernel / 'Makefile').write_bytes(makefile)
+        if symlink_mca:
+            target = self.base / 'mca-link-target.c'
+            target.write_bytes(mca)
+            (kernel / 'mca.c').symlink_to(target)
+        else:
+            (kernel / 'mca.c').write_bytes(mca)
+        extras = {
+            'Kbuild': b'unpinned kbuild\n',
+            'stale.ko': b'\x7fELF stale\n',
+            'mca.o': b'stale object\n',
+            'mca.o.cmd': b'cmd_mca.o\n',
+            'unlisted.c': b'int unlisted(void) { return 0; }\n',
+        }
+        for name, data in extras.items():
+            (kernel / name).write_bytes(data)
+        pinned = {'kernel/Makefile': makefile, 'kernel/mca.c': mca}
+        manifest = audio / 'imported-source.sha256'
+        manifest.write_text(''.join(
+            '%s  %s\n' % (text_digest(data), name) for name, data in pinned.items()))
+        archive = self.write_archive(self.kernel_files(b'alpha\n'))
+        exports = self.base / ('exports-' + audio.name)
+        exports.write_bytes(b'supplemental\n')
+        return audio, manifest, pinned, extras, archive, exports
+
+    def audio_pins(self, audio, manifest, archive, exports):
+        return (
+            mock.patch.object(tool, 'AUDIO', audio),
+            mock.patch.object(tool, 'IMPORTED_MANIFEST', manifest),
+            mock.patch.object(tool, 'KERNEL_ARCHIVE', digest(archive)),
+            mock.patch.object(tool, 'SOUND_EXPORTS', digest(exports)),
+        )
+
+    def test_copy_audio_modules_copies_only_manifest_kernel_files(self):
+        audio, manifest, pinned, extras, archive, exports = self.pinned_audio_fixture()
+        kernel = audio / 'kernel'
+        before = {
+            path.relative_to(kernel).as_posix(): path.read_bytes()
+            for path in sorted(kernel.iterdir())
+        }
+        output = self.base / 'copied-mca'
+        output.mkdir()
+        pins = self.audio_pins(audio, manifest, archive, exports)
+        with pins[0], pins[1], pins[2], pins[3]:
+            tool.require_pinned_inputs(archive, exports)
+            tool.copy_audio_modules(output)
+        copied = output / 'mca'
+        present = sorted(
+            path.relative_to(copied).as_posix()
+            for path in copied.rglob('*') if path.is_file() or path.is_symlink())
+        self.assertEqual(present, ['Makefile', 'mca.c'])
+        for name, data in pinned.items():
+            path = copied / name.split('/', 1)[1]
+            self.assertFalse(path.is_symlink())
+            self.assertTrue(path.is_file())
+            self.assertEqual(path.read_bytes(), data)
+            self.assertEqual(digest(path), text_digest(data))
+        for name in extras:
+            self.assertFalse((copied / name).exists())
+        for path in copied.rglob('*'):
+            self.assertFalse(path.is_symlink())
+        after = {
+            path.relative_to(kernel).as_posix(): path.read_bytes()
+            for path in sorted(kernel.iterdir())
+        }
+        self.assertEqual(after, before)
+
+    def test_copy_audio_modules_refuses_symlink_listed_source(self):
+        audio, manifest, pinned, _extras, archive, exports = self.pinned_audio_fixture(
+            symlink_mca=True)
+        source = audio / 'kernel' / 'mca.c'
+        self.assertTrue(source.is_symlink())
+        self.assertEqual(source.read_bytes(), pinned['kernel/mca.c'])
+        output = self.base / 'symlink-mca'
+        output.mkdir()
+        pins = self.audio_pins(audio, manifest, archive, exports)
+        with pins[0], pins[1], pins[2], pins[3]:
+            tool.require_pinned_inputs(archive, exports)
+            with self.assertRaises(RuntimeError) as caught:
+                tool.copy_audio_modules(output)
+        self.assertIn('kernel/mca.c', str(caught.exception))
+        self.assertIn('regular file', str(caught.exception))
+        self.assertFalse((output / 'mca').exists())
+        self.assertTrue(source.is_symlink())
+        self.assertEqual(source.read_bytes(), pinned['kernel/mca.c'])
+
+    def test_copy_audio_modules_refuses_source_changed_after_precheck(self):
+        audio, manifest, pinned, _extras, archive, exports = self.pinned_audio_fixture()
+        source = audio / 'kernel' / 'mca.c'
+        output = self.base / 'drifted-mca'
+        output.mkdir()
+        pins = self.audio_pins(audio, manifest, archive, exports)
+        with pins[0], pins[1], pins[2], pins[3]:
+            tool.require_pinned_inputs(archive, exports)
+            source.write_bytes(b'drifted after precheck\n')
+            with self.assertRaises(RuntimeError) as caught:
+                tool.copy_audio_modules(output)
+        self.assertIn('imported source mismatch: kernel/mca.c', str(caught.exception))
+        self.assertFalse((output / 'mca').exists())
+        self.assertEqual(source.read_bytes(), b'drifted after precheck\n')
+        self.assertEqual((audio / 'kernel' / 'Makefile').read_bytes(), pinned['kernel/Makefile'])
+
+    def test_sound_exports_mismatch_is_rejected_before_output(self):
+        files = self.kernel_files(b'alpha\n')
+        archive = self.write_archive(files)
+        exports = self.base / 'exports-mismatch-input'
+        exports.write_bytes(b'supplemental\n')
+        before = exports.read_bytes()
+        output = self.base / 'exports-mismatch-out'
+        with mock.patch.object(tool, 'KERNEL_ARCHIVE', digest(archive)), \
+             mock.patch.object(tool, 'SOUND_EXPORTS', 'ab' * 32):
+            with self.assertRaises(RuntimeError) as caught:
+                tool.prepare(archive, exports, self.image(), output)
+        self.assertIn('sound exports do not match the pinned hash', str(caught.exception))
+        self.assertFalse(output.exists())
+        self.assertEqual(exports.read_bytes(), before)
+
+    def test_each_patch_hash_mismatch_is_rejected_before_output(self):
+        files = self.kernel_files(b'alpha\n')
+        archive = self.write_archive(files)
+        exports = self.base / 'exports-patch-mismatch'
+        exports.write_bytes(b'supplemental\n')
+        paths, hashes, retained = self.historical_patches()
+        self.apply_pins(self.pins_for(
+            files, archive, exports, after_historical=(b'alpha\nbeta\ngamma\n', b'smc\nlocked\n')),
+            (paths, hashes), retained)
+        cases = [(Path(path), 'historical patch hash mismatch') for path in paths]
+        cases.append((retained, 'retained patch hash mismatch'))
+        for path, message in cases:
+            original = path.read_bytes()
+            path.write_bytes(original + b'\nnot-the-pinned-patch\n')
+            output = self.base / ('patch-mismatch-' + path.name)
+            try:
+                with self.subTest(patch=path.name):
+                    with self.assertRaises(RuntimeError) as caught:
+                        tool.prepare(archive, exports, self.image(), output)
+                    self.assertIn(message, str(caught.exception))
+                    self.assertIn(str(path), str(caught.exception))
+                    self.assertFalse(output.exists())
+            finally:
+                path.write_bytes(original)
+
+    def test_multi_root_archive_is_rejected_before_output(self):
+        files = self.kernel_files(b'alpha\n')
+        archive = self.base / 'multi-root.tar.gz'
+        with tarfile.open(archive, 'w:gz') as packed:
+            for name, data in files.items():
+                info = tarfile.TarInfo('linux/' + name)
+                info.size = len(data)
+                info.mode = 0o644
+                info.type = tarfile.REGTYPE
+                packed.addfile(info, io.BytesIO(data))
+            payload = b'other root\n'
+            extra = tarfile.TarInfo('other-root/README')
+            extra.size = len(payload)
+            extra.mode = 0o644
+            extra.type = tarfile.REGTYPE
+            packed.addfile(extra, io.BytesIO(payload))
+        exports = self.base / 'exports-multi-root'
+        exports.write_bytes(b'supplemental\n')
+        historical = self.historical_patches()
+        self.apply_pins(self.pins_for(
+            files, archive, exports, after_historical=(b'alpha\nbeta\ngamma\n', b'smc\nlocked\n')),
+            historical[:2], historical[2])
+        output = self.base / 'multi-root-out'
+        with self.assertRaises(RuntimeError) as caught:
+            tool.prepare(archive, exports, self.image(), output)
+        self.assertIn('kernel archive does not have one top-level directory', str(caught.exception))
+        self.assertFalse(output.exists())
+
+    def test_supplemental_export_drift_writes_no_receipt(self):
+        archive, exports, _files = self.prepared_inputs()
+        before = exports.read_bytes()
+
+        def mutate(mounts):
+            supplemental = mounts['/reference-sound-exports.symvers']
+            supplemental.write_bytes(before + b'drift\n')
+            kernel = mounts['/kernel']
+            image = kernel / 'arch/arm64/boot/Image.gz'
+            image.parent.mkdir(parents=True, exist_ok=True)
+            image.write_bytes(b'candidate-image')
+            for name in tool.AUDIO_MODULES:
+                (mounts['/job'] / name).write_bytes(b'module:' + name.encode())
+
+        output = self.base / 'supplemental-drift'
+        _calls, run = self.docker_runner(mutate=mutate)
+        with mock.patch.object(tool.subprocess, 'run', side_effect=run):
+            with self.assertRaises(RuntimeError) as caught:
+                tool.build(archive, exports, self.image(), output)
+        self.assertIn('supplemental sound exports changed during the build', str(caught.exception))
+        self.assertFalse((output / 'receipt.json').exists())
+        self.assertFalse((output / 'Image.gz').exists())
+        self.assertEqual(exports.read_bytes(), before + b'drift\n')
+
+    def test_missing_image_or_module_after_successful_docker_writes_no_receipt(self):
+        archive, exports, _files = self.prepared_inputs()
+
+        def write_modules(mounts, skip=None):
+            for name in tool.AUDIO_MODULES:
+                if name != skip:
+                    (mounts['/job'] / name).write_bytes(b'module:' + name.encode())
+
+        def missing_image(mounts):
+            write_modules(mounts)
+
+        def missing_module(mounts):
+            image = mounts['/kernel'] / 'arch/arm64/boot/Image.gz'
+            image.parent.mkdir(parents=True, exist_ok=True)
+            image.write_bytes(b'candidate-image')
+            write_modules(mounts, skip='apple-admac.ko')
+
+        cases = {
+            'image': (missing_image, 'kernel Image.gz was not produced'),
+            'module': (missing_module, 'audio module was not produced: apple-admac.ko'),
+        }
+        for name, (mutate, message) in cases.items():
+            output = self.base / ('missing-output-' + name)
+            _calls, run = self.docker_runner(mutate=mutate)
+            with self.subTest(missing=name):
+                with mock.patch.object(tool.subprocess, 'run', side_effect=run):
+                    with self.assertRaises(RuntimeError) as caught:
+                        tool.build(archive, exports, self.image(), output)
+                self.assertIn(message, str(caught.exception))
+                self.assertFalse((output / 'receipt.json').exists())
+                if name == 'image':
+                    self.assertFalse((output / 'Image.gz').exists())
+                else:
+                    self.assertFalse((output / 'modules' / 'apple-admac.ko').exists())
+
+    def test_docker_script_sets_errexit_nounset_and_pipefail(self):
+        script = tool.docker_script()
+        self.assertTrue(script.startswith('set -euo pipefail\n'))
+        body = script.splitlines()
+        self.assertEqual(body[0], 'set -euo pipefail')
+        make_lines = [line for line in body[1:] if line.startswith('make ')]
+        self.assertEqual(len(make_lines), 2)
+        self.assertIn('Image.gz', make_lines[0])
+        self.assertIn('M=/job', make_lines[1])
 
 
 if __name__ == '__main__':
