@@ -1558,7 +1558,7 @@ class ComposeTests(unittest.TestCase):
                 self.assertIn(cause, err)
                 self.assertFalse((machine.root / BOOT_HOLD).exists())
                 self.assertEqual(self.saved_bytes(machine), before)
-                self.assertIn('boot.bin was not changed.', err)
+                assert_unresolved_recovery(self, err)
 
     def test_incoherent_same_kernel_rollback_target_refuses_before_hold(self):
         """A same-kernel rollback journal still requires the backlight handoff loader."""
@@ -1578,7 +1578,7 @@ class ComposeTests(unittest.TestCase):
         self.assertIn('stage2', err)
         self.assertFalse((machine.root / BOOT_HOLD).exists())
         self.assertEqual(self.saved_bytes(machine), before)
-        self.assertIn('boot.bin was not changed.', err)
+        assert_unresolved_recovery(self, err)
 
     def test_resumed_apply_late_refusal_does_not_name_missing_journal(self):
         """After the journal is cleared, a package refusal must not point back at it."""

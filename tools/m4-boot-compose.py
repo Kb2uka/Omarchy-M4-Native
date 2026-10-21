@@ -7,7 +7,8 @@ boot.bin is per machine: its boot arguments and initramfs carry this owner's
 root partition and Apple firmware. Kernel/devicetree updates preserve both.
 The native backlight additionally replaces only a known stage2, preserving the
 owner's notch preference, because its per-boot display reservations are required
-by the enabled backlight tree. Failed checks leave boot.bin untouched.
+by the enabled backlight tree. Checks that fail before a write leave boot.bin
+untouched.
 Inspection is the default; --apply keeps the replaced file as boot.bin.previous.
 A completed rollback writes var/lib/omarchy-m4/boot-compose/hold. Inspection,
 ordinary --apply, and the package hook leave that hold in place.
@@ -498,8 +499,22 @@ def commit_transition(root, journal):
     clear_journal(root)
 
 
-def resume(root, journal):
+def check_resume(root, journal):
+    """Equal kernels resume only as a coherent same-kernel rollback.
+
+    ``rollback_target`` keeps the owner, tree, loader, and notch checks. A
+    same-kernel apply, or any unequal pair, still goes through ``check_listed``
+    and cannot invent a transition the allowlist does not name.
+    """
+    if journal['operation'] == 'rollback' and journal['from_kernel'] == journal['to_kernel']:
+        _, kernel = rollback_target(parse(journal['from_bytes']), parse(journal['to_bytes']))
+        check_protected(root, kernel)
+        return
     check_listed(root, journal['from_kernel'], journal['to_kernel'])
+
+
+def resume(root, journal):
+    check_resume(root, journal)
     commit_transition(root, journal)
     return journal
 
@@ -785,6 +800,9 @@ def rollback(root, apply=False):
         if journal['operation'] != 'rollback':
             raise Refused('An apply transition is pending. Resume with sudo m4-boot-compose --apply',
                           pending=True)
+        # Protected eligibility and the space commit will use, before a new hold.
+        # An existing hold is left untouched when either check refuses.
+        check_resume(root, journal)
         require_space(root, journal['from_bytes'], journal['to_bytes'], snapshots=False)
         create_hold(root)
         resume(root, journal)
@@ -826,15 +844,14 @@ def rollback(root, apply=False):
         return {'boot': str(boot_path), 'boot_sha256': sha(data), 'restore_sha256': sha(older),
                 'applied': changed, 'status': HELD_STATUS,
                 'release': 'sudo m4-boot-compose --resume-updates --apply'}
-    if source_kernel != dest_kernel:
-        require_space(root, current, older)
+    # Both images are journaled before either rename, including a same-kernel
+    # rollback. The hold follows the journal: ordinary apply already refuses a
+    # pending rollback, so a crash in that gap does not need a new hold.
+    require_space(root, current, older)
+    journal = save_journal(root, 'rollback', current, older, dest_kernel)
     create_hold(root)
-    if source_kernel != dest_kernel:
-        journal = save_journal(root, 'rollback', current, older, dest_kernel)
-        resume(root, journal)
-        return finished_rollback(root, older)
-    replace(boot_path, current, older)
-    return finished_rollback(root, older)
+    resume(root, journal)
+    return finished_rollback(root, journal['to_bytes'])
 
 
 @contextlib.contextmanager
@@ -855,19 +872,36 @@ def transaction_guard(root, package_hook=False):
         path.unlink()
 
 
-def recovery_uncertain(root):
-    """True when this invocation mutated state or a journal file is present.
+def journal_path_present(root):
+    """True when the journal path exists or cannot be stated.
 
-    The journal is not parsed here. A corrupt journal must not be caught and
-    then reported as an unchanged boot.bin.
+    Corrupt contents, a symlink, and any other non-file still have to be
+    inspected. Confirmed absence is the only false result. The contents are
+    not parsed here.
     """
-    if _mutated:
-        return True
     path = root / JOURNAL
     try:
-        return path.is_file() and not path.is_symlink()
+        return path.is_symlink() or path.exists()
     except OSError:
         return True
+
+
+def recovery_uncertain(root):
+    """True when this invocation mutated state or a journal path is present.
+
+    The journal is not parsed here. A corrupt or invalid journal path must not
+    be reported as an unchanged boot.bin.
+    """
+    return _mutated or journal_path_present(root)
+
+
+def retry_command(rollback, resume_updates):
+    """The explicit command that continues after the journal is already gone."""
+    if rollback:
+        return '--rollback --apply'
+    if resume_updates:
+        return '--resume-updates --apply'
+    return '--apply'
 
 
 def main(argv=None):
@@ -895,12 +929,21 @@ def main(argv=None):
         else:
             receipt = rollback(args.root, False) if args.rollback else compose(args.root, False)
     except (Refused, OSError) as error:
-        if getattr(error, 'pending', False) or recovery_uncertain(args.root):
+        pending = getattr(error, 'pending', False)
+        if not pending and not recovery_uncertain(args.root):
+            suffix = '. boot.bin was not changed.'
+        elif journal_path_present(args.root):
             suffix = ('. Unresolved boot recovery: inspect ' + JOURNAL +
                       ' and resume only the operation recorded there. '
                       'Do not assume boot.bin is unchanged.')
+        elif pending:
+            suffix = ('. Unresolved boot recovery: inspect and correct the cause, then retry '
+                      'the explicit m4-boot-compose command above. '
+                      'Do not assume boot.bin is unchanged.')
         else:
-            suffix = '. boot.bin was not changed.'
+            suffix = ('. Unresolved boot recovery: inspect and correct the cause, then retry '
+                      'sudo m4-boot-compose ' + retry_command(args.rollback, args.resume_updates) +
+                      '. Do not assume boot.bin is unchanged.')
         print('m4-boot-compose: refused: ' + str(error) + suffix, file=sys.stderr)
         return 1
     print(json.dumps(receipt, indent=2, sort_keys=True))
