@@ -186,6 +186,12 @@ class NotchPendingJournalTests(unittest.TestCase):
                     air.put(NOTCH.BOOT, from_bytes)
                     plant(types.SimpleNamespace(module=compose, put=air.put), operation, from_bytes, to_bytes, pin)
                     self.refuse(air, compose, action)
+                    if operation == 'apply':
+                        # Resume commits, then plans the packages installed now.
+                        # The kernel and tree match the committed boot. Its stage2
+                        # loader stays in that boot object. Do not skip planning.
+                        air.put(compose.KERNEL, notch_tests.K2)
+                        air.put(compose.DTB, notch_tests.D1)
                     code, _, err = run_module(compose, air.root, *args)
                     self.assertEqual((code, err), (0, ''), err)
                     self.assertEqual((air.root / compose.BOOT).read_bytes(), to_bytes)

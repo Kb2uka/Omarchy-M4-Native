@@ -38,6 +38,15 @@ or from the package hook, is refused. A release that fails before any write
 leaves every byte in place. A release that fails after the video pin keeps
 the hold and the apply journal; ordinary compose does not continue it.
 
+A same-kernel rollback (devicetree only, or the backlight tree with its
+handoff loader) stores both boot objects before it renames anything. A failure
+after either rename still retries to the original object. The hold is created
+only after eligibility and space checks, so a refusal creates none and does
+not delete a hold that was already there. Pending recovery checks that
+eligibility before a new hold as well. Once a journal is gone, a later error
+names ``m4-boot-compose`` and the command to run; it does not send the owner
+to an operation recorded in a missing journal.
+
 A corrupt journal, or a ``boot.bin`` that is neither snapshot of a pending
 transition, is unresolved recovery. The refusal tells the operator to inspect
 the journal path and does not claim that ``boot.bin`` was left unchanged.
@@ -407,27 +416,41 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn('Rollback copy is missing', err)
 
-    def handoff_machine(self, shown=False):
+    def handoff_machine(self, shown=False, *, hold_patches=True):
         native_tree = fdt(b'native backlight tree')
         old_loader = LOADER + (b' shown preference' if shown else b'')
         loaders = {mode: (mode.encode() + b' handoff stage2').ljust(0x110000, b'\0')
                    for mode in ('hidden', 'shown')}
         paths = {mode: f'usr/lib/omarchy-m4/backlight/stage2-{mode}.bin' for mode in loaders}
-        for patcher in (
-                mock.patch.object(MODULE, 'BACKLIGHT_DTB', sha(native_tree)),
-                mock.patch.dict(MODULE.KNOWN_LOADERS,
-                                {sha(old_loader): 'shown' if shown else 'hidden',
-                                 **{sha(data): mode for mode, data in loaders.items()}}, clear=True),
-                mock.patch.dict(MODULE.BACKLIGHT_LOADERS,
-                                {mode: (paths[mode], sha(data)) for mode, data in loaders.items()}, clear=True)):
-            patcher.start()
-            self.addCleanup(patcher.stop)
-        machine = Machine(self, boot_bytes=boot(loader=old_loader), package_dtb=native_tree)
-        patcher = mock.patch.dict(MODULE.KNOWN_DTBS, {sha(native_tree): 'native backlight'})
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        for mode, data in loaders.items():
-            machine.put(paths[mode], data)
+        # The devicetree pin starts after Machine(), which replaces KNOWN_DTBS.
+        early = (
+            mock.patch.object(MODULE, 'BACKLIGHT_DTB', sha(native_tree)),
+            mock.patch.dict(MODULE.KNOWN_LOADERS,
+                            {sha(old_loader): 'shown' if shown else 'hidden',
+                             **{sha(data): mode for mode, data in loaders.items()}}, clear=True),
+            mock.patch.dict(MODULE.BACKLIGHT_LOADERS,
+                            {mode: (paths[mode], sha(data)) for mode, data in loaders.items()}, clear=True))
+        started = []
+        try:
+            for patcher in early:
+                patcher.start()
+                started.append(patcher)
+                if hold_patches:
+                    self.addCleanup(patcher.stop)
+            machine = Machine(self, boot_bytes=boot(loader=old_loader), package_dtb=native_tree)
+            late = mock.patch.dict(MODULE.KNOWN_DTBS, {sha(native_tree): 'native backlight'})
+            late.start()
+            started.append(late)
+            if hold_patches:
+                self.addCleanup(late.stop)
+            for mode, data in loaders.items():
+                machine.put(paths[mode], data)
+        except Exception:
+            if not hold_patches:
+                for patcher in reversed(started):
+                    patcher.stop()
+            raise
+        machine.handoff_patchers = () if hold_patches else tuple(started)
         return machine, native_tree, old_loader, loaders, paths
 
     def test_backlight_update_preserves_hidden_notch_preference(self):
@@ -1022,8 +1045,10 @@ class ComposeTests(unittest.TestCase):
 
         The packaged devicetree moved forward while the journal was open. The
         receipt names both changes and the final boot SHA. Owner loader, boot
-        arguments, and initramfs stay the original bytes. The recorded
-        snapshots remain after the journal is cleared.
+        arguments, and initramfs stay the original bytes. The cross-kernel
+        backup stays the original image, not the intermediate recorded boot,
+        and a later rollback restores that original. The recorded snapshots
+        remain after the journal is cleared.
         """
         packaged = kernel(18)
         loader, bootargs, initramfs = owner_image(b'pending-owner')
@@ -1044,7 +1069,8 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual((code, err), (0, ''), err)
         receipt = json.loads(out)
         self.assertEqual(machine.boot, final)
-        self.assertEqual(machine.previous, recorded)
+        self.assertEqual(machine.previous, original)
+        self.assertNotEqual(machine.previous, recorded)
         self.assertEqual(receipt['boot_sha256'], sha(final))
         self.assertEqual(receipt['kernel_sha256'], sha(packaged))
         self.assertEqual(receipt['devicetree_sha256'], sha(D2))
@@ -1061,6 +1087,25 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual(parsed['boot_kernel_sha256'], sha(packaged))
         self.assertEqual((parsed['owner_panel'], parsed['notch']), ('kept', 'owner'))
         self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
+        code, out, err = machine.run('--rollback', '--apply')
+        self.assertEqual((code, err), (0, ''), err)
+        rolled = json.loads(out)
+        self.assertEqual(machine.boot, original)
+        self.assertEqual(machine.previous, final)
+        self.assertEqual(rolled['boot_sha256'], sha(original))
+        self.assertEqual(rolled['restore_sha256'], sha(original))
+        self.assertEqual(rolled['status'], 'rolled back; takes effect at next boot')
+        restored = MODULE.parse(machine.boot)
+        self.assertEqual((restored['loader'], restored['bootargs'], restored['initramfs']),
+                         (loader, bootargs, initramfs))
+        self.assertEqual((restored['kernel'], restored['dtb']), (K1, D1))
+        parsed = json.loads((machine.root / MODULE.VIDEO_MANIFEST).read_bytes())
+        self.assertEqual(parsed['boot_kernel_sha256'], sha(K1))
+        self.assertEqual((parsed['owner_panel'], parsed['notch']), ('kept', 'owner'))
+        self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
+        self.assertEqual((machine.root / MODULE.KERNEL).read_bytes(), packaged)
+        self.assertEqual((machine.root / MODULE.DTB).read_bytes(), D2)
+        self.assertTrue((machine.root / BOOT_HOLD).is_file())
 
     def test_corrupt_journal_or_neither_side_reports_unresolved_recovery(self):
         """Do not claim boot.bin was unchanged, and do not delete the journal."""
@@ -1267,6 +1312,352 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
         self.assertFalse((machine.root / BOOT_JOURNAL).exists())
         self.assertFalse((machine.root / BOOT_HOLD).exists())
+
+    def saved_bytes(self, machine):
+        """Boot, backup, manifests, packages, and recovery files currently on disk."""
+        paths = [MODULE.BOOT, MODULE.BOOT + MODULE.PREVIOUS, MODULE.VIDEO_MANIFEST,
+                 MODULE.AUDIO_MANIFEST, MODULE.KERNEL, MODULE.DTB, BOOT_JOURNAL, BOOT_HOLD]
+        backlight = machine.root / 'usr/lib/omarchy-m4/backlight'
+        if backlight.is_dir():
+            paths.extend(str(path.relative_to(machine.root))
+                         for path in sorted(backlight.iterdir()) if path.is_file())
+        snaps = machine.root / BOOT_SNAPSHOTS
+        if snaps.is_dir():
+            paths.extend(BOOT_SNAPSHOTS + '/' + path.name
+                         for path in sorted(snaps.iterdir()) if path.is_file())
+        found = {}
+        for relative in paths:
+            path = machine.root / relative
+            found[relative] = path.read_bytes() if path.is_file() else None
+        return found
+
+    def assert_no_recovery_writes(self, machine, before, *, hold_bytes=None):
+        after = self.saved_bytes(machine)
+        self.assertIsNone(after.get(BOOT_JOURNAL))
+        self.assertFalse(any(name.startswith(BOOT_SNAPSHOTS + '/') for name in after))
+        if hold_bytes is None:
+            self.assertIsNone(after.get(BOOT_HOLD))
+        else:
+            self.assertEqual(after.get(BOOT_HOLD), hold_bytes)
+        for name, data in before.items():
+            if name in (BOOT_HOLD, BOOT_JOURNAL) or name.startswith(BOOT_SNAPSHOTS + '/'):
+                continue
+            self.assertEqual(after.get(name), data, name)
+
+    def same_kernel_rollback_retry(self, machine, current, original, boundary):
+        """Fail one rollback rename, then a fresh rollback must finish on ``original``.
+
+        The rename is allowed to complete before the error. ``.previous`` may
+        then hold ``current``; the snapshot store is what still has ``original``.
+        """
+        current_layout, original_layout = MODULE.parse(current), MODULE.parse(original)
+        self.assertEqual(current_layout['kernel'], original_layout['kernel'])
+        self.assertEqual(current_layout['bootargs'], original_layout['bootargs'])
+        self.assertEqual(current_layout['initramfs'], original_layout['initramfs'])
+        self.assertNotEqual((current_layout['dtb'], current_layout['loader']),
+                            (original_layout['dtb'], original_layout['loader']))
+        video = (machine.root / MODULE.VIDEO_MANIFEST).read_bytes()
+        audio = (machine.root / MODULE.AUDIO_MANIFEST).read_bytes()
+        packages = ((machine.root / MODULE.KERNEL).read_bytes(), (machine.root / MODULE.DTB).read_bytes())
+        self.assertFalse((machine.root / BOOT_HOLD).exists())
+        self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+        real = os.replace
+        fired = {'n': 0}
+
+        def fail_after_rename(source, target):
+            result = real(source, target)
+            if fired['n'] == 0 and Path(target).name == boundary:
+                fired['n'] = 1
+                raise OSError('power cut after ' + boundary)
+            return result
+
+        with mock.patch.object(MODULE.os, 'replace', side_effect=fail_after_rename):
+            code, out, err = machine.run('--rollback', '--apply')
+        self.assertEqual(fired['n'], 1)
+        self.assertEqual(code, 1, err)
+        self.assertEqual(out, '')
+        self.assertIn('power cut after ' + boundary, err)
+        self.assertNotIn('boot.bin was not changed', err)
+        self.assertIn('unresolved', err.lower())
+        self.assertTrue((machine.root / BOOT_HOLD).is_file())
+        self.assertEqual(machine.boot, current if boundary == 'boot.bin.previous' else original)
+        journal_during = (machine.root / BOOT_JOURNAL).read_bytes() if (machine.root / BOOT_JOURNAL).is_file() else None
+        during = self.saved_bytes(machine)
+        for args in (('--rollback',), ()):
+            code, _, inspect_err = machine.run(*args)
+            self.assertEqual(code, 0, inspect_err)
+            self.assertEqual(self.saved_bytes(machine), during)
+        code, out, err = machine.run('--rollback', '--apply')
+        self.assertEqual((code, err), (0, ''), err)
+        receipt = json.loads(out)
+        self.assertEqual(machine.boot, original)
+        self.assertEqual(machine.previous, current)
+        self.assertEqual(receipt['boot_sha256'], sha(original))
+        self.assertEqual(receipt['restore_sha256'], sha(original))
+        self.assertIsNotNone(journal_during)
+        self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+        self.assertEqual((machine.root / BOOT_HOLD).read_bytes(), during[BOOT_HOLD])
+        done = MODULE.parse(machine.boot)
+        self.assertEqual([done[name] for name in ('loader', 'bootargs', 'kernel', 'dtb', 'initramfs')],
+                         [original_layout[name] for name in ('loader', 'bootargs', 'kernel', 'dtb', 'initramfs')])
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), video)
+        self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
+        self.assertEqual(((machine.root / MODULE.KERNEL).read_bytes(), (machine.root / MODULE.DTB).read_bytes()),
+                         packages)
+        for name, data in during.items():
+            if name.startswith('usr/lib/omarchy-m4/backlight/'):
+                self.assertEqual((machine.root / name).read_bytes(), data, name)
+        code, out, err = machine.run('--apply')
+        self.assertEqual((code, err), (0, ''), err)
+        held = json.loads(out)
+        self.assertFalse(held['applied'])
+        self.assertEqual(held['status'], MODULE.HELD_STATUS)
+        self.assertEqual(machine.boot, original)
+        self.assertEqual(machine.previous, current)
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), video)
+        self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
+
+    def test_same_kernel_rollback_retry_keeps_original_target(self):
+        """A devicetree rollback that dies after either rename still restores the original tree."""
+        for boundary in ('boot.bin.previous', 'boot.bin'):
+            with self.subTest(boundary=boundary):
+                machine = Machine(self)
+                code, _, err = machine.run('--apply')
+                self.assertEqual((code, err), (0, ''), err)
+                current, original = boot(dtb=D2), boot()
+                self.assertEqual((machine.boot, machine.previous), (current, original))
+                self.same_kernel_rollback_retry(machine, current, original, boundary)
+
+    def test_backlight_rollback_retry_keeps_original_tree_and_loader(self):
+        """Shown and hidden handoff rollbacks retry to the original tree and loader.
+
+        Each subTest drops its loader and backlight pins before the next one.
+        """
+        for shown in (False, True):
+            for boundary in ('boot.bin.previous', 'boot.bin'):
+                with self.subTest(shown=shown, boundary=boundary):
+                    machine, tree, old_loader, loaders, _ = self.handoff_machine(
+                        shown=shown, hold_patches=False)
+                    try:
+                        code, _, err = machine.run('--apply')
+                        self.assertEqual((code, err), (0, ''), err)
+                        mode = 'shown' if shown else 'hidden'
+                        current = boot(loader=loaders[mode], dtb=tree)
+                        original = boot(loader=old_loader)
+                        self.assertEqual(machine.boot, current)
+                        self.assertEqual(machine.previous, original)
+                        self.same_kernel_rollback_retry(machine, current, original, boundary)
+                    finally:
+                        for patcher in reversed(machine.handoff_patchers):
+                            patcher.stop()
+
+    def rollback_fixtures(self, kind):
+        """A valid rollback pair with no hold, journal, or snapshots yet."""
+        if kind == 'cross':
+            machine = self.transition(boot_kernel=K2, package_kernel=K1)
+            current = machine.boot
+            original = boot(kernel_bytes=K1, loader=LOADER + b' notch')
+            machine.put(MODULE.BOOT + MODULE.PREVIOUS, original)
+            self.assertNotEqual(MODULE.parse(current)['kernel'], MODULE.parse(original)['kernel'])
+        else:
+            machine = Machine(self, boot_bytes=boot(dtb=D2))
+            current, original = boot(dtb=D2), boot()
+            machine.put(MODULE.BOOT + MODULE.PREVIOUS, original)
+            self.assertEqual(MODULE.parse(current)['kernel'], MODULE.parse(original)['kernel'])
+        self.assertFalse((machine.root / BOOT_HOLD).exists())
+        self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+        snaps = machine.root / BOOT_SNAPSHOTS
+        self.assertFalse(snaps.exists() and any(path.is_file() for path in snaps.rglob('*')))
+        return machine, self.saved_bytes(machine)
+
+    def test_rollback_space_refusal_creates_no_hold(self):
+        """EFI and snapshot shortages refuse before a hold, journal, or payload write.
+
+        Same-kernel rollback journals its target, so the snapshot store is in
+        that budget too. A hold that already exists keeps its bytes.
+        """
+        efi_cases = (('same', 'efi'), ('cross', 'efi'), ('same', 'snapshot'), ('cross', 'snapshot'))
+        for kind, case in efi_cases:
+            with self.subTest(kind=kind, case=case):
+                machine, before = self.rollback_fixtures(kind)
+                efi = machine.root / 'boot' / 'efi'
+                ample = types.SimpleNamespace(f_bavail=1 << 40, f_frsize=1)
+                tight = types.SimpleNamespace(f_bavail=MODULE.MARGIN, f_frsize=1)
+                tiny = types.SimpleNamespace(f_bavail=1, f_frsize=1)
+
+                def fake(path, case=case):
+                    probed = Path(path)
+                    on_efi = probed == efi or efi in probed.parents
+                    if case == 'efi':
+                        return tiny if on_efi else ample
+                    return ample if on_efi else tight
+
+                with mock.patch.object(MODULE.os, 'statvfs', side_effect=fake):
+                    code, out, err = machine.run('--rollback', '--apply')
+                self.assertEqual(code, 1, out + err)
+                self.assertEqual(out, '')
+                if case == 'efi':
+                    self.assertIn('Not enough free space on the EFI partition', err)
+                    self.assertNotIn('root filesystem', err)
+                else:
+                    self.assertIn('Not enough free space on the root filesystem', err)
+                    self.assertNotIn('EFI partition', err)
+                self.assert_no_recovery_writes(machine, before)
+                self.assertIn('boot.bin was not changed.', err)
+
+        machine, before = self.rollback_fixtures('cross')
+        hold_bytes = b'already held\n'
+        machine.put(BOOT_HOLD, hold_bytes)
+        before[BOOT_HOLD] = hold_bytes
+        efi = machine.root / 'boot' / 'efi'
+        ample = types.SimpleNamespace(f_bavail=1 << 40, f_frsize=1)
+        tiny = types.SimpleNamespace(f_bavail=1, f_frsize=1)
+
+        def efi_only(path):
+            probed = Path(path)
+            return tiny if probed == efi or efi in probed.parents else ample
+
+        with mock.patch.object(MODULE.os, 'statvfs', side_effect=efi_only):
+            code, out, err = machine.run('--rollback', '--apply')
+        self.assertEqual(code, 1, out + err)
+        self.assertEqual(out, '')
+        self.assertIn('Not enough free space on the EFI partition', err)
+        self.assert_no_recovery_writes(machine, before, hold_bytes=hold_bytes)
+        self.assertIn('boot.bin was not changed.', err)
+
+    def test_pending_rollback_protected_refusal_creates_no_hold(self):
+        """A pending rollback still checks the protected stacks before creating a hold."""
+        def planted():
+            packaged = kernel(12)
+            machine = self.transition(package_kernel=packaged)
+            original = machine.boot_before
+            current = boot(kernel_bytes=packaged, dtb=D1, loader=LOADER + b' notch')
+            machine.put(MODULE.BOOT, current)
+            plant_journal(machine, 'rollback', current, original, sha(K1))
+            loaded = MODULE.load_journal(machine.root)
+            self.assertEqual(loaded['operation'], 'rollback')
+            self.assertEqual((loaded['from_bytes'], loaded['to_bytes']), (current, original))
+            self.assertFalse((machine.root / BOOT_HOLD).exists())
+            return machine
+
+        for kind in ('video', 'audio'):
+            with self.subTest(kind=kind):
+                machine = planted()
+                if kind == 'video':
+                    video = json.loads((machine.root / MODULE.VIDEO_MANIFEST).read_bytes())
+                    video['boot_kernel_sha256'] = sha(kernel(9))
+                    machine.put(MODULE.VIDEO_MANIFEST, (json.dumps(video, indent=4) + '\n').encode())
+                    cause = 'video stack is not qualified'
+                else:
+                    machine.put(MODULE.AUDIO_MANIFEST, json.dumps({'kernel_release': '7.1.9-other'}).encode())
+                    cause = 'audio stack is not qualified'
+                before = self.saved_bytes(machine)
+                code, out, err = machine.run('--rollback', '--apply')
+                self.assertEqual(code, 1, err)
+                self.assertEqual(out, '')
+                self.assertIn(cause, err)
+                self.assertFalse((machine.root / BOOT_HOLD).exists())
+                self.assertEqual(self.saved_bytes(machine), before)
+                self.assertIn('boot.bin was not changed.', err)
+
+    def test_incoherent_same_kernel_rollback_target_refuses_before_hold(self):
+        """A same-kernel rollback journal still requires the backlight handoff loader."""
+        machine, tree, old_loader, loaders, _ = self.handoff_machine()
+        current = boot(loader=loaders['hidden'], dtb=tree)
+        target = boot(loader=old_loader, dtb=tree)
+        self.assertEqual(MODULE.parse(current)['kernel'], MODULE.parse(target)['kernel'])
+        self.assertNotEqual(MODULE.parse(current)['loader'], MODULE.parse(target)['loader'])
+        machine.put(MODULE.BOOT, current)
+        plant_journal(machine, 'rollback', current, target, sha(K1))
+        self.assertEqual(MODULE.load_journal(machine.root)['operation'], 'rollback')
+        before = self.saved_bytes(machine)
+        code, out, err = machine.run('--rollback', '--apply')
+        self.assertEqual(code, 1, err)
+        self.assertEqual(out, '')
+        self.assertIn('handoff', err)
+        self.assertIn('stage2', err)
+        self.assertFalse((machine.root / BOOT_HOLD).exists())
+        self.assertEqual(self.saved_bytes(machine), before)
+        self.assertIn('boot.bin was not changed.', err)
+
+    def test_resumed_apply_late_refusal_does_not_name_missing_journal(self):
+        """After the journal is cleared, a package refusal must not point back at it."""
+        packaged = kernel(18)
+        machine = self.transition(package_kernel=packaged)
+        original = machine.boot_before
+        committed = boot(kernel_bytes=packaged, dtb=D1, loader=LOADER + b' notch')
+        plant_journal(machine, 'apply', original, committed, sha(packaged))
+        machine.put(MODULE.DTB, b'corrupt packaged devicetree')
+        audio = (machine.root / MODULE.AUDIO_MANIFEST).read_bytes()
+        code, out, err = machine.run('--apply')
+        self.assertEqual(code, 1, err)
+        self.assertEqual(out, '')
+        self.assertEqual(machine.boot, committed)
+        self.assertEqual(machine.previous, original)
+        parsed = json.loads((machine.root / MODULE.VIDEO_MANIFEST).read_bytes())
+        self.assertEqual(parsed['boot_kernel_sha256'], sha(packaged))
+        self.assertEqual((parsed['owner_panel'], parsed['notch']), ('kept', 'owner'))
+        self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
+        self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+        self.assertIn('Packaged devicetree', err)
+        self.assertNotIn('boot.bin was not changed', err)
+        self.assertNotIn('recorded there', err)
+        self.assertNotIn('operation recorded', err)
+        self.assertIn('m4-boot-compose', err)
+        self.assertTrue(any(word in err.lower() for word in ('inspect', 'fix', 'rerun')))
+        self.assertTrue('--apply' in err or ('updater' in err.lower() and 'retry' in err.lower()))
+
+    def test_manual_copy_back_manifest_failure_names_explicit_retry(self):
+        """Copy-back that dies while rewriting the video pin names ``--rollback --apply``."""
+        loader = LOADER + b' recognized handoff'
+        patcher = mock.patch.dict(MODULE.KNOWN_LOADERS, {sha(loader): 'hidden'})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        packaged = kernel(8)
+        machine = self.transition(boot_kernel=K1, package_kernel=packaged, video_pin=sha(packaged))
+        original = boot(kernel_bytes=K1, dtb=D1, loader=loader)
+        machine.put(MODULE.BOOT, original)
+        machine.put(MODULE.BOOT + MODULE.PREVIOUS, original)
+        video = (machine.root / MODULE.VIDEO_MANIFEST).read_bytes()
+        audio = (machine.root / MODULE.AUDIO_MANIFEST).read_bytes()
+        self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+        self.assertNotEqual(json.loads(video)['boot_kernel_sha256'], sha(K1))
+        real = os.replace
+
+        def fail_manifest(source, target):
+            if Path(target).name == 'j713-video-manifest.json':
+                raise OSError('video manifest rename failed')
+            return real(source, target)
+
+        with mock.patch.object(MODULE.os, 'replace', side_effect=fail_manifest):
+            code, out, err = machine.run('--rollback', '--apply')
+        self.assertEqual(code, 1, err)
+        self.assertEqual(out, '')
+        self.assertIn('video manifest rename failed', err)
+        self.assertEqual(machine.boot, original)
+        self.assertEqual(machine.previous, original)
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), video)
+        self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
+        self.assertTrue((machine.root / BOOT_HOLD).is_file())
+        self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+        code, out, retry_err = machine.run('--rollback', '--apply')
+        self.assertEqual((code, retry_err), (0, ''), retry_err)
+        receipt = json.loads(out)
+        self.assertEqual(receipt['status'], MODULE.HELD_STATUS)
+        self.assertEqual(machine.boot, original)
+        self.assertEqual(machine.previous, original)
+        parsed = json.loads((machine.root / MODULE.VIDEO_MANIFEST).read_bytes())
+        self.assertEqual(parsed['boot_kernel_sha256'], sha(K1))
+        self.assertEqual((parsed['owner_panel'], parsed['notch']), ('kept', 'owner'))
+        self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
+        self.assertTrue((machine.root / BOOT_HOLD).is_file())
+        self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+        self.assertNotIn('boot.bin was not changed', err)
+        self.assertNotIn('recorded there', err)
+        self.assertNotIn('operation recorded', err)
+        self.assertIn('m4-boot-compose', err)
+        self.assertIn('--rollback', err)
+        self.assertIn('--apply', err)
 
 
 def video_with_pin(raw, pin):

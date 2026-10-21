@@ -825,6 +825,43 @@ class SetupTests(unittest.TestCase):
         self.assertEqual((self.root / MODULE.CONF).read_text(), AIR_CONF)
         self.assertFalse((self.root / MODULE.SNIPPET).exists())
 
+    def test_held_boot_status_matches_the_composer(self):
+        """The unpatched held strings match, and that status does not promise a reboot."""
+        import test_m4_boot_compose as boot_tests
+        self.assertEqual(MODULE.HELD_BOOT, boot_tests.MODULE.HELD_STATUS)
+        self.assertNotIn('restart', MODULE.HELD_BOOT)
+        with mock.patch.object(MODULE.Machine, 'compose', return_value=MODULE.HELD_BOOT):
+            result = self.setup_with(FakeSystem(self.root))
+        self.assertEqual((result['boot'], result['restart_needed']), (MODULE.HELD_BOOT, False))
+        self.assertEqual(result['status'], 'connected; boot updates remain held')
+        self.assertNotIn('restart', result['status'])
+
+    def test_held_boot_still_restarts_for_pending_stock_gpu(self):
+        """A known alpha.1 GPU swap still needs a restart while boot updates stay held."""
+        alpha1 = b'alpha.1 gpu module'
+        with mock.patch.object(MODULE, 'GPU_STOCK', MODULE.hashlib.sha256(alpha1).hexdigest()), \
+             mock.patch.object(MODULE.Machine, 'compose', return_value=MODULE.HELD_BOOT):
+            (self.root / MODULE.GPU_MODULE).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / MODULE.GPU_MODULE).write_bytes(alpha1)
+            self.put(MODULE.GPU_STAGED, 'fixed module')
+            self.assertTrue(MODULE.gpu_pending(self.root))
+            result = self.setup_with(FakeSystem(self.root))
+        self.assertEqual(result['boot'], MODULE.HELD_BOOT)
+        self.assertTrue(result['restart_needed'])
+        self.assertEqual(result['status'],
+                         'connected; restart once to apply the other update; boot updates remain held')
+
+    def test_unresolved_boot_recovery_is_not_held_success(self):
+        """Recovery wording is not an accepted boot status."""
+        status = ('Recovery needed: boot updates are held but the video pin does not match '
+                  'boot.bin. Complete the explicit rollback with sudo m4-boot-compose --rollback --apply')
+        with mock.patch.object(MODULE.Machine, 'compose', return_value=status):
+            with self.assertRaises(MODULE.Refused) as caught:
+                self.setup_with(FakeSystem(self.root))
+        self.assertIn('boot.bin is not in step', str(caught.exception))
+        self.assertIn(status, str(caught.exception))
+        self.assertNotIn(MODULE.HELD_BOOT, str(caught.exception))
+
 
 if __name__ == '__main__':
     unittest.main()
