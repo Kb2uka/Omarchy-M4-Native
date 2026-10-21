@@ -367,12 +367,22 @@ class HardeningPackageTests(unittest.TestCase):
             CHECK.check_package(self.channel, *self.speaker_package(missing))
 
     def test_service_option_values_accepts_one_explicit_service_assignment(self):
-        # Other sections do not count. Comments are already covered by the production drop-in.
+        # A decoy before Service must not supply the command. Comments are
+        # already covered by the production drop-in.
         explicit = (
-            '[Service]\nExecStartPre=' + MCA_BOOT_COMMAND + '\n'
-            + '[Unit]\nExecStartPre=/bin/false\n'
+            '[Unit]\nExecStartPre=/bin/unit-decoy\n'
+            + '[Service]\nExecStartPre=' + MCA_BOOT_COMMAND + '\n'
+            + '[Install]\nExecStartPre=/bin/install-decoy\n'
         )
         self.assertEqual(service_option_values(explicit, 'ExecStartPre'), [MCA_BOOT_COMMAND])
+        # A percent specifier stays literal. An interpolation exception must
+        # fail this assertion rather than escape as a suite error.
+        literal = '[Service]\nExecStartPre=/bin/echo %i %%\n'
+        try:
+            literal_values = service_option_values(literal, 'ExecStartPre')
+        except Exception as error:
+            self.fail('literal percent specifier must be preserved: ' + str(error))
+        self.assertEqual(literal_values, ['/bin/echo %i %%'])
         rejected = (
             ('inherited default',
              '[DEFAULT]\nExecStartPre=' + MCA_BOOT_COMMAND + '\n[Service]\n',
@@ -383,6 +393,12 @@ class HardeningPackageTests(unittest.TestCase):
             ('missing section header',
              'ExecStartPre=' + MCA_BOOT_COMMAND + '\n',
              'malformed unit'),
+            ('two service assignments',
+             '[Service]\nExecStartPre=/bin/false\nExecStartPre=' + MCA_BOOT_COMMAND + '\n',
+             'duplicate active assignment'),
+            ('empty reset then command',
+             '[Service]\nExecStartPre=\nExecStartPre=' + MCA_BOOT_COMMAND + '\n',
+             'duplicate active assignment'),
         )
         for case, text, message in rejected:
             with self.subTest(case=case):
