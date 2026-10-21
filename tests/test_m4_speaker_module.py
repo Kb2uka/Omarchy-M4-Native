@@ -420,7 +420,8 @@ class SpeakerModule(unittest.TestCase):
         self.manifest.write_text(json.dumps(document, indent=4))
         before = self.manifest.read_bytes()
         code, report = self.run_tool('--boot', '--component', 'mca')
-        self.assertEqual((code, report['status']), (0, 'current'))
+        self.assertEqual(code, 0, self.last_error)
+        self.assertEqual(report['status'], 'current')
         self.assertEqual(self.manifest.read_bytes(), before)
         self.assertEqual(self.run_tool('--boot')[1]['status'], 'current')
         self.assertEqual(self.manifest.read_bytes(), before)
@@ -448,7 +449,7 @@ class SpeakerModule(unittest.TestCase):
     def test_mca_pins_match_the_qualified_spec_and_the_fixed_module(self):
         spec = json.loads((ROOT / 'audio/j713/qualified.json').read_text())
         artifact = spec['module_artifacts'][MCA_NAME]
-        metadata = spec['file_metadata'][MCA_MODULE]
+        metadata = spec['files'][MCA_MODULE]
         reloaded = importlib.util.module_from_spec(SPEC)
         SPEC.loader.exec_module(reloaded)
         stock = getattr(reloaded, 'MCA_STOCK', {})
