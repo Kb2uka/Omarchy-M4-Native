@@ -28,8 +28,10 @@ mapping and start design, which has not begun.
    runs a mutant suite compiled with the same dtc.
 3. Requalify every private launcher constant after any boot or kernel
    change. The ADT physical address moves between boots.
-4. Design, review and arbitrate a firmware mapping and start contract
-   before any processor start (see "Work still required").
+4. The firmware mapping and start contract is designed in
+   `FIRMWARE-START.md` (revision 4, three blind design reviews arbitrated).
+   It defines the ladder E1 to E5. E1 (read-only firmware hashes) is done.
+   Next is E2: map the firmware's pre-release view with the processor halted.
 
 The acceptance criteria the 2026-10-21 run met are listed below.
 For a clean mapping result expect `result`, `first_error`, `cleanup_error`,
