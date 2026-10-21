@@ -1518,6 +1518,71 @@ class HardenedBuildTests(unittest.TestCase):
         ]
         self.assertEqual(leftovers, [])
 
+    def test_prepare_refuses_case_insensitive_destination_through_directory_symlink(self):
+        """The case probe runs through a symlinked directory output parent.
+
+        An alias onto a simulated case-insensitive filesystem must refuse
+        before creating output and clean up its probe. Path.exists is
+        patched only for the CASE-PROBE basename. A real filesystem prepare
+        of the same inputs still succeeds, and neither path changes the
+        pinned inputs.
+        """
+        archive, exports, _files = self.prepared_inputs()
+        watched = (
+            archive,
+            exports,
+            ROOT / 'audio/j713/imported-source.sha256',
+            ROOT / 'audio/j713/kernel/mca.c',
+            RETAINED_PATCH,
+        )
+        before = {path: digest(path) for path in watched}
+        real = self.base / 'real-case-parent'
+        real.mkdir()
+        alias = self.base / 'alias-case-parent'
+        alias.symlink_to(real.name)
+        output = alias / 'prepared'
+        self.assertTrue(alias.is_symlink())
+        self.assertTrue(alias.is_dir())
+        self.assertFalse(real.is_symlink())
+        self.assertFalse(output.exists())
+        self.assertFalse(output.is_symlink())
+        self.assertEqual(os.readlink(alias), real.name)
+        self.assertEqual(output.parent, alias)
+        self.assertTrue(output.parent.is_symlink())
+        real_exists = Path.exists
+
+        def exists(path):
+            if Path(path).name == 'CASE-PROBE':
+                return True
+            return real_exists(path)
+
+        with mock.patch.object(Path, 'exists', exists):
+            with self.assertRaises(RuntimeError) as caught:
+                tool.prepare(archive, exports, self.image(), output)
+        self.assertIn('case-sensitive', str(caught.exception))
+        self.assertFalse(real_exists(output))
+        self.assertFalse(real_exists(real / 'prepared'))
+        self.assertTrue(alias.is_symlink())
+        self.assertTrue(alias.is_dir())
+        self.assertFalse(real.is_symlink())
+        self.assertEqual(os.readlink(alias), real.name)
+        leftovers = [
+            path for path in self.base.rglob('*')
+            if 'case-probe' in path.name.lower() or path.name.startswith('.j713-case-')
+        ]
+        self.assertEqual(leftovers, [])
+        for path, pin in before.items():
+            self.assertEqual(digest(path), pin)
+
+        real_output = self.base / 'case-real'
+        tool.prepare(archive, exports, self.image(), real_output)
+        copied = real_output / 'mca' / 'mca.c'
+        self.assertTrue(copied.is_file())
+        self.assertFalse(copied.is_symlink())
+        self.assertEqual(copied.read_bytes(), (ROOT / 'audio/j713/kernel/mca.c').read_bytes())
+        for path, pin in before.items():
+            self.assertEqual(digest(path), pin)
+
     def test_prepare_refuses_missing_and_regular_file_destination_parents(self):
         """A missing or regular-file parent is refused by the case probe itself.
 
