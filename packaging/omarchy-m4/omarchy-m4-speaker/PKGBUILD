@@ -14,7 +14,7 @@ options=('!strip' '!debug')
 source=('m4-speaker-module.py' '20-m4-speaker-module.conf' '25-m4-mca-module.conf' 'MIT.txt' 'GPL-2.0-only.txt'
         "snd-soc-j713-group.ko::${url}/releases/download/package-inputs/snd-soc-j713-group-aaad802e.ko"
         "snd-soc-apple-mca.ko::${url}/releases/download/package-inputs/snd-soc-apple-mca-fb941df4.ko")
-sha256sums=('ca34b9aefe67bee9bb49469309623c95dfdc49a6f1b6d9585c3e832b4c0c00f0'
+sha256sums=('2f3b117da209073c0f7aed1b2668f4f490f0599d1b89015b936a693d4f3718b1'
             '30f71811f89039d0448b0186a7224f9545746690685eb7c0b3106467cbce65fc'
             '1e14c4cbcb80953b3bc88144f7d7a269da7f7b65b6f1eafb3bc6e0191394fcb5'
             'b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5'
