@@ -116,6 +116,13 @@ the occupied-destination diagnostic is also caught, but that is diagnostic
 coverage: `mkdir` still refuses the existing path before copying. It is not
 an additional overwrite vulnerability. The restored 42-test suite passes.
 
+The subsequent directory-alias refusal test increases the suite to 43 tests.
+It simulates case-insensitive name lookup through a real directory alias,
+checks refusal before output creation, and checks probe cleanup and unchanged
+source pins. A mutant that returns early for an aliased parent passed the
+previous 42 tests and fails this test. The restored 43 tests pass on Homebase.
+The builder implementation is unchanged from `dc191cb`.
+
 A full ARM64 baseline kernel and then the hardened kernel linked with
 LLVM 21.1.8 and Rust 1.93.1. All five `audio/j713/kernel` modules also linked
 with `J713_PROFILE=conservative-v1`, `KCFLAGS=-Werror` and pinned supplemental
@@ -135,8 +142,10 @@ the case-probe check, completed on Homebase. Against one of the earlier
 outputs (build A), `cmp` of `Image.gz`, `cmp` of the receipt, and `diff -qr`
 of all five modules each exited 0. The image remains 18,900,939 bytes and the MCA module
 remains 79,152 bytes, at the hashes below. The full 5,896-byte trust region was
-verified independently and matches the original qualified kernel hash below;
-that hash is unchanged. The matched receipt still sets `native_qualified`
+verified independently: its SHA-256 is
+`77f3aad25837130e2e41d6750019a0e526365eeda0bfd17f2c45bb7df28cc0cc`,
+matching the same region of the original qualified kernel. This is a region
+digest, separate from either complete kernel digest. The matched receipt still sets `native_qualified`
 and `fresh_install_qualified` to false.
 
 A fourth fresh build used `dc191cb3e7dc935cb5f4e13a5b44f2a835a6a331`,
@@ -215,8 +224,14 @@ boot completed with this same image and MCA module
 18,900,939 bytes;
 `fb941df4d55c4f2093b4595e0392aaf97ffe3a250228518b18a4f70568bf7454`,
 79,152 bytes). The evidence for that session is in the companion pull
-request. Closing issue 43 also requires the companion migration and recovery
-evidence. Build receipts keep `native_qualified` and
+request. The native acceptance requirements remain boot and repeat boot,
+keyboard and trackpad input, protected audio, GPU, and video checks. PR 157
+owns those checks and the migration evidence: protected audio readiness and
+playback, GPU state, and hardware-decoded video comparisons were observed on
+the candidate. Device enumeration and automated login are recorded separately
+from physical keyboard and trackpad acceptance, which remains unperformed
+for channel promotion. These source changes do not waive that gate.
+Closing issue 43 also requires the companion migration and recovery evidence. Build receipts keep `native_qualified` and
 `fresh_install_qualified` false because the builder does not qualify
 hardware. A fresh install, suspend, human listening, and physical typing
 were not performed.
