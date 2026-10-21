@@ -16,7 +16,7 @@ reviewers.
 | `linux-m4-omarchy` | The J713 kernel image and its modules | `7.1.9.m4.20261008-2` |
 | `omarchy-m4-gst-audio` | GStreamer's `autodetect` and `pulse` sinks in `/usr/lib/gstreamer-1.0`, for WebKitGTK and GStreamer apps | `1.28.7-1` |
 | `omarchy-m4-headphones` | The headphone jack card: two pinned modules, `m4-headphones`, its registration drop-in, UCM and WirePlumber files | `1-1`; `1-2` adds the headset microphone |
-| `omarchy-m4-cpu` | The CPU idle driver: one pinned module, `m4-cpu-idle` and its boot unit | `1-1`; `1-4` survives a clean stop during the settle period |
+| `omarchy-m4-cpu` | The CPU idle driver: one pinned module, `m4-cpu-idle` and its boot unit | `1-1`; `1-5` retries a leftover marker once after a proven orderly shutdown |
 | `omarchy-m4-evdi` | DisplayLink's evdi module and `libevdi`, for USB display adapters | `1.15.1-1` |
 | `omarchy-m4-backlight` | Native DCP backlight module, guarded startup, brightness-key routing and OSD | `1-1` |
 
@@ -222,6 +222,21 @@ file.
   historical marker, because its reason is unknowable. The upgrade prints the
   recovery instead: `sudo m4-cpu-idle --start` retries the load in the running
   session. `--disable` and `--boost off` choices are untouched.
+
+### omarchy-m4-cpu 1-5
+
+- **One retry after a proven orderly shutdown:** `--boot` can clear a leftover
+  attempt marker when its boot reached systemd-shutdown's final "Sending
+  SIGTERM to remaining processes" entry. New markers record the boot ID;
+  legacy markers must match exactly one journal boot by modification time.
+  The current boot, uncertain evidence and unexpected markers stay struck.
+- **Bounded recovery:** the retry writes `retry=1` before loading. A later boot
+  never clears that marker automatically, even with orderly shutdown evidence.
+  The settle cleanup and `sudo m4-cpu-idle --start` recovery remain unchanged.
+  The upgrade notice explains both paths and leaves the marker untouched.
+- **Package only:** neither kernel module changes; both retain their existing
+  `rebuilt-identical` source joins. Release 1-5 supersedes the owner's earlier
+  1-4 test build without reusing its package filename.
 
 ### omarchy-m4-headphones 1-2
 

@@ -24,7 +24,9 @@ nothing, because the Air has no boot menu to recover from. A clean stop during
 the settle period (a systemd restart or shutdown sends SIGTERM) is not a death:
 the loader clears the marker as it stops and the next boot tries again. A stop
 while a module load is still pending keeps the marker, because that load's
-outcome is unknowable. --start loads the driver in the running session instead
+outcome is unknowable. At the next boot, one retry is allowed if that marker's
+boot reached systemd-shutdown's final SIGTERM stage. The retry's marker can
+never earn another automatic retry. --start loads the driver in the running session instead
 (and clears a marker left by such a boot). Inspection is the default.
 
 Off switch: --disable writes a hold file, and no boot or --start loads the
@@ -42,7 +44,9 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -51,6 +55,7 @@ RELEASE = '7.1.9-m4-gpu-backport-20261008'
 BOARD = b'apple,j713'
 COMPATIBLE = 'sys/firmware/devicetree/base/compatible'
 OSRELEASE = 'proc/sys/kernel/osrelease'
+BOOT_ID = 'proc/sys/kernel/random/boot_id'
 CURRENT_DRIVER = 'sys/devices/system/cpu/cpuidle/current_driver'
 CPUS = 'sys/devices/system/cpu'
 STAGED = 'usr/lib/omarchy-m4/cpu/j713_cpuidle.ko'
@@ -176,6 +181,81 @@ def read(path):
         return None
 
 
+def boot_id(root):
+    try:
+        value = (root / BOOT_ID).read_text().strip().replace('-', '').lower()
+        return value if re.fullmatch('[0-9a-f]{32}', value) else None
+    except (OSError, UnicodeError):
+        return None
+
+
+def write_attempt(root, message, retry=False):
+    text = message + '\n'
+    current = boot_id(root)
+    if current is not None:
+        text += 'boot_id=' + current + '\n'
+    if retry:
+        text += 'retry=1\n'
+    write_state(root, 'attempt', text)
+
+
+def run_journal(args):
+    result = subprocess.run(['journalctl'] + args, capture_output=True, text=True, check=False, timeout=30)
+    return result.returncode, result.stdout
+
+
+def orderly_attempt(root, journal):
+    """Prove a leftover marker belongs to a different boot that shut down in order. Any doubt keeps it."""
+    try:
+        fd = os.open(root / STATE / 'attempt', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, 'rb') as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size > 4096:
+                return False
+            data = stream.read(4097)
+        if len(data) > 4096:
+            return False
+        lines = data.decode('ascii').removesuffix('\n').split('\n')
+        if lines[0] not in ('loading the CPU idle driver', 'loading the P-cluster boost guard'):
+            return False
+        retry = lines[-1] == 'retry=1'
+        if retry:
+            lines = lines[:-1]
+        current = boot_id(root)
+        if retry or current is None:
+            return False
+        if len(lines) == 2 and lines[1].startswith('boot_id='):
+            previous = lines[1][len('boot_id='):]
+        elif len(lines) == 1:
+            code, output = journal(['--list-boots', '-o', 'json'])
+            if code != 0:
+                return False
+            boots = json.loads(output)
+            if not isinstance(boots, list):
+                return False
+            matches = []
+            for boot in boots:
+                first, last = boot['first_entry'], boot['last_entry']
+                if (type(first) is not int or type(last) is not int or not 0 <= first <= last
+                        or not re.fullmatch('[0-9a-f]{32}', boot['boot_id'])):
+                    return False
+                if first <= info.st_mtime_ns // 1000 <= last:
+                    matches.append(boot['boot_id'])
+            if len(matches) != 1:
+                return False
+            previous = matches[0]
+        else:
+            return False
+        if not re.fullmatch('[0-9a-f]{32}', previous) or previous == current:
+            return False
+        code, output = journal(['-b', previous, 'SYSLOG_IDENTIFIER=systemd-shutdown',
+                                '-o', 'cat', '-q', '--no-pager'])
+        return code == 0 and any('Sending SIGTERM to remaining processes' in line for line in output.splitlines())
+    except Exception:
+        # A missing journal, timeout, unreadable marker or unknown journal format is not proof.
+        return False
+
+
 def power_downs(root):
     """Total power-down entries across all CPUs, or None when the driver serves none."""
     counts = [read(cpu / POWER_DOWN / 'usage') for cpu in (root / CPUS).glob('cpu[0-9]*')]
@@ -283,13 +363,13 @@ def joined(*parts):
     return '; '.join(part for part in parts if part)
 
 
-def load(root, report, run, settle_seconds, sleep):
+def load(root, report, run, settle_seconds, sleep, retry=False):
     require(report['board'], 'This is not a J713 MacBook Air')
     require(report['kernel'], 'The running kernel is not ' + RELEASE)
     require(report['staged'], 'Staged j713_cpuidle.ko is missing or differs from the pin')
     require(report['driver'] in (None, 'none'),
             f"Another CPU idle driver ({report['driver']}) is registered; leaving it in charge")
-    write_state(root, 'attempt', 'loading the CPU idle driver\n')
+    write_attempt(root, 'loading the CPU idle driver', retry)
     if run(['insmod', str(root / STAGED)]) != 0:
         # The load returned, so it did not take the boot down with it.
         remove_state(root, 'attempt')
@@ -309,7 +389,7 @@ def start_guard(root, report, run, settle_seconds, sleep):
     """In a running session with the idle driver loaded, load the guard under the attempt marker."""
     if report['guard_loaded'] or report['boost_held'] or report['gate'] == 'absent':
         return None
-    write_state(root, 'attempt', 'loading the P-cluster boost guard\n')
+    write_attempt(root, 'loading the P-cluster boost guard')
     try:
         boost = load_guard(root, report, run)
         if boost == 'boost guard loaded':
@@ -385,14 +465,14 @@ def run_command(command):
     return subprocess.run(command, check=False).returncode
 
 
-def run(root, mode, runner=run_command, settle_seconds=SETTLE_SECONDS, sleep=time.sleep):
+def run(root, mode, runner=run_command, settle_seconds=SETTLE_SECONDS, sleep=time.sleep, journal=run_journal):
     if mode == 'inspect':
-        return change(root, mode, runner, settle_seconds, sleep)
+        return change(root, mode, runner, settle_seconds, sleep, journal)
     with Locked(root):
-        return change(root, mode, runner, settle_seconds, sleep)
+        return change(root, mode, runner, settle_seconds, sleep, journal)
 
 
-def change(root, mode, runner, settle_seconds, sleep):
+def change(root, mode, runner, settle_seconds, sleep, journal):
     if mode in ('boost-off', 'boost-on'):
         return boost(root, mode)
     if mode == 'disable':
@@ -407,7 +487,12 @@ def change(root, mode, runner, settle_seconds, sleep):
     if mode in ('boot', 'start'):
         require(not report['held'],
                 'CPU idle is switched off. Run sudo m4-cpu-idle --enable to switch it back on')
-        require(mode == 'start' or not report['attempt_marker'],
+        retry = False
+        marked = report['attempt_marker'] or (root / STATE / 'attempt').is_symlink()
+        if mode == 'boot' and marked and orderly_attempt(root, journal):
+            remove_state(root, 'attempt')
+            retry = True
+        require(mode == 'start' or not marked or retry,
                 'A previous boot stopped while loading the CPU idle driver, so this boot loads none. '
                 'Run sudo m4-cpu-idle --start to try again in the running session')
         if report['state'] == 'loaded':
@@ -415,8 +500,10 @@ def change(root, mode, runner, settle_seconds, sleep):
             boost_note = start_guard(root, report, runner, settle_seconds, sleep) if mode == 'start' else None
             report = dict(inspect(root), status=joined('current', boost_note))
         else:
-            status = load(root, report, runner, settle_seconds, sleep)
+            status = load(root, report, runner, settle_seconds, sleep, retry)
             report = dict(inspect(root), status=status)
+        if retry:
+            report['status'] = 'retried after an orderly restart left the attempt marker; ' + report['status']
     else:  # inspect or enable
         report['status'] = {
             'loaded': 'current',

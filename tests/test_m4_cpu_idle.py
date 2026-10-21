@@ -37,10 +37,12 @@ class Machine:
     def __init__(self, root, fail=False, idles=True, guard_fails=False):
         self.root, self.fail, self.idles, self.guard_fails = root, fail, idles, guard_fails
         self.commands, self.marked, self.slept = [], [], []
+        self.markers = []
 
     def __call__(self, command):
         self.commands.append(command)
         self.marked.append((self.root / MODULE.STATE / 'attempt').is_file())
+        self.markers.append((self.root / MODULE.STATE / 'attempt').read_text())
         if command[-1].endswith(MODULE.GUARD_STAGED):
             # The real guard refuses without the idle driver, and opens the gate itself.
             if self.guard_fails or not (self.root / 'sys/module' / MODULE.NAME).exists():
@@ -552,6 +554,378 @@ class CpuIdleLoad(unittest.TestCase):
         self.assertIn('systemctl disable m4-cpu-idle.service', install)
 
 
+class CpuIdleOrderlyRetry(unittest.TestCase):
+    """Only a proven orderly shutdown earns one automatic retry of a leftover marker."""
+
+    put = CpuIdleLoad.put
+    marker = CpuIdleLoad.marker
+    boost_ready = CpuIdleLoad.boost_ready
+    restart = CpuIdleLoad.restart
+    idle_insmod = CpuIdleLoad.idle_insmod
+    guard_insmod = CpuIdleLoad.guard_insmod
+
+    BOOT_ID = 'proc/sys/kernel/random/boot_id'
+    CURRENT = '0123456789abcdef0123456789abcdef'
+    PREVIOUS = 'fedcba9876543210fedcba9876543210'
+    IDLE = 'loading the CPU idle driver'
+    GUARD = 'loading the P-cluster boost guard'
+    REFUSAL = ('A previous boot stopped while loading the CPU idle driver, so this boot loads none. '
+               'Run sudo m4-cpu-idle --start to try again in the running session')
+    RETRIED = 'retried after an orderly restart left the attempt marker; '
+    LIST = ['--list-boots', '-o', 'json']
+
+    def setUp(self):
+        CpuIdleLoad.setUp(self)
+        self.put(self.BOOT_ID, b' 01234567-89AB-CDEF-0123-456789ABCDEF\n')
+        self.journal_calls = []
+        self.boots = [{'boot_id': self.PREVIOUS, 'first_entry': 1000000, 'last_entry': 3000000}]
+        self.shutdown = 'Syncing filesystems and block devices.\nSending SIGTERM to remaining processes...\n'
+
+    def journal(self, args):
+        self.journal_calls.append(args)
+        if args == self.LIST:
+            return 0, json.dumps(self.boots)
+        return 0, self.shutdown
+
+    def attempt(self, text):
+        self.put(MODULE.STATE + '/attempt', text.encode())
+        os.utime(self.marker(), ns=(2000000000, 2000000000))
+
+    def run_mode(self, mode, machine, journal=None):
+        return MODULE.run(self.root, mode, machine, settle_seconds=120, sleep=machine.sleep,
+                          journal=self.journal if journal is None else journal)
+
+    def assert_struck(self, journal=None):
+        machine = Machine(self.root)
+        with self.assertRaises(MODULE.Refused) as caught:
+            self.run_mode('boot', machine, journal)
+        self.assertEqual(str(caught.exception), self.REFUSAL)
+        self.assertEqual((machine.commands, machine.slept), ([], []))
+        self.assertTrue(self.marker().exists() or self.marker().is_symlink())
+
+    def test_legacy_marker_with_one_orderly_boot_retries_under_a_new_durable_marker(self):
+        for first in (self.IDLE, self.GUARD):
+            with self.subTest(first=first):
+                self.attempt(first + '\n')
+                self.journal_calls.clear()
+                machine = Machine(self.root)
+                remove = MODULE.remove_state
+                sync = MODULE.sync_directory
+                with mock.patch.object(MODULE, 'remove_state', wraps=remove) as removed, \
+                        mock.patch.object(MODULE, 'sync_directory', wraps=sync) as synced:
+                    def runner(command):
+                        removed.assert_called_once_with(self.root, 'attempt')
+                        self.assertEqual(synced.call_count, 2, 'removal and replacement must both be durable')
+                        return machine(command)
+
+                    report = MODULE.run(self.root, 'boot', runner, 120, machine.sleep, journal=self.journal)
+                self.assertEqual(machine.commands, [self.idle_insmod()])
+                self.assertEqual(machine.markers, [self.IDLE + '\nboot_id=' + self.CURRENT + '\nretry=1\n'])
+                self.assertFalse(self.marker().exists())
+                self.assertEqual(report['state'], 'loaded')
+                self.assertTrue(report['status'].startswith(self.RETRIED))
+                self.assertEqual(self.journal_calls[0], self.LIST)
+                self.assertEqual(self.journal_calls[1], ['-b', self.PREVIOUS,
+                                 'SYSLOG_IDENTIFIER=systemd-shutdown', '-o', 'cat', '-q', '--no-pager'])
+                self.assertEqual(len(self.journal_calls), 2)
+                self.restart()
+
+    def test_boot_id_marker_uses_its_boot_without_mtime_lookup_and_loads_both_modules(self):
+        self.attempt(self.IDLE + '\nboot_id=' + self.PREVIOUS + '\n')
+        os.utime(self.marker(), ns=(9000000000, 9000000000))
+        self.boost_ready()
+        machine = Machine(self.root)
+        report = self.run_mode('boot', machine)
+        self.assertEqual(machine.commands, [self.idle_insmod(), self.guard_insmod()])
+        self.assertEqual(machine.markers, [self.IDLE + '\nboot_id=' + self.CURRENT + '\nretry=1\n'] * 2)
+        self.assertEqual((report['state'], report['boost']), ('loaded', 'on'))
+        self.assertTrue(report['status'].startswith(self.RETRIED))
+        self.assertFalse(self.marker().exists())
+        self.assertEqual(self.journal_calls, [['-b', self.PREVIOUS, 'SYSLOG_IDENTIFIER=systemd-shutdown',
+                                              '-o', 'cat', '-q', '--no-pager']])
+
+    def test_abrupt_boot_keeps_the_exact_refusal_and_marker(self):
+        for shutdown in ('', 'Reached target System Reboot.\n', 'Sending SIGKILL to remaining processes...\n'):
+            with self.subTest(shutdown=shutdown):
+                self.shutdown = shutdown
+                text = self.IDLE + '\nboot_id=' + self.PREVIOUS + '\n'
+                self.attempt(text)
+                self.assert_struck()
+                self.assertEqual(self.marker().read_text(), text)
+
+    def test_journal_failure_missing_command_timeout_and_garbage_keep_the_strike(self):
+        for stage in ('list', 'shutdown'):
+            for failure in ((1, self.shutdown), (1, json.dumps(self.boots)), (0, 'garbage'), FileNotFoundError('journalctl'),
+                            subprocess.TimeoutExpired('journalctl', 30), OSError('journal unreadable')):
+                with self.subTest(stage=stage, failure=failure):
+                    self.attempt(self.IDLE + '\n')
+
+                    def journal(args):
+                        if stage == 'shutdown' and args == self.LIST:
+                            return self.journal(args)
+                        if isinstance(failure, Exception):
+                            raise failure
+                        return failure
+
+                    self.assert_struck(journal)
+
+    def test_failed_boot_list_with_valid_stdout_keeps_the_exact_refusal_and_marker(self):
+        self.attempt(self.IDLE + '\n')
+        original = self.marker().read_bytes()
+
+        def journal(args):
+            code, output = self.journal(args)
+            return (1 if args == self.LIST else code), output
+
+        self.assert_struck(journal)
+        self.assertEqual(self.journal_calls, [self.LIST])
+        self.assertEqual(self.marker().read_bytes(), original)
+        self.assertEqual(self.run_mode('inspect', Machine(self.root))['state'], 'struck')
+
+    def test_legacy_mtime_must_match_exactly_one_boot(self):
+        match = self.boots[0]
+        for boots in ([], [dict(match, first_entry=2000001)], [dict(match, last_entry=1999999)],
+                      [match, dict(match, boot_id='a' * 32)], [match, match]):
+            with self.subTest(boots=boots):
+                self.attempt(self.IDLE + '\n')
+                self.boots = boots
+                self.journal_calls.clear()
+                self.assert_struck()
+                self.assertEqual(self.journal_calls, [self.LIST])
+
+    def test_legacy_mtime_includes_both_interval_endpoints(self):
+        for timestamp in (1000000000, 3000000000):
+            with self.subTest(timestamp=timestamp):
+                self.attempt(self.IDLE)
+                os.utime(self.marker(), ns=(timestamp, timestamp))
+                self.assertEqual(self.run_mode('boot', Machine(self.root))['state'], 'loaded')
+                self.restart()
+
+    def test_malformed_boot_lists_never_prove_an_orderly_boot(self):
+        good = self.boots[0]
+        for boots in ({}, None, [None], [{}], [dict(good, boot_id='bad')],
+                      [dict(good, first_entry='1000000')], [dict(good, last_entry=True)],
+                      [dict(good, first_entry=True)], [dict(good, first_entry=1000000.0)],
+                      [dict(good, last_entry=3000000.0)],
+                      [dict(good, first_entry=-1)], [dict(good, first_entry=4000000)],
+                      [good, dict(good, boot_id='bad', first_entry=4000000, last_entry=5000000)],
+                      [good, {}]):
+            with self.subTest(boots=boots):
+                self.attempt(self.IDLE + '\n')
+                self.boots = boots
+                self.assert_struck()
+
+    def test_the_current_boot_never_earns_a_retry(self):
+        for legacy in (False, True):
+            with self.subTest(legacy=legacy):
+                self.attempt(self.IDLE + ('\n' if legacy else '\nboot_id=' + self.CURRENT + '\n'))
+                self.boots[0]['boot_id'] = self.CURRENT
+                self.journal_calls.clear()
+                self.assert_struck()
+                self.assertEqual(self.journal_calls, [self.LIST] if legacy else [])
+
+    def test_missing_or_invalid_current_boot_id_cannot_prove_a_different_boot(self):
+        for content in (None, b'bad', b'\xff'):
+            with self.subTest(content=content):
+                if content is None:
+                    (self.root / self.BOOT_ID).unlink()
+                else:
+                    self.put(self.BOOT_ID, content)
+                self.attempt(self.IDLE + '\nboot_id=' + self.PREVIOUS + '\n')
+                self.assert_struck()
+
+    def test_retry_markers_never_clear_automatically(self):
+        for first in (self.IDLE, self.GUARD):
+            for boot in ('', 'boot_id=' + self.PREVIOUS + '\n'):
+                with self.subTest(first=first, boot=boot):
+                    self.attempt(first + '\n' + boot + 'retry=1\n')
+                    self.assert_struck()
+                    self.assertEqual(self.journal_calls, [])
+
+    def test_unknown_binary_oversized_and_malformed_markers_keep_the_strike(self):
+        valid = self.IDLE + '\nboot_id=' + self.PREVIOUS + '\n'
+        for content in (b'', b'loading\n', valid.encode() + b'unknown\n', valid.encode() + b'\xff',
+                        valid.encode() + b'\0', (valid + 'retry=0\n').encode(),
+                        (valid + 'boot_id=' + self.PREVIOUS + '\n').encode(),
+                        (valid + '\n').encode(), (self.IDLE + '\n' + 'x' * 4096).encode()):
+            with self.subTest(content=content[:100]):
+                self.put(MODULE.STATE + '/attempt', content)
+                os.utime(self.marker(), ns=(2000000000, 2000000000))
+                self.assert_struck()
+                self.assertEqual(self.marker().read_bytes(), content)
+        for boot in ('', 'A' * 32, 'g' * 32, 'a' * 31, 'a' * 33, '../' + 'a' * 29,
+                     '01234567-89ab-cdef-0123-456789abcdef'):
+            with self.subTest(boot=boot):
+                self.attempt(self.IDLE + '\nboot_id=' + boot + '\n')
+                self.assert_struck()
+
+    def test_oversized_marker_is_rejected_even_if_the_prefix_looks_valid(self):
+        self.attempt(self.IDLE + '\nboot_id=' + self.PREVIOUS + '\n')
+        with mock.patch.object(MODULE.os, 'fstat', return_value=types.SimpleNamespace(
+                st_mode=0o100600, st_size=4097, st_mtime_ns=2000000000)):
+            self.assert_struck()
+
+    def test_marker_read_is_bounded_and_rejects_growth_after_stat(self):
+        self.attempt(self.IDLE + '\nboot_id=' + self.PREVIOUS + '\n')
+        fdopen = MODULE.os.fdopen
+        journal = mock.Mock(return_value=(0, self.shutdown))
+        streams = []
+
+        def opened(fd, mode):
+            stream = fdopen(fd, mode)
+            proxy = mock.MagicMock(wraps=stream)
+            proxy.__enter__.return_value = proxy
+            proxy.__exit__.side_effect = stream.__exit__
+            data = mock.MagicMock()
+            data.__len__.return_value = 4097
+            data.decode.return_value = self.IDLE + '\nboot_id=' + self.PREVIOUS + '\n'
+            proxy.read.return_value = data
+            streams.append(proxy)
+            return proxy
+
+        with mock.patch.object(MODULE.os, 'fdopen', side_effect=opened) as opened_file:
+            self.assertFalse(MODULE.orderly_attempt(self.root, journal))
+        opened_file.assert_called_once()
+        streams[0].read.assert_called_once_with(4097)
+        journal.assert_not_called()
+
+    def test_nonregular_metadata_is_rejected_before_reading(self):
+        self.attempt(self.IDLE + '\nboot_id=' + self.PREVIOUS + '\n')
+        with mock.patch.object(MODULE.os, 'fstat', return_value=types.SimpleNamespace(
+                st_mode=0o010600, st_size=100, st_mtime_ns=2000000000)):
+            self.assert_struck()
+
+    def test_unreadable_marker_keeps_the_strike(self):
+        self.attempt(self.IDLE + '\nboot_id=' + self.PREVIOUS + '\n')
+        real_open = MODULE.os.open
+
+        def opened(path, flags, *args):
+            if path == self.marker():
+                raise PermissionError('unreadable marker')
+            return real_open(path, flags, *args)
+
+        with mock.patch.object(MODULE.os, 'open', side_effect=opened):
+            self.assert_struck()
+
+    def test_symlink_directory_and_fifo_markers_stay_struck(self):
+        self.attempt(self.IDLE + '\nboot_id=' + self.PREVIOUS + '\n')
+        target = self.marker().with_name('target')
+        self.marker().rename(target)
+        self.marker().symlink_to(target)
+        self.assert_struck()
+        target.unlink()  # a dangling symlink is still a strike
+        self.assert_struck()
+        self.marker().unlink()
+        self.marker().mkdir()
+        self.assert_struck()
+        self.marker().rmdir()
+        os.mkfifo(self.marker())
+        self.assert_struck()
+        self.assertEqual(self.journal_calls, [])
+
+    def test_marker_open_uses_nofollow_and_nonblocking(self):
+        self.attempt(self.IDLE + '\nboot_id=' + self.PREVIOUS + '\n')
+        real_open = MODULE.os.open
+
+        def opened(path, flags, *args):
+            if path == self.marker() and not flags & os.O_WRONLY:
+                self.assertTrue(flags & os.O_NOFOLLOW)
+                self.assertTrue(flags & os.O_NONBLOCK, 'opening a FIFO must never wait')
+            return real_open(path, flags, *args)
+
+        with mock.patch.object(MODULE.os, 'open', side_effect=opened):
+            self.assertEqual(self.run_mode('boot', Machine(self.root))['state'], 'loaded')
+
+    def test_a_retry_that_dies_stays_struck_after_even_an_orderly_shutdown(self):
+        self.attempt(self.IDLE + '\nboot_id=' + self.PREVIOUS + '\n')
+
+        def died(command):
+            self.assertEqual(command, self.idle_insmod())
+            raise SystemExit('the load never returned')
+
+        with self.assertRaises(SystemExit):
+            MODULE.run(self.root, 'boot', died, sleep=lambda seconds: None, journal=self.journal)
+        self.assertEqual(self.marker().read_text(), self.IDLE + '\nboot_id=' + self.CURRENT + '\nretry=1\n')
+        self.put(self.BOOT_ID, ('a' * 32).encode())
+        journal = mock.Mock(return_value=(0, self.shutdown))
+        self.assert_struck(journal)
+        journal.assert_not_called()
+
+    def test_start_clears_a_retry_marker_without_consulting_the_journal(self):
+        self.attempt(self.IDLE + '\nboot_id=' + self.PREVIOUS + '\nretry=1\n')
+        journal = mock.Mock(side_effect=AssertionError('start must not read the journal'))
+        machine = Machine(self.root)
+        report = self.run_mode('start', machine, journal)
+        self.assertEqual(report['state'], 'loaded')
+        self.assertFalse(report['status'].startswith(self.RETRIED))
+        self.assertEqual(machine.markers, [self.IDLE + '\nboot_id=' + self.CURRENT + '\n'])
+        self.assertFalse(self.marker().exists())
+        journal.assert_not_called()
+
+    def test_start_with_an_orderly_legacy_marker_never_uses_automatic_retry(self):
+        self.attempt(self.IDLE + '\n')
+        journal = mock.Mock(wraps=self.journal)
+        machine = Machine(self.root)
+        report = self.run_mode('start', machine, journal)
+        journal.assert_not_called()
+        self.assertEqual(report['state'], 'loaded')
+        self.assertEqual(machine.commands, [self.idle_insmod()])
+        self.assertEqual(machine.markers, [self.IDLE + '\nboot_id=' + self.CURRENT + '\n'])
+        self.assertFalse(report['status'].startswith(self.RETRIED))
+        self.assertFalse(self.marker().exists())
+
+    def test_new_idle_and_guard_markers_record_the_normalized_boot_id(self):
+        machine = Machine(self.root)
+        self.run_mode('boot', machine)
+        self.assertEqual(machine.markers, [self.IDLE + '\nboot_id=' + self.CURRENT + '\n'])
+        self.boost_ready()
+        machine = Machine(self.root)
+        self.run_mode('start', machine)
+        self.assertEqual(machine.markers, [self.GUARD + '\nboot_id=' + self.CURRENT + '\n'])
+        self.assertEqual(self.journal_calls, [])
+
+    def test_new_markers_without_a_readable_boot_id_keep_the_existing_first_line(self):
+        (self.root / self.BOOT_ID).unlink()
+        machine = Machine(self.root)
+        self.run_mode('boot', machine)
+        self.assertEqual(machine.markers, [self.IDLE + '\n'])
+        self.boost_ready()
+        machine = Machine(self.root)
+        self.run_mode('start', machine)
+        self.assertEqual(machine.markers, [self.GUARD + '\n'])
+
+    def test_inspection_enable_and_disable_never_consult_the_journal_or_clear_a_marker(self):
+        text = self.IDLE + '\nboot_id=' + self.PREVIOUS + '\n'
+        self.attempt(text)
+        journal = mock.Mock(side_effect=AssertionError('only boot may query the journal'))
+        for mode in ('inspect', 'disable', 'enable'):
+            self.run_mode(mode, Machine(self.root), journal)
+            self.assertEqual(self.marker().read_text(), text)
+        journal.assert_not_called()
+
+    def test_a_hold_prevents_recovery_and_journal_access(self):
+        self.attempt(self.IDLE + '\nboot_id=' + self.PREVIOUS + '\n')
+        self.put(MODULE.STATE + '/hold', b'off\n')
+        machine = Machine(self.root)
+        with self.assertRaisesRegex(MODULE.Refused, 'CPU idle is switched off'):
+            self.run_mode('boot', machine)
+        self.assertEqual((machine.commands, self.journal_calls), ([], []))
+        self.assertTrue(self.marker().exists())
+
+    def test_default_journal_command_captures_output_and_bounds_each_call(self):
+        self.attempt(self.IDLE + '\n')
+        replies = [types.SimpleNamespace(returncode=0, stdout=json.dumps(self.boots)),
+                   types.SimpleNamespace(returncode=0, stdout=self.shutdown)]
+        machine = Machine(self.root)
+        with mock.patch.object(MODULE.subprocess, 'run', side_effect=replies) as command:
+            report = MODULE.run(self.root, 'boot', machine, 120, machine.sleep)
+        self.assertEqual(report['state'], 'loaded')
+        self.assertEqual(command.call_count, 2)
+        for call in command.call_args_list:
+            self.assertEqual(call.args[0][0], 'journalctl')
+            self.assertEqual(call.kwargs, {'capture_output': True, 'text': True, 'check': False, 'timeout': 30})
+
+
 class CpuIdleStopSignal(unittest.TestCase):
     """A stop inside the settle window (#130): SIGTERM (clean stop) must clear the attempt
     marker and release the lock, so the next boot loads; SIGKILL (abrupt death) must keep the
@@ -842,8 +1216,8 @@ class CpuIdleStopSignal(unittest.TestCase):
 
 
 class CpuIdleInstallScriptlet(unittest.TestCase):
-    """The package scriptlet points an already-struck install at --start, keeps its existing
-    notices, and never clears the marker or starts anything itself."""
+    """The package scriptlet explains boot recovery and --start, keeps its existing notices,
+    and never clears the marker or starts anything itself."""
 
     INSTALL = ROOT / 'packaging/omarchy-m4/omarchy-m4-cpu/omarchy-m4-cpu.install'
 
@@ -877,6 +1251,8 @@ class CpuIdleInstallScriptlet(unittest.TestCase):
         out = self.run_hook(root, 'post_upgrade')
         self.assertIn('Restart once to let idle CPU cores power down', out, 'the install notice stays')
         self.assertIn('sudo m4-cpu-idle --start', out, 'the recovery is discoverable')
+        self.assertIn('next boot retries once if that boot shut down in order', out)
+        self.assertIn('no retry was already used', out)
         self.assertTrue((root / 'var/lib/omarchy-m4/cpu-idle/attempt').exists(),
                         'the scriptlet never clears a marker: its reason is unknowable')
         self.assertEqual(self.systemctl_calls(root), ['systemctl enable m4-cpu-idle.service'],
