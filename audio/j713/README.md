@@ -9,7 +9,9 @@ The current pinned-certificate recipe `Image.gz` is
 (18,900,939 bytes). Two fresh pinned-certificate builds matched that image,
 all five audio modules and the receipt. A third clean build of the recipe
 with source-closure and case-sensitive destination checks reproduced those
-same outputs. The hardened MCA module remains
+same outputs. A fourth clean build at `dc191cb`, including directory-alias
+compatibility, again reproduced the image, modules and receipt exactly.
+The hardened MCA module remains
 `fb941df4d55c4f2093b4595e0392aaf97ffe3a250228518b18a4f70568bf7454`
 (79,152 bytes). The other four audio modules match their historical hashes.
 An earlier incremental image hash is not this recipe. `qualified.json` is

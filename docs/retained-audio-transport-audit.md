@@ -73,7 +73,8 @@ baseline fixture retains its upstream license and hash.
 
 ## Observed evidence
 
-All development tests ran on leased fleet hosts. The direct-source MCA suite
+The regression and mutation runs reported here ran on leased fleet hosts.
+The direct-source MCA suite
 failed its boundary case before the fix and passed all three afterward.
 The expanded DockChannel suite ran 37 cases: four failed before the
 initialization fixes, including two sanitizer-detected reads beyond the worker
@@ -100,6 +101,21 @@ restoring `copytree` so an unlisted file is copied (the targeted copy test),
 omitting the copy digest, and omitting the case-probe call. With those
 fixes restored, the same 35 tests pass.
 
+The final builder suite at `dc191cb` has 42 tests, all passing on Homebase.
+A positive directory-alias test failed before removing the unnecessary
+symlink-parent refusal and passed afterward. The destination filesystem still
+must be case-sensitive. The success tests require a case-sensitive `TMPDIR`;
+case-sensitive APFS is suitable, while case-insensitive destinations are
+intentionally refused.
+
+Five additional guard mutations fail behavioral assertions: accepting an empty
+kernel manifest, accepting a backslash path, following a source-directory
+symlink, following a symlinked audio root, and removing the nonblocking FIFO
+open. The FIFO case fails within five seconds instead of hanging. Removing
+the occupied-destination diagnostic is also caught, but that is diagnostic
+coverage: `mkdir` still refuses the existing path before copying. It is not
+an additional overwrite vulnerability. The restored 42-test suite passes.
+
 A full ARM64 baseline kernel and then the hardened kernel linked with
 LLVM 21.1.8 and Rust 1.93.1. All five `audio/j713/kernel` modules also linked
 with `J713_PROFILE=conservative-v1`, `KCFLAGS=-Werror` and pinned supplemental
@@ -114,7 +130,7 @@ Two independent fresh builds at `8ee57be` of the pinned-certificate recipe
 produced byte-identical `Image.gz`, all five audio modules, and the build
 receipt. `cmp` and `diff` between those outputs reported no differences.
 Those two builds are the earlier pinned-certificate recipe. A third clean
-build of the final `91dabdf` recipe, which adds the source-closure copy and
+build of the `91dabdf` recipe, which adds the source-closure copy and
 the case-probe check, completed on Homebase. Against one of the earlier
 outputs (build A), `cmp` of `Image.gz`, `cmp` of the receipt, and `diff -qr`
 of all five modules each exited 0. The image remains 18,900,939 bytes and the MCA module
@@ -122,6 +138,13 @@ remains 79,152 bytes, at the hashes below. The full 5,896-byte trust region was
 verified independently and matches the original qualified kernel hash below;
 that hash is unchanged. The matched receipt still sets `native_qualified`
 and `fresh_install_qualified` to false.
+
+A fourth fresh build used `dc191cb3e7dc935cb5f4e13a5b44f2a835a6a331`,
+the final builder implementation with directory-alias compatibility. Its
+`Image.gz`, receipt and five modules again compare byte-for-byte equal to
+build A. The complete trust region also matches the original qualified
+kernel. Thus the hashes below are reproduced by the final implementation,
+not inferred from the earlier builds.
 
 | Artifact | SHA-256 |
 | --- | --- |
@@ -155,10 +178,11 @@ the default key-generation rule. The archived configuration and its signature
 verification policy remain unchanged. Automatic module signing remains disabled;
 these outputs are not claimed to be signed. The recipe checks the copied PEM
 and generated DER before writing a receipt and records the make override.
-The two builds at `8ee57be` are that pinned-certificate recipe. The final
+The two builds at `8ee57be` are that pinned-certificate recipe. The
 `91dabdf` build uses the same certificate pin and adds the source-closure
-copy and case-probe check. Its receipt matches earlier build A, including
-the same PEM and DER hashes. No private key is in the tree or the
+copy and case-probe check. Both its receipt and the final `dc191cb` receipt
+match earlier build A, including the same PEM and DER hashes.
+No private key is in the tree or the
 receipt, and these outputs are not claimed to be signed.
 
 ## Reproduce a candidate
@@ -191,18 +215,20 @@ boot completed with this same image and MCA module
 18,900,939 bytes;
 `fb941df4d55c4f2093b4595e0392aaf97ffe3a250228518b18a4f70568bf7454`,
 79,152 bytes). The evidence for that session is in the companion pull
-request. Final review and recovery fixes for the rollout are still pending.
-Issue 43 is not closed. Build receipts keep `native_qualified` and
+request. Closing issue 43 also requires the companion migration and recovery
+evidence. Build receipts keep `native_qualified` and
 `fresh_install_qualified` false because the builder does not qualify
 hardware. A fresh install, suspend, human listening, and physical typing
 were not performed.
 
-Hosted CI for source commit `91dabdf39993fb7f01ea2a4db55a2c686e6e0ba5`
-passed 1,276 Linux tests in 60.340 seconds on run `39527305580`. The Rust,
-macOS, and policy jobs on that run passed. CodeQL run `39527305617`,
-security run `39527305599`, and package run `39527305639` passed. Each of
-these runs is that source commit. A later documentation-only commit is
-outside these results.
+Hosted CI for source commit `dc191cb3e7dc935cb5f4e13a5b44f2a835a6a331`
+passed [1,283 Linux tests in 80.058 seconds](https://github.com/Kb2uka/Omarchy-M4-Native/actions/runs/39533130154).
+The Rust, macOS and policy jobs on that run passed.
+[CodeQL](https://github.com/Kb2uka/Omarchy-M4-Native/actions/runs/39533130213),
+[security checks](https://github.com/Kb2uka/Omarchy-M4-Native/actions/runs/39533130159)
+and [package checks](https://github.com/Kb2uka/Omarchy-M4-Native/actions/runs/39533130165)
+also passed at that source commit. Later documentation-only changes are
+outside these revision-specific results.
 
 Before channel promotion, the kernel needs a reviewed video-manifest and boot
 transition; MCA needs a matching audio-manifest transition. Rollback must
