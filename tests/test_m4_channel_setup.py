@@ -8,7 +8,9 @@ newer installed channel package is not named on the install transaction.
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
+import stat
 import subprocess
 import tempfile
 import types
@@ -702,6 +704,100 @@ class SetupTests(unittest.TestCase):
                 self.plant_audio_state('speaker', 'stock', 'stock', staged='fixed', hold=True)
                 self.plant_audio_state('mca', 'stock', 'stock', staged='fixed')
                 self._assert_audio_pair(False, True)
+
+    def test_uncertain_rollback_marker_is_not_audio_work(self):
+        """A non-regular rollback marker is not pending boot work.
+
+        Fixed with a valid stock backup, and stock with the fixed module
+        staged, stay not pending for the speaker and for MCA. A symlink to a
+        file outside the state directory, a dangling symlink, a directory, or
+        a fifo is not rollback authorization and does not fall through to a
+        forward swap. The module, manifest, backup, marker, and symlink target
+        stay as planted.
+        """
+        try:
+            probe = self.root / 'fifo-probe'
+            os.mkfifo(probe)
+            probe.unlink()
+            kinds = ('symlink', 'dangling', 'directory', 'fifo')
+        except OSError:
+            kinds = ('symlink', 'dangling', 'directory')
+
+        def identity(path):
+            try:
+                mode = path.lstat().st_mode
+            except FileNotFoundError:
+                return ('absent',)
+            if stat.S_ISLNK(mode):
+                return ('symlink', os.readlink(path))
+            if stat.S_ISDIR(mode):
+                return ('directory', tuple(sorted(child.name for child in path.iterdir())))
+            if stat.S_ISREG(mode):
+                return ('file', path.read_bytes())
+            if stat.S_ISFIFO(mode):
+                return ('fifo',)
+            return ('other', stat.S_IFMT(mode))
+
+        def plant_marker(rollback_rel, kind):
+            marker = self.root / rollback_rel
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            outside = self.root / 'var' / 'outside-rollback-target'
+            outside.parent.mkdir(parents=True, exist_ok=True)
+            outside.write_bytes(b'outside-target')
+            missing = marker.parent.parent / 'missing-rollback-target'
+            if kind == 'symlink':
+                marker.symlink_to(Path('../../../outside-rollback-target'))
+            elif kind == 'dangling':
+                marker.symlink_to(Path('../missing-rollback-target'))
+            elif kind == 'directory':
+                marker.mkdir()
+            elif kind == 'fifo':
+                os.mkfifo(marker)
+            else:
+                raise AssertionError(kind)
+            return outside, missing
+
+        with self._patch_audio_identities():
+            self._assert_patched_identities()
+            for name in ('speaker', 'mca'):
+                for live, pin in (('fixed', 'fixed'), ('stock', 'stock')):
+                    for kind in kinds:
+                        with self.subTest(component=name, live=live, kind=kind):
+                            self.setUp()
+                            self.plant_audio_state(name, live, pin, staged='fixed', backup='stock')
+                            _, _, hold_rel, rollback_rel = self.component_paths(name)
+                            outside, missing = plant_marker(rollback_rel, kind)
+                            stage = self.root / hold_rel.rpartition('/')[0]
+                            if kind == 'symlink':
+                                self.assertEqual(os.readlink(self.root / rollback_rel),
+                                                 '../../../outside-rollback-target')
+                                linked = (stage / '../../../outside-rollback-target').resolve()
+                                self.assertEqual(linked, outside.resolve())
+                                self.assertNotIn(stage.resolve(), linked.parents)
+                            elif kind == 'dangling':
+                                self.assertEqual(os.readlink(self.root / rollback_rel),
+                                                 '../missing-rollback-target')
+                                self.assertEqual(identity(missing), ('absent',))
+                            other = 'mca' if name == 'speaker' else 'speaker'
+                            other_rollback = self.component_paths(other)[3]
+                            module_rel, staged_rel, _, _ = self.component_paths(name)
+
+                            def snapshot():
+                                state = hold_rel.rpartition('/')[0]
+                                return (identity(self.root / module_rel),
+                                        identity(self.root / staged_rel),
+                                        identity(self.root / MODULE.MANIFESTS[1]),
+                                        identity(self.root / (state + '/alpha1-module.ko')),
+                                        identity(self.root / (state + '/alpha1-manifest.json')),
+                                        identity(self.root / hold_rel),
+                                        identity(self.root / rollback_rel),
+                                        identity(self.root / other_rollback),
+                                        identity(outside),
+                                        identity(missing))
+
+                            before = snapshot()
+                            self.assert_audio_pending(name, False)
+                            self.assertEqual(snapshot(), before)
 
     def test_audio_sha_identities_match_the_speaker_helper(self):
         """Updater stock and fixed SHA constants are the helper's shipped pins.
