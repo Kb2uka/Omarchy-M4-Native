@@ -365,7 +365,7 @@ file.
   is claimed.
 
 
-### Retained bounds candidate: boot 1-18 and speaker 1-4
+### Retained bounds candidate: boot 1-19 and speaker 1-5
 
 These develop-branch packages deliver the [retained bounds correction](j713-retained-bounds.md).
 They are not a statement that the public channel has been promoted.
@@ -373,7 +373,7 @@ The base kernel package remains unchanged. Boot stages Image `ca1fff57…`
 beside it and accepts only the explicit old/new same-release kernel pair;
 speaker stages MCA `fb941df4…` and applies it before audio registration.
 The other audio component pins and owner boot arguments/firmware are preserved.
-The boot package requires speaker `>=1-4`, including when an older updater
+The boot package requires speaker `>=1-5`, including when an older updater
 does not explicitly request the speaker package.
 
 The updater refreshes only the channel database, then uses pacman's installed
@@ -398,6 +398,17 @@ releases that hold; restart to apply the staged MCA module. Never run the
 service's `--boot` operation to swap loaded audio
 modules in a live session. Unknown states or missing rollback intent require
 inspection and verified recovery, rather than repeated reboot promises.
+
+Inspection of an interrupted operation may need to read the root-only stock
+backup. Without access it returns a controlled permission refusal; it cannot
+verify recovery or promise completion. Ordinary current or held inspection
+does not read that backup.
+
+The restart hint identifies recognized staged work rather than preflighting
+every boot-time write. In particular, an unexpected existing backup half can
+still make initial stock-module application refuse safely. If a restart does
+not apply the staged module, inspect the helper with sudo and read
+`journalctl -b -u m4-j713-audio-register.service` before retrying.
 
 ## Connecting new installs
 
