@@ -23,6 +23,8 @@ release helpers do. Expected production API:
     HISTORICAL_PATCH_SHA256 = {those paths: published sha256}
     RETAINED_PATCH = 'patches-kernel/retained-hardening/dockchannel-packet-bounds.patch'
     RETAINED_PATCH_SHA256 = sha256 of that file
+    MODULE_CERTIFICATE = 'patches-kernel/retained-hardening/qualified-module-certificate.pem'
+    MODULE_CERTIFICATE_SHA256 = sha256 of that public certificate
     IMPORTED_MANIFEST = ROOT / 'audio/j713/imported-source.sha256'
     KBUILD_ENV = {
         'KBUILD_BUILD_TIMESTAMP': '2026-10-20',
@@ -58,13 +60,18 @@ Order, and nothing is written to output before the input checks:
 1. Refuse an image that is not the pinned sha256 identity.
 2. Hash the archive and supplemental exports, and hash the historical and
    retained patch files. Verify every imported-source.sha256 row against
-   audio/j713. Refuse an output path that already exists.
+   audio/j713. Require MODULE_CERTIFICATE to be a regular file, not a
+   symlink, whose sha256 is MODULE_CERTIFICATE_SHA256. The certificate is
+   public; it contains no private key and the build does not generate one.
+   Refuse an output path that already exists.
 3. Extract the gzip archive into output/kernel with one leading component
    removed. Verify KERNEL_INPUTS and DOCKCHANNEL_BASE.
 4. Apply HISTORICAL_PATCHES with patch -p1 --fuzz=0 --forward, in order,
    then require DOCKCHANNEL_HISTORICAL and MACSMC_HISTORICAL.
 5. Apply RETAINED_PATCH once, to that copied tree only.
 6. Copy audio/j713/kernel to output/mca. Do not apply the bclk patch.
+   Copy the pinned certificate to
+   output/kernel/certs/qualified-module-certificate.pem.
 
 build() calls prepare(), then one docker run. Host sides of -v are absolute
 paths to the prepared kernel tree, the supplemental exports file, and
@@ -78,10 +85,13 @@ output/mca, including when archive, exports, and output were relative:
       sha256:BUILDER_IMAGE -c SCRIPT
 
 SCRIPT runs make Image.gz, then make modules for M=/job, both with
-ARCH=arm64 LLVM=1 LOCALVERSION=. The module make also passes
-KCFLAGS=-Werror, J713_PROFILE=conservative-v1, and
+ARCH=arm64 LLVM=1 LOCALVERSION= and
+CONFIG_MODULE_SIG_KEY=certs/qualified-module-certificate.pem. That
+non-default key stops the kernel from generating a certificate. The module
+make also passes KCFLAGS=-Werror, J713_PROFILE=conservative-v1, and
 KBUILD_EXTRA_SYMBOLS=/reference-sound-exports.symvers. No daemon, Cargo,
-or speakersafetyd build is invoked.
+or speakersafetyd build is invoked. The archived .config, including any
+signature-verification settings, is left unchanged.
 
 After docker, Module.symvers, vmlinux.symvers, .config, and
 include/config/kernel.release must still match the archived inputs, and the
@@ -103,7 +113,13 @@ also build()'s return value:
     exports {module_symvers_before, module_symvers_after,
              vmlinux_symvers_before, vmlinux_symvers_after,
              supplemental_before, supplemental_after},
-    kernel_release, config_sha256, profile 'conservative-v1'
+    kernel_release, config_sha256, profile 'conservative-v1',
+    module_certificate_sha256 = MODULE_CERTIFICATE_SHA256,
+    make_overrides['CONFIG_MODULE_SIG_KEY'] =
+        'certs/qualified-module-certificate.pem'
+
+require_unchanged() refuses publication when the copied certificate is no
+longer that pin. A docker mutation of the copy writes no receipt.
 
 Patch and docker go through this module's subprocess.run.
 """
@@ -141,6 +157,9 @@ PINNED_DRIVER = ROOT / 'tests/fixtures/dockchannel/dockchannel-hid.c'
 PINNED_DRIVER_SHA256 = 'e4eebbee612eee32bd51ce370d412afc8cf62a9a7e087a3797c2c29306cedfb4'
 RETAINED_PATCH = ROOT / 'patches-kernel/retained-hardening/dockchannel-packet-bounds.patch'
 KERNEL_RELEASE = '7.1.9-m4-gpu-backport-20261008'
+MODULE_CERTIFICATE = 'patches-kernel/retained-hardening/qualified-module-certificate.pem'
+MODULE_CERTIFICATE_SHA256 = 'db92215adb9de23e9bba226ca17332b27c3bff5981346163cc68a4239fcd40b5'
+MODULE_SIG_KEY = 'certs/qualified-module-certificate.pem'
 EXPECTED_ENV = {
     'KBUILD_BUILD_TIMESTAMP': '2026-10-20',
     'KBUILD_BUILD_USER': 'KB2UKA',
@@ -751,6 +770,92 @@ class HardenedBuildTests(unittest.TestCase):
             host = mounts[guest]
             self.assertTrue(os.path.isabs(host))
             self.assertEqual(Path(host).resolve(), intended)
+
+    def certificate_path(self):
+        return ROOT / MODULE_CERTIFICATE
+
+    def test_committed_module_certificate_is_pinned_public_certificate(self):
+        path = self.certificate_path()
+        data = path.read_bytes()
+        self.assertEqual(text_digest(data), MODULE_CERTIFICATE_SHA256)
+        self.assertNotIn(b'PRIVATE KEY', data)
+        self.assertIn(b'-----BEGIN CERTIFICATE-----', data)
+        self.assertFalse(path.is_symlink())
+        self.assertFalse(Path(MODULE_CERTIFICATE).is_absolute())
+        self.assertEqual(getattr(tool, 'MODULE_CERTIFICATE', None), MODULE_CERTIFICATE)
+        self.assertEqual(getattr(tool, 'MODULE_CERTIFICATE_SHA256', None), MODULE_CERTIFICATE_SHA256)
+
+    def test_build_overrides_module_sig_key_and_records_pinned_certificate(self):
+        archive, exports, files = self.prepared_inputs()
+        committed = self.certificate_path().read_bytes()
+        output = self.base / 'signed-key'
+        calls, run = self.docker_runner()
+        with mock.patch.object(tool.subprocess, 'run', side_effect=run):
+            receipt = tool.build(archive, exports, self.image(), output)
+        script = calls[0][-1]
+        make_lines = [line for line in script.splitlines() if 'make ' in line]
+        self.assertEqual(len(make_lines), 2)
+        override = 'CONFIG_MODULE_SIG_KEY=' + MODULE_SIG_KEY
+        for line in make_lines:
+            self.assertIn(override, line)
+        copied = output / 'kernel/certs/qualified-module-certificate.pem'
+        self.assertTrue(copied.is_file())
+        self.assertFalse(copied.is_symlink())
+        self.assertEqual(copied.read_bytes(), committed)
+        self.assertEqual(receipt['module_certificate_sha256'], MODULE_CERTIFICATE_SHA256)
+        self.assertEqual(receipt['make_overrides']['CONFIG_MODULE_SIG_KEY'], MODULE_SIG_KEY)
+        self.assertEqual((output / 'kernel/.config').read_bytes(), files['.config'])
+        self.assertEqual(self.certificate_path().read_bytes(), committed)
+
+    def test_bad_module_certificate_is_rejected_before_output(self):
+        files = self.kernel_files(b'alpha\n')
+        archive = self.write_archive(files)
+        exports = self.base / 'exports-cert'
+        exports.write_bytes(b'supplemental\n')
+        historical = self.historical_patches()
+        self.apply_pins(self.pins_for(
+            files, archive, exports, after_historical=(b'alpha\nbeta\ngamma\n', b'smc\nlocked\n')),
+            historical[:2], historical[2])
+        committed = self.certificate_path().read_bytes()
+        tampered = self.base / 'tampered-cert.pem'
+        tampered.write_bytes(committed + b'\n')
+        missing = self.base / 'missing-cert.pem'
+        linked = self.base / 'linked-cert.pem'
+        linked.symlink_to(self.certificate_path())
+        cases = {'tampered': tampered, 'missing': missing, 'symlink': linked}
+        for name, path in cases.items():
+            output = self.base / ('cert-reject-' + name)
+            with self.subTest(certificate=name):
+                with mock.patch.object(tool, 'MODULE_CERTIFICATE', str(path), create=True), \
+                     mock.patch.object(tool, 'MODULE_CERTIFICATE_SHA256', MODULE_CERTIFICATE_SHA256, create=True):
+                    with self.assertRaises(RuntimeError):
+                        tool.prepare(archive, exports, self.image(), output)
+                self.assertFalse(output.exists())
+        self.assertEqual(self.certificate_path().read_bytes(), committed)
+
+    def test_copied_module_certificate_mutation_writes_no_receipt(self):
+        archive, exports, _files = self.prepared_inputs()
+        committed = self.certificate_path().read_bytes()
+
+        def mutate(mounts):
+            kernel = mounts['/kernel']
+            cert = kernel / 'certs/qualified-module-certificate.pem'
+            cert.parent.mkdir(parents=True, exist_ok=True)
+            cert.write_bytes(b'not-the-pinned-certificate\n')
+            image = kernel / 'arch/arm64/boot/Image.gz'
+            image.parent.mkdir(parents=True, exist_ok=True)
+            image.write_bytes(b'candidate-image')
+            for name in tool.AUDIO_MODULES:
+                (mounts['/job'] / name).write_bytes(b'module:' + name.encode())
+
+        output = self.base / 'cert-mutated'
+        _calls, run = self.docker_runner(mutate=mutate)
+        with mock.patch.object(tool.subprocess, 'run', side_effect=run):
+            with self.assertRaises(RuntimeError):
+                tool.build(archive, exports, self.image(), output)
+        self.assertFalse((output / 'receipt.json').exists())
+        self.assertFalse((output / 'Image.gz').exists())
+        self.assertEqual(self.certificate_path().read_bytes(), committed)
 
 
 if __name__ == '__main__':
