@@ -4,9 +4,9 @@
 
 The base linux-m4-omarchy package keeps the qualified image and its modules.
 omarchy-m4-boot 1-17 carries the new image beside that package, and
-omarchy-m4-speaker carries the fixed MCA module. Pins come from the channel
-when it already records them, and from the composer and speaker helper until then.
+omarchy-m4-speaker carries the fixed MCA module. Pins come from the shipped channel.
 """
+import configparser
 import hashlib
 import importlib.util
 import json
@@ -19,13 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 CHANNEL = json.loads((ROOT / 'packaging/omarchy-m4/channel.json').read_text())
 MCA_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/25-m4-mca-module.conf'
 MCA_DROP_IN_SOURCE = ROOT / 'packaging/omarchy-m4/omarchy-m4-speaker/25-m4-mca-module.conf'
-# Used only while the drop-in is not in the tree yet. The installed file replaces it.
-MCA_DROP_IN_EXPECTED = (
-    b'# Installed by omarchy-m4-speaker. Applies the fixed MCA module before registration.\n'
-    b'[Service]\n'
-    b'ExecStartPre=-/usr/bin/m4-speaker-module --component mca --boot\n'
-)
-MCA_EXEC_START_PRE = 'ExecStartPre=-/usr/bin/m4-speaker-module --component mca --boot\n'
+# The leading '-' is systemd's ignore-failure prefix and is part of the command.
+MCA_BOOT_COMMAND = '-/usr/bin/m4-speaker-module --component mca --boot'
 BOOT_VERSION = '1-17'
 SPEAKER_VERSION = '1-3'
 
@@ -60,60 +55,33 @@ def write_size(root, relative, size):
 
 
 def mca_drop_in_bytes():
-    """Real drop-in when it exists; otherwise the fixed bytes the checker will require."""
-    data = MCA_DROP_IN_SOURCE.read_bytes() if MCA_DROP_IN_SOURCE.is_file() else MCA_DROP_IN_EXPECTED
-    if MCA_EXEC_START_PRE not in data.decode():
-        raise AssertionError('MCA drop-in lacks the exact ExecStartPre line')
-    return data
+    """Production MCA drop-in. Absence fails; there is no substitute payload."""
+    if not MCA_DROP_IN_SOURCE.is_file():
+        raise AssertionError('production MCA drop-in is absent')
+    return MCA_DROP_IN_SOURCE.read_bytes()
 
 
-def boot_kernel_pin(channel):
-    """Channel pin when the feature has recorded one; otherwise the composer pair."""
-    recorded = channel.get('boot_kernel')
-    if isinstance(recorded, dict) and recorded.get('path') and recorded.get('image_sha256'):
-        return recorded
-    return {'path': COMPOSE.KERNEL, 'image_sha256': COMPOSE.NEW_KERNEL, 'image_bytes': 64,
-            'release': channel['kernel']['release']}
+def service_option_values(text, option):
+    """Active [Service] values for one option. Comments and other sections do not count.
 
-
-def mca_pin(channel):
-    recorded = channel.get('mca_module')
-    if isinstance(recorded, dict) and recorded:
-        return recorded
-    return {SPEAKER.MCA_STAGED: SPEAKER.MCA_FIXED['sha256']}
-
-
-def mca_identity_record(channel):
-    """Qualified fixed-module identity. A later channel record wins; until then copy the helper.
-
-    This is the identity the helper already qualifies. It is not a claim that channel.json
-    historically carried mca_identity. The hash map in mca_module stays the file pin.
+    A second active assignment, including a reset line, is a duplicate and does not
+    become the single required command.
     """
-    recorded = channel.get('mca_identity')
-    if isinstance(recorded, dict) and {'sha256', 'size', 'note'} <= set(recorded):
-        return {'sha256': recorded['sha256'], 'size': recorded['size'], 'note': recorded['note']}
-    fixed = SPEAKER.MCA_FIXED
-    return {'sha256': fixed['sha256'], 'size': fixed['size'], 'note': fixed['note']}
-
-
-def allow_proposed(paths, path):
-    if path not in paths:
-        paths.append(path)
+    parser = configparser.ConfigParser(interpolation=None, strict=True)
+    parser.optionxform = str
+    try:
+        parser.read_string(text)
+    except configparser.DuplicateOptionError as error:
+        raise AssertionError(
+            'duplicate active assignment: ' + error.section + '.' + error.option) from error
+    if not parser.has_section('Service'):
+        return []
+    return [parser['Service'][key] for key in parser['Service'] if key == option]
 
 
 def policy_channel():
-    """Copied channel. Proposed paths are allowed here only; the repository channel stays as published."""
-    channel = json.loads(json.dumps(CHANNEL))
-    channel['boot_kernel'] = boot_kernel_pin(channel)
-    channel['mca_module'] = mca_pin(channel)
-    channel['mca_identity'] = mca_identity_record(channel)
-    allow_proposed(channel['allowed_paths']['omarchy-m4-boot'], channel['boot_kernel']['path'])
-    allow_proposed(channel['allowed_paths']['omarchy-m4-speaker'], SPEAKER.MCA_STAGED)
-    allow_proposed(channel['allowed_paths']['omarchy-m4-speaker'], MCA_DROP_IN)
-    channel['protected_exceptions'].setdefault(
-        MCA_DROP_IN,
-        'applies the fixed MCA module before registration loads any audio module')
-    return channel
+    """Deep copy of the shipped channel. Tests mutate the copy; channel.json stays as published."""
+    return json.loads(json.dumps(CHANNEL))
 
 
 class HardeningPackageTests(unittest.TestCase):
@@ -291,11 +259,16 @@ class HardeningPackageTests(unittest.TestCase):
         def reverse_only(namespace):
             namespace['KERNEL_TRANSITIONS'] = {(namespace['NEW_KERNEL'], namespace['OLD_KERNEL'])}
 
+        def forward_only(namespace):
+            namespace['KERNEL_TRANSITIONS'] = {(namespace['OLD_KERNEL'], namespace['NEW_KERNEL'])}
+
         with edited(wrong_path), self.assertRaisesRegex(ValueError, 'kernel path'):
             self.check_boot()
         with edited(wrong_release), self.assertRaisesRegex(ValueError, 'boot kernel release'):
             self.check_boot()
         with edited(reverse_only), self.assertRaisesRegex(ValueError, 'transition'):
+            self.check_boot()
+        with edited(forward_only), self.assertRaisesRegex(ValueError, 'transition'):
             self.check_boot()
 
     def test_boot_requires_the_versioned_speaker_package(self):
@@ -374,6 +347,8 @@ class HardeningPackageTests(unittest.TestCase):
         self.assertNotEqual(SPEAKER.MCA_FIXED['note'], 'note-does-not-match')
 
     def test_mca_drop_in_bytes_are_exact(self):
+        commands = service_option_values(mca_drop_in_bytes().decode(), 'ExecStartPre')
+        self.assertEqual(commands, [MCA_BOOT_COMMAND])
         self.load_speaker()
         files = dict(self.speaker_files)
         files[MCA_DROP_IN] = (0o644, '0' * 64)

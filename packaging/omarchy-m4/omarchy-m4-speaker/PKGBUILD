@@ -5,7 +5,7 @@
 pkgname=omarchy-m4-speaker
 pkgver=1
 pkgrel=3
-pkgdesc='Applies the fixed J713 speaker protection module (#61) at the next boot'
+pkgdesc='Applies the J713 speaker protection and MCA module updates at the next boot'
 arch=('aarch64')
 url='https://github.com/Kb2uka/Omarchy-M4-Native'
 license=('GPL-2.0-only' 'MIT')
