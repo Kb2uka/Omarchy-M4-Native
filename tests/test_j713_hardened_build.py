@@ -1045,6 +1045,26 @@ class HardenedBuildTests(unittest.TestCase):
             str(caught.exception),
             'imported source path is not a safe relative path: ' + literal)
 
+    def test_kernel_manifest_refuses_empty(self):
+        """No kernel/ row is an empty imported kernel manifest.
+
+        One manifest is empty. The other pins only README.md with a real
+        digest. Only IMPORTED_MANIFEST is patched.
+        """
+        cases = {
+            'empty': '',
+            'readme': '%s  README.md\n' % text_digest(b'readme-only\n'),
+        }
+        for name, body in cases.items():
+            with self.subTest(manifest=name):
+                manifest = self.base / ('kernel-manifest-%s.sha256' % name)
+                manifest.write_text(body)
+                with mock.patch.object(tool, 'IMPORTED_MANIFEST', manifest):
+                    with self.assertRaises(RuntimeError) as caught:
+                        tool.kernel_manifest_entries()
+                self.assertEqual(
+                    str(caught.exception), 'imported kernel manifest is empty')
+
     def pinned_audio_fixture(self, symlink_mca=False):
         """Temporary AUDIO tree whose manifest pins only kernel/Makefile and kernel/mca.c.
 
@@ -1499,8 +1519,11 @@ class HardenedBuildTests(unittest.TestCase):
         self.assertEqual(leftovers, [])
 
     def test_prepare_refuses_missing_and_regular_file_destination_parents(self):
-        """A missing or regular-file immediate parent is refused before output changes."""
-        archive, exports, _files = self.prepared_inputs()
+        """A missing or regular-file parent is refused by the case probe itself.
+
+        prepare can fail earlier in archive preflight when the parent is a
+        regular file, so this calls require_case_sensitive_destination(parent).
+        """
         regular = self.base / 'regular-parent'
         regular.write_bytes(b'keep-parent\n')
         cases = {
@@ -1512,7 +1535,7 @@ class HardenedBuildTests(unittest.TestCase):
                 parent = output.parent
                 before = parent.read_bytes() if parent.is_file() else None
                 with self.assertRaises(RuntimeError) as caught:
-                    tool.prepare(archive, exports, self.image(), output)
+                    tool.require_case_sensitive_destination(parent)
                 self.assertIn('destination parent is not a directory', str(caught.exception))
                 self.assertIn(str(parent), str(caught.exception))
                 self.assertFalse(output.exists())

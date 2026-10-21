@@ -357,11 +357,13 @@ def copy_audio_modules(output):
 def require_case_sensitive_destination(parent):
     """Refuse a parent filesystem that treats case-probe and CASE-PROBE as one file.
 
-    Linux trees contain legitimate case variants, so archive names are not
-    rewritten. The probe is removed on success and on refusal.
+    A symlink to a directory is a valid parent. A missing path or any
+    non-directory is refused before the probe. Linux trees contain
+    legitimate case variants, so archive names are not rewritten. The probe
+    is removed on success and on refusal.
     """
     parent = Path(parent)
-    if parent.is_symlink() or not parent.is_dir():
+    if not parent.is_dir():
         refuse('destination parent is not a directory: ' + str(parent))
     temporary = tempfile.TemporaryDirectory(prefix='.j713-case-', dir=parent)
     try:
