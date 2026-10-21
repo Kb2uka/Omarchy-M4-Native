@@ -508,7 +508,7 @@ class SpeakerModule(unittest.TestCase):
                 self.assertEqual((self.root / selected['other_module']).read_bytes(), selected['other_bytes'])
                 code, report = self.run_tool('--boot', *selected['args'])
                 self.assertEqual(code, 0, self.last_error)
-                self.assertNotIn('applied', report['status'])
+                self.assertEqual(report['status'], 'held after a rollback; nothing applied')
                 self.assertFalse((stage / 'rollback').exists())
                 self.assertTrue((stage / 'hold').exists())
                 self.assertEqual((self.root / selected['module']).read_bytes(), selected['stock_bytes'])

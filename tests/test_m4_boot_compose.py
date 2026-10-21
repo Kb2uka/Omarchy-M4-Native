@@ -244,27 +244,25 @@ BOOT_JOURNAL = 'var/lib/omarchy-m4/boot-compose/journal'
 BOOT_SNAPSHOTS = 'var/lib/omarchy-m4/boot-compose/snapshots'
 
 
-def approve_synthetic_k1_k2(test, module, root):
-    """Register the fixture K1→K2 pair only. Other hashes stay unlisted."""
+@contextlib.contextmanager
+def approve_synthetic_k1_k2(module, root):
+    """Register the fixture K1→K2 pair for this block only. Other hashes stay unlisted."""
     pairs = set(module.KERNEL_TRANSITIONS)
     pairs.add((sha(K1), sha(K2)))
     pairs.add((sha(K2), sha(K1)))
-    patcher = mock.patch.object(module, 'KERNEL_TRANSITIONS', pairs)
-    patcher.start()
-    test.addCleanup(patcher.stop)
     modules = root / 'usr/lib/modules' / module.KNOWN_KERNELS[sha(K2)]
     if not modules.is_dir():
         modules.mkdir(parents=True)
+    with mock.patch.object(module, 'KERNEL_TRANSITIONS', pairs):
+        yield
 
 
 def scenario_newer_devicetree_kept(test, module):
     machine = Machine(test, module, boot_bytes=boot(dtb=D4), package_kernel=K2)
-    patcher = mock.patch.dict(module.KNOWN_DTBS, {sha(D4): 'cpufreq'})
-    patcher.start()
-    test.addCleanup(patcher.stop)
-    approve_synthetic_k1_k2(test, module, machine.root)
-    machine.manifests(sha(K2))
-    code, out, err = machine.run('--apply')
+    with mock.patch.dict(module.KNOWN_DTBS, {sha(D4): 'cpufreq'}):
+        with approve_synthetic_k1_k2(module, machine.root):
+            machine.manifests(sha(K2))
+            code, out, err = machine.run('--apply')
     test.assertEqual((code, err), (0, ''))
     receipt = json.loads(out)
     test.assertEqual((receipt['changes'], receipt['devicetree_sha256']), (['kernel'], sha(D4)))
@@ -307,9 +305,9 @@ class ComposeTests(unittest.TestCase):
 
     def test_qualified_kernel_change(self):
         machine = Machine(self, package_kernel=K2)
-        approve_synthetic_k1_k2(self, MODULE, machine.root)
-        machine.manifests(sha(K2))
-        code, out, _ = machine.run('--apply')
+        with approve_synthetic_k1_k2(MODULE, machine.root):
+            machine.manifests(sha(K2))
+            code, out, _ = machine.run('--apply')
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)['changes'], ['dtb', 'kernel'])
         self.assertEqual(machine.boot, boot(kernel_bytes=K2, dtb=D2))
