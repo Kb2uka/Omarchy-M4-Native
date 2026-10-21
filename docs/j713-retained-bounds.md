@@ -80,11 +80,15 @@ Candidate build receipts deliberately leave `native_qualified` and
 qualification registry. Historical qualification records are unchanged.
 
 The source joins name merged source revision
-`24920ee126207d8a5595f1297892384cef77776a`; its recipe inputs match the four
-clean builds recorded in the source audit. These observations do not claim
+`24920ee126207d8a5595f1297892384cef77776a`; its recipe inputs match final
+clean build D recorded in the source audit. All four clean builds produced
+identical artifacts. These observations do not claim
 a production channel promotion. Physical typing, physical
 trackpad use, human listening, suspend and fresh installation were not tested.
 Automated enumeration and playback do not establish those results.
+Before public-channel promotion, complete manual built-in keyboard and trackpad
+acceptance, listening, suspend/resume and fresh-install qualification. This
+develop-branch validation does not satisfy those remaining release checks.
 
 The signed sandbox package test separately checks dependency installation,
 unchanged base-package payload, idempotence and signer rejection. It uses a

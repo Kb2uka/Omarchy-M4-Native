@@ -381,15 +381,18 @@ and upgradable package queries with the full installation configuration.
 Only missing or upgradable channel names enter its transaction. Equal or
 newer installed packages stay installed, including a qualified candidate
 whose public-channel counterpart is older. An empty transaction still runs
-boot composition and reports recovery/restart status. Query errors stop the
-installation; this selection does not perform a general system upgrade.
+boot composition and reports recovery/restart status. Query errors or diagnostics,
+including configuration warnings, stop installation; resolve the reported cause
+before retrying. This selection does not perform a general system upgrade.
 
 MCA inspection is `sudo m4-speaker-module --component mca`. A rollback request
 is `sudo m4-speaker-module --component mca --rollback`; it requires a verified
 stock module and manifest backup before promising restoration at the next boot.
 The resulting MCA hold is `/var/lib/omarchy-m4/mca-module/hold`, independent
-of the speaker hold. Removing that MCA hold permits forward application at a
-later boot. Never run the service's `--boot` operation to swap loaded audio
+of the speaker hold. Once inspection confirms the completed stock rollback
+and no pending rollback request, `sudo rm -- /var/lib/omarchy-m4/mca-module/hold`
+releases that hold; restart to apply the staged MCA module. Never run the
+service's `--boot` operation to swap loaded audio
 modules in a live session. Unknown states or missing rollback intent require
 inspection and verified recovery, rather than repeated reboot promises.
 
@@ -482,7 +485,10 @@ margin on that filesystem; resuming existing snapshots requires the margin.
 EFI space is checked separately. A refusal preserves existing recovery data.
 
 When a journal is pending, resume its recorded operation: `--apply` for an
-apply, `--rollback --apply` for a rollback. A notch change is refused until
+apply without a hold, `--rollback --apply` for a rollback. An apply journal
+with a retained hold, including an interrupted release of that hold, requires
+`sudo m4-boot-compose --resume-updates --apply`. Inspection and the notch
+refusal name the applicable command. A notch change is refused until
 that operation finishes. Outside pending recovery, a new rollback refused
 for a different notch preference reports `m4-notch --show` or `--hide` to
 restore the matching preference before retrying.
