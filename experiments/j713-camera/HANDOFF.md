@@ -1,7 +1,9 @@
 # Resume the camera investigation
 
-**DO NOT MERGE.** Work is paused. The camera is not functional, and the
-latest overlay packaging fix is not cleared for a hardware load.
+**DO NOT MERGE.** Work is paused. The camera is not functional. On
+2026-10-21 the R5 scratch DART mapping experiment ran once and met every
+acceptance criterion below (see EVIDENCE.md). The next work is firmware
+mapping and start design, which has not begun.
 
 ## State at pause
 
@@ -18,30 +20,21 @@ latest overlay packaging fix is not cleared for a hardware load.
 
 ## Immediate next step
 
-1. Recover the private `air-camera-20261020` evidence archive and read the
-   final continuation record. Preserve earlier failed attempts.
-2. Independently review the R5 delta: the real Makefile no longer invokes
-   `dtc -@`; the added contract test checks the actual generated payload.
-   Kernel C, DTS, emitter, and launcher logic are unchanged from R4.
-   The two independent reviews and arbitration for this delta are pending.
-3. Confirm the exact kernel, board, current boot identity, fresh ADT,
-   device ownership, power baseline, and absence of old probe resources.
-   Requalify every private launcher constant after a boot or kernel change.
-4. After review, rebuild and verify the exact artifact and embedded DTBO.
-   Use the mandatory qualified launcher for check-only, then validate-only.
-   Inspect all parameters and kernel logs before unloading.
-5. Perform at most one bounded scratch mapping experiment. Inspect all
-   results, explicitly recover pending cleanup if needed, compare the raw
-   PMGR/boot baseline, and unload only after resources are gone. Do not
-   interpret successful insertion as a successful experiment or retry the
-   forward mapping operation automatically.
+1. The R5 review, requalification and one bounded mapping run are done
+   (2026-10-21). Do not repeat the mapping run without a reason.
+2. Close the two open contract-test gaps: exact master-node property set
+   and refusal of any extra fragment or root child.
+3. Requalify every private launcher constant after any boot or kernel
+   change. The ADT physical address moves between boots.
+4. Design, review and arbitrate a firmware mapping and start contract
+   before any processor start (see "Work still required").
 
+The acceptance criteria the 2026-10-21 run met are listed below.
 For a clean mapping result expect `result`, `first_error`, `cleanup_error`,
 `cleanup`, `verify`, and `fail_stage` all zero; `attempted=13`,
 `version=0x100001`, `map_total=5`, `lookup_count=5`, `readback_count=6`,
 `map_count=0`, `flags=0`, `retain=0`, `cleanup_pending=0`, and
-`power_restored=1`. These are **expected acceptance criteria**, not results
-already observed. Validate-only has no power writes and normally reports
+`power_restored=1`. The 2026-10-21 run observed exactly these values. Validate-only has no power writes and normally reports
 `power_restored=0`.
 
 ## What the experiments establish

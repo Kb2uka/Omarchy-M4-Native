@@ -14,7 +14,9 @@ its host-wide test lock.
 | Sealed-loader validation | Both diagnostic variants loaded successfully from an immutable read-only memfd. Validate-only had zero power writes and zero ISP reads, then unloaded. It did read the PMGR snapshot. |
 | RVBAR observation | `result=0 cleanup=0 verify=0 fail_stage=0 attempted=13 isp_reads=1 inspect_reads=37 rvbar_reads=1 version=0x100001 raw_rvbar=0x10000000001`. CPU control `0`, status `0x0330006a`. Unloaded; all 16 raw PMGR words and boot identity restored. |
 | Aligned DART R4 attempt | Header accepted, then `symbols in overlay, but not in live tree`. Overlay apply returned `-22` with an allocated ID. Explicit cleanup removed it. Final `result=-52 first=-52 cleanup_error=0 pending=0 power_restored=1 retain=0 flags=0 map=0/0 cleanup=0 verify=0`. No providers or mappings remained; all 16 raw PMGR words and boot identity restored. |
-| DART R5 without symbol exports | **NOT RUN on hardware.** |
+| DART R5 without symbol exports (2026-10-21, after reboot and requalification) | Fresh check-only passed; the stale R5 launcher was refused for boot mismatch. Validate-only matched the earlier run. One `--map-check`: overlay applied (`ret=0`), all three temporary ISP DARTs bound (16K pages, AS 42), five 16 KiB scratch pages mapped, looked up and unmapped, SID0 TTBR readback identical on all three DARTs with TLB flush and error register `0`, overlay removed. Final `result=0 first=0 cleanup_error=0 pending=0 stage=7 fail=0 power_restored=1 retain=0 flags=0 map=0/5 lookup=5 readback=6 cleanup=0 verify=0 attempted=13 version=0x100001`. COPROC control stayed `0`, status `0x0330006a`, at every check. No fault or error lines in the kernel log. All 16 raw PMGR words and boot identity matched the pre-run baseline; module unloaded; no owned nodes, platform devices or IOMMU group remained. |
+
+The R5 result proves Linux can program and tear down the ISP DART page tables from a software point of view. It is not a DMA transaction and does not establish the firmware address alias.
 
 There is no successful ISP firmware boot, DMA transfer, sensor discovery,
 camera frame, or camera application result in this checkpoint.
@@ -87,3 +89,18 @@ coverage. These are retained as follow-up work, not silently marked fixed.
 **The R5 symbol-export delta has not completed that review cycle and has not
 been loaded.** The final redacted publication checkpoint is also not being
 presented as merge-ready or as a fully reviewed camera driver.
+
+## 2026-10-21 continuation
+
+- **Requalification after reboot.** m1n1 placed the ADT at a different physical address on this boot. The private launcher's
+  boot identity, ADT address, ADT digest and reserved-memory path were requalified. Only those four launcher constants changed;
+  the module bytes did not. A parsed diff against the previous qualified ADT showed no property change in the ISP, ISP DART,
+  ISP mappers or PMGR nodes. Only per-boot entropy, timestamps, memory-map entries and other coprocessors' segment ranges changed.
+  The live FDT differed only in boot-relocation fields; `/soc` and the AIC phandle were unchanged.
+- **Review.** Two blind delta reviews of R5 plus the requalified launcher (Gemini 3.8 Flash High, DeepSeek v4 pro max): both
+  APPROVE, with no blocker or major finding. Both found the same test-strength gaps: the DTBO contract does not enforce an exact
+  master-node property set and does not refuse an extra fragment. The arbiter checked the exact staged DTBO: one fragment, master
+  properties exactly `compatible` and `iommus`, so the run was unaffected. These gaps remain open as follow-up work. Jev
+  arbitration: one bounded run (0.97); planted false controls rejected (0.07, 0.05, 0.34).
+- **Tests.** The 69 launcher tests passed on a remote Linux host under the host lease.
+- **Not performed.** Firmware start, handshake, sensor discovery, frames, foundation KUnit, and hosted CI.
