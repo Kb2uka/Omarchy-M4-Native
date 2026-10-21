@@ -1445,6 +1445,91 @@ class HardenedBuildTests(unittest.TestCase):
         for path, pin in before.items():
             self.assertEqual(digest(path), pin)
 
+    def test_prepare_follows_directory_symlink_to_case_sensitive_parent(self):
+        """A missing output is prepared through a directory-symlink parent.
+
+        The immediate parent is a symlink to a real case-sensitive directory.
+        prepare follows that alias, leaves the alias in place, writes the
+        prepared tree in the real directory, and removes the case probe.
+        """
+        archive, exports, _files = self.prepared_inputs()
+        real = self.base / 'real-case-parent'
+        real.mkdir()
+        marker = real / 'case-fold-marker'
+        marker.write_bytes(b'marker')
+        self.assertFalse((real / 'CASE-FOLD-MARKER').exists())
+        marker.unlink()
+        alias = self.base / 'alias-case-parent'
+        alias.symlink_to(real.name)
+        output = alias / 'prepared'
+        self.assertTrue(alias.is_symlink())
+        self.assertTrue(alias.is_dir())
+        self.assertFalse(real.is_symlink())
+        self.assertFalse(output.exists())
+        self.assertFalse(output.is_symlink())
+        self.assertEqual(os.readlink(alias), real.name)
+        tool.prepare(archive, exports, self.image(), output)
+        self.assertTrue(alias.is_symlink())
+        self.assertTrue(alias.is_dir())
+        self.assertFalse(real.is_symlink())
+        self.assertEqual(os.readlink(alias), real.name)
+        real_output = real / 'prepared'
+        self.assertEqual(output.parent, alias)
+        self.assertTrue(real_output.is_dir())
+        self.assertFalse(real_output.is_symlink())
+        self.assertFalse(output.is_symlink())
+        self.assertEqual(output.resolve(), real_output.resolve())
+        self.assertEqual(
+            (real_output / 'kernel' / tool.DOCKCHANNEL).read_text(),
+            'alpha\nbeta\ngamma\nbounds\n')
+        self.assertEqual((real_output / 'kernel' / tool.MACSMC).read_text(), 'smc\nlocked\n')
+        copied = real_output / 'mca' / 'mca.c'
+        self.assertTrue(copied.is_file())
+        self.assertFalse(copied.is_symlink())
+        self.assertEqual(copied.read_bytes(), (ROOT / 'audio/j713/kernel/mca.c').read_bytes())
+        certificate = real_output / 'kernel/certs/qualified-module-certificate.pem'
+        self.assertTrue(certificate.is_file())
+        self.assertFalse(certificate.is_symlink())
+        self.assertEqual(certificate.read_bytes(), (ROOT / MODULE_CERTIFICATE).read_bytes())
+        self.assertFalse((real_output / 'receipt.json').exists())
+        leftovers = [
+            path for path in self.base.rglob('*')
+            if 'case-probe' in path.name.lower() or path.name.startswith('.j713-case-')
+        ]
+        self.assertEqual(leftovers, [])
+
+    def test_prepare_refuses_missing_and_regular_file_destination_parents(self):
+        """A missing or regular-file immediate parent is refused before output changes."""
+        archive, exports, _files = self.prepared_inputs()
+        regular = self.base / 'regular-parent'
+        regular.write_bytes(b'keep-parent\n')
+        cases = {
+            'missing': self.base / 'missing-parent' / 'prepared',
+            'file': regular / 'prepared',
+        }
+        for name, output in cases.items():
+            with self.subTest(parent=name):
+                parent = output.parent
+                before = parent.read_bytes() if parent.is_file() else None
+                with self.assertRaises(RuntimeError) as caught:
+                    tool.prepare(archive, exports, self.image(), output)
+                self.assertIn('destination parent is not a directory', str(caught.exception))
+                self.assertIn(str(parent), str(caught.exception))
+                self.assertFalse(output.exists())
+                self.assertFalse(output.is_symlink())
+                if before is None:
+                    self.assertFalse(parent.exists())
+                    self.assertFalse(parent.is_symlink())
+                else:
+                    self.assertTrue(parent.is_file())
+                    self.assertFalse(parent.is_symlink())
+                    self.assertEqual(parent.read_bytes(), before)
+                leftovers = [
+                    path for path in self.base.rglob('*')
+                    if 'case-probe' in path.name.lower() or path.name.startswith('.j713-case-')
+                ]
+                self.assertEqual(leftovers, [])
+
     def test_sound_exports_mismatch_is_rejected_before_output(self):
         files = self.kernel_files(b'alpha\n')
         archive = self.write_archive(files)
