@@ -39,6 +39,9 @@ LOCK = 'run/lock/omarchy-m4-setup.lock'
 SPEAKER_STAGED = 'usr/lib/omarchy-m4/j713-audio/snd-soc-j713-group.ko'
 SPEAKER_MODULE = 'usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-j713-group.ko'
 SPEAKER_HOLD = 'var/lib/omarchy-m4/speaker-module/hold'
+MCA_STAGED = 'usr/lib/omarchy-m4/j713-audio/snd-soc-apple-mca.ko'
+MCA_MODULE = 'usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-apple-mca.ko'
+MCA_HOLD = 'var/lib/omarchy-m4/mca-module/hold'
 GPU_STAGED = 'usr/lib/omarchy-m4/gpu/asahi_m4.ko'
 GPU_MODULE = 'opt/m4-gpu/asahi_m4.ko'
 GPU_HOLD = 'var/lib/omarchy-m4/gpu-module/hold'
@@ -204,6 +207,18 @@ def speaker_pending(root):
     return hashlib.sha256(module.read_bytes()).digest() != hashlib.sha256(staged.read_bytes()).digest()
 
 
+def mca_pending(root):
+    """Whether a staged MCA module differs from the installed one and is not held.
+
+    Independent of the speaker hold: each component has its own staged file,
+    installed file, and hold marker.
+    """
+    staged, module = root / MCA_STAGED, root / MCA_MODULE
+    if not staged.is_file() or not module.is_file() or (root / MCA_HOLD).exists():
+        return False
+    return hashlib.sha256(module.read_bytes()).digest() != hashlib.sha256(staged.read_bytes()).digest()
+
+
 def gpu_pending(root):
     """Whether omarchy-m4-gpu staged a module that the next boot will swap in for alpha.1's."""
     staged, module = root / GPU_STAGED, root / GPU_MODULE
@@ -328,8 +343,9 @@ def connect(root, apply, server, key, fingerprint, output):
             f'({boot}); boot.bin keeps booting what it booted before. See the message above, '
             'fix the cause, then run this again')
     machine.start_notifier()
-    restart = (boot_digest(root) != before or speaker_pending(root) or gpu_pending(root) or
-               headphones_pending(root) or cpu_idle_pending(root) or backlight_pending(root))
+    restart = (boot_digest(root) != before or speaker_pending(root) or mca_pending(root) or
+               gpu_pending(root) or headphones_pending(root) or cpu_idle_pending(root) or
+               backlight_pending(root))
     plan.update(applied=True, boot=boot, restart_needed=restart,
                 status=('connected; restart once to apply the update' if restart else
                         'connected; future M4 fixes arrive with omarchy-m4-update'))

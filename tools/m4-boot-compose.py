@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import struct
 import sys
 import zlib
@@ -23,9 +24,16 @@ import zlib
 # Kernels and devicetrees an installed alpha.1 machine may boot, by SHA-256.
 # A kernel maps to its module release. Adding one requires the protected audio,
 # video and GPU stacks to be requalified for it (docs/package-channel.md).
+# The second hash is the retained-bounds kernel. It shares the release; modules
+# stay with the base kernel package. Kernel bytes move only for KERNEL_TRANSITIONS.
+OLD_KERNEL = 'c3704cfd2afb7760e73f0b9939a68864a30bd916fcd478bd960e538373123dc9'
+NEW_KERNEL = 'a7a160b6686652d7ae93218593d015febf9cc7ab0ef838148e551116befeb05e'
+RELEASE = '7.1.9-m4-gpu-backport-20261008'
 KNOWN_KERNELS = {
-    'c3704cfd2afb7760e73f0b9939a68864a30bd916fcd478bd960e538373123dc9': '7.1.9-m4-gpu-backport-20261008',
+    OLD_KERNEL: RELEASE,
+    NEW_KERNEL: RELEASE,
 }
+KERNEL_TRANSITIONS = {(OLD_KERNEL, NEW_KERNEL), (NEW_KERNEL, OLD_KERNEL)}
 # Devicetrees in lineage order. A machine whose boot.bin carries a later one than
 # the package keeps it: an owner-applied devicetree update is never reverted.
 KNOWN_DTBS = {
@@ -40,7 +48,9 @@ KNOWN_DTBS = {
 }
 BOARD = b'apple,j713'
 BOOT = 'boot/efi/omarchy/boot.bin'
-KERNEL = 'usr/lib/omarchy-m4/Image.gz'
+# Packaging stages this beside the unchanged base Image.gz. A devicetree-only
+# update still reads whatever kernel image is installed at this path.
+KERNEL = 'usr/lib/omarchy-m4/retained-bounds/Image.gz'
 DTB = 'usr/lib/omarchy-m4/j713.dtb'
 VIDEO_MANIFEST = 'etc/omarchy/j713-video-manifest.json'
 AUDIO_MANIFEST = 'etc/omarchy/j713-audio-manifest.json'
@@ -66,10 +76,16 @@ BACKLIGHT_LOADERS = {
               '692f656cd8f6dfb2530172da518f9e2e18e6c5032df3062cd603eb4539e4c405'),
 }
 PACMAN_LOCK = 'var/lib/pacman/db.lck'
+JOURNAL_DIR = 'var/lib/omarchy-m4/boot-compose'
+JOURNAL = JOURNAL_DIR + '/journal'
+SNAPSHOTS = JOURNAL_DIR + '/snapshots'
+SHA256 = re.compile(r'[0-9a-f]{64}')
 
 
 class Refused(Exception):
-    pass
+    def __init__(self, message, pending=False):
+        super().__init__(message)
+        self.pending = pending
 
 
 def require(condition, message):
@@ -174,6 +190,245 @@ def check_protected(root, kernel_sha):
     require(modules.is_dir() and not modules.is_symlink(), 'Kernel modules are missing: ' + str(modules))
 
 
+def transition_kind(old, new):
+    """How a kernel-hash change is allowed.
+
+    ``listed`` is an exact KERNEL_TRANSITIONS pair that shares one release.
+    ``historical`` is a same-release pair whose hashes are not in that table
+    (fixture kernels, or a devicetree update that also carries an already
+    qualified kernel). ``refused`` is any other hash change. ``same`` is not a
+    kernel change; devicetree-only updates do not consult the table.
+    """
+    if old == new:
+        return 'same'
+    if (old, new) in KERNEL_TRANSITIONS:
+        if old in KNOWN_KERNELS and new in KNOWN_KERNELS and KNOWN_KERNELS[old] == KNOWN_KERNELS[new]:
+            return 'listed'
+        return 'refused'
+    governed = {item for pair in KERNEL_TRANSITIONS for item in pair}
+    if not KERNEL_TRANSITIONS or old in governed or new in governed:
+        return 'refused'
+    if old in KNOWN_KERNELS and new in KNOWN_KERNELS and KNOWN_KERNELS[old] == KNOWN_KERNELS[new]:
+        return 'historical'
+    return 'refused'
+
+
+def check_listed(root, old, new):
+    """Release, audio, video pin, and modules for an exact kernel pair. No writes."""
+    require(transition_kind(old, new) == 'listed',
+            'The installed video stack is not qualified for kernel ' + new)
+    release = KNOWN_KERNELS[new]
+    video, audio = manifest(root, VIDEO_MANIFEST), manifest(root, AUDIO_MANIFEST)
+    require(video.get('kernel_release') == release and video.get('boot_kernel_sha256') in (old, new),
+            'The installed video stack is not qualified for kernel ' + new)
+    require(audio.get('kernel_release') == release,
+            'The installed audio stack is not qualified for kernel release ' + release)
+    modules = root / 'usr/lib/modules' / release
+    require(modules.is_dir() and not modules.is_symlink(), 'Kernel modules are missing: ' + str(modules))
+    return video
+
+
+def owned(root, relative):
+    """A path under root with no symlink component and no parent segments."""
+    current = Path(root)
+    require(not current.is_symlink(), 'Boot compose root is a symlink')
+    for part in Path(relative).parts:
+        require(part not in ('', '.', '..'), 'Unsafe boot-compose path')
+        current = current / part
+        require(not current.is_symlink(), 'Refusing a symlink in boot-compose state: ' + str(current))
+    return current
+
+
+def read_nofollow(path, what):
+    require(path.is_file() and not path.is_symlink(), what + ' is missing or not a regular file')
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        chunks = []
+        while True:
+            block = os.read(fd, 1 << 20)
+            if not block:
+                break
+            chunks.append(block)
+    finally:
+        os.close(fd)
+    return b''.join(chunks)
+
+
+def private_dir(path):
+    require(not path.is_symlink(), 'Boot compose directory is a symlink: ' + str(path))
+    path.mkdir(mode=0o700, exist_ok=True)
+    require(path.is_dir() and not path.is_symlink(), 'Boot compose directory is not a directory')
+    os.chmod(path, 0o700)
+
+
+def ensure_store(root):
+    parent = owned(root, 'var/lib/omarchy-m4')
+    parent.mkdir(parents=True, exist_ok=True)
+    base = owned(root, JOURNAL_DIR)
+    private_dir(base)
+    private_dir(owned(root, SNAPSHOTS))
+    return base
+
+
+def snapshot_path(root, digest):
+    require(isinstance(digest, str) and SHA256.fullmatch(digest) is not None, 'Boot snapshot hash is invalid')
+    return owned(root, SNAPSHOTS + '/' + digest)
+
+
+def read_snapshot(root, digest):
+    path = snapshot_path(root, digest)
+    data = read_nofollow(path, 'Boot snapshot')
+    require(sha(data) == digest, 'Boot snapshot does not match its hash')
+    return data
+
+
+def same_owner(source, dest):
+    """Both boot images keep this machine's arguments, initramfs, and notch choice."""
+    require(source['bootargs'] == dest['bootargs'] and source['initramfs'] == dest['initramfs'],
+            'Boot objects do not belong to the same owner')
+    require(sha(source['dtb']) in KNOWN_DTBS and sha(dest['dtb']) in KNOWN_DTBS,
+            'Boot object carries an unrecognized devicetree')
+    if source['loader'] != dest['loader']:
+        current, restored = sha(source['loader']), sha(dest['loader'])
+        require(current in KNOWN_LOADERS and restored in KNOWN_LOADERS and
+                KNOWN_LOADERS[current] == KNOWN_LOADERS[restored],
+                'Boot objects change notch preference or an unknown stage2')
+    old, new = sha(source['kernel']), sha(dest['kernel'])
+    require(old in KNOWN_KERNELS and new in KNOWN_KERNELS, 'Boot object has an unrecognized kernel')
+    require(KNOWN_KERNELS[old] == KNOWN_KERNELS[new],
+            'Boot objects are not the same kernel release')
+    if old != new:
+        require((old, new) in KERNEL_TRANSITIONS,
+                'The installed video stack is not qualified for kernel ' + new)
+    return old, new
+
+
+def load_journal(root):
+    """Return a validated pending journal, None when absent, or refuse corrupt state."""
+    path = owned(root, JOURNAL)
+    if not path.exists():
+        return None
+    try:
+        value = json.loads(read_nofollow(path, 'Boot journal'))
+    except ValueError:
+        raise Refused('Boot journal is corrupt') from None
+    require(isinstance(value, dict), 'Boot journal is corrupt')
+    operation = value.get('operation')
+    from_sha, to_sha = value.get('from_sha256'), value.get('to_sha256')
+    video_pin = value.get('video_boot_kernel_sha256')
+    require(operation in ('apply', 'rollback'), 'Boot journal operation is invalid')
+    require(all(isinstance(item, str) and SHA256.fullmatch(item) for item in (from_sha, to_sha, video_pin)),
+            'Boot journal hashes are invalid')
+    from_bytes, to_bytes = read_snapshot(root, from_sha), read_snapshot(root, to_sha)
+    try:
+        source, dest = parse(from_bytes), parse(to_bytes)
+    except Refused:
+        raise Refused('Boot journal snapshots are not boot objects') from None
+    old, new = same_owner(source, dest)
+    require(video_pin == new, 'Boot journal video pin does not match the target kernel')
+    return {'operation': operation, 'from_sha256': from_sha, 'to_sha256': to_sha,
+            'video_boot_kernel_sha256': video_pin, 'from_bytes': from_bytes, 'to_bytes': to_bytes,
+            'from_kernel': old, 'to_kernel': new}
+
+
+def pending_receipt(journal):
+    return {'applied': False, 'operation': journal['operation'],
+            'from_sha256': journal['from_sha256'], 'to_sha256': journal['to_sha256'],
+            'status': 'transition pending (' + journal['operation'] +
+                      '); resume with the same operation, nothing was replayed'}
+
+
+def require_space(root, from_bytes, to_bytes):
+    """Root filesystem and EFI must hold the snapshots, the previous file, and the new boot."""
+    boot_path = root / BOOT
+    efi = os.statvfs(boot_path.parent)
+    require(efi.f_bavail * efi.f_frsize >= len(from_bytes) + len(to_bytes) + MARGIN,
+            'Not enough free space on the EFI partition')
+    anchor = root if root.is_dir() else boot_path.parent
+    rootfs = os.statvfs(anchor)
+    require(rootfs.f_bavail * rootfs.f_frsize >= len(from_bytes) + len(to_bytes) + MARGIN,
+            'Not enough free space on the root filesystem')
+
+
+def write_private(path, data):
+    write(path, data)
+    os.chmod(path, 0o600)
+
+
+def save_journal(root, operation, from_bytes, to_bytes, video_pin):
+    """Persist both boot objects and the journal before any boot or video write."""
+    require_space(root, from_bytes, to_bytes)
+    source, dest = parse(from_bytes), parse(to_bytes)
+    old, new = same_owner(source, dest)
+    require(video_pin == new, 'Boot journal video pin does not match the target kernel')
+    ensure_store(root)
+    from_sha, to_sha = sha(from_bytes), sha(to_bytes)
+    write_private(snapshot_path(root, from_sha), from_bytes)
+    write_private(snapshot_path(root, to_sha), to_bytes)
+    require(read_snapshot(root, from_sha) == from_bytes and read_snapshot(root, to_sha) == to_bytes,
+            'Saved boot snapshot does not match')
+    payload = {'operation': operation, 'from_sha256': from_sha, 'to_sha256': to_sha,
+               'video_boot_kernel_sha256': video_pin}
+    write_private(owned(root, JOURNAL), (json.dumps(payload, indent=2, sort_keys=True) + '\n').encode())
+    return load_journal(root)
+
+
+def write_video_pin(root, pin, allowed):
+    path = root / VIDEO_MANIFEST
+    raw = read_regular(path, 'Protected stack manifest')
+    try:
+        document = json.loads(raw)
+    except ValueError:
+        raise Refused('Protected stack manifest is not valid JSON: ' + str(path)) from None
+    require(isinstance(document, dict), 'Protected stack manifest is not an object: ' + str(path))
+    current = document.get('boot_kernel_sha256')
+    require(current in allowed, 'The installed video stack is not qualified for kernel ' + pin)
+    if current == pin:
+        return
+    document['boot_kernel_sha256'] = pin
+    write(path, (json.dumps(document, indent=2) + '\n').encode())
+
+
+def clear_journal(root):
+    path = owned(root, JOURNAL)
+    require(path.is_file() and not path.is_symlink(), 'Boot journal disappeared before it could be cleared')
+    path.unlink()
+    directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+    require(not path.exists(), 'Boot journal is still present')
+
+
+def commit_transition(root, journal):
+    """Previous from the snapshot, then the video pin, then boot. Clear the journal last."""
+    require_space(root, journal['from_bytes'], journal['to_bytes'])
+    boot_path = root / BOOT
+    current = read_regular(boot_path, 'boot.bin (is the EFI partition mounted at /boot/efi?)')
+    require(current in (journal['from_bytes'], journal['to_bytes']),
+            'boot.bin is neither side of the pending transition')
+    allowed = (journal['from_kernel'], journal['to_kernel'])
+    video = manifest(root, VIDEO_MANIFEST)
+    require(video.get('boot_kernel_sha256') in allowed,
+            'The installed video stack is not qualified for kernel ' + journal['video_boot_kernel_sha256'])
+    # Previous is the boot we are leaving, taken from the snapshot, not from a
+    # partially overwritten boot.bin.previous and not from the live boot.bin.
+    write(boot_path.with_name(boot_path.name + PREVIOUS), journal['from_bytes'])
+    write_video_pin(root, journal['video_boot_kernel_sha256'], allowed)
+    write(boot_path, journal['to_bytes'])
+    require(read_regular(boot_path, 'boot.bin') == journal['to_bytes'], 'boot.bin does not match the snapshot')
+    require(manifest(root, VIDEO_MANIFEST).get('boot_kernel_sha256') == journal['video_boot_kernel_sha256'],
+            'Video manifest pin does not match the target kernel')
+    clear_journal(root)
+
+
+def resume(root, journal):
+    check_listed(root, journal['from_kernel'], journal['to_kernel'])
+    commit_transition(root, journal)
+    return journal
+
+
 def plan(root):
     """Return (current bytes, desired bytes, receipt) for the installed machine."""
     compatible = read_regular(root / COMPATIBLE, 'Devicetree compatible list')
@@ -194,7 +449,14 @@ def plan(root):
     lineage = list(KNOWN_DTBS)
     if lineage.index(now['dtb']) > lineage.index(new['dtb']):
         dtb, new['dtb'] = layout['dtb'], now['dtb']
-    check_protected(root, new['kernel'])
+    kind = transition_kind(now['kernel'], new['kernel'])
+    if kind == 'listed':
+        check_listed(root, now['kernel'], new['kernel'])
+    elif kind == 'refused':
+        check_protected(root, new['kernel'])
+        raise Refused('The installed video stack is not qualified for kernel ' + new['kernel'])
+    else:
+        check_protected(root, new['kernel'])
     loader = layout['loader']
     if BACKLIGHT_DTB in lineage and lineage.index(new['dtb']) >= lineage.index(BACKLIGHT_DTB):
         current_loader = sha(loader)
@@ -254,10 +516,32 @@ def replace(boot_path, current, desired):
 
 
 def compose(root, apply=False):
+    journal = load_journal(root)
+    if journal is not None:
+        if not apply:
+            return pending_receipt(journal)
+        if journal['operation'] != 'apply':
+            raise Refused('A rollback transition is pending. Resume with sudo m4-boot-compose --rollback --apply',
+                          pending=True)
+        resume(root, journal)
+        boot_path = root / BOOT
+        previous = boot_path.with_name(boot_path.name + PREVIOUS)
+        return {'boot': str(boot_path), 'boot_sha256': sha(journal['to_bytes']),
+                'kernel_sha256': journal['to_kernel'], 'kernel_release': KNOWN_KERNELS[journal['to_kernel']],
+                'applied': True, 'status': 'updated; takes effect at next boot', 'previous': str(previous),
+                'changes': ['kernel'], 'rollback': 'sudo m4-boot-compose --rollback --apply'}
     current, desired, receipt = plan(root)
     boot_path = root / BOOT
     previous = boot_path.with_name(boot_path.name + PREVIOUS)
     if receipt['status'] == 'current' or not apply:
+        return receipt
+    kind = transition_kind(sha(parse(current)['kernel']), sha(parse(desired)['kernel']))
+    if kind == 'listed':
+        journal = save_journal(root, 'apply', current, desired, sha(parse(desired)['kernel']))
+        resume(root, journal)
+        receipt.update(applied=True, status='updated; takes effect at next boot', previous=str(previous),
+                       rollback='sudo m4-boot-compose --rollback --apply')
+        receipt['boot_sha256'] = sha(desired)
         return receipt
     replace(boot_path, current, desired)
     receipt.update(applied=True, status='updated; takes effect at next boot', previous=str(previous),
@@ -267,6 +551,20 @@ def compose(root, apply=False):
 
 def rollback(root, apply=False):
     """Swap boot.bin.previous back in; it must belong to this machine."""
+    journal = load_journal(root)
+    if journal is not None:
+        if not apply:
+            return pending_receipt(journal)
+        if journal['operation'] != 'rollback':
+            raise Refused('An apply transition is pending. Resume with sudo m4-boot-compose --apply',
+                          pending=True)
+        resume(root, journal)
+        boot_path = root / BOOT
+        return {'boot': str(boot_path), 'boot_sha256': sha(journal['to_bytes']),
+                'restore_sha256': sha(journal['to_bytes']), 'applied': True,
+                'status': 'rolled back; takes effect at next boot',
+                'hold': 'Installed packages are unchanged. The next M4 package update composes '
+                        'boot.bin again; downgrade or hold the package to stay on this version.'}
     compatible = read_regular(root / COMPATIBLE, 'Devicetree compatible list')
     require(BOARD in compatible.split(b'\0'), 'This is not a J713 MacBook Air')
     boot_path = root / BOOT
@@ -285,6 +583,15 @@ def rollback(root, apply=False):
     receipt = {'boot': str(boot_path), 'boot_sha256': sha(current), 'restore_sha256': sha(older),
                'applied': False, 'status': 'rollback available' if older != current else 'current'}
     if older == current or not apply:
+        return receipt
+    old_kernel, new_kernel = sha(now['kernel']), sha(then['kernel'])
+    if transition_kind(old_kernel, new_kernel) == 'listed':
+        check_listed(root, old_kernel, new_kernel)
+        journal = save_journal(root, 'rollback', current, older, new_kernel)
+        resume(root, journal)
+        receipt.update(applied=True, status='rolled back; takes effect at next boot',
+                       hold='Installed packages are unchanged. The next M4 package update composes '
+                            'boot.bin again; downgrade or hold the package to stay on this version.')
         return receipt
     replace(boot_path, current, older)
     receipt.update(applied=True, status='rolled back; takes effect at next boot',
@@ -326,7 +633,18 @@ def main(argv=None):
         else:
             receipt = (rollback if args.rollback else compose)(args.root, False)
     except (Refused, OSError) as error:
-        print('m4-boot-compose: refused: ' + str(error) + '. boot.bin was not changed.', file=sys.stderr)
+        pending = getattr(error, 'pending', False)
+        if not pending:
+            try:
+                pending = load_journal(args.root) is not None
+            except (Refused, OSError):
+                pending = False
+        if pending:
+            suffix = ('. Resume the pending transition with the same operation; '
+                      'do not assume boot.bin is unchanged.')
+        else:
+            suffix = '. boot.bin was not changed.'
+        print('m4-boot-compose: refused: ' + str(error) + suffix, file=sys.stderr)
         return 1
     print(json.dumps(receipt, indent=2, sort_keys=True))
     return 0
