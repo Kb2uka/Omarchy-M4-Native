@@ -1,6 +1,32 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 KB2UKA
-"""boot.bin composer: splice only kernel and devicetree, refuse everything unknown."""
+"""boot.bin composer: splice only kernel and devicetree, refuse everything unknown.
+
+Kernel bytes move only for a pair listed in ``KERNEL_TRANSITIONS`` whose two
+hashes share one entry in ``KNOWN_KERNELS``. A devicetree-only update does not
+consult that set. Applying a pair replaces the boot kernel and the video
+manifest's ``boot_kernel_sha256`` only; owner boot arguments, initramfs, the
+devicetree, the stage2 notch preference, the audio manifest, and every other
+video-manifest key and value stay. That contract is semantic: unrelated JSON
+keys and values are preserved, and serialization whitespace is not. A no-op
+on an already settled manifest still leaves those bytes unchanged. Rollback
+restores the previous kernel and that same video pin.
+
+Private recovery store, planted by these tests and not a CLI flag:
+
+* ``var/lib/omarchy-m4/boot-compose/journal`` — JSON object with ``operation``
+  (``apply`` or ``rollback``), ``from_sha256``, ``to_sha256``, and
+  ``video_boot_kernel_sha256``.
+* ``var/lib/omarchy-m4/boot-compose/snapshots/<sha256>`` — exact file bytes,
+  and the file name is that sha256. A valid pending journal has both the
+  ``from_sha256`` snapshot and the ``to_sha256`` snapshot.
+
+Inspection of a valid pending journal must not replay either operation. A
+journal whose operation is the opposite of the command refuses before
+``boot.bin`` or the video manifest changes. A corrupt journal, or a pending
+journal whose snapshot is missing or does not match its hash, is not a valid
+pending state: inspection refuses it and does not apply it.
+"""
 import contextlib
 import gzip
 import hashlib
@@ -210,6 +236,13 @@ def scenario_foreign_rollback(test, module):
     test.assertEqual(machine.boot, boot())
 
 
+OLD_KERNEL = 'c3704cfd2afb7760e73f0b9939a68864a30bd916fcd478bd960e538373123dc9'
+NEW_KERNEL = 'a7a160b6686652d7ae93218593d015febf9cc7ab0ef838148e551116befeb05e'
+TRANSITION_RELEASE = '7.1.9-m4-gpu-backport-20261008'
+BOOT_JOURNAL = 'var/lib/omarchy-m4/boot-compose/journal'
+BOOT_SNAPSHOTS = 'var/lib/omarchy-m4/boot-compose/snapshots'
+
+
 def scenario_newer_devicetree_kept(test, module):
     machine = Machine(test, module, boot_bytes=boot(dtb=D4), package_kernel=K2)
     patcher = mock.patch.dict(module.KNOWN_DTBS, {sha(D4): 'cpufreq'})
@@ -379,8 +412,237 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual(machine.boot, boot(dtb=D2))
         self.assertEqual((machine.root / MODULE.PACMAN_LOCK).read_bytes(), b'pacman transaction')
 
+    def transition(self, *, boot_kernel=None, package_kernel=None, video_pin=None, allow=True,
+                   releases=None):
+        """Machine whose boot kernel and packaged kernel are a bounded pair.
+
+        Fixture kernels are synthetic. ``KERNEL_TRANSITIONS`` and
+        ``KNOWN_KERNELS`` are patched for this case; the real pair is pinned
+        by ``test_kernel_transition_pair_is_pinned``.
+        """
+        boot_kernel = K1 if boot_kernel is None else boot_kernel
+        package_kernel = kernel(12) if package_kernel is None else package_kernel
+        current = boot(kernel_bytes=boot_kernel, loader=LOADER + b' notch', bootargs=BOOTARGS,
+                       initramfs=INITRAMFS)
+        machine = Machine(self, boot_bytes=current, package_kernel=package_kernel, package_dtb=D1)
+        releases = releases or {sha(boot_kernel): RELEASE, sha(package_kernel): RELEASE}
+        pairs = {(sha(boot_kernel), sha(package_kernel)), (sha(package_kernel), sha(boot_kernel))}
+        for patcher in (
+                mock.patch.dict(MODULE.KNOWN_KERNELS, releases, clear=True),
+                mock.patch.object(MODULE, 'KERNEL_TRANSITIONS', pairs if allow else set(), create=True)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        pin = sha(boot_kernel) if video_pin is None else video_pin
+        video = {'boot_kernel_sha256': pin, 'kernel_release': releases[sha(package_kernel)],
+                 'owner_panel': 'kept', 'notch': 'owner'}
+        machine.put(MODULE.VIDEO_MANIFEST, json.dumps(video, indent=4).encode() + b'\n')
+        machine.video_before = (machine.root / MODULE.VIDEO_MANIFEST).read_bytes()
+        machine.audio_before = (machine.root / MODULE.AUDIO_MANIFEST).read_bytes()
+        machine.boot_before = current
+        return machine
+
+    def test_kernel_transition_pair_is_pinned(self):
+        module = load()
+        transitions = {tuple(pair) for pair in getattr(module, 'KERNEL_TRANSITIONS', ())}
+        self.assertIn((OLD_KERNEL, NEW_KERNEL), transitions)
+        self.assertIn((NEW_KERNEL, OLD_KERNEL), transitions)
+        self.assertEqual(module.KNOWN_KERNELS.get(OLD_KERNEL), TRANSITION_RELEASE)
+        self.assertEqual(module.KNOWN_KERNELS.get(NEW_KERNEL), TRANSITION_RELEASE)
+
+    def test_devicetree_only_update_does_not_need_a_kernel_pair(self):
+        machine = Machine(self)
+        with mock.patch.object(MODULE, 'KERNEL_TRANSITIONS', set(), create=True):
+            code, out, err = machine.run('--apply')
+        self.assertEqual((code, err), (0, ''))
+        self.assertEqual(json.loads(out)['changes'], ['dtb'])
+        self.assertEqual(machine.boot, boot(dtb=D2))
+
+    def test_apply_transitions_kernel_and_only_the_video_pin(self):
+        packaged = kernel(12)
+        machine = self.transition(package_kernel=packaged)
+        code, out, err = machine.run('--apply')
+        self.assertEqual((code, err), (0, ''))
+        receipt = json.loads(out)
+        self.assertEqual(receipt['changes'], ['kernel'])
+        self.assertEqual(machine.boot, boot(kernel_bytes=packaged, dtb=D1, loader=LOADER + b' notch'))
+        self.assertEqual(machine.previous, machine.boot_before)
+        video = json.loads((machine.root / MODULE.VIDEO_MANIFEST).read_bytes())
+        self.assertEqual(video, video_with_pin(machine.video_before, sha(packaged)))
+        self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), machine.audio_before)
+        settled = (machine.root / MODULE.VIDEO_MANIFEST).read_bytes()
+        code, out, _ = machine.run('--apply')
+        self.assertEqual(json.loads(out)['status'], 'current')
+        self.assertEqual(machine.previous, machine.boot_before)
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), settled)
+        self.assertEqual(code, 0)
+
+    def test_unknown_pair_release_or_pins_refuse_before_writes(self):
+        packaged = kernel(12)
+        # Video is already pinned to the packaged kernel, which is enough for
+        # the composer today. The pair is absent from KERNEL_TRANSITIONS.
+        machine = self.transition(package_kernel=packaged, allow=False, video_pin=sha(packaged))
+        code, _, err = machine.run('--apply')
+        self.assertEqual(code, 1, err)
+        self.assertEqual((machine.boot, machine.previous), (machine.boot_before, None))
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), machine.video_before)
+
+        machine = self.transition(package_kernel=packaged, video_pin=sha(packaged),
+                                  releases={sha(K1): RELEASE, sha(packaged): '7.1.9-other'})
+        machine.put(MODULE.AUDIO_MANIFEST, json.dumps({'kernel_release': '7.1.9-other'}).encode())
+        code, _, err = machine.run('--apply')
+        self.assertEqual(code, 1, err)
+        self.assertEqual((machine.boot, machine.previous), (machine.boot_before, None))
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), machine.video_before)
+
+        machine = self.transition(package_kernel=packaged, video_pin=sha(kernel(9)))
+        code, _, err = machine.run('--apply')
+        self.assertEqual(code, 1, err)
+        self.assertIsNone(machine.previous)
+        self.assertEqual(machine.boot, machine.boot_before)
+
+    def test_rollback_restores_kernel_and_video_pin_only(self):
+        packaged = kernel(12)
+        current = boot(kernel_bytes=packaged, dtb=D1, loader=LOADER + b' notch')
+        previous = boot(kernel_bytes=K1, dtb=D1, loader=LOADER + b' notch')
+        machine = self.transition(boot_kernel=packaged, package_kernel=K1, video_pin=sha(packaged))
+        machine.put(MODULE.BOOT, current)
+        machine.put(MODULE.BOOT + MODULE.PREVIOUS, previous)
+        video = {'boot_kernel_sha256': sha(packaged), 'kernel_release': RELEASE,
+                 'owner_panel': 'kept'}
+        raw = json.dumps(video, indent=4).encode() + b'\n'
+        machine.put(MODULE.VIDEO_MANIFEST, raw)
+        audio = (machine.root / MODULE.AUDIO_MANIFEST).read_bytes()
+        code, out, err = machine.run('--rollback', '--apply')
+        self.assertEqual((code, err), (0, ''))
+        self.assertEqual(json.loads(out)['status'], 'rolled back; takes effect at next boot')
+        self.assertEqual(machine.boot, previous)
+        restored = json.loads((machine.root / MODULE.VIDEO_MANIFEST).read_bytes())
+        self.assertEqual(restored, video_with_pin(raw, sha(K1)))
+        self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
+
+    def test_interrupted_transition_resumes_and_rejects_the_opposite_operation(self):
+        packaged = kernel(12)
+        machine = self.transition(package_kernel=packaged)
+        real = os.replace
+
+        def fail_previous(source, target):
+            if Path(target).name == 'boot.bin.previous':
+                raise OSError('power cut while replacing boot.bin.previous')
+            return real(source, target)
+
+        with mock.patch.object(MODULE.os, 'replace', side_effect=fail_previous):
+            code, _, err = machine.run('--apply')
+        self.assertEqual(code, 1, err)
+        self.assertEqual(machine.boot, machine.boot_before)
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), machine.video_before)
+        code, out, err = machine.run()
+        self.assertEqual(code, 0, err)
+        self.assertFalse(json.loads(out)['applied'])
+        self.assertEqual(machine.boot, machine.boot_before)
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), machine.video_before)
+        planted = boot(kernel_bytes=K1, dtb=D2, loader=LOADER + b' notch')
+        machine.put(MODULE.BOOT + MODULE.PREVIOUS, planted)
+        code, _, err = machine.run('--rollback', '--apply')
+        self.assertEqual(code, 1, err)
+        self.assertEqual(machine.boot, machine.boot_before)
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), machine.video_before)
+        code, _, err = machine.run('--apply')
+        self.assertEqual((code, err), (0, ''))
+        self.assertEqual(machine.boot, boot(kernel_bytes=packaged, dtb=D1, loader=LOADER + b' notch'))
+        self.assertEqual(json.loads((machine.root / MODULE.VIDEO_MANIFEST).read_bytes())['boot_kernel_sha256'],
+                         sha(packaged))
+        self.assertEqual(json.loads((machine.root / MODULE.VIDEO_MANIFEST).read_bytes())['owner_panel'], 'kept')
+
+    def test_pending_journal_blocks_the_opposite_operation_and_inspection_does_not_apply(self):
+        packaged = kernel(12)
+        machine = self.transition(package_kernel=packaged)
+        desired = boot(kernel_bytes=packaged, dtb=D1, loader=LOADER + b' notch')
+        machine.put(BOOT_JOURNAL, json.dumps({
+            'operation': 'apply', 'from_sha256': sha(machine.boot_before), 'to_sha256': sha(desired),
+            'video_boot_kernel_sha256': sha(packaged)}).encode())
+        machine.put(f'{BOOT_SNAPSHOTS}/{sha(machine.boot_before)}', machine.boot_before)
+        machine.put(f'{BOOT_SNAPSHOTS}/{sha(desired)}', desired)
+        code, out, err = machine.run()
+        self.assertEqual(code, 0, err)
+        self.assertFalse(json.loads(out)['applied'])
+        self.assertEqual(machine.boot, machine.boot_before)
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), machine.video_before)
+        previous = boot(dtb=D2, loader=LOADER + b' notch')
+        machine.put(MODULE.BOOT + MODULE.PREVIOUS, previous)
+        code, _, err = machine.run('--rollback', '--apply')
+        self.assertEqual(code, 1, err)
+        self.assertEqual(machine.boot, machine.boot_before)
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), machine.video_before)
+
+    def test_corrupt_journal_or_snapshot_refuses_before_writes(self):
+        machine = Machine(self)
+        machine.put(BOOT_JOURNAL, b'{not a journal')
+        code, _, err = machine.run('--apply')
+        self.assertEqual(code, 1, err)
+        self.assertEqual((machine.boot, machine.previous), (boot(), None))
+        code, _, err = machine.run()
+        self.assertEqual(code, 1, err)
+        self.assertEqual(machine.boot, boot())
+
+        machine = Machine(self)
+        current = boot()
+        machine.put(BOOT_JOURNAL, json.dumps({
+            'operation': 'apply', 'from_sha256': sha(current), 'to_sha256': sha(boot(dtb=D2)),
+            'video_boot_kernel_sha256': sha(K1)}).encode())
+        machine.put(f'{BOOT_SNAPSHOTS}/{sha(current)}', b'truncated snapshot')
+        machine.put(f'{BOOT_SNAPSHOTS}/{sha(boot(dtb=D2))}', boot(dtb=D2))
+        video = (machine.root / MODULE.VIDEO_MANIFEST).read_bytes()
+        code, _, err = machine.run()
+        self.assertEqual(code, 1, err)
+        self.assertEqual((machine.boot, machine.previous), (current, None))
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), video)
+        code, _, err = machine.run('--apply')
+        self.assertEqual(code, 1, err)
+        self.assertEqual((machine.boot, machine.previous), (current, None))
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), video)
+
+        machine = Machine(self)
+        current = boot()
+        desired = boot(dtb=D2)
+        machine.put(BOOT_JOURNAL, json.dumps({
+            'operation': 'apply', 'from_sha256': sha(current), 'to_sha256': sha(desired),
+            'video_boot_kernel_sha256': sha(K1)}).encode())
+        machine.put(f'{BOOT_SNAPSHOTS}/{sha(current)}', current)
+        video = (machine.root / MODULE.VIDEO_MANIFEST).read_bytes()
+        code, _, err = machine.run()
+        self.assertEqual(code, 1, err)
+        self.assertEqual((machine.boot, machine.previous), (current, None))
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), video)
+        code, _, err = machine.run('--apply')
+        self.assertEqual(code, 1, err)
+        self.assertEqual((machine.boot, machine.previous), (current, None))
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), video)
+
+    def test_transition_keeps_the_free_space_and_package_lock_refusals(self):
+        packaged = kernel(12)
+        machine = self.transition(package_kernel=packaged)
+        with mock.patch.object(MODULE.os, 'statvfs', return_value=types.SimpleNamespace(f_bavail=1, f_frsize=4096)):
+            code, _, err = machine.run('--apply')
+        self.assertEqual(code, 1)
+        self.assertIn('Not enough free space', err)
+        self.assertEqual(machine.boot, machine.boot_before)
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), machine.video_before)
+        self.assertIsNone(machine.previous)
+
+        machine = self.transition(package_kernel=packaged)
+        machine.put(MODULE.PACMAN_LOCK, b'another transaction')
+        code, _, err = machine.run('--apply')
+        self.assertEqual(code, 1)
+        self.assertIn('boot writer', err)
+        self.assertEqual(machine.boot, machine.boot_before)
+        self.assertEqual((machine.root / MODULE.PACMAN_LOCK).read_bytes(), b'another transaction')
 
 
+def video_with_pin(raw, pin):
+    """Parsed manifest with only ``boot_kernel_sha256`` replaced."""
+    document = json.loads(raw)
+    document['boot_kernel_sha256'] = pin
+    return document
 
 
 if __name__ == '__main__':

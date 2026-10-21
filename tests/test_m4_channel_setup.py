@@ -188,6 +188,35 @@ class SetupTests(unittest.TestCase):
         self.put(MODULE.SPEAKER_MODULE, 'fixed module')
         self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'already swapped')
 
+    def test_restart_reported_when_mca_is_pending_and_boot_is_already_current(self):
+        """MCA staged against the known old module needs a restart; boot itself is current.
+
+        ``MCA_MODULE``, ``MCA_STAGED``, and ``MCA_HOLD`` match the speaker trio.
+        ``create=True`` supplies them on a checkout that does not define them yet.
+        """
+        mca_module = ('usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/'
+                      'snd-soc-apple-mca.ko')
+        mca_staged = 'usr/lib/omarchy-m4/j713-audio/snd-soc-apple-mca.ko'
+        mca_hold = 'var/lib/omarchy-m4/mca-module/hold'
+        with mock.patch.object(MODULE, 'MCA_MODULE', mca_module, create=True), \
+             mock.patch.object(MODULE, 'MCA_STAGED', mca_staged, create=True), \
+             mock.patch.object(MODULE, 'MCA_HOLD', mca_hold, create=True):
+            self.put(MODULE.MCA_MODULE, 'known old mca')
+            self.put(MODULE.MCA_STAGED, 'staged mca')
+            result = self.setup_with(FakeSystem(self.root))
+            self.assertEqual((result['restart_needed'], result['status']),
+                             (True, 'connected; restart once to apply the update'))
+            self.put(MODULE.MCA_MODULE, 'staged mca')
+            self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'same bytes')
+            self.put(MODULE.MCA_MODULE, 'known old mca')
+            self.put(MODULE.MCA_HOLD, '')
+            self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'],
+                             'mca hold: nothing applies')
+            (self.root / MODULE.MCA_HOLD).unlink()
+            self.put(MODULE.SPEAKER_HOLD, '')
+            self.assertTrue(self.setup_with(FakeSystem(self.root))['restart_needed'],
+                            'speaker hold does not hide a pending MCA swap')
+
     def test_restart_reported_when_a_gpu_swap_is_pending(self):
         alpha1 = b'alpha.1 gpu module'
         with mock.patch.object(MODULE, 'GPU_STOCK', MODULE.hashlib.sha256(alpha1).hexdigest()):
