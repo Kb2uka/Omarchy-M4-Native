@@ -64,16 +64,22 @@ def mca_drop_in_bytes():
 def service_option_values(text, option):
     """Active [Service] values for one option. Comments and other sections do not count.
 
-    A second active assignment, including a reset line, is a duplicate and does not
-    become the single required command.
+    Only an explicit key=value in [Service] counts. systemd has no [DEFAULT]
+    inheritance, so a nonempty [DEFAULT] section is rejected. A second active
+    assignment, including a reset line, is a duplicate and does not become the
+    single required command.
     """
-    parser = configparser.ConfigParser(interpolation=None, strict=True)
+    parser = configparser.ConfigParser(interpolation=None, strict=True, delimiters=('=',))
     parser.optionxform = str
     try:
         parser.read_string(text)
     except configparser.DuplicateOptionError as error:
         raise AssertionError(
             'duplicate active assignment: ' + error.section + '.' + error.option) from error
+    except configparser.Error as error:
+        raise AssertionError('malformed unit: ' + str(error)) from error
+    if parser.defaults():
+        raise AssertionError('systemd unit does not inherit DEFAULT')
     if not parser.has_section('Service'):
         return []
     return [parser['Service'][key] for key in parser['Service'] if key == option]
