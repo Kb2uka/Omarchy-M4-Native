@@ -4,8 +4,18 @@ This source package contains the J713 audio stack for the custom
 `7.1.9-m4-gpu-backport-20261008` ARM64 kernel. The MCA arithmetic correction
 now changes one module from the historical qualified build; see the
 [hardening evidence and qualification gate](../../docs/retained-audio-transport-audit.md).
-`qualified.json` still identifies the historical binaries, and packaging
-refuses a changed binary until its own qualification is recorded. It is an explicit,
+The current pinned-certificate recipe `Image.gz` is
+`ca1fff571cf1b9d8c0b07b2e97ba0a5402f93c1b7a2d54ea2c07e24a8b70f9d0`
+(18,900,939 bytes). Two fresh builds matched that image, all five audio
+modules and the receipt. The hardened MCA module remains
+`fb941df4d55c4f2093b4595e0392aaf97ffe3a250228518b18a4f70568bf7454`
+(79,152 bytes). The other four audio modules match their historical hashes.
+An earlier incremental image hash is not this recipe. `qualified.json` is
+unchanged and still identifies the historical binaries. Both recipe receipts
+keep `native_qualified` and `fresh_install_qualified` false: this candidate
+has not been installed or rebooted. Packaging refuses a changed binary until
+its own qualification is recorded. Package migration is separate work and is
+not part of this source change. The production channel has not shipped it. It is an explicit,
 fail-closed addition to a pending ext4 owner image. It does not alter a running
 system, change the kernel, or handle arbitrary Apple models.
 
