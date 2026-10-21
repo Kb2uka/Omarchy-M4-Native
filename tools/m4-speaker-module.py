@@ -8,7 +8,7 @@ register and readiness services refuse any module or manifest that disagrees.
 The default component is the speaker module (snd-soc-j713-group.ko). MCA
 (snd-soc-apple-mca.ko) is the same swap with its own paths, pins, backup, hold,
 and rollback marker. Each run changes that component's module and exactly its
-six manifest pins. Unrelated keys and the other component stay as they are.
+seven manifest pins. Unrelated keys and the other component stay as they are.
 
 The swap runs at boot, before the audio register service loads modules. Known
 states for the selected component: stock, fixed, forward interruption (new
@@ -19,19 +19,26 @@ writes no directory or marker. A reverse state is finished only when a
 rollback marker is already present with a valid stock backup; a new request
 does not create that marker. A boot that finds stock bytes, stock pins, a
 valid stock backup, and that marker clears the marker and stays held.
-Inspection only reads. A known state with an existing regular rollback marker
-and a valid stock backup reports that rollback as requested and names the
-component in the restart guidance, ahead of hold. Held stock, or a held
-forward interruption, without that pending rollback reports that nothing
-applies. A markerless reverse state reports recovery from the verified stock
-backup only when both backup halves match that stock identity. A missing or
-corrupt backup reports that recovery is required instead, without asking for
-a reboot or creating a marker. An existing symlink, including a dangling one,
+Inspection only reads. It opens the stock backup only for a known state with
+a regular rollback marker, a markerless reverse, or an unheld forward
+interruption. A known state with an existing regular rollback marker and a
+valid stock backup reports that rollback as requested and names the component
+in the restart guidance, ahead of hold. Held stock, or a held forward
+interruption, without that pending rollback reports that nothing applies.
+Current with no marker does not open the backup either. A markerless reverse
+state reports recovery from the verified stock backup only when both backup
+halves match that stock identity. A missing or corrupt backup reports that
+recovery is required instead, without asking for a reboot or creating a
+marker. An existing symlink, including a dangling one,
 or any other non-regular rollback marker is uncertain. Inspection reports
 that recovery is required. Boot refuses that marker: it is not rollback
 authorization, and boot does not apply the staged module. Nothing is written.
 A regular marker with an invalid backup or state does not promise
-restoration. Inspection is the default.
+restoration. An unheld forward interruption promises the next boot only
+when the stock backup is valid; a missing or corrupt backup reports that
+recovery is required instead. Held forward interruption still reports that
+nothing applies. --rollback refuses an existing non-regular marker before
+it opens or replaces that marker. Inspection is the default.
 """
 import argparse
 import hashlib
@@ -91,7 +98,7 @@ def serialize(manifest):
 
 
 def pins(manifest, component='speaker'):
-    """The six manifest values that pin one component, as one comparable record."""
+    """The seven manifest values that pin one component, as one comparable record."""
     selected = record(component)
     artifact = manifest['module_artifacts'][selected['name']]
     metadata = manifest['file_metadata'][selected['module']]
@@ -108,7 +115,7 @@ def expected(identity):
 
 
 def with_pins(manifest, identity, component='speaker'):
-    """Copy the manifest and replace only this component's six pins."""
+    """Copy the manifest and replace only this component's seven pins."""
     selected = record(component)
     updated = json.loads(json.dumps(manifest))
     updated['files']['/' + selected['module']] = identity['sha256']
@@ -382,6 +389,7 @@ def run(root, mode, component='speaker'):
     stage = root / selected['state']
     if mode == 'request-rollback':
         # Backup halves are judged before any directory or marker write.
+        # An existing non-regular marker is refused before that write.
         _, module_backup, manifest_backup = backup_paths(root, selected)
         if report['state'] == 'reverse':
             # Old bytes with new pins are not a new request. An existing marker
@@ -395,6 +403,8 @@ def run(root, mode, component='speaker'):
                     'Nothing to roll back: state is ' + report['state'])
             require(valid_stock_backup(module_backup, manifest_backup, selected),
                     'Backed-up module is not the alpha.1 ' + selected['component'] + ' module and pins')
+            if rollback_marker_kind(stage / 'rollback') == 'uncertain':
+                raise Refused('Rollback marker is not a regular file; nothing was changed')
             stage.mkdir(parents=True, exist_ok=True)
             marker(stage / 'rollback')
         report['status'] = ('rollback requested; restart to restore the alpha.1 '
@@ -416,6 +426,11 @@ def run(root, mode, component='speaker'):
             raise Refused('Unknown ' + selected['component'] + ' module state; nothing was changed')
     else:
         # Read-only, in the same order as boot. No marker or backup is created.
+        # Backup bytes are owner-only. Open them only when the report depends
+        # on a stock backup: a known state with a regular rollback marker
+        # (this still wins over hold), a markerless reverse, or an unheld
+        # forward interruption. Current with no marker, and held stock or
+        # forward with no marker, keep their report and do not read them.
         intent = stage / 'rollback'
         marker_kind = rollback_marker_kind(intent)
         if marker_kind == 'uncertain':
@@ -423,14 +438,21 @@ def run(root, mode, component='speaker'):
             return report
         regular_marker = marker_kind == 'regular'
         known = report['state'] in ('stock', 'fixed', 'interrupted', 'reverse')
-        _, module_backup, manifest_backup = backup_paths(root, selected)
-        backup_ok = (known and report['rollback_requested'] and
-                     valid_stock_backup(module_backup, manifest_backup, selected))
+        rollback_intent = known and regular_marker and report['rollback_requested']
+        markerless_reverse = report['state'] == 'reverse' and not report['rollback_requested']
+        unheld_forward = (report['state'] == 'interrupted' and not report['held']
+                          and not report['rollback_requested'])
+        if rollback_intent or markerless_reverse or unheld_forward:
+            _, module_backup, manifest_backup = backup_paths(root, selected)
+            backup_matches = valid_stock_backup(module_backup, manifest_backup, selected)
+            backup_ok = rollback_intent and backup_matches
+        else:
+            backup_ok = False
         if known and regular_marker and backup_ok:
             report['status'] = ('rollback requested; restart to restore the alpha.1 '
                                 + selected['component'] + ' module')
-        elif report['state'] == 'reverse' and not report['rollback_requested']:
-            if valid_stock_backup(module_backup, manifest_backup, selected):
+        elif markerless_reverse:
+            if backup_matches:
                 report['status'] = ('refused; nothing was changed; recover from the verified stock backup')
             else:
                 report['status'] = 'refused; nothing was changed; recovery required'
@@ -438,9 +460,11 @@ def run(root, mode, component='speaker'):
             report['status'] = 'refused; nothing was changed; recovery required'
         elif report['held'] and report['state'] in ('stock', 'interrupted'):
             report['status'] = 'held after a rollback; nothing applied'
+        elif unheld_forward:
+            report['status'] = ('interrupted; completes at the next boot' if backup_matches
+                                else 'refused; nothing was changed; recovery required')
         else:
             report['status'] = {'fixed': 'current', 'stock': 'staged; applies at the next boot',
-                                'interrupted': 'interrupted; completes at the next boot',
                                 'reverse': 'interrupted rollback; waiting for a rollback request',
                                 'unknown': 'unknown state; the fix will not be applied'}[report['state']]
     return report

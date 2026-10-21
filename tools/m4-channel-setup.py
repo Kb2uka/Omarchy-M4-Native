@@ -45,14 +45,20 @@ SPEAKER_STAGED = 'usr/lib/omarchy-m4/j713-audio/snd-soc-j713-group.ko'
 SPEAKER_MODULE = 'usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-j713-group.ko'
 SPEAKER_HOLD = 'var/lib/omarchy-m4/speaker-module/hold'
 SPEAKER_ROLLBACK = 'var/lib/omarchy-m4/speaker-module/rollback'
-SPEAKER_STOCK = '465a88aa9f70ceac8682499ad6bd9ecd34a33b35a3b5c556b42f7bd1524272d0'
-SPEAKER_FIXED = 'aaad802eb136ff6cb915feaa123001b3eb848bc2f038d0a5b71c8e2ff35d2581'
+SPEAKER_NAME = 'snd_soc_j713_group'
+SPEAKER_STOCK = {'sha256': '465a88aa9f70ceac8682499ad6bd9ecd34a33b35a3b5c556b42f7bd1524272d0', 'size': 52088,
+                 'note': '040000001400000003000000474e5500f2078435f633f3e320dc95119734cfd263d6edd9'}
+SPEAKER_FIXED = {'sha256': 'aaad802eb136ff6cb915feaa123001b3eb848bc2f038d0a5b71c8e2ff35d2581', 'size': 52000,
+                 'note': '040000001400000003000000474e55009e792aa072fe3a8c75354bcc631fae233c7c014b'}
 MCA_STAGED = 'usr/lib/omarchy-m4/j713-audio/snd-soc-apple-mca.ko'
 MCA_MODULE = 'usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-apple-mca.ko'
 MCA_HOLD = 'var/lib/omarchy-m4/mca-module/hold'
 MCA_ROLLBACK = 'var/lib/omarchy-m4/mca-module/rollback'
-MCA_STOCK = 'd3194660a28d30ba8ea296b6592836ad4ca9426d9471d05ba8ce3cad284baa1e'
-MCA_FIXED = 'fb941df4d55c4f2093b4595e0392aaf97ffe3a250228518b18a4f70568bf7454'
+MCA_NAME = 'snd_soc_apple_mca'
+MCA_STOCK = {'sha256': 'd3194660a28d30ba8ea296b6592836ad4ca9426d9471d05ba8ce3cad284baa1e', 'size': 79152,
+             'note': '040000001400000003000000474e550057b999a68c50407955e8b2ed92f242b0cfe426e9'}
+MCA_FIXED = {'sha256': 'fb941df4d55c4f2093b4595e0392aaf97ffe3a250228518b18a4f70568bf7454', 'size': 79152,
+             'note': '040000001400000003000000474e55000a48e413fcbb318d62c1161c59fb2bef1de7df81'}
 GPU_STAGED = 'usr/lib/omarchy-m4/gpu/asahi_m4.ko'
 GPU_MODULE = 'opt/m4-gpu/asahi_m4.ko'
 GPU_HOLD = 'var/lib/omarchy-m4/gpu-module/hold'
@@ -283,66 +289,124 @@ def audio_digest(path):
         return None
 
 
-def audio_files_pin(path, module_rel, release):
-    """Files pin for this exact installed path, or None when it is not that release."""
-    if path.is_symlink() or not path.is_file() or not release:
+def audio_expected_pins(identity):
+    """The seven values one sha256/size/note identity must match, or None."""
+    if not isinstance(identity, dict):
         return None
     try:
-        document = json.loads(path.read_text())
-    except (OSError, ValueError, UnicodeError):
+        sha256, size, note = identity['sha256'], identity['size'], identity['note']
+    except KeyError:
         return None
-    if not isinstance(document, dict) or document.get('kernel_release') != release:
+    return {'files': sha256, 'metadata_sha256': sha256, 'metadata_size': size,
+            'artifact_sha256': sha256, 'artifact_size': size, 'artifact_note': note,
+            'modules': note}
+
+
+def audio_selected_pins(document, module_rel, name):
+    """Seven pins for one component, or None when a selected map is missing or not a dict.
+
+    The values are the files hash, metadata hash and size, artifact hash, size,
+    and note, and the modules note. Other fields are ignored. Missing maps and
+    nested values of the wrong type return None instead of raising.
+    """
+    if not isinstance(document, dict):
         return None
     files = document.get('files')
-    pin = files.get('/' + module_rel) if isinstance(files, dict) else None
-    return pin if isinstance(pin, str) else None
+    metadata_root = document.get('file_metadata')
+    artifacts = document.get('module_artifacts')
+    modules = document.get('modules')
+    if not all(isinstance(item, dict) for item in (files, metadata_root, artifacts, modules)):
+        return None
+    metadata = metadata_root.get(module_rel)
+    artifact = artifacts.get(name)
+    if not isinstance(metadata, dict) or not isinstance(artifact, dict) or name not in modules:
+        return None
+    return {'files': files.get('/' + module_rel),
+            'metadata_sha256': metadata.get('sha256'), 'metadata_size': metadata.get('size'),
+            'artifact_sha256': artifact.get('sha256'), 'artifact_size': artifact.get('size'),
+            'artifact_note': artifact.get('note'), 'modules': modules.get(name)}
 
 
-def audio_known_state(root, module_rel, stock_sha, fixed_sha):
+def audio_json_document(path):
+    """Parse one regular JSON file. A symlink or unreadable file is None."""
+    if path.is_symlink() or not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_bytes())
+    except (OSError, ValueError, UnicodeError):
+        return None
+
+
+def audio_pins_match(path, module_rel, name, identity, release=None):
+    """True when a regular manifest carries this identity's seven pins.
+
+    When release is not None, kernel_release must equal it. Backup validation
+    passes None and does not require a release. Wrong or missing nested data
+    is false.
+    """
+    expected = audio_expected_pins(identity)
+    document = audio_json_document(path)
+    if expected is None or not isinstance(document, dict):
+        return False
+    if release is not None and document.get('kernel_release') != release:
+        return False
+    return audio_selected_pins(document, module_rel, name) == expected
+
+
+def audio_module_identity(path, identity):
+    """True when path is a regular file with this identity's SHA-256 and length."""
+    if audio_expected_pins(identity) is None or path.is_symlink() or not path.is_file():
+        return False
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return False
+    return hashlib.sha256(data).hexdigest() == identity.get('sha256') and len(data) == identity.get('size')
+
+
+def audio_known_state(root, module_rel, name, stock, fixed):
     """stock, forward, current, reverse, or None.
 
-    Only the two explicit identities count. Another digest, another path, a
-    wrong release, or a missing or non-regular module is unknown.
+    The live module hash selects stock or fixed bytes. All seven pins must
+    match that identity, and the manifest release must be the release in the
+    module path. Another digest, another path, a wrong release, or a missing
+    or non-regular module is unknown.
     """
     release = audio_release(module_rel)
     installed = audio_digest(root / module_rel)
-    if installed == stock_sha:
+    stock_sha = stock.get('sha256') if isinstance(stock, dict) else None
+    fixed_sha = fixed.get('sha256') if isinstance(fixed, dict) else None
+    if installed is not None and installed == stock_sha:
         installed_kind = 'stock'
-    elif installed == fixed_sha:
+    elif installed is not None and installed == fixed_sha:
         installed_kind = 'fixed'
     else:
         return None
-    pin = audio_files_pin(root / MANIFESTS[1], module_rel, release)
-    if installed_kind == 'stock' and pin == stock_sha:
+    if not release:
+        return None
+    manifest = root / MANIFESTS[1]
+    if installed_kind == 'stock' and audio_pins_match(manifest, module_rel, name, stock, release):
         return 'stock'
-    if installed_kind == 'fixed' and pin == stock_sha:
+    if installed_kind == 'fixed' and audio_pins_match(manifest, module_rel, name, stock, release):
         return 'forward'
-    if installed_kind == 'fixed' and pin == fixed_sha:
+    if installed_kind == 'fixed' and audio_pins_match(manifest, module_rel, name, fixed, release):
         return 'current'
-    if installed_kind == 'stock' and pin == fixed_sha:
+    if installed_kind == 'stock' and audio_pins_match(manifest, module_rel, name, fixed, release):
         return 'reverse'
     return None
 
 
-def audio_stock_backup(root, state_rel, module_rel, stock_sha):
+def audio_stock_backup(root, state_rel, module_rel, name, stock):
     """True when both stock backup halves are regular and match the stock identity.
 
-    The manifest half is that module's files pin only. This reads; it does not
-    restore or write state.
+    The module half must have the stock hash and length. The manifest half
+    must carry the seven stock pins. It does not have to name the live release.
+    This reads; it does not restore or write state.
     """
     state = root / state_rel
-    if audio_digest(state / 'alpha1-module.ko') != stock_sha:
+    if not audio_module_identity(state / 'alpha1-module.ko', stock):
         return False
-    path = state / 'alpha1-manifest.json'
-    if path.is_symlink() or not path.is_file():
-        return False
-    try:
-        document = json.loads(path.read_bytes())
-    except (OSError, ValueError, UnicodeError):
-        return False
-    files = document.get('files') if isinstance(document, dict) else None
-    pin = files.get('/' + module_rel) if isinstance(files, dict) else None
-    return pin == stock_sha
+    return audio_pins_match(state / 'alpha1-manifest.json', module_rel, name, stock)
 
 
 def rollback_marker_kind(path):
@@ -364,20 +428,22 @@ def rollback_marker_kind(path):
     return 'regular'
 
 
-def audio_pending(root, staged_rel, module_rel, hold_rel, rollback_rel, stock_sha, fixed_sha):
+def audio_pending(root, staged_rel, module_rel, hold_rel, rollback_rel, name, stock, fixed):
     """Whether this component has recognized pending boot work.
 
-    Stock can apply when the staged file is the fixed identity. A forward
+    Stock can apply when the staged file is the fixed hash and size. A forward
     interruption can complete when the stock backup pair matches too. A regular
     rollback marker in a recognized state is pending, ahead of hold, when that
     same backup matches, including stock left behind by an interrupted marker
-    cleanup. A symlink, including a dangling one, or any other non-regular
-    rollback marker is not pending: it is not rollback authorization and it is
-    not forward work. Current, reverse without that marker, hold without a
-    marker, and anything unrecognized are not pending. A recognized result is
-    not a promise that every later boot write succeeds.
+    cleanup. The backup is the stock module hash and length plus the seven
+    stock pins, with no release requirement. A symlink, including a dangling
+    one, or any other non-regular rollback marker is not pending: it is not
+    rollback authorization and it is not forward work. Current, reverse without
+    that marker, hold without a marker, and anything unrecognized are not
+    pending. A recognized result is not a promise that every later boot write
+    succeeds.
     """
-    state = audio_known_state(root, module_rel, stock_sha, fixed_sha)
+    state = audio_known_state(root, module_rel, name, stock, fixed)
     if state is None:
         return False
     rollback = root / rollback_rel
@@ -385,18 +451,18 @@ def audio_pending(root, staged_rel, module_rel, hold_rel, rollback_rel, stock_sh
     if marker_kind == 'uncertain':
         return False
     if marker_kind == 'regular':
-        return audio_stock_backup(root, Path(hold_rel).parent, module_rel, stock_sha)
+        return audio_stock_backup(root, Path(hold_rel).parent, module_rel, name, stock)
     if (root / hold_rel).exists() or state in ('current', 'reverse'):
         return False
-    if state == 'forward' and not audio_stock_backup(root, Path(hold_rel).parent, module_rel, stock_sha):
+    if state == 'forward' and not audio_stock_backup(root, Path(hold_rel).parent, module_rel, name, stock):
         return False
-    return audio_digest(root / staged_rel) == fixed_sha
+    return audio_module_identity(root / staged_rel, fixed)
 
 
 def speaker_pending(root):
     """Whether the speaker module has recognized pending boot work."""
     return audio_pending(root, SPEAKER_STAGED, SPEAKER_MODULE, SPEAKER_HOLD, SPEAKER_ROLLBACK,
-                         SPEAKER_STOCK, SPEAKER_FIXED)
+                         SPEAKER_NAME, SPEAKER_STOCK, SPEAKER_FIXED)
 
 
 def mca_pending(root):
@@ -404,7 +470,8 @@ def mca_pending(root):
 
     Independent of the speaker paths, hold, rollback marker, and identities.
     """
-    return audio_pending(root, MCA_STAGED, MCA_MODULE, MCA_HOLD, MCA_ROLLBACK, MCA_STOCK, MCA_FIXED)
+    return audio_pending(root, MCA_STAGED, MCA_MODULE, MCA_HOLD, MCA_ROLLBACK,
+                         MCA_NAME, MCA_STOCK, MCA_FIXED)
 
 
 def gpu_pending(root):
