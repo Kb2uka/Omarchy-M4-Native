@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 KB2UKA
-"""The boot-time speaker module swap: only known states, six pins, always consistent.
+"""The boot-time speaker module swap: only known states, seven pins, always consistent.
 
 MCA is a second component of the same tool, selected with ``--component mca``.
 The default remains the speaker. Fixture bytes below are synthetic and are
@@ -11,7 +11,7 @@ Per component the tool keeps its own installed path, staged path, and state
 directory (speaker: ``var/lib/omarchy-m4/speaker-module``; MCA:
 ``var/lib/omarchy-m4/mca-module``). Each directory has its own ``hold`` and
 ``rollback`` markers and its own module backup. The shared audio manifest is
-updated only in that component's six pins. Unrelated keys, the other
+updated only in that component's seven pins. Unrelated keys, the other
 component's pins, and a hand-written manifest's other bytes stay as they were.
 A forward power cut is new module bytes with the old pins, and the next boot
 finishes it. The reverse (old module bytes, new pins) is resumed only when
@@ -21,11 +21,18 @@ before that marker is written. Read-only inspection of a held stock rollback
 reports that nothing applies. A valid rollback marker and stock backup on
 fixed, reverse, or restored stock reports that rollback as pending or
 requested and tells the owner to restart. A held forward interruption with no
-marker reports that nothing applies. A markerless reverse state describes the
-refusal and recovery from the verified backup when that backup is valid. A
-missing or corrupt backup reports recovery required and does not call that
-backup verified. A symlink, directory, or fifo rollback marker is recovery
-required: boot refuses it and does not apply or roll back.
+marker reports that nothing applies. Current with no marker, and that held
+stock or forward state, do not open the stock backup: a permission error
+limited to those backup bytes leaves the current or held status unchanged.
+A markerless reverse state describes the refusal and recovery from the
+verified backup when that backup is valid. A missing or corrupt backup
+reports recovery required and does not call that backup verified. An unheld
+forward interruption promises the next boot only when that stock backup is
+valid; otherwise inspection requires recovery.
+A symlink, directory, or fifo rollback marker is recovery required: boot
+refuses it and does not apply or roll back, and ``--rollback`` refuses it
+before opening the marker. A restored stock rollback with that marker and
+hold stays unfinished when the backup is no longer valid.
 """
 import hashlib
 import importlib.util
@@ -85,7 +92,7 @@ def manifest(identity):
 
 
 def with_mca(document, record):
-    """Add the six MCA pins. ``record`` is a sha256/size/note identity."""
+    """Add the seven MCA pins. ``record`` is a sha256/size/note identity."""
     updated = json.loads(json.dumps(document))
     updated['files']['/' + MCA_MODULE] = record['sha256']
     updated['file_metadata'][MCA_MODULE] = {'sha256': record['sha256'], 'size': record['size'], 'mode': 420}
@@ -170,7 +177,7 @@ class SpeakerModule(unittest.TestCase):
         self.assertEqual((code, report['status']), (0, 'staged; applies at the next boot'))
         self.assertEqual(self.state(), before)
 
-    def test_boot_applies_module_and_exactly_six_pins(self):
+    def test_boot_applies_module_and_exactly_seven_pins(self):
         code, report = self.run_tool('--boot')
         self.assertEqual(code, 0)
         self.assertIn('applied', report['status'])
@@ -257,6 +264,13 @@ class SpeakerModule(unittest.TestCase):
                     self.assertEqual(found_manifest, before['backup_manifest'])
                     self.assertFalse((stage / 'hold').exists())
                     self.assertFalse((stage / 'rollback').exists())
+                    code, report = self.run_tool('--component', name)
+                    self.assertEqual(code, 0, self.last_error)
+                    self.assertEqual(report['state'], 'interrupted')
+                    self.assertEqual(report['status'],
+                                     'refused; nothing was changed; recovery required')
+                    self.assertNotIn('next boot', report['status'])
+                    self.assertNotIn('completes', report['status'])
 
     def test_interrupted_swap_is_completed_before_modules_load(self):
         real = MODULE.write
@@ -267,7 +281,10 @@ class SpeakerModule(unittest.TestCase):
             real(path, data, mode)
         with mock.patch.object(MODULE, 'write', side_effect=fail_on_manifest):
             self.assertEqual(self.run_tool('--boot')[0], 1)
-        self.assertEqual(self.run_tool()[1]['state'], 'interrupted')
+        code, report = self.run_tool()
+        self.assertEqual(code, 0, self.last_error)
+        self.assertEqual(report['state'], 'interrupted')
+        self.assertEqual(report['status'], 'interrupted; completes at the next boot')
         self.assertEqual(self.run_tool('--boot')[0], 0)
         self.assertEqual(self.state(), (NEW, manifest(FIXED)))
 
@@ -548,6 +565,7 @@ class SpeakerModule(unittest.TestCase):
         code, report = self.run_tool('--component', 'mca')
         self.assertEqual(code, 0, self.last_error)
         self.assertEqual(report['state'], 'interrupted')
+        self.assertEqual(report['status'], 'interrupted; completes at the next boot')
         self.assertEqual(self.run_tool('--boot', '--component', 'mca')[0], 0)
         restored = json.loads(self.manifest.read_bytes())
         self.assertEqual(restored['modules'][MCA_NAME], MCA_NEW_NOTE)
@@ -742,6 +760,83 @@ class SpeakerModule(unittest.TestCase):
                 self.assertTrue((stage / 'hold').exists())
                 self.assertFalse((stage / 'rollback').exists())
 
+    def test_restored_rollback_completion_refuses_an_invalid_backup(self):
+        """Stock bytes, stock pins, hold, and a rollback marker are not finished without a valid backup.
+
+        This is the retry after a restored rollback, not a new request and not
+        the rollback that still has fixed or forward bytes. ``--boot`` refuses
+        when the manifest half is missing, and when the module half is the
+        stock file but the backup modules note does not match. Live bytes, the
+        manifest, both markers, the other component, and the backup files stay
+        as planted. The fixed module remains staged and is not applied.
+        """
+        def marked(path):
+            info = node_identity(path)
+            if info[0] == 'file':
+                return info + (path.stat().st_mode & 0o777,)
+            return info
+
+        for name in ('speaker', 'mca'):
+            for kind in ('missing-manifest', 'wrong-note'):
+                with self.subTest(component=name, kind=kind):
+                    self.setUp()
+                    selected = self.component(name)
+                    owner = {'gain': 12, 'label': name + '-' + kind}
+                    document = self.install_both(
+                        OLD, STOCK, MCA_OLD, identity(MCA_OLD, MCA_OLD_NOTE), owner)
+                    stage = self.root / selected['state']
+                    stage.mkdir(parents=True)
+                    self.put(selected['state'] + '/alpha1-module.ko', selected['stock_bytes'], mode=0o600)
+                    if kind == 'wrong-note':
+                        saved = json.loads(json.dumps(document))
+                        key = MODULE.NAME if name == 'speaker' else MCA_NAME
+                        saved['modules'][key] = 'not-the-stock-note'
+                        self.put(selected['state'] + '/alpha1-manifest.json', MODULE.serialize(saved),
+                                 mode=0o600)
+                    self.put(selected['state'] + '/rollback', b'rollback-marker', mode=0o640)
+                    self.put(selected['state'] + '/hold', b'hold-marker', mode=0o604)
+                    self.assertEqual((self.root / selected['staged']).read_bytes(), selected['fixed_bytes'])
+                    code, report = self.run_tool(*selected['args'])
+                    self.assertEqual(code, 0, self.last_error)
+                    self.assertEqual(report['state'], 'stock')
+                    self.assertTrue(report['rollback_requested'])
+                    self.assertTrue(report['held'])
+                    before = {
+                        'manifest': self.manifest.read_bytes(),
+                        'module': (self.root / selected['module']).read_bytes(),
+                        'other': (self.root / selected['other_module']).read_bytes(),
+                        'staged': (self.root / MODULE.STAGED).read_bytes(),
+                        'mca_staged': (self.root / MCA_STAGED).read_bytes(),
+                        'backup_module': marked(stage / 'alpha1-module.ko'),
+                        'backup_manifest': marked(stage / 'alpha1-manifest.json'),
+                        'rollback': marked(stage / 'rollback'),
+                        'hold': marked(stage / 'hold'),
+                    }
+                    self.assertEqual(before['rollback'], ('file', b'rollback-marker', 0o640))
+                    self.assertEqual(before['hold'], ('file', b'hold-marker', 0o604))
+                    self.assertEqual(before['backup_module'][0], 'file')
+                    if kind == 'missing-manifest':
+                        self.assertEqual(before['backup_manifest'], ('absent',))
+                    else:
+                        self.assertEqual(before['backup_manifest'][0], 'file')
+                    code, report = self.run_tool('--boot', *selected['args'])
+                    self.assertEqual(code, 1, report)
+                    self.assertIn('Backed-up module is not the alpha.1 ' + name + ' module and pins',
+                                  self.last_error)
+                    self.assertNotIn('Traceback', self.last_error)
+                    self.assertIsNone(report)
+                    self.assertEqual(self.manifest.read_bytes(), before['manifest'])
+                    self.assertEqual((self.root / selected['module']).read_bytes(), before['module'])
+                    self.assertEqual((self.root / selected['other_module']).read_bytes(), before['other'])
+                    self.assertEqual((self.root / MODULE.STAGED).read_bytes(), before['staged'])
+                    self.assertEqual((self.root / MCA_STAGED).read_bytes(), before['mca_staged'])
+                    self.assertEqual(marked(stage / 'alpha1-module.ko'), before['backup_module'])
+                    self.assertEqual(marked(stage / 'alpha1-manifest.json'), before['backup_manifest'])
+                    self.assertEqual(marked(stage / 'rollback'), before['rollback'])
+                    self.assertEqual(marked(stage / 'hold'), before['hold'])
+                    self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
+                    self.assertEqual((self.root / selected['module']).read_bytes(), selected['stock_bytes'])
+
     def test_partial_stock_backup_completes_and_a_wrong_part_refuses(self):
         """One valid backup half is finished on the next boot, then the fix applies.
 
@@ -888,6 +983,83 @@ class SpeakerModule(unittest.TestCase):
                 code, other = self.run_tool(*other_args)
                 self.assertEqual(code, 0, self.last_error)
                 self.assertEqual(other['status'], 'staged; applies at the next boot')
+
+    def test_inspect_current_and_held_does_not_read_the_stock_backup(self):
+        """Current and held stock or forward stay reported when the backup is unreadable.
+
+        Both components have a valid mode 0600 stock backup and no rollback
+        marker. Read-only inspection goes through the CLI. ``read_bytes`` raises
+        PermissionError only for a backup half; the manifest and the live module
+        are read for real. The status stays current or held, and nothing is written.
+        """
+        rows = (
+            dict(label='current', kind='fixed', hold=False, state='fixed', status='current'),
+            dict(label='held stock', kind='stock', hold=True, state='stock',
+                 status='held after a rollback; nothing applied'),
+            dict(label='held forward', kind='interrupted', hold=True, state='interrupted',
+                 status='held after a rollback; nothing applied'),
+        )
+        backup_names = {'alpha1-module.ko', 'alpha1-manifest.json'}
+        real_read_bytes = Path.read_bytes
+
+        def read_bytes(path):
+            if path.name in backup_names:
+                raise PermissionError(13, 'Permission denied', str(path))
+            return real_read_bytes(path)
+
+        def live_for(kind, selected):
+            if kind == 'fixed':
+                return selected['fixed_bytes'], selected['fixed']
+            if kind == 'stock':
+                return selected['stock_bytes'], selected['stock']
+            if kind == 'interrupted':
+                return selected['fixed_bytes'], selected['stock']
+            raise AssertionError(kind)
+
+        def snapshot(selected):
+            stage = self.root / selected['state']
+            return (self.manifest.read_bytes(),
+                    (self.root / selected['module']).read_bytes(),
+                    (self.root / selected['other_module']).read_bytes(),
+                    (self.root / MODULE.STAGED).read_bytes(),
+                    (self.root / MCA_STAGED).read_bytes(),
+                    (stage / 'alpha1-module.ko').read_bytes(),
+                    (stage / 'alpha1-manifest.json').read_bytes(),
+                    node_identity(stage / 'hold'),
+                    node_identity(stage / 'rollback'))
+
+        for name in ('speaker', 'mca'):
+            for row in rows:
+                with self.subTest(component=name, situation=row['label']):
+                    self.setUp()
+                    selected = self.component(name)
+                    owner = {'gain': 3, 'label': name + '-' + row['label']}
+                    module_bytes, record = live_for(row['kind'], selected)
+                    if name == 'speaker':
+                        self.install_both(module_bytes, record, MCA_OLD,
+                                          identity(MCA_OLD, MCA_OLD_NOTE), owner)
+                    else:
+                        self.install_both(OLD, STOCK, module_bytes, record, owner)
+                    saved = with_mca(manifest(STOCK), identity(MCA_OLD, MCA_OLD_NOTE))
+                    stage = self.root / selected['state']
+                    self.put(selected['state'] + '/alpha1-module.ko', selected['stock_bytes'], 0o600)
+                    self.put(selected['state'] + '/alpha1-manifest.json', MODULE.serialize(saved), 0o600)
+                    if row['hold']:
+                        self.put(selected['state'] + '/hold', b'')
+                    self.assertEqual((stage / 'alpha1-module.ko').stat().st_mode & 0o777, 0o600)
+                    self.assertEqual((stage / 'alpha1-manifest.json').stat().st_mode & 0o777, 0o600)
+                    self.assertFalse((stage / 'rollback').exists())
+                    before = snapshot(selected)
+                    with mock.patch.object(Path, 'read_bytes', read_bytes):
+                        code, report = self.run_tool(*selected['args'])
+                    self.assertEqual(code, 0, self.last_error)
+                    self.assertEqual(self.last_error, '')
+                    self.assertEqual(report['state'], row['state'])
+                    self.assertEqual(report['held'], row['hold'])
+                    self.assertFalse(report['rollback_requested'])
+                    self.assertEqual(report['status'], row['status'])
+                    self.assertEqual(snapshot(selected), before)
+                    self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
 
     def test_inspect_of_markerless_reverse_describes_refusal_not_rollback(self):
         """Old bytes and new pins, with no marker, are not a request to run ``--rollback``.
@@ -1182,7 +1354,10 @@ class SpeakerModule(unittest.TestCase):
         with the fixed module staged, are covered for the speaker and for MCA.
         A symlink to a file outside the state directory, a dangling symlink, a
         directory, or a fifo where the OS can create one makes inspection
-        report recovery required. Boot refuses. Nothing is written to the live
+        report recovery required. Boot refuses. ``--rollback`` on the fixed
+        component, which already has a valid stock backup, refuses before it
+        opens the marker. A fifo request is guarded so an open of that fifo
+        fails the test instead of blocking. Nothing is written to the live
         module, the manifest, either backup half, the marker, the other
         component, or the symlink target.
         """
@@ -1274,6 +1449,31 @@ class SpeakerModule(unittest.TestCase):
                         self.assertNotIn('Traceback', self.last_error)
                         self.assertNotIn('applied', self.last_error)
                         self.assertNotIn('rolled back', self.last_error)
+                        self.assertEqual(snapshot(), before)
+                        self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
+                        if live != 'fixed':
+                            continue
+                        if kind == 'fifo':
+                            real_open = MODULE.os.open
+                            fifo = stage / 'rollback'
+
+                            def guarded_open(file, flags, *args, **kwargs):
+                                if not isinstance(file, int) and os.fspath(file) == os.fspath(fifo):
+                                    raise AssertionError(
+                                        'request-rollback opened the existing fifo rollback marker')
+                                return real_open(file, flags, *args, **kwargs)
+
+                            with mock.patch.object(MODULE.os, 'open', guarded_open):
+                                code, report = self.run_tool('--rollback', *selected['args'])
+                        else:
+                            code, report = self.run_tool('--rollback', *selected['args'])
+                        self.assertEqual(code, 1, self.last_error)
+                        self.assertIn('Rollback marker is not a regular file; nothing was changed',
+                                      self.last_error)
+                        self.assertNotIn('Traceback', self.last_error)
+                        self.assertNotIn('applied', self.last_error)
+                        self.assertNotIn('rolled back', self.last_error)
+                        self.assertIsNone(report)
                         self.assertEqual(snapshot(), before)
                         self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
 

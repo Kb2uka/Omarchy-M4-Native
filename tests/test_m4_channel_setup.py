@@ -23,18 +23,40 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 CHANNEL = json.loads((ROOT / 'packaging/omarchy-m4/channel.json').read_text())
 
-# Synthetic module bytes. Scenario tests patch the SHA constants to these digests.
+# Synthetic module bytes. Records are built from these, not from production constants.
 SPEAKER_STOCK_BYTES = b'speaker-stock-module'
 SPEAKER_FIXED_BYTES = b'speaker-fixed-module'
 MCA_STOCK_BYTES = b'mca-stock-module'
 MCA_FIXED_BYTES = b'mca-fixed-module'
+SPEAKER_STOCK_NOTE = 'speaker-stock-note'
+SPEAKER_FIXED_NOTE = 'speaker-fixed-note'
+MCA_STOCK_NOTE = 'mca-stock-note'
+MCA_FIXED_NOTE = 'mca-fixed-note'
+SPEAKER_COMPONENT = 'snd_soc_j713_group'
+MCA_COMPONENT = 'snd_soc_apple_mca'
+# component, kind, production constant, bytes, note, component name.
+AUDIO_IDENTITY_SPECS = (
+    ('speaker', 'stock', 'SPEAKER_STOCK', SPEAKER_STOCK_BYTES, SPEAKER_STOCK_NOTE, SPEAKER_COMPONENT),
+    ('speaker', 'fixed', 'SPEAKER_FIXED', SPEAKER_FIXED_BYTES, SPEAKER_FIXED_NOTE, SPEAKER_COMPONENT),
+    ('mca', 'stock', 'MCA_STOCK', MCA_STOCK_BYTES, MCA_STOCK_NOTE, MCA_COMPONENT),
+    ('mca', 'fixed', 'MCA_FIXED', MCA_FIXED_BYTES, MCA_FIXED_NOTE, MCA_COMPONENT),
+)
 UNKNOWN_AUDIO = b'unknown-audio-module'
+LIVE_PIN_FIELDS = (
+    'files', 'metadata_sha256', 'metadata_size', 'artifact_sha256',
+    'artifact_size', 'artifact_note', 'modules',
+)
 APPLY_STATUS = 'connected; restart once to apply the update'
 QUIET_STATUS = 'connected; future M4 fixes arrive with omarchy-m4-update'
 
 
 def audio_sha(data):
     return MODULE.hashlib.sha256(data).hexdigest()
+
+
+def audio_record(data, note):
+    """One sha256/size/note identity. Built here, not by the production extractor."""
+    return {'sha256': audio_sha(data), 'size': len(data), 'note': note}
 
 # The installed alpha.1 Air's pacman.conf, without comments (observed 2026-10-12).
 AIR_CONF = '''[options]
@@ -345,34 +367,61 @@ class SetupTests(unittest.TestCase):
         self.assertTrue(result['restart_needed'])
         self.assertIn('restart once', result['status'])
 
+    def _audio_rows(self, name):
+        rows = [row for row in AUDIO_IDENTITY_SPECS if row[0] == name]
+        if len(rows) != 2 or {row[1] for row in rows} != {'stock', 'fixed'}:
+            raise AssertionError(name)
+        if len({row[5] for row in rows}) != 1:
+            raise AssertionError(name)
+        return rows
+
     def _patch_audio_identities(self):
-        """Patch only the four SHA identities. Path constants stay as shipped."""
-        return mock.patch.multiple(
-            MODULE, create=True,
-            SPEAKER_STOCK=audio_sha(SPEAKER_STOCK_BYTES),
-            SPEAKER_FIXED=audio_sha(SPEAKER_FIXED_BYTES),
-            MCA_STOCK=audio_sha(MCA_STOCK_BYTES),
-            MCA_FIXED=audio_sha(MCA_FIXED_BYTES))
+        """Patch each identity to the synthetic value of its original shape.
+
+        A string constant is replaced with the synthetic sha256, so scalar
+        production code can still recognize these bytes. Any other original
+        shape is replaced with the full synthetic record. Paths and component
+        names stay as shipped. The originals are kept for the shape assertion.
+        """
+        originals, values = {}, {}
+        for _, _, constant, blob, note, _ in AUDIO_IDENTITY_SPECS:
+            original = getattr(MODULE, constant)
+            originals[constant] = original
+            record = audio_record(blob, note)
+            values[constant] = record['sha256'] if isinstance(original, str) else record
+        self._audio_identity_originals = originals
+        return mock.patch.multiple(MODULE, create=True, **values)
 
     def _audio_identities(self, name):
-        """Read the SHA constants on each call so a fixture patch is visible."""
-        if name == 'speaker':
-            stock_bytes, fixed_bytes = SPEAKER_STOCK_BYTES, SPEAKER_FIXED_BYTES
-            stock_sha, fixed_sha = MODULE.SPEAKER_STOCK, MODULE.SPEAKER_FIXED
-        elif name == 'mca':
-            stock_bytes, fixed_bytes = MCA_STOCK_BYTES, MCA_FIXED_BYTES
-            stock_sha, fixed_sha = MODULE.MCA_STOCK, MODULE.MCA_FIXED
-        else:
-            raise AssertionError(name)
-        return stock_bytes, fixed_bytes, stock_sha, fixed_sha
+        """Independent synthetic records. Not the patched production constants."""
+        found = {kind: (blob, note, component)
+                 for _, kind, _, blob, note, component in self._audio_rows(name)}
+        stock_bytes, stock_note, component_name = found['stock']
+        fixed_bytes, fixed_note, _ = found['fixed']
+        return (stock_bytes, fixed_bytes, audio_record(stock_bytes, stock_note),
+                audio_record(fixed_bytes, fixed_note), component_name)
 
     def _assert_patched_identities(self):
+        originals = self._audio_identity_originals
         for name in ('speaker', 'mca'):
-            stock_bytes, fixed_bytes, stock_sha, fixed_sha = self._audio_identities(name)
-            self.assertEqual(stock_sha, audio_sha(stock_bytes))
-            self.assertEqual(fixed_sha, audio_sha(fixed_bytes))
-            self.assertNotEqual(stock_sha, fixed_sha)
-            self.assertNotIn(audio_sha(UNKNOWN_AUDIO), (stock_sha, fixed_sha))
+            stock_bytes, fixed_bytes, stock, fixed, component_name = self._audio_identities(name)
+            records = {'stock': (stock, stock_bytes), 'fixed': (fixed, fixed_bytes)}
+            for _, kind, constant, _, _, _ in self._audio_rows(name):
+                record, blob = records[kind]
+                self.assertEqual(set(record), {'sha256', 'size', 'note'})
+                self.assertEqual(record['sha256'], audio_sha(blob))
+                self.assertEqual(record['size'], len(blob))
+                self.assertIsInstance(record['note'], str)
+                self.assertNotEqual(record['note'], '')
+                patched = getattr(MODULE, constant)
+                if isinstance(originals[constant], str):
+                    self.assertEqual(patched, record['sha256'])
+                else:
+                    self.assertEqual(patched, record)
+            self.assertNotEqual(stock['sha256'], fixed['sha256'])
+            self.assertNotEqual(stock['note'], fixed['note'])
+            self.assertNotIn(audio_sha(UNKNOWN_AUDIO), (stock['sha256'], fixed['sha256']))
+            self.assertIn(component_name, (SPEAKER_COMPONENT, MCA_COMPONENT))
 
     def component_paths(self, name):
         if name == 'speaker':
@@ -410,24 +459,50 @@ class SetupTests(unittest.TestCase):
             return
         raise AssertionError(kind)
 
-    def _write_files_pin(self, rel, module_rel, pin, release, pin_path=None, merge=False):
-        """Write the files pin selected by exact path. A second call keeps the other pin."""
-        key = '/' + (module_rel if pin_path is None else pin_path)
+    def _write_component_manifest(self, rel, module_rel, component_name, record, release,
+                                  pin_path=None, merge=False):
+        """Write one component's files, metadata, artifact, and modules pins.
+
+        A merge keeps owner keys and the other component's entries. The files
+        hash is stored on ``pin_path`` when that path is given, and removed
+        from the real module path. This does not call the production extractor.
+        """
         path = self.root / rel
-        document = {'kernel_release': release, 'files': {key: pin}}
+        document = {}
         if merge and path.is_file() and not path.is_symlink():
             try:
                 existing = json.loads(path.read_text())
-            except (ValueError, UnicodeError):
+            except (ValueError, UnicodeError, OSError):
                 existing = None
-            files = existing.get('files') if isinstance(existing, dict) else None
-            if isinstance(files, dict):
-                document['files'] = dict(files)
-                document['files'][key] = pin
+            if isinstance(existing, dict):
+                document = dict(existing)
+        document['kernel_release'] = release
+        files = document.get('files')
+        files = dict(files) if isinstance(files, dict) else {}
+        if pin_path is None:
+            files['/' + module_rel] = record['sha256']
+        else:
+            files.pop('/' + module_rel, None)
+            files['/' + pin_path] = record['sha256']
+        document['files'] = files
+        metadata = document.get('file_metadata')
+        metadata = dict(metadata) if isinstance(metadata, dict) else {}
+        metadata[module_rel] = {'sha256': record['sha256'], 'size': record['size'], 'mode': 420}
+        document['file_metadata'] = metadata
+        artifacts = document.get('module_artifacts')
+        artifacts = dict(artifacts) if isinstance(artifacts, dict) else {}
+        artifacts[component_name] = {
+            'module': component_name, 'note': record['note'], 'path': '/' + module_rel,
+            'sha256': record['sha256'], 'size': record['size']}
+        document['module_artifacts'] = artifacts
+        modules = document.get('modules')
+        modules = dict(modules) if isinstance(modules, dict) else {}
+        modules[component_name] = record['note']
+        document['modules'] = modules
         self.put(rel, json.dumps(document, indent=2, sort_keys=True) + '\n')
 
-    def _plant_backup(self, name, kind, module_rel, stock_bytes, stock_sha, fixed_sha, release):
-        """Stock backup is the module hash plus that module's files pin. Not a full manifest copy."""
+    def _plant_backup(self, name, kind, module_rel, component_name, stock_bytes, stock, fixed, release):
+        """Stock backup is the module hash and length plus that module's seven pins."""
         if not kind:
             return
         state = self.component_paths(name)[2].rpartition('/')[0]
@@ -442,18 +517,18 @@ class SetupTests(unittest.TestCase):
             if link.is_symlink() or link.exists():
                 link.unlink()
             link.symlink_to('real-stock-module.ko')
-            self._write_files_pin(manifest_backup, module_rel, stock_sha, release)
+            self._write_component_manifest(manifest_backup, module_rel, component_name, stock, release)
             return
         if kind == 'stock':
-            data, pin = stock_bytes, stock_sha
+            data, record = stock_bytes, stock
         elif kind == 'wrong-module':
-            data, pin = b'not-the-stock-module', stock_sha
+            data, record = b'not-the-stock-module', stock
         elif kind == 'wrong-pin':
-            data, pin = stock_bytes, fixed_sha
+            data, record = stock_bytes, fixed
         else:
             raise AssertionError(kind)
         self.put_bytes(module_backup, data)
-        self._write_files_pin(manifest_backup, module_rel, pin, release)
+        self._write_component_manifest(manifest_backup, module_rel, component_name, record, release)
 
     def _plant_staged(self, rel, kind, stock_bytes, fixed_bytes):
         if kind in (None, 'missing'):
@@ -482,18 +557,27 @@ class SetupTests(unittest.TestCase):
             return
         raise AssertionError(kind)
 
+    def _record_for_pin(self, pin, stock, fixed, installed_bytes):
+        """Map a pin label to a full record without using the production extractor."""
+        if pin == 'stock':
+            return stock
+        if pin == 'fixed':
+            return fixed
+        if pin == 'unknown':
+            return audio_record(b'not-a-known-pin', 'unknown-note')
+        if pin == 'matches':
+            return audio_record(installed_bytes, 'matches-note')
+        raise AssertionError(pin)
+
     def plant_audio_state(self, name, installed, pin, staged=None, release=None, backup=None,
                           hold=False, rollback=False, manifest='present', module='file', pin_path=None):
-        """Plant one component's bytes, files pin, stage, and optional stock backup."""
+        """Plant one component's bytes, seven pins, stage, and optional stock backup."""
         module_rel, staged_rel, hold_rel, rollback_rel = self.component_paths(name)
-        stock_bytes, fixed_bytes, stock_sha, fixed_sha = self._audio_identities(name)
+        stock_bytes, fixed_bytes, stock, fixed, component_name = self._audio_identities(name)
         payloads = {'stock': stock_bytes, 'fixed': fixed_bytes, 'unknown': UNKNOWN_AUDIO}
         if installed not in payloads:
             raise AssertionError(installed)
-        pins = {'stock': stock_sha, 'fixed': fixed_sha, 'unknown': audio_sha(b'not-a-known-pin'),
-                'matches': audio_sha(payloads[installed])}
-        if pin not in pins:
-            raise AssertionError(pin)
+        record = self._record_for_pin(pin, stock, fixed, payloads[installed])
         chosen_release = release or self._release_of(module_rel)
         self._place_bytes(module_rel, payloads[installed], module)
         self._plant_staged(staged_rel, staged, stock_bytes, fixed_bytes)
@@ -503,11 +587,13 @@ class SetupTests(unittest.TestCase):
         elif manifest == 'malformed':
             self.put(manifest_rel, '{')
         elif manifest == 'present':
-            self._write_files_pin(manifest_rel, module_rel, pins[pin], chosen_release,
-                                  pin_path=pin_path, merge=True)
+            self._write_component_manifest(
+                manifest_rel, module_rel, component_name, record, chosen_release,
+                pin_path=pin_path, merge=True)
         else:
             raise AssertionError(manifest)
-        self._plant_backup(name, backup, module_rel, stock_bytes, stock_sha, fixed_sha, chosen_release)
+        self._plant_backup(name, backup, module_rel, component_name, stock_bytes, stock, fixed,
+                           chosen_release)
         if hold:
             self.put(hold_rel, '')
         self._plant_marker(rollback_rel, rollback)
@@ -548,9 +634,9 @@ class SetupTests(unittest.TestCase):
     def test_audio_states_classify_forward_work(self):
         """Stock with the fixed stage is pending; current, reverse, and unknown are not.
 
-        Fixture digests stand in for the two SHA identities. Fresh stock does not
+        Fixture records stand in for the stock and fixed identities. Fresh stock does not
         need a backup. Forward interruption is pending only with a stock backup
-        and a regular staged file of the fixed identity. Reverse (stock module,
+        and a regular staged file of the fixed hash and size. Reverse (stock module,
         fixed pins) stays not pending when that staged file is the fixed module,
         with or without a stock backup, while the marker is absent. A recognized
         result is pending work, not a promise that every later boot write succeeds.
@@ -799,11 +885,15 @@ class SetupTests(unittest.TestCase):
                             self.assert_audio_pending(name, False)
                             self.assertEqual(snapshot(), before)
 
-    def test_audio_sha_identities_match_the_speaker_helper(self):
-        """Updater stock and fixed SHA constants are the helper's shipped pins.
+    def test_audio_identities_match_the_speaker_helper(self):
+        """Updater identities are the helper's full stock and fixed records.
 
-        Paths and the release are compared to the helper unchanged. The SHA
-        comparison is last: a missing constant is an AttributeError.
+        Paths and the release are compared unchanged. The record comparison is
+        last: a missing constant is an AttributeError. The four records and the
+        two component names are duplicated on purpose. This import is unpatched
+        and requires the whole sha256/size/note record, so a scalar production
+        identity fails here. Scenario fixtures may patch a string; this test
+        does not.
         """
         spec = importlib.util.spec_from_file_location(
             'm4_speaker_module_shipped', ROOT / 'tools/m4-speaker-module.py')
@@ -830,10 +920,191 @@ class SetupTests(unittest.TestCase):
         self.assertNotEqual(MODULE.MCA_STAGED, MODULE.SPEAKER_STAGED)
         self.assertNotEqual(MODULE.MCA_HOLD, MODULE.SPEAKER_HOLD)
         self.assertNotEqual(MODULE.MCA_ROLLBACK, MODULE.SPEAKER_ROLLBACK)
-        self.assertEqual(MODULE.SPEAKER_STOCK, helper.STOCK['sha256'])
-        self.assertEqual(MODULE.SPEAKER_FIXED, helper.FIXED['sha256'])
-        self.assertEqual(MODULE.MCA_STOCK, helper.MCA_STOCK['sha256'])
-        self.assertEqual(MODULE.MCA_FIXED, helper.MCA_FIXED['sha256'])
+        self.assertEqual(MODULE.SPEAKER_STOCK, helper.STOCK)
+        self.assertEqual(MODULE.SPEAKER_FIXED, helper.FIXED)
+        self.assertEqual(MODULE.MCA_STOCK, helper.MCA_STOCK)
+        self.assertEqual(MODULE.MCA_FIXED, helper.MCA_FIXED)
+        self.assertEqual(MODULE.SPEAKER_NAME, 'snd_soc_j713_group')
+        self.assertEqual(MODULE.MCA_NAME, 'snd_soc_apple_mca')
+        self.assertEqual(MODULE.SPEAKER_NAME, helper.NAME)
+        self.assertEqual(MODULE.MCA_NAME, helper.MCA_NAME)
+        for record in (helper.STOCK, helper.FIXED, helper.MCA_STOCK, helper.MCA_FIXED):
+            self.assertEqual(set(record), {'sha256', 'size', 'note'})
+
+    def _mutate_selected_pin(self, name, field, how):
+        """Change or remove one of the seven live pins. The fixture edits the JSON itself."""
+        module_rel, _, _, _ = self.component_paths(name)
+        component_name = SPEAKER_COMPONENT if name == 'speaker' else MCA_COMPONENT
+        path = self.root / MODULE.MANIFESTS[1]
+        document = json.loads(path.read_text())
+        if field == 'files':
+            key = '/' + module_rel
+            if how == 'change':
+                document['files'][key] = 'f' * 64
+            elif how == 'remove':
+                del document['files'][key]
+            else:
+                raise AssertionError(how)
+        elif field in ('metadata_sha256', 'metadata_size'):
+            entry = document['file_metadata'][module_rel]
+            key = 'sha256' if field == 'metadata_sha256' else 'size'
+            if how == 'change':
+                entry[key] = 'e' * 64 if key == 'sha256' else 1
+            elif how == 'remove':
+                del entry[key]
+            else:
+                raise AssertionError(how)
+        elif field in ('artifact_sha256', 'artifact_size', 'artifact_note'):
+            entry = document['module_artifacts'][component_name]
+            key = {'artifact_sha256': 'sha256', 'artifact_size': 'size', 'artifact_note': 'note'}[field]
+            if how == 'change':
+                entry[key] = {'sha256': 'd' * 64, 'size': 1, 'note': 'wrong-note'}[key]
+            elif how == 'remove':
+                del entry[key]
+            else:
+                raise AssertionError(how)
+        elif field == 'modules':
+            if how == 'change':
+                document['modules'][component_name] = 'wrong-note'
+            elif how == 'remove':
+                del document['modules'][component_name]
+            else:
+                raise AssertionError(how)
+        else:
+            raise AssertionError(field)
+        path.write_text(json.dumps(document, indent=2, sort_keys=True) + '\n')
+
+    def test_each_live_pin_is_required_when_bytes_and_stage_are_valid(self):
+        """A stock module and a fixed stage are pending only when all seven pins match.
+
+        Changing or removing any one pin leaves the module bytes and the staged
+        file alone and is not pending, for the speaker and for MCA.
+        """
+        with self._patch_audio_identities():
+            self._assert_patched_identities()
+            for name in ('speaker', 'mca'):
+                with self.subTest(component=name, pin='valid'):
+                    self.setUp()
+                    stock_bytes, fixed_bytes, _, _, _ = self._audio_identities(name)
+                    module_rel, staged_rel, _, _ = self.component_paths(name)
+                    self.plant_audio_state(name, 'stock', 'stock', staged='fixed')
+                    self.assertEqual((self.root / module_rel).read_bytes(), stock_bytes)
+                    self.assertEqual((self.root / staged_rel).read_bytes(), fixed_bytes)
+                    self.assert_audio_pending(name, True)
+                for field in LIVE_PIN_FIELDS:
+                    for how in ('change', 'remove'):
+                        with self.subTest(component=name, pin=field, how=how):
+                            self.setUp()
+                            stock_bytes, fixed_bytes, _, _, _ = self._audio_identities(name)
+                            module_rel, staged_rel, _, _ = self.component_paths(name)
+                            self.plant_audio_state(name, 'stock', 'stock', staged='fixed')
+                            self._mutate_selected_pin(name, field, how)
+                            self.assertEqual((self.root / module_rel).read_bytes(), stock_bytes)
+                            self.assertEqual((self.root / staged_rel).read_bytes(), fixed_bytes)
+                            self.assert_audio_pending(name, False)
+
+    def _corrupt_backup_manifest(self, name, kind):
+        """Spoil one backup pin and leave the stock files hash in place."""
+        module_rel, _, _, _ = self.component_paths(name)
+        _, _, stock, _, component_name = self._audio_identities(name)
+        state = self.component_paths(name)[2].rpartition('/')[0]
+        path = self.root / (state + '/alpha1-manifest.json')
+        document = json.loads(path.read_text())
+        self.assertEqual(document['files']['/' + module_rel], stock['sha256'])
+        if kind == 'wrong-note':
+            document['modules'][component_name] = 'wrong-note'
+        elif kind == 'wrong-size':
+            document['file_metadata'][module_rel]['size'] = stock['size'] + 1
+        elif kind == 'missing-map':
+            del document['module_artifacts']
+        elif kind == 'wrong-type':
+            document['file_metadata'][module_rel] = ['not-a-metadata-map']
+        elif kind == 'modules-type':
+            document['modules'][component_name] = {'note': document['modules'][component_name]}
+        else:
+            raise AssertionError(kind)
+        self.assertEqual(document['files']['/' + module_rel], stock['sha256'])
+        path.write_text(json.dumps(document, indent=2, sort_keys=True) + '\n')
+
+    def test_backup_must_match_every_pin_not_only_the_files_hash(self):
+        """Forward work and a regular rollback marker need the whole stock backup.
+
+        A correct files hash with a wrong note or size, a missing nested map,
+        or a nested value of the wrong type is not pending. A backup whose
+        release differs still counts when the seven pins and the module hash
+        and length match. There is no separate backup-release requirement.
+        """
+        corruptions = ('wrong-note', 'wrong-size', 'missing-map', 'wrong-type', 'modules-type')
+        situations = (
+            dict(installed='fixed', pin='stock', staged='fixed', label='forward'),
+            dict(installed='fixed', pin='fixed', staged='fixed', rollback=True, hold=True,
+                 label='marker'),
+        )
+        with self._patch_audio_identities():
+            self._assert_patched_identities()
+            for name in ('speaker', 'mca'):
+                for situation in situations:
+                    with self.subTest(component=name, state=situation['label'], backup='valid'):
+                        self.setUp()
+                        self.plant_audio_state(name, situation['installed'], situation['pin'],
+                                               staged='fixed', backup='stock',
+                                               rollback=situation.get('rollback', False),
+                                               hold=situation.get('hold', False))
+                        self.assert_audio_pending(name, True)
+                    for kind in corruptions:
+                        with self.subTest(component=name, state=situation['label'], backup=kind):
+                            self.setUp()
+                            self.plant_audio_state(name, situation['installed'], situation['pin'],
+                                                   staged='fixed', backup='stock',
+                                                   rollback=situation.get('rollback', False),
+                                                   hold=situation.get('hold', False))
+                            self._corrupt_backup_manifest(name, kind)
+                            self.assert_audio_pending(name, False)
+                with self.subTest(component=name, state='forward', backup='other-release'):
+                    self.setUp()
+                    self.plant_audio_state(name, 'fixed', 'stock', staged='fixed', backup='stock')
+                    state = self.component_paths(name)[2].rpartition('/')[0]
+                    path = self.root / (state + '/alpha1-manifest.json')
+                    document = json.loads(path.read_text())
+                    document['kernel_release'] = 'not-the-live-release'
+                    path.write_text(json.dumps(document, indent=2, sort_keys=True) + '\n')
+                    self.assert_audio_pending(name, True)
+
+    def test_speaker_stays_pending_when_only_mca_metadata_is_invalid(self):
+        """One component's bad metadata does not clear the other's pending swap.
+
+        The shared manifest keeps the owner key and both components' entries.
+        Only the MCA metadata size is wrong.
+        """
+        with self._patch_audio_identities():
+            self._assert_patched_identities()
+            _, _, speaker_stock, _, _ = self._audio_identities('speaker')
+            _, _, mca_stock, _, _ = self._audio_identities('mca')
+            self.plant_audio_state('speaker', 'stock', 'stock', staged='fixed')
+            manifest = self.root / MODULE.MANIFESTS[1]
+            document = json.loads(manifest.read_text())
+            document['owner_calibration'] = {'gain': 4}
+            manifest.write_text(json.dumps(document, indent=2, sort_keys=True) + '\n')
+            self.plant_audio_state('mca', 'stock', 'stock', staged='fixed')
+            document = json.loads(manifest.read_text())
+            self.assertEqual(document['owner_calibration'], {'gain': 4})
+            self.assertEqual(document['files']['/' + MODULE.SPEAKER_MODULE], speaker_stock['sha256'])
+            self.assertEqual(document['files']['/' + MODULE.MCA_MODULE], mca_stock['sha256'])
+            self.assertEqual(document['modules'][SPEAKER_COMPONENT], speaker_stock['note'])
+            self.assertEqual(document['modules'][MCA_COMPONENT], mca_stock['note'])
+            self.assertEqual(document['file_metadata'][MODULE.SPEAKER_MODULE]['size'],
+                             speaker_stock['size'])
+            self.assertIn(SPEAKER_COMPONENT, document['module_artifacts'])
+            self.assertIn(MCA_COMPONENT, document['module_artifacts'])
+            document['file_metadata'][MODULE.MCA_MODULE]['size'] = 1
+            manifest.write_text(json.dumps(document, indent=2, sort_keys=True) + '\n')
+            self._assert_audio_pair(True, False)
+            again = json.loads(manifest.read_text())
+            self.assertEqual(again['owner_calibration'], {'gain': 4})
+            self.assertEqual(again['file_metadata'][MODULE.SPEAKER_MODULE]['size'],
+                             speaker_stock['size'])
+            self.assertEqual(again['file_metadata'][MODULE.MCA_MODULE]['size'], 1)
+            self.assertEqual(again['modules'][SPEAKER_COMPONENT], speaker_stock['note'])
 
     def test_restart_reported_when_a_gpu_swap_is_pending(self):
         alpha1 = b'alpha.1 gpu module'
