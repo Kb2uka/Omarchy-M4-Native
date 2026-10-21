@@ -399,15 +399,18 @@ service's `--boot` operation to swap loaded audio
 modules in a live session. Unknown states or missing rollback intent require
 inspection and verified recovery, rather than repeated reboot promises.
 
-Inspection of an interrupted operation may need to read the root-only stock
-backup. Without access it returns a controlled permission refusal; it cannot
-verify recovery or promise completion. Ordinary current or held inspection
-does not read that backup.
+Inspect an interrupted operation or a requested rollback with sudo: these states
+may need to read the root-only stock backup. Without access the helper returns a
+controlled permission refusal; it cannot verify recovery or promise completion.
+Without a rollback marker, inspection of a current component or a held stock
+or forward state does not read that backup.
 
 The restart hint identifies recognized staged work rather than preflighting
 every boot-time write. In particular, an unexpected existing backup half can
-still make initial stock-module application refuse safely. If a restart does
-not apply the staged module, inspect the helper with sudo and read
+still make the first application of a staged module over the stock module
+refuse safely. If a restart does not apply the staged module, inspect both
+components with `sudo m4-speaker-module` and
+`sudo m4-speaker-module --component mca`, then read
 `journalctl -b -u m4-j713-audio-register.service` before retrying.
 
 ## Connecting new installs
