@@ -3,7 +3,7 @@
 """Package policy for the retained-bounds boot kernel and the fixed MCA module.
 
 The base linux-m4-omarchy package keeps the qualified image and its modules.
-omarchy-m4-boot 1-16 carries the new image beside that package, and
+omarchy-m4-boot 1-17 carries the new image beside that package, and
 omarchy-m4-speaker carries the fixed MCA module. Pins come from the channel
 when it already records them, and from the composer and speaker helper until then.
 """
@@ -26,7 +26,7 @@ MCA_DROP_IN_EXPECTED = (
     b'ExecStartPre=-/usr/bin/m4-speaker-module --component mca --boot\n'
 )
 MCA_EXEC_START_PRE = 'ExecStartPre=-/usr/bin/m4-speaker-module --component mca --boot\n'
-BOOT_VERSION = '1-16'
+BOOT_VERSION = '1-17'
 SPEAKER_VERSION = '1-3'
 
 

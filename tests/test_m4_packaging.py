@@ -48,7 +48,7 @@ def covers_protected(path, protected):
     return path.endswith('/') and any(p.startswith(path) for p in protected)
 
 
-BOOT_VERSION = '1-16'
+BOOT_VERSION = '1-17'
 SPEAKER_VERSION = '1-3'
 
 
