@@ -165,6 +165,70 @@ class SpeakerModule(unittest.TestCase):
         self.assertEqual((code, report['status']), (0, 'current'))
         self.assertEqual(self.manifest.read_bytes(), before)
 
+    def test_forward_interruption_refuses_a_missing_or_corrupt_backup_half(self):
+        """New module bytes and stock pins are not finished without both stock backup halves.
+
+        A missing half and a corrupt half each refuse. The live module, the
+        manifest, the other component, and any backup half already on disk stay
+        as planted. Speaker and MCA are independent.
+        """
+        halves = ('missing-module', 'missing-manifest', 'corrupt-module', 'corrupt-manifest')
+        for name in ('speaker', 'mca'):
+            for kind in halves:
+                with self.subTest(component=name, kind=kind):
+                    self.setUp()
+                    selected = self.component(name)
+                    owner = {'gain': 4, 'label': name + '-' + kind}
+                    if name == 'speaker':
+                        document = with_mca(manifest(STOCK), identity(MCA_OLD, MCA_OLD_NOTE))
+                        document['owner_calibration'] = owner
+                        self.install(NEW, document)
+                        self.put(MCA_MODULE, MCA_OLD)
+                    else:
+                        document = with_mca(manifest(STOCK), identity(MCA_OLD, MCA_OLD_NOTE))
+                        document['owner_calibration'] = owner
+                        self.install(OLD, document)
+                        self.put(MCA_MODULE, MCA_NEW)
+                        self.put(MCA_STAGED, MCA_NEW)
+                    stage = self.root / selected['state']
+                    stage.mkdir(parents=True)
+                    stock_manifest = MODULE.serialize(json.loads(self.manifest.read_bytes()))
+                    if kind != 'missing-module':
+                        module_backup = selected['stock_bytes'] if kind != 'corrupt-module' else b'corrupt-backup-module'
+                        self.put(selected['state'] + '/alpha1-module.ko', module_backup)
+                    if kind != 'missing-manifest':
+                        if kind == 'corrupt-manifest':
+                            wrong = json.loads(stock_manifest)
+                            key = MODULE.NAME if name == 'speaker' else MCA_NAME
+                            wrong['modules'][key] = 'not-the-stock-note'
+                            self.put(selected['state'] + '/alpha1-manifest.json', MODULE.serialize(wrong))
+                        else:
+                            self.put(selected['state'] + '/alpha1-manifest.json', stock_manifest)
+                    before = {
+                        'module': (self.root / selected['module']).read_bytes(),
+                        'manifest': self.manifest.read_bytes(),
+                        'other': (self.root / selected['other_module']).read_bytes(),
+                        'backup_module': ((stage / 'alpha1-module.ko').read_bytes()
+                                          if (stage / 'alpha1-module.ko').is_file() else None),
+                        'backup_manifest': ((stage / 'alpha1-manifest.json').read_bytes()
+                                            if (stage / 'alpha1-manifest.json').is_file() else None),
+                    }
+                    self.assertEqual(self.run_tool('--component', name)[1]['state'], 'interrupted')
+                    self.assertEqual(self.run_tool('--boot', *selected['args'])[0], 1)
+                    self.assertIn('stock backup', self.last_error)
+                    self.assertEqual((self.root / selected['module']).read_bytes(), before['module'])
+                    self.assertEqual(self.manifest.read_bytes(), before['manifest'])
+                    self.assertEqual((self.root / selected['other_module']).read_bytes(), before['other'])
+                    self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
+                    found_module = ((stage / 'alpha1-module.ko').read_bytes()
+                                    if (stage / 'alpha1-module.ko').is_file() else None)
+                    found_manifest = ((stage / 'alpha1-manifest.json').read_bytes()
+                                      if (stage / 'alpha1-manifest.json').is_file() else None)
+                    self.assertEqual(found_module, before['backup_module'])
+                    self.assertEqual(found_manifest, before['backup_manifest'])
+                    self.assertFalse((stage / 'hold').exists())
+                    self.assertFalse((stage / 'rollback').exists())
+
     def test_interrupted_swap_is_completed_before_modules_load(self):
         real = MODULE.write
 
