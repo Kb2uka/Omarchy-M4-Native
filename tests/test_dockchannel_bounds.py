@@ -1,8 +1,9 @@
 """Contract for the DockChannel HID receive path.
 
-The harness compiles the driver's checksum, packet, ACK, event, and report
-functions. By default that driver is a temporary copy of the pinned source
-with patches-kernel/retained-hardening/dockchannel-packet-bounds.patch applied.
+The harness compiles the driver's checksum, init parser, packet, ACK, event,
+and report functions. Ready and GPIO command handlers stay mocked. By default
+that driver is a temporary copy of the pinned source with
+patches-kernel/retained-hardening/dockchannel-packet-bounds.patch applied.
 DCHID_SOURCE bypasses the patch for baseline and mutant runs.
 """
 
@@ -49,15 +50,21 @@ def build_source(driver):
     license_end = driver.index("*/", license_at)
     types = between(driver, "#define MAX_INTERFACES 16\n", "\nstatic ssize_t apple_layout_id_show(")
     checksum = between(driver, "static u32 dchid_checksum(", "\nstatic int dchid_send(")
+    init = between(driver, "static void dchid_handle_init(", "\nstatic void dchid_handle_gpio(")
     rx = between(driver, "static void dchid_handle_event(", "\nstatic int dockchannel_hid_probe(")
     for name in ("dchid_handle_packet", "dchid_packet_work", "dchid_handle_ack", "dchid_handle_report"):
         if name not in rx:
             raise AssertionError("extracted receive path is missing " + name)
     if "dchid_checksum" not in checksum:
         raise AssertionError("extracted checksum is missing")
+    if "dchid_get_interface" not in init or "dchid_handle_descriptor" not in init:
+        raise AssertionError("extracted init path is not the driver parser")
+    if "dchid_handle_ready" in init or "dchid_handle_gpio" in init:
+        raise AssertionError("extracted init path includes a different event handler")
     generated = fixture
     for marker, chunk in (
         ("/* ACTUAL_TYPES */", types),
+        ("/* ACTUAL_INIT */", init),
         ("/* ACTUAL_CHECKSUM */", checksum),
         ("/* ACTUAL_RX */", rx),
     ):
@@ -178,6 +185,51 @@ class DockChannelBoundsTest(unittest.TestCase):
 
     def test_receive_rearms_when_allocation_fails(self):
         self.assert_pass("alloc_fail_rearm")
+
+    def test_init_zero_length_product_is_rejected(self):
+        self.assert_pass("init_product_zero")
+
+    def test_init_zero_length_product_does_not_read_tail(self):
+        self.assert_pass("init_product_zero_walk")
+
+    def test_init_empty_product_is_accepted(self):
+        self.assert_pass("init_product_empty")
+
+    def test_init_product_text_is_accepted(self):
+        self.assert_pass("init_product_text")
+
+    def test_init_unterminated_product_is_not_accepted(self):
+        self.assert_pass("init_product_unterminated")
+
+    def test_init_short_gpio_does_not_read_next_block(self):
+        self.assert_pass("init_gpio_short")
+
+    def test_init_gpio_request_is_stored(self):
+        self.assert_pass("init_gpio_valid")
+
+    def test_init_unterminated_interface_name_rejects_before_lookup(self):
+        self.assert_pass("init_name_unterminated")
+
+    def test_init_interface_name_is_looked_up(self):
+        self.assert_pass("init_name_valid")
+
+    def test_init_fifteen_character_name_is_looked_up(self):
+        self.assert_pass("init_name_15")
+
+    def test_init_stm_is_created(self):
+        self.assert_pass("init_stm_creates")
+
+    def test_init_truncated_header_rearms(self):
+        self.assert_pass("init_header_truncated")
+
+    def test_init_oversized_block_is_not_a_descriptor(self):
+        self.assert_pass("init_block_oversized")
+
+    def test_init_descriptor_stops_at_terminator(self):
+        self.assert_pass("init_descriptor_terminator")
+
+    def test_init_unknown_block_rearms(self):
+        self.assert_pass("init_unknown_block")
 
 
 if __name__ == "__main__":

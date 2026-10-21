@@ -1,7 +1,27 @@
 # J713 protected audio source package
 
-This source package assembles the exact J713 audio stack qualified on the
-custom `7.1.9-m4-gpu-backport-20261008` ARM64 kernel. It is an explicit,
+This source package contains the J713 audio stack for the custom
+`7.1.9-m4-gpu-backport-20261008` ARM64 kernel. The MCA arithmetic correction
+now changes one module from the historical qualified build; see the
+[hardening evidence and qualification gate](../../docs/retained-audio-transport-audit.md).
+The current pinned-certificate recipe `Image.gz` is
+`ca1fff571cf1b9d8c0b07b2e97ba0a5402f93c1b7a2d54ea2c07e24a8b70f9d0`
+(18,900,939 bytes). Two fresh pinned-certificate builds matched that image,
+all five audio modules and the receipt. A third clean build of the recipe
+with source-closure and case-sensitive destination checks reproduced those
+same outputs. A fourth clean build at `dc191cb`, including directory-alias
+compatibility, again reproduced the image, modules and receipt exactly.
+The hardened MCA module remains
+`fb941df4d55c4f2093b4595e0392aaf97ffe3a250228518b18a4f70568bf7454`
+(79,152 bytes). The other four audio modules match their historical hashes.
+An earlier incremental image hash is not this recipe. `qualified.json` is
+unchanged and still identifies the historical binaries. Build receipts keep
+`native_qualified` and `fresh_install_qualified` false because the builder
+does not perform hardware qualification. Installed-Air validation and package
+migration are recorded separately in
+[the dependent rollout](https://github.com/Kb2uka/Omarchy-M4-Native/pull/157);
+fresh installation is not claimed. The production channel has not shipped it.
+This source package is an explicit,
 fail-closed addition to a pending ext4 owner image. It does not alter a running
 system, change the kernel, or handle arbitrary Apple models.
 
@@ -71,7 +91,7 @@ historical custom kernel/toolchain are still external prerequisites. A successfu
 compilation alone does not authorize different binary hashes. Compare outputs
 with `qualified.json`; a changed output requires its own review and qualification.
 The recipe records toolchain image IDs and preserves the Rust linker map. A
-fresh leased build of this packaged source reproduced all seven qualified module
+fresh leased build of the historical source reproduced all seven qualified module
 hashes and the daemon hash byte for byte; this does not distribute the external
 container images or complete historical kernel build inputs.
 

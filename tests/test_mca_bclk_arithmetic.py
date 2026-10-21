@@ -1,13 +1,13 @@
 """Width of the mca_fe_hw_params TDM bclk product.
 
-By default the harness copies the retained audio/j713/kernel/mca.c into a
-temporary tree, requires its snapshot SHA256, and applies
-patches-kernel/j713-audio/mca-bclk-width.patch with
-patch -p1 --fuzz=0 --forward from that tree's root. It then extracts the
-else-branch assignment and compiles that RHS with the function's real
-operand types. MCA_SOURCE bypasses the patch so a baseline or mutant file
-can be measured directly. The retained file and its hash inventory stay
-unchanged.
+By default the harness reads audio/j713/kernel/mca.c and extracts the
+else-branch assignment, then compiles that RHS with the function's real
+operand types. It does not copy the file or apply a patch.
+MCA_SOURCE selects another file, such as a baseline or mutant, and skips
+the shipped source. The retained file and its hash inventory stay unchanged.
+
+The imported-source.sha256 line for kernel/mca.c must match the bytes of
+audio/j713/kernel/mca.c. The expected digest comes from that manifest.
 
 This checks evaluation width only. It does not validate hw_params, rewrite
 the imported source, or qualify deployed binaries.
@@ -15,8 +15,8 @@ the imported source, or qualify deployed binaries.
 Shipped generic machine callers use 2*32, 8*32, and 16*16. The boundary
 pairs below are synthetic and are not a claim about caller reachability
 or about a J713 PCM overflow. J713 returns before this assignment.
-The staged patch casts one operand to unsigned long before the multiply.
-A cast applied to the product after the multiply still wraps.
+A widening cast belongs on one operand before the multiply. A cast applied
+to the product after the multiply still wraps.
 """
 
 from hashlib import sha256
@@ -29,8 +29,8 @@ from tempfile import TemporaryDirectory
 
 _ROOT = Path(__file__).resolve().parents[1]
 _DEFAULT_MCA = _ROOT / "audio" / "j713" / "kernel" / "mca.c"
-_PATCH = _ROOT / "patches-kernel" / "j713-audio" / "mca-bclk-width.patch"
-_MCA_SHA256 = "6ee2fade6fc237cedb211c4bd198891e10b4fabac947070dce9bc55307628846"
+_MANIFEST = _ROOT / "audio" / "j713" / "imported-source.sha256"
+_MANIFEST_PATH = "kernel/mca.c"
 
 # (slot_width, slots, mathematical unsigned-long product)
 _NORMAL = ((32, 2, 64), (32, 8, 256), (16, 16, 256))
@@ -62,31 +62,32 @@ def bclk_product_rhs(source_text):
     return rhs
 
 
-def mca_source_text(directory):
-    """Return patched retained source, or MCA_SOURCE with no patch applied."""
+def manifest_digest(manifest_text, relative_path):
+    """Return the SHA256 recorded for relative_path in imported-source.sha256."""
+    found = None
+    for line in manifest_text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) != 2 or parts[1] != relative_path:
+            continue
+        if found is not None:
+            raise AssertionError("duplicate manifest entry for %s" % relative_path)
+        digest = parts[0]
+        if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+            raise AssertionError("manifest digest for %s is not 64 hex digits" % relative_path)
+        found = digest
+    if found is None:
+        raise AssertionError("manifest has no entry for %s" % relative_path)
+    return found
+
+
+def mca_source_text():
+    """Return shipped mca.c, or MCA_SOURCE when that path is set."""
     if "MCA_SOURCE" in os.environ:
         return Path(os.environ["MCA_SOURCE"]).read_text(encoding="utf-8")
-    data = _DEFAULT_MCA.read_bytes()
-    digest = sha256(data).hexdigest()
-    if digest != _MCA_SHA256:
-        raise AssertionError(
-            "retained mca.c SHA256 %s != %s; refusing to patch" % (digest, _MCA_SHA256)
-        )
-    dest = directory / "audio" / "j713" / "kernel" / "mca.c"
-    dest.parent.mkdir(parents=True)
-    dest.write_bytes(data)
-    applied = subprocess.run(
-        ["patch", "-p1", "--fuzz=0", "--forward", "-i", str(_PATCH)],
-        cwd=directory,
-        capture_output=True,
-        text=True,
-        timeout=20,
-    )
-    if applied.returncode != 0:
-        raise AssertionError(applied.stderr or applied.stdout)
-    if sha256(_DEFAULT_MCA.read_bytes()).hexdigest() != _MCA_SHA256:
-        raise AssertionError("retained mca.c changed while applying the patch")
-    return dest.read_text(encoding="utf-8")
+    return _DEFAULT_MCA.read_text(encoding="utf-8")
 
 
 def _rows(cases):
@@ -160,17 +161,21 @@ int main(int argc, char **argv)
 """ % (rhs, _rows(_NORMAL), _rows(_BOUNDARY))
 
 
-class RetainedMcaSnapshotTest(unittest.TestCase):
-    def test_snapshot_hash_remains(self):
+class RetainedMcaIdentityTest(unittest.TestCase):
+    def test_manifest_hash_matches_file(self):
         data = _DEFAULT_MCA.read_bytes()
-        self.assertEqual(sha256(data).hexdigest(), _MCA_SHA256)
+        recorded = manifest_digest(_MANIFEST.read_text(encoding="utf-8"), _MANIFEST_PATH)
+        self.assertEqual(sha256(data).hexdigest(), recorded)
+        text = data.decode("utf-8")
+        self.assertIn("SPDX-License-Identifier: GPL-2.0-only", text)
+        self.assertIn("Copyright (C) The Asahi Linux Contributors", text)
 
 
 class McaBclkArithmeticTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls._tmp = TemporaryDirectory(prefix="mca-bclk-")
-        source_text = mca_source_text(Path(cls._tmp.name))
+        source_text = mca_source_text()
         cls.rhs = bclk_product_rhs(source_text)
         src = Path(cls._tmp.name) / "bclk_ratio.c"
         cls.binary = Path(cls._tmp.name) / "bclk_ratio"

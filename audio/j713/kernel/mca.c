@@ -781,7 +781,7 @@ static int mca_fe_hw_params(struct snd_pcm_substream *substream,
 	if (cl->bclk_ratio)
 		bclk_ratio = cl->bclk_ratio;
 	else
-		bclk_ratio = tdm_slot_width * tdm_slots;
+		bclk_ratio = (unsigned long)tdm_slot_width * tdm_slots;
 
 	if (refine_tdm) {
 		int nchannels = params_channels(params);

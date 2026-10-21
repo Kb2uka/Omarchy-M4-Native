@@ -133,7 +133,23 @@
       "correspondence": "unverified",
       "sources": [
         {
-          "tree": "audio/j713/kernel",
+          "tree": "audio/j713/kernel/Makefile",
+          "commit": "1114297c752c1c1e5245ce7a4f85507f4c53fcf7"
+        },
+        {
+          "tree": "audio/j713/kernel/j713-speaker-group.c",
+          "commit": "1114297c752c1c1e5245ce7a4f85507f4c53fcf7"
+        },
+        {
+          "tree": "audio/j713/kernel/j713-speaker-group.h",
+          "commit": "1114297c752c1c1e5245ce7a4f85507f4c53fcf7"
+        },
+        {
+          "tree": "audio/j713/kernel/j713-audio.c",
+          "commit": "1114297c752c1c1e5245ce7a4f85507f4c53fcf7"
+        },
+        {
+          "tree": "audio/j713/kernel/j713-audio.h",
           "commit": "1114297c752c1c1e5245ce7a4f85507f4c53fcf7"
         },
         {
@@ -145,7 +161,7 @@
           "sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362"
         }
       ],
-      "evidence": "J713 speaker group driver. Built from audio/j713/kernel/ on the alpha.1 kernel-controller tree with reference-sound-exports.symvers (clang 21.1.8)."
+      "evidence": "J713 speaker group driver. Source closure at 1114297c is audio/j713/kernel/Makefile, j713-speaker-group.c, j713-speaker-group.h, j713-audio.c, and j713-audio.h. The group module links j713-speaker-group.o and j713-audio.o only; MCA (mca.c, snd-soc-apple-mca) is not linked into the group. Built on the alpha.1 kernel-controller tree with reference-sound-exports.symvers (clang 21.1.8). Byte-identical rebuild is not claimed."
     },
     "snd-soc-j713-headphones-2e743937.ko": {
       "sha256": "2e743937b4bd8315ec6dba6bef4bbfbf197d4bf6f8688761954579192df48244",
