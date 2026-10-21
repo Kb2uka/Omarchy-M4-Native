@@ -48,8 +48,8 @@ def covers_protected(path, protected):
     return path.endswith('/') and any(p.startswith(path) for p in protected)
 
 
-BOOT_VERSION = '1-18'
-SPEAKER_VERSION = '1-4'
+BOOT_VERSION = '1-19'
+SPEAKER_VERSION = '1-5'
 
 
 def write_size(root, relative, size):
@@ -448,7 +448,7 @@ class PolicyTests(unittest.TestCase):
     def boot_info(self):
         return {'pkgname': ['omarchy-m4-boot'], 'pkgver': [BOOT_VERSION], 'arch': ['aarch64'],
                 'depend': ['python', 'pacman', 'omarchy-m4-gpu', 'omarchy-m4-headphones', 'omarchy-m4-cpu',
-                           'omarchy-m4-evdi', 'omarchy-m4-backlight', 'omarchy-m4-speaker>=1-4']}
+                           'omarchy-m4-evdi', 'omarchy-m4-backlight', 'omarchy-m4-speaker>=1-5']}
 
     def boot_files(self):
         """A boot package that passes every check except the ones under test, unpacked on disk."""
