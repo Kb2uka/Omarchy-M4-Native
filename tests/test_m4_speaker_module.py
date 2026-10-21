@@ -964,6 +964,72 @@ class SpeakerModule(unittest.TestCase):
                     self.assertEqual(snapshot(selected), before)
                     self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
 
+    def test_inspect_fixed_nonregular_rollback_marker_requires_recovery(self):
+        """Fixed bytes and pins, a valid stock backup, and a directory or symlink marker.
+
+        The marker exists, so inspection records a rollback request, but it is
+        not a regular file. The report is the recovery-required refusal. The
+        live module, the manifest, both backup halves, and the marker stay as
+        planted. Speaker and MCA are both covered.
+        """
+        def marker_identity(path):
+            if path.is_symlink():
+                return ('symlink', Path(path.readlink()).as_posix())
+            if path.is_dir():
+                return ('directory',)
+            if path.is_file():
+                return ('file', path.read_bytes())
+            return ('absent',)
+
+        for name in ('speaker', 'mca'):
+            for kind in ('directory', 'symlink'):
+                with self.subTest(component=name, kind=kind):
+                    self.setUp()
+                    selected = self.component(name)
+                    owner = {'gain': 5, 'label': name + '-' + kind}
+                    if name == 'speaker':
+                        self.install_both(NEW, FIXED, MCA_OLD, identity(MCA_OLD, MCA_OLD_NOTE), owner)
+                    else:
+                        self.install_both(OLD, STOCK, MCA_NEW, identity(MCA_NEW, MCA_NEW_NOTE), owner)
+                    saved = with_mca(manifest(STOCK), identity(MCA_OLD, MCA_OLD_NOTE))
+                    stage = self.root / selected['state']
+                    self.put(selected['state'] + '/alpha1-module.ko', selected['stock_bytes'])
+                    self.put(selected['state'] + '/alpha1-manifest.json', MODULE.serialize(saved))
+                    marker = stage / 'rollback'
+                    if kind == 'directory':
+                        marker.mkdir()
+                    else:
+                        marker.symlink_to('alpha1-module.ko')
+                    expected_marker = ('directory',) if kind == 'directory' else ('symlink', 'alpha1-module.ko')
+                    self.assertEqual(marker_identity(marker), expected_marker)
+                    self.assertTrue(marker.exists())
+                    self.assertFalse(marker.is_file() and not marker.is_symlink())
+                    before = (self.manifest.read_bytes(),
+                              (self.root / selected['module']).read_bytes(),
+                              (self.root / selected['other_module']).read_bytes(),
+                              (self.root / MODULE.STAGED).read_bytes(),
+                              (self.root / MCA_STAGED).read_bytes(),
+                              (stage / 'alpha1-module.ko').read_bytes(),
+                              (stage / 'alpha1-manifest.json').read_bytes(),
+                              marker_identity(marker),
+                              self.state_files(stage))
+                    code, report = self.run_tool(*selected['args'])
+                    self.assertEqual(code, 0, self.last_error)
+                    self.assertEqual(report['state'], 'fixed')
+                    self.assertTrue(report['rollback_requested'])
+                    self.assertEqual(report['status'],
+                                     'refused; nothing was changed; recovery required')
+                    self.assertEqual((self.manifest.read_bytes(),
+                                      (self.root / selected['module']).read_bytes(),
+                                      (self.root / selected['other_module']).read_bytes(),
+                                      (self.root / MODULE.STAGED).read_bytes(),
+                                      (self.root / MCA_STAGED).read_bytes(),
+                                      (stage / 'alpha1-module.ko').read_bytes(),
+                                      (stage / 'alpha1-manifest.json').read_bytes(),
+                                      marker_identity(marker),
+                                      self.state_files(stage)), before)
+                    self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
+
     def test_pinned_mca_identity_matches_qualified_spec_and_fixed_pin(self):
         """Pinned sha256, size, and note literals agree with each other.
 
