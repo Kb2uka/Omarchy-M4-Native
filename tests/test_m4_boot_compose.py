@@ -2064,10 +2064,11 @@ class ComposeTests(unittest.TestCase):
     def test_hold_lstat_error_refuses_and_the_same_tree_stays_held(self):
         """A non-missing lstat failure on the hold is not an absent hold.
 
-        The hold file and a pending apply are real. Inspection and ordinary
-        ``--apply`` reach ``hold_present``. PermissionError and
-        NotADirectoryError from lstat of that hold path only refuse with exit
-        1 and the OSError text, and they print no success receipt. Boot,
+        The hold file and a pending apply are real. Inspection, ordinary
+        ``--apply``, and explicit resume ``--resume-updates --apply`` reach
+        ``hold_present``. PermissionError and NotADirectoryError from lstat
+        of that hold path only refuse with exit 1 and the OSError text, and
+        they print no success receipt. Boot,
         manifests, the journal, its snapshots, the hold, and previous stay
         put. With lstat working again, that same tree is held: inspection
         names ``--resume-updates --apply`` and ordinary ``--apply`` does not
@@ -2104,7 +2105,8 @@ class ComposeTests(unittest.TestCase):
                     return _real(path, *args, **kwargs)
 
                 with mock.patch.object(MODULE.os, 'lstat', side_effect=fail_hold_lstat):
-                    for label, args in (('inspect', ()), ('apply', ('--apply',))):
+                    for label, args in (('inspect', ()), ('apply', ('--apply',)),
+                                        ('resume', ('--resume-updates', '--apply'))):
                         with self.subTest(command=label):
                             code, out, err = machine.run(*args)
                             self.assertEqual(code, 1, out + err)
