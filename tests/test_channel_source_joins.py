@@ -253,8 +253,8 @@ class ChannelBinaryJoinTests(unittest.TestCase):
         good.update((path, (0o644, digest)) for path, digest in CHANNEL['mca_module'].items())
         mca_drop = (ROOT / 'packaging/omarchy-m4/omarchy-m4-speaker/25-m4-mca-module.conf').read_bytes()
         good[CHECK.MCA_DROP_IN] = (0o644, hashlib.sha256(mca_drop).hexdigest())
-        package = Path('omarchy-m4-speaker-1-3-aarch64.pkg.tar.zst')
-        info = {'pkgname': ['omarchy-m4-speaker'], 'pkgver': ['1-3'], 'arch': ['aarch64']}
+        package = Path('omarchy-m4-speaker-1-5-aarch64.pkg.tar.zst')
+        info = {'pkgname': ['omarchy-m4-speaker'], 'pkgver': ['1-5'], 'arch': ['aarch64']}
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             installed = root / 'usr/bin/m4-speaker-module'
