@@ -405,7 +405,7 @@ def main():
             require(snapshot(root) == before, 'Inspection changed files')
             # Synthetic selector for this sandbox, not a copy of a released setup script.
             # It omits the packages an older request did not name, including speaker.
-            # omarchy-m4-boot's versioned dependency must still bring speaker 1-3.
+            # omarchy-m4-boot's versioned dependency must still bring speaker 1-4.
             omitted = BROUGHT_BY_BOOT + ('omarchy-m4-speaker',)
             source = (ROOT / 'tools/m4-channel-setup.py').read_text()
             listed = source[source.index('PACKAGES = ('):source.index(')', source.index('PACKAGES = (')) + 1]
@@ -426,9 +426,9 @@ def main():
                         require(brought not in results[0]['install'] and
                                 run(*pacman, '-Q', brought, check=False).returncode == 0,
                                 'The first run from the older request did not install ' + brought)
-                    require('omarchy-m4-speaker 1-3' in run(*pacman, '-Q', 'omarchy-m4-speaker',
+                    require('omarchy-m4-speaker 1-4' in run(*pacman, '-Q', 'omarchy-m4-speaker',
                                                            capture_output=True, text=True).stdout,
-                            'The boot dependency did not upgrade the speaker stub to 1-3')
+                            'The boot dependency did not upgrade the speaker stub to 1-4')
                     after_first = snapshot(root)
                     assert_base_kernel(root, base_files)
                 conf = (root / 'etc/pacman.conf').read_text()

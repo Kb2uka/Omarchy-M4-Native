@@ -3,7 +3,7 @@
 """Package policy for the retained-bounds boot kernel and the fixed MCA module.
 
 The base linux-m4-omarchy package keeps the qualified image and its modules.
-omarchy-m4-boot 1-17 carries the new image beside that package, and
+omarchy-m4-boot 1-18 carries the new image beside that package, and
 omarchy-m4-speaker carries the fixed MCA module. Pins come from the shipped channel.
 """
 import configparser
@@ -21,8 +21,8 @@ MCA_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/25-m4-mca
 MCA_DROP_IN_SOURCE = ROOT / 'packaging/omarchy-m4/omarchy-m4-speaker/25-m4-mca-module.conf'
 # The leading '-' is systemd's ignore-failure prefix and is part of the command.
 MCA_BOOT_COMMAND = '-/usr/bin/m4-speaker-module --component mca --boot'
-BOOT_VERSION = '1-17'
-SPEAKER_VERSION = '1-3'
+BOOT_VERSION = '1-18'
+SPEAKER_VERSION = '1-4'
 
 
 def load(name):
@@ -111,7 +111,7 @@ class HardeningPackageTests(unittest.TestCase):
     def boot_info(self, depend=None):
         if depend is None:
             depend = ['python', 'pacman', 'omarchy-m4-gpu', 'omarchy-m4-headphones', 'omarchy-m4-cpu',
-                      'omarchy-m4-evdi', 'omarchy-m4-backlight', 'omarchy-m4-speaker>=1-3']
+                      'omarchy-m4-evdi', 'omarchy-m4-backlight', 'omarchy-m4-speaker>=1-4']
         return {'pkgname': ['omarchy-m4-boot'], 'pkgver': [BOOT_VERSION], 'arch': ['aarch64'], 'depend': depend}
 
     def boot_tree(self, pin):
@@ -274,10 +274,11 @@ class HardeningPackageTests(unittest.TestCase):
     def test_boot_requires_the_versioned_speaker_package(self):
         base = [item for item in self.boot_info()['depend'] if not item.startswith('omarchy-m4-speaker')]
         for depend in (base, base + ['omarchy-m4-speaker'], base + ['omarchy-m4-speaker>=1-1'],
-                       base + ['omarchy-m4-speaker>=1-2'], base + ['omarchy-m4-speaker=1-2'],
+                       base + ['omarchy-m4-speaker>=1-2'], base + ['omarchy-m4-speaker>=1-3'],
+                       base + ['omarchy-m4-speaker=1-2'],
                        base + ['omarchy-m4-speaker>1-2']):
             with self.subTest(depend=depend):
-                with self.assertRaisesRegex(ValueError, r'omarchy-m4-speaker>=1-3'):
+                with self.assertRaisesRegex(ValueError, r'omarchy-m4-speaker>=1-4'):
                     self.check_boot(info=self.boot_info(depend))
 
     def test_protected_paths_and_source_joins_still_bind_the_boot_package(self):

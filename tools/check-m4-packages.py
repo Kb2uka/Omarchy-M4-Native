@@ -30,7 +30,7 @@ REALTIME = 'usr/lib/systemd/system/speakersafetyd-j713.service.d/50-realtime.con
 NOTCH_UNIT = 'usr/lib/systemd/user/omarchy-m4-notch.service'
 SPEAKER_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/20-m4-speaker-module.conf'
 MCA_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/25-m4-mca-module.conf'
-SPEAKER_DEP = 'omarchy-m4-speaker>=1-3'
+SPEAKER_DEP = 'omarchy-m4-speaker>=1-4'
 GPU_DROP_IN = 'usr/lib/systemd/system/m4-gpu.service.d/20-m4-gpu-module.conf'
 HEADPHONES_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/30-m4-headphones.conf'
 CPU_IDLE_UNIT = 'usr/lib/systemd/system/m4-cpu-idle.service'
