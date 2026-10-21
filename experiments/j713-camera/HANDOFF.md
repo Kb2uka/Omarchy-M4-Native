@@ -22,8 +22,10 @@ mapping and start design, which has not begun.
 
 1. The R5 review, requalification and one bounded mapping run are done
    (2026-10-21). Do not repeat the mapping run without a reason.
-2. Close the two open contract-test gaps: exact master-node property set
-   and refusal of any extra fragment or root child.
+2. The two contract-test gaps are closed (2026-10-21, see EVIDENCE.md):
+   the DTBO contract now requires the exact node set, exact property names
+   on every node and an empty reserve map, and `make dtbo-contract-test`
+   runs a mutant suite compiled with the same dtc.
 3. Requalify every private launcher constant after any boot or kernel
    change. The ADT physical address moves between boots.
 4. Design, review and arbitrate a firmware mapping and start contract

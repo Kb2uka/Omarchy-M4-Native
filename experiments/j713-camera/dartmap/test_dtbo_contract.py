@@ -3,15 +3,18 @@
 """Contract for the DTBO and .inc that `make dtbo` already wrote.
 
 dtc -@ exports DTS labels into root /__symbols__. External symbolic
-references use /__fixups__. Both require a live root /__symbols__. This Air tree has none, so
-of_overlay_fdt_apply rejects it ("symbols in overlay, but not in live tree").
-The AIC interrupt-parent is a numeric external phandle and the fragment uses
-target-path, so no exported symbol is required.
+references use /__fixups__. Both require a live root /__symbols__. This Air
+tree has none, so of_overlay_fdt_apply rejects it ("symbols in overlay, but
+not in live tree"). The AIC interrupt-parent is a numeric external phandle
+and the fragment uses target-path, so no exported symbol is required.
 
 /plugin/ stays. It makes dtc emit __local_fixups__ for the three local iommus
-phandles, at byte offsets 0, 8, and 16. This test only reads those two build
-products. It does not invoke dtc, so putting -@ back in the Makefile fails here
-instead of being hidden by a second compiler command.
+phandles, at byte offsets 0, 8, and 16. The node set and the property-name
+sets are exact: an extra node, fragment, or property fails this contract.
+The reserve map must be empty.
+This test only reads those two build products. It does not invoke dtc, so
+putting -@ back in the Makefile fails here instead of being hidden by a
+second compiler command.
 """
 
 from __future__ import annotations
@@ -49,6 +52,10 @@ def parse_fdt(raw: bytes) -> dict[str, dict[str, bytes]]:
     header = struct.unpack_from(">10I", raw)
     if header[0] != 0xD00DFEED or header[1] != len(raw):
         raise AssertionError("DTBO is not one complete FDT blob")
+    # off_mem_rsvmap. Empty means the map starts with the 16-byte terminator.
+    off_mem_rsvmap = header[4]
+    if raw[off_mem_rsvmap:off_mem_rsvmap + 16] != b"\0" * 16:
+        raise AssertionError(("memreserve", off_mem_rsvmap))
     strings = raw[header[3]:header[3] + header[8]]
     pos, stack = header[2], []
     props: dict[str, dict[str, bytes]] = {}
@@ -60,14 +67,22 @@ def parse_fdt(raw: bytes) -> dict[str, dict[str, bytes]]:
             name = raw[pos:end].decode()
             pos = (end + 4) & ~3
             stack.append(name)
-            props["/" + "/".join(stack[1:])] = {}
+            # Root is "/". A repeated name used to overwrite the first node.
+            path = "/" + "/".join(stack[1:])
+            if path in props:
+                raise AssertionError(("duplicate node", path))
+            props[path] = {}
         elif token == FDT_END_NODE:
             stack.pop()
         elif token == FDT_PROP:
             size, off = struct.unpack_from(">II", raw, pos)
             pos += 8
             name = strings[off:strings.index(0, off)].decode()
-            props["/" + "/".join(stack[1:])][name] = raw[pos:pos + size]
+            # A repeated property name used to overwrite the first value.
+            path = "/" + "/".join(stack[1:])
+            if name in props[path]:
+                raise AssertionError(("duplicate property", path, name))
+            props[path][name] = raw[pos:pos + size]
             pos = (pos + size + 3) & ~3
         elif token == FDT_NOP:
             pass
@@ -95,16 +110,43 @@ def check(raw: bytes, inc_text: str) -> None:
     refuse_exported_symbols(props)
 
     base = "/fragment@0/__overlay__"
+    addrs = (0x48E8C0000, 0x48E8E0000, 0x48E900000)
+    expected_nodes = [f"{base}/iommu@{addr:x}" for addr in addrs]
+    master = base + "/j713-isp-dart-map-test"
+    # Exact paths. A sibling fragment or extra root child must fail here.
+    expected_paths = {
+        "/",
+        "/fragment@0",
+        base,
+        master,
+        "/__local_fixups__",
+        "/__local_fixups__/fragment@0",
+        "/__local_fixups__/fragment@0/__overlay__",
+        "/__local_fixups__" + master,
+        *expected_nodes,
+    }
+    if set(props) != expected_paths:
+        raise AssertionError(("nodes", sorted(props)))
+    # Exact property names. DART nodes keep their own 7-name check below.
+    non_dart = {
+        "/": set(),
+        "/fragment@0": {"target-path"},
+        base: set(),
+        master: {"compatible", "iommus"},
+        "/__local_fixups__": set(),
+        "/__local_fixups__/fragment@0": set(),
+        "/__local_fixups__/fragment@0/__overlay__": set(),
+        "/__local_fixups__" + master: {"iommus"},
+    }
+    for path, names in non_dart.items():
+        if set(props[path]) != names:
+            raise AssertionError((path, "properties", sorted(props[path])))
+
     if props["/fragment@0"]["target-path"] != b"/soc\0":
         raise AssertionError("fragment target-path is not /soc")
-    expected_nodes = [f"{base}/iommu@{addr:x}" for addr in (0x48E8C0000, 0x48E8E0000, 0x48E900000)]
-    master = base + "/j713-isp-dart-map-test"
-    owned = {path for path in props if path.startswith(base + "/")}
-    if owned != set(expected_nodes + [master]):
-        raise AssertionError(("owned nodes", sorted(owned)))
 
     phandles = []
-    for path, addr in zip(expected_nodes, (0x48E8C0000, 0x48E8E0000, 0x48E900000)):
+    for path, addr in zip(expected_nodes, addrs):
         node = props[path]
         if node["reg"] != struct.pack(">QQ", addr, 0xC000):
             raise AssertionError((path, "reg"))
@@ -149,7 +191,8 @@ def main(argv: list[str]) -> int:
     inc_text = inc_path.read_text()
     check(raw, inc_text)
     print(
-        "PASS DTBO contract: no /__symbols__ or /__fixups__, "
+        "PASS DTBO contract: exact node set and property sets, "
+        "no /__symbols__ or /__fixups__, empty reserve map, "
         "local fixups 0/8/16, 3 ranges, AIC 13, SID 0, dma window, embedded bytes"
     )
     return 0

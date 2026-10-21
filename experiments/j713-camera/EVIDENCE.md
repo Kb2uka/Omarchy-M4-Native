@@ -100,7 +100,25 @@ presented as merge-ready or as a fully reviewed camera driver.
 - **Review.** Two blind delta reviews of R5 plus the requalified launcher (Gemini 3.8 Flash High, DeepSeek v4 pro max): both
   APPROVE, with no blocker or major finding. Both found the same test-strength gaps: the DTBO contract does not enforce an exact
   master-node property set and does not refuse an extra fragment. The arbiter checked the exact staged DTBO: one fragment, master
-  properties exactly `compatible` and `iommus`, so the run was unaffected. These gaps remain open as follow-up work. Jev
+  properties exactly `compatible` and `iommus`, so the run was unaffected. Both gaps are now closed (see below). Jev
   arbitration: one bounded run (0.97); planted false controls rejected (0.07, 0.05, 0.34).
 - **Tests.** The 69 launcher tests passed on a remote Linux host under the host lease.
 - **Not performed.** Firmware start, handshake, sensor discovery, frames, foundation KUnit, and hosted CI.
+
+## 2026-10-21 contract-test gap closure (offline only)
+
+- **Change.** `test_dtbo_contract.py` requires the exact node-path set, the exact property names on every node, an empty
+  reserve map, and no duplicate node or property in the blob. The new `test_dtbo_contract_mutants.py` compiles DTS mutants with
+  the same dtc (master `status`, extra `fragment@1`, stray root child, root/fragment/overlay properties, master child,
+  `/memreserve/`, an unresolved external label, and `dtc -@`). It injects extra properties into all four generated
+  `__local_fixups__` nodes of the real compiled blob. It also checks hand-built duplicate blobs and every `DTC` refusal.
+  `make dtbo` deletes the old DTBO and requires a non-empty new one before embedding. A `DTC` must be an executable regular
+  file, resolved to an absolute path with no PATH lookup. `all` and `modules` are unchanged; no C, DTS or launcher source
+  changed.
+- **Before/after.** On the remote builder with the exact kernel dtc 1.7.2 under the test lock, the new suite fails 13 checks against
+  the previous contract, including both reported survivors. With the change, the contract passes on a DTBO byte-identical to
+  the live R5 artifact (`ad8931…`, 1019 bytes), and the suite runs 16 tests with no failure. The embed tests (2) and launcher
+  tests (69) also pass.
+- **Mutation check.** Removing or weakening each new guard one at a time (14 mutants) is caught each time by a targeted test.
+  A no-op `DTC` and a directory `DTC` are refused.
+- **Review.** Independent blind review rounds with arbitration until no finding remained open. No hardware was touched.
