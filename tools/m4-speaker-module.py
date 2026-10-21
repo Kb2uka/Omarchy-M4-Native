@@ -395,7 +395,7 @@ def run(root, mode, component='speaker'):
                                 + selected['component'] + ' module')
         elif report['state'] == 'reverse' and not report['rollback_requested']:
             report['status'] = ('refused; nothing was changed; recover from the verified stock backup')
-        elif known and report['rollback_requested'] and not backup_ok:
+        elif known and report['rollback_requested'] and (not regular_marker or not backup_ok):
             report['status'] = 'refused; nothing was changed; recovery required'
         elif report['held'] and report['state'] in ('stock', 'interrupted'):
             report['status'] = 'held after a rollback; nothing applied'
