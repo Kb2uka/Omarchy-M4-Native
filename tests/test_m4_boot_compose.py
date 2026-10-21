@@ -27,6 +27,20 @@ journal whose operation is the opposite of the command refuses before
 ``boot.bin`` or the video manifest changes. A corrupt journal, or a pending
 journal whose snapshot is missing or does not match its hash, is not a valid
 pending state: inspection refuses it and does not apply it.
+
+A finished rollback writes ``var/lib/omarchy-m4/boot-compose/hold``. Ordinary
+compose, including ``--apply`` and a pacman ``--hook --apply``, reports that
+hold and writes nothing while the packaged Image stays new. Inspection does
+not clear it. ``--resume-updates --apply`` releases the hold and composes the
+installed packages, keeping this machine's loader, boot arguments, and
+initramfs bytes. ``--resume-updates`` without ``--apply``, or with
+``--rollback``, is refused. A failed release leaves the hold in place.
+
+A corrupt journal, or a ``boot.bin`` that is neither snapshot of a pending
+transition, is unresolved recovery. The refusal tells the operator to inspect
+the journal path and does not claim that ``boot.bin`` was left unchanged.
+The journal and its snapshots stay. Other preflight refusals, where nothing
+was pending, may still say that ``boot.bin`` was not changed.
 """
 import contextlib
 import gzip
@@ -149,6 +163,7 @@ def scenario_unqualified_kernel(test, module):
     code, _, err = machine.run('--apply')
     test.assertEqual(code, 1)
     test.assertIn('video stack is not qualified', err)
+    test.assertIn('boot.bin was not changed.', err)
     test.assertEqual((machine.boot, machine.previous), (boot(), None))
 
 
@@ -242,6 +257,36 @@ NEW_KERNEL = 'ca1fff571cf1b9d8c0b07b2e97ba0a5402f93c1b7a2d54ea2c07e24a8b70f9d0'
 TRANSITION_RELEASE = '7.1.9-m4-gpu-backport-20261008'
 BOOT_JOURNAL = 'var/lib/omarchy-m4/boot-compose/journal'
 BOOT_SNAPSHOTS = 'var/lib/omarchy-m4/boot-compose/snapshots'
+# Durable marker created by a finished rollback. Ordinary compose leaves it alone.
+BOOT_HOLD = MODULE.JOURNAL_DIR + '/hold'
+
+
+def owner_image(tag):
+    """Loader, boot arguments, and initramfs that belong to one synthetic owner."""
+    loader = LOADER + tag
+    bootargs = b'chosen.bootargs=root=PARTUUID=' + tag + b' dockchannel_hid.m4_power_v2=1\n'
+    firmware = b'070701 ' + tag
+    initramfs = b'm1n1_initramfs' + struct.pack('<I', len(firmware)) + firmware
+    return loader, bootargs, initramfs
+
+
+def plant_journal(machine, operation, from_bytes, to_bytes, video_pin):
+    """Write a journal the real ``load_journal`` will accept, plus both snapshots."""
+    module = machine.module
+    payload = {'operation': operation, 'from_sha256': module.sha(from_bytes),
+               'to_sha256': module.sha(to_bytes), 'video_boot_kernel_sha256': video_pin}
+    machine.put(module.JOURNAL, (json.dumps(payload, indent=2, sort_keys=True) + '\n').encode())
+    machine.put(module.SNAPSHOTS + '/' + module.sha(from_bytes), from_bytes)
+    machine.put(module.SNAPSHOTS + '/' + module.sha(to_bytes), to_bytes)
+
+
+def assert_unresolved_recovery(test, err):
+    """Corrupt or neither-side recovery must not claim the boot object was untouched."""
+    lowered = err.lower()
+    test.assertNotIn('boot.bin was not changed', err)
+    test.assertIn('unresolved', lowered)
+    test.assertIn('inspect', lowered)
+    test.assertIn(BOOT_JOURNAL, err)
 
 
 @contextlib.contextmanager
@@ -685,12 +730,8 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
         self.assertFalse((machine.root / BOOT_JOURNAL).exists())
 
-    def test_rollback_of_an_unlisted_kernel_pair_refuses_before_writes(self):
-        """Previous may change the kernel only for an allowlisted pair.
-
-        Owner segments match and both hashes are known on one release. The
-        pair is not in ``KERNEL_TRANSITIONS``.
-        """
+    def unlisted_kernel_pair(self):
+        """Known same-release kernels that are not a ``KERNEL_TRANSITIONS`` pair."""
         third, fourth = kernel(3), kernel(4)
         loader = LOADER + b' owner-stage2'
         bootargs = b'chosen.bootargs=root=PARTUUID=abcd dockchannel_hid.m4_power_v2=1\n'
@@ -708,14 +749,471 @@ class ComposeTests(unittest.TestCase):
         raw = json.dumps(video, indent=4).encode() + b'\n'
         machine.put(MODULE.VIDEO_MANIFEST, raw)
         audio = (machine.root / MODULE.AUDIO_MANIFEST).read_bytes()
-        code, _, err = machine.run('--rollback', '--apply')
+        return machine, current, older, raw, audio
+
+    def assert_unlisted_rollback_refused(self, machine, current, older, raw, audio, *extra):
+        code, _, err = machine.run('--rollback', *extra)
         self.assertEqual(code, 1, err)
         self.assertIn('not qualified', err)
+        self.assertIn('boot.bin was not changed.', err)
         self.assertEqual(machine.boot, current)
         self.assertEqual(machine.previous, older)
         self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), raw)
         self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
         self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+        self.assertFalse((machine.root / BOOT_HOLD).exists())
+
+    def test_rollback_of_an_unlisted_kernel_pair_refuses_before_writes(self):
+        """Previous may change the kernel only for an allowlisted pair.
+
+        Owner segments match and both hashes are known on one release. The
+        pair is not in ``KERNEL_TRANSITIONS``.
+        """
+        self.assert_unlisted_rollback_refused(*self.unlisted_kernel_pair(), '--apply')
+
+    def test_rollback_inspection_of_an_unlisted_pair_refuses_like_apply(self):
+        """Inspection of an unlisted rollback refuses before it reports a receipt."""
+        self.assert_unlisted_rollback_refused(*self.unlisted_kernel_pair())
+
+    def invoke(self, machine, *args):
+        try:
+            return machine.run(*args)
+        except SystemExit as error:
+            self.fail('m4-boot-compose rejected %s (%s)' % (args, error))
+
+    def assert_compose_held(self, machine, args, boot_bytes, previous_bytes, video_bytes,
+                            audio_bytes, hold_bytes):
+        if '--hook' in args:
+            machine.put(MODULE.PACMAN_LOCK, b'updater retry')
+        code, out, err = self.invoke(machine, *args)
+        self.assertEqual((code, err), (0, ''), err)
+        receipt = json.loads(out)
+        self.assertFalse(receipt['applied'])
+        self.assertIn('held', receipt['status'].lower())
+        self.assertEqual(machine.boot, boot_bytes)
+        self.assertEqual(machine.previous, previous_bytes)
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), video_bytes)
+        self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio_bytes)
+        self.assertEqual((machine.root / BOOT_HOLD).read_bytes(), hold_bytes)
+        self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+        if '--hook' in args:
+            self.assertEqual((machine.root / MODULE.PACMAN_LOCK).read_bytes(), b'updater retry')
+        else:
+            self.assertFalse((machine.root / MODULE.PACMAN_LOCK).exists())
+
+    def prepare_kernel_rollback_hold(self):
+        """Roll the listed kernel back while the packaged Image stays the new one."""
+        packaged = kernel(30)
+        loader, bootargs, initramfs = owner_image(b'hold-owner')
+        restored = boot(kernel_bytes=K1, dtb=D1, loader=loader, bootargs=bootargs, initramfs=initramfs)
+        updated = boot(kernel_bytes=packaged, dtb=D1, loader=loader, bootargs=bootargs, initramfs=initramfs)
+        machine = self.transition(boot_kernel=K1, package_kernel=packaged)
+        machine.put(MODULE.BOOT, updated)
+        machine.put(MODULE.BOOT + MODULE.PREVIOUS, restored)
+        video = {'boot_kernel_sha256': sha(packaged), 'kernel_release': RELEASE,
+                 'owner_panel': 'kept', 'notch': 'owner'}
+        machine.put(MODULE.VIDEO_MANIFEST, json.dumps(video, indent=4).encode() + b'\n')
+        audio = (machine.root / MODULE.AUDIO_MANIFEST).read_bytes()
+        code, out, err = self.invoke(machine, '--rollback', '--apply')
+        self.assertEqual((code, err), (0, ''), err)
+        self.assertNotIn('next M4 package update composes', out)
+        self.assertEqual(machine.boot, restored)
+        self.assertEqual((machine.root / MODULE.KERNEL).read_bytes(), packaged)
+        self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
+        hold = machine.root / BOOT_HOLD
+        self.assertTrue(hold.is_file() and not hold.is_symlink())
+        self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+        machine.audio_before = audio
+        machine.resume_pin = sha(packaged)
+        return machine, restored, updated, ['kernel']
+
+    def prepare_devicetree_rollback_hold(self):
+        """Roll a devicetree update back while the packaged tree stays the new one."""
+        loader, bootargs, initramfs = owner_image(b'dtb-owner')
+        restored = boot(kernel_bytes=K1, dtb=D1, loader=loader, bootargs=bootargs, initramfs=initramfs)
+        updated = boot(kernel_bytes=K1, dtb=D2, loader=loader, bootargs=bootargs, initramfs=initramfs)
+        machine = Machine(self, boot_bytes=updated, package_kernel=K1, package_dtb=D2)
+        machine.put(MODULE.BOOT + MODULE.PREVIOUS, restored)
+        video = {'boot_kernel_sha256': sha(K1), 'kernel_release': RELEASE,
+                 'owner_panel': 'kept', 'notch': 'owner'}
+        raw = json.dumps(video, indent=4).encode() + b'\n'
+        machine.put(MODULE.VIDEO_MANIFEST, raw)
+        audio = (machine.root / MODULE.AUDIO_MANIFEST).read_bytes()
+        code, out, err = self.invoke(machine, '--rollback', '--apply')
+        self.assertEqual((code, err), (0, ''), err)
+        self.assertNotIn('next M4 package update composes', out)
+        self.assertEqual(machine.boot, restored)
+        self.assertEqual((machine.root / MODULE.DTB).read_bytes(), D2)
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), raw)
+        self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
+        hold = machine.root / BOOT_HOLD
+        self.assertTrue(hold.is_file() and not hold.is_symlink())
+        machine.audio_before = audio
+        machine.resume_pin = None
+        return machine, restored, updated, ['dtb']
+
+    def test_rollback_hold_blocks_ordinary_compose_until_resume_updates(self):
+        """The hold survives inspection, compose, and updater retries, then resume releases it."""
+        for label, prepare in (
+                ('kernel image stays packaged', self.prepare_kernel_rollback_hold),
+                ('devicetree stays packaged', self.prepare_devicetree_rollback_hold)):
+            with self.subTest(label):
+                machine, restored, released, changes = prepare()
+                hold_bytes = (machine.root / BOOT_HOLD).read_bytes()
+                video_bytes = (machine.root / MODULE.VIDEO_MANIFEST).read_bytes()
+                previous_bytes = machine.previous
+                audio_bytes = machine.audio_before
+                for args in ((), ('--apply',), ('--apply',)):
+                    self.assert_compose_held(
+                        machine, args, restored, previous_bytes, video_bytes, audio_bytes, hold_bytes)
+                code, _, err = self.invoke(machine, '--rollback')
+                self.assertEqual(code, 0, err)
+                self.assertEqual(machine.boot, restored)
+                self.assertEqual((machine.root / BOOT_HOLD).read_bytes(), hold_bytes)
+                for args in (('--hook', '--apply'), ('--hook', '--apply')):
+                    self.assert_compose_held(
+                        machine, args, restored, previous_bytes, video_bytes, audio_bytes, hold_bytes)
+                (machine.root / MODULE.PACMAN_LOCK).unlink()
+                code, out, err = self.invoke(machine, '--resume-updates', '--apply')
+                self.assertEqual((code, err), (0, ''), err)
+                receipt = json.loads(out)
+                self.assertTrue(receipt['applied'])
+                self.assertEqual(receipt['status'], 'updated; takes effect at next boot')
+                self.assertEqual(receipt['changes'], changes)
+                self.assertEqual(receipt['boot_sha256'], sha(released))
+                self.assertEqual(receipt['kernel_sha256'], sha(MODULE.parse(released)['kernel']))
+                self.assertEqual(receipt['devicetree_sha256'], sha(MODULE.parse(released)['dtb']))
+                self.assertEqual(machine.boot, released)
+                self.assertFalse((machine.root / BOOT_HOLD).exists())
+                done, owner = MODULE.parse(machine.boot), MODULE.parse(restored)
+                self.assertEqual([done[name] for name in ('loader', 'bootargs', 'initramfs')],
+                                 [owner[name] for name in ('loader', 'bootargs', 'initramfs')])
+                if machine.resume_pin is None:
+                    self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), video_bytes)
+                else:
+                    parsed = json.loads((machine.root / MODULE.VIDEO_MANIFEST).read_bytes())
+                    self.assertEqual(parsed['boot_kernel_sha256'], machine.resume_pin)
+                    self.assertEqual((parsed['owner_panel'], parsed['notch']), ('kept', 'owner'))
+                self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio_bytes)
+                code, out, err = self.invoke(machine, '--apply')
+                self.assertEqual((code, err), (0, ''), err)
+                self.assertEqual(json.loads(out)['status'], 'current')
+                self.assertEqual(machine.boot, released)
+                self.assertFalse((machine.root / BOOT_HOLD).exists())
+
+    def test_resume_updates_refuses_without_apply_or_with_rollback(self):
+        machine = Machine(self)
+        before = machine.boot
+        cases = (
+            ('--resume-updates',),
+            ('--resume-updates', '--rollback'),
+            ('--resume-updates', '--rollback', '--apply'),
+        )
+        for args in cases:
+            with self.subTest(args=args):
+                code, out, err = self.invoke(machine, *args)
+                self.assertEqual(code, 1, err)
+                self.assertEqual(out, '')
+                self.assertIn('resume-updates', err)
+                self.assertIn('--apply', err)
+                if '--rollback' in args:
+                    self.assertIn('--rollback', err)
+                self.assertEqual(machine.boot, before)
+                self.assertIsNone(machine.previous)
+                self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+                self.assertFalse((machine.root / BOOT_HOLD).exists())
+
+    def test_failed_resume_updates_keeps_the_hold(self):
+        machine, restored, _, _ = self.prepare_kernel_rollback_hold()
+        hold_bytes = (machine.root / BOOT_HOLD).read_bytes()
+        video = (machine.root / MODULE.VIDEO_MANIFEST).read_bytes()
+        real = os.replace
+
+        def fail_boot(source, target):
+            if Path(target).name == 'boot.bin':
+                raise OSError('power cut while releasing the hold')
+            return real(source, target)
+
+        with mock.patch.object(MODULE.os, 'replace', side_effect=fail_boot):
+            code, _, err = self.invoke(machine, '--resume-updates', '--apply')
+        self.assertEqual(code, 1, err)
+        self.assertIn('power cut while releasing the hold', err)
+        self.assertEqual(machine.boot, restored)
+        self.assertEqual((machine.root / BOOT_HOLD).read_bytes(), hold_bytes)
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), video)
+        code, out, err = self.invoke(machine, '--apply')
+        self.assertEqual((code, err), (0, ''), err)
+        receipt = json.loads(out)
+        self.assertFalse(receipt['applied'])
+        self.assertIn('held', receipt['status'].lower())
+        self.assertEqual(machine.boot, restored)
+        self.assertEqual((machine.root / BOOT_HOLD).read_bytes(), hold_bytes)
+
+    def test_pending_opposite_journal_still_refuses_while_held(self):
+        machine, restored, updated, _ = self.prepare_kernel_rollback_hold()
+        hold_bytes = (machine.root / BOOT_HOLD).read_bytes()
+        video = (machine.root / MODULE.VIDEO_MANIFEST).read_bytes()
+        plant_journal(machine, 'rollback', updated, restored, sha(K1))
+        journal = (machine.root / BOOT_JOURNAL).read_bytes()
+        code, _, err = self.invoke(machine, '--apply')
+        self.assertEqual(code, 1, err)
+        self.assertIn('rollback transition is pending', err)
+        self.assertIn('m4-boot-compose --rollback --apply', err)
+        self.assertNotIn('boot.bin was not changed', err)
+        self.assertEqual(machine.boot, restored)
+        self.assertEqual((machine.root / BOOT_HOLD).read_bytes(), hold_bytes)
+        self.assertEqual((machine.root / BOOT_JOURNAL).read_bytes(), journal)
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), video)
+
+    def test_resume_pending_apply_then_composes_the_newer_packaged_devicetree(self):
+        """Commit the recorded apply, then plan the packages that are installed now.
+
+        The packaged devicetree moved forward while the journal was open. The
+        receipt names both changes and the final boot SHA. Owner loader, boot
+        arguments, and initramfs stay the original bytes. The recorded
+        snapshots remain after the journal is cleared.
+        """
+        packaged = kernel(18)
+        loader, bootargs, initramfs = owner_image(b'pending-owner')
+        original = boot(kernel_bytes=K1, dtb=D1, loader=loader, bootargs=bootargs, initramfs=initramfs)
+        recorded = boot(kernel_bytes=packaged, dtb=D1, loader=loader, bootargs=bootargs, initramfs=initramfs)
+        final = boot(kernel_bytes=packaged, dtb=D2, loader=loader, bootargs=bootargs, initramfs=initramfs)
+        machine = self.transition(boot_kernel=K1, package_kernel=packaged)
+        machine.put(MODULE.BOOT, original)
+        video = {'boot_kernel_sha256': sha(K1), 'kernel_release': RELEASE,
+                 'owner_panel': 'kept', 'notch': 'owner'}
+        raw = json.dumps(video, indent=4).encode() + b'\n'
+        machine.put(MODULE.VIDEO_MANIFEST, raw)
+        audio = (machine.root / MODULE.AUDIO_MANIFEST).read_bytes()
+        plant_journal(machine, 'apply', original, recorded, sha(packaged))
+        machine.put(MODULE.DTB, D2)
+        machine.put(MODULE.BOOT + MODULE.PREVIOUS, b'decoy previous')
+        code, out, err = machine.run('--apply')
+        self.assertEqual((code, err), (0, ''), err)
+        receipt = json.loads(out)
+        self.assertEqual(machine.boot, final)
+        self.assertEqual(machine.previous, recorded)
+        self.assertEqual(receipt['boot_sha256'], sha(final))
+        self.assertEqual(receipt['kernel_sha256'], sha(packaged))
+        self.assertEqual(receipt['devicetree_sha256'], sha(D2))
+        self.assertEqual(sorted(receipt['changes']), ['dtb', 'kernel'])
+        self.assertTrue(receipt['applied'])
+        self.assertEqual(receipt['status'], 'updated; takes effect at next boot')
+        self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+        self.assertEqual((machine.root / (BOOT_SNAPSHOTS + '/' + sha(original))).read_bytes(), original)
+        self.assertEqual((machine.root / (BOOT_SNAPSHOTS + '/' + sha(recorded))).read_bytes(), recorded)
+        done = MODULE.parse(machine.boot)
+        self.assertEqual((done['loader'], done['bootargs'], done['initramfs']), (loader, bootargs, initramfs))
+        self.assertEqual((done['kernel'], done['dtb']), (packaged, D2))
+        parsed = json.loads((machine.root / MODULE.VIDEO_MANIFEST).read_bytes())
+        self.assertEqual(parsed['boot_kernel_sha256'], sha(packaged))
+        self.assertEqual((parsed['owner_panel'], parsed['notch']), ('kept', 'owner'))
+        self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
+
+    def test_corrupt_journal_or_neither_side_reports_unresolved_recovery(self):
+        """Do not claim boot.bin was unchanged, and do not delete the journal."""
+        def preserved(machine, paths):
+            found = {}
+            for relative in paths:
+                path = machine.root / relative
+                found[relative] = path.read_bytes() if path.is_file() else None
+            return found
+
+        machine = Machine(self)
+        machine.put(BOOT_JOURNAL, b'{not a journal')
+        paths = (MODULE.BOOT, MODULE.BOOT + MODULE.PREVIOUS, MODULE.VIDEO_MANIFEST,
+                 MODULE.AUDIO_MANIFEST, BOOT_JOURNAL)
+        before = preserved(machine, paths)
+        for args in ((), ('--apply',), ('--rollback',), ('--rollback', '--apply')):
+            with self.subTest(corrupt=args):
+                code, out, err = machine.run(*args)
+                self.assertEqual(code, 1, out + err)
+                self.assertEqual(out, '')
+                assert_unresolved_recovery(self, err)
+                self.assertEqual(preserved(machine, paths), before)
+
+        packaged = kernel(12)
+        machine = self.transition(package_kernel=packaged)
+        desired = boot(kernel_bytes=packaged, dtb=D1, loader=LOADER + b' notch')
+        plant_journal(machine, 'apply', machine.boot_before, desired, sha(packaged))
+        neither = boot(kernel_bytes=K1, dtb=D2, loader=LOADER + b' notch')
+        self.assertNotIn(neither, (machine.boot_before, desired))
+        machine.put(MODULE.BOOT, neither)
+        machine.put(MODULE.BOOT + MODULE.PREVIOUS, b'decoy previous')
+        paths = (MODULE.BOOT, MODULE.BOOT + MODULE.PREVIOUS, MODULE.VIDEO_MANIFEST,
+                 MODULE.AUDIO_MANIFEST, BOOT_JOURNAL,
+                 BOOT_SNAPSHOTS + '/' + sha(machine.boot_before),
+                 BOOT_SNAPSHOTS + '/' + sha(desired))
+        before = preserved(machine, paths)
+        code, out, err = machine.run('--apply')
+        self.assertEqual(code, 1, out + err)
+        self.assertEqual(out, '')
+        assert_unresolved_recovery(self, err)
+        self.assertIn('neither side', err)
+        self.assertEqual(preserved(machine, paths), before)
+
+    def test_commit_transition_refuses_boot_on_neither_side(self):
+        packaged = kernel(12)
+        machine = self.transition(package_kernel=packaged)
+        desired = boot(kernel_bytes=packaged, dtb=D1, loader=LOADER + b' notch')
+        plant_journal(machine, 'apply', machine.boot_before, desired, sha(packaged))
+        neither = boot(kernel_bytes=K1, dtb=D2, loader=LOADER + b' notch')
+        machine.put(MODULE.BOOT, neither)
+        journal_bytes = (machine.root / BOOT_JOURNAL).read_bytes()
+        video = (machine.root / MODULE.VIDEO_MANIFEST).read_bytes()
+        audio = (machine.root / MODULE.AUDIO_MANIFEST).read_bytes()
+        journal = MODULE.load_journal(machine.root)
+        with self.assertRaises(MODULE.Refused) as caught:
+            MODULE.commit_transition(machine.root, journal)
+        self.assertIn('neither side of the pending transition', str(caught.exception))
+        self.assertEqual(machine.boot, neither)
+        self.assertIsNone(machine.previous)
+        self.assertEqual((machine.root / BOOT_JOURNAL).read_bytes(), journal_bytes)
+        self.assertEqual((machine.root / (BOOT_SNAPSHOTS + '/' + sha(machine.boot_before))).read_bytes(),
+                         machine.boot_before)
+        self.assertEqual((machine.root / (BOOT_SNAPSHOTS + '/' + sha(desired))).read_bytes(), desired)
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), video)
+        self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
+
+    def test_cross_release_exact_pair_refuses_before_writes(self):
+        """An exact pair whose hashes do not share a release is not a transition."""
+        third, fourth = kernel(21), kernel(22)
+        source, target = '7.1.9-source-release', '7.1.9-other-release'
+        loader, bootargs, initramfs = owner_image(b'cross-release')
+        current = boot(kernel_bytes=third, dtb=D1, loader=loader, bootargs=bootargs, initramfs=initramfs)
+        machine = Machine(self, boot_bytes=current, package_kernel=fourth, package_dtb=D1)
+        (machine.root / 'usr/lib/modules' / target).mkdir(parents=True)
+        for patcher in (
+                mock.patch.dict(MODULE.KNOWN_KERNELS, {sha(third): source, sha(fourth): target}, clear=True),
+                mock.patch.object(MODULE, 'KERNEL_TRANSITIONS', {(sha(third), sha(fourth)),
+                                                                 (sha(fourth), sha(third))})):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.assertIn((sha(third), sha(fourth)), set(MODULE.KERNEL_TRANSITIONS))
+        video = {'boot_kernel_sha256': sha(fourth), 'kernel_release': target, 'owner_panel': 'kept'}
+        raw = json.dumps(video, indent=4).encode() + b'\n'
+        machine.put(MODULE.VIDEO_MANIFEST, raw)
+        machine.put(MODULE.AUDIO_MANIFEST, json.dumps({'kernel_release': target}).encode())
+        audio = (machine.root / MODULE.AUDIO_MANIFEST).read_bytes()
+        code, _, err = machine.run('--apply')
+        self.assertEqual(code, 1, err)
+        self.assertIn('not the same kernel release', err)
+        self.assertIn('boot.bin was not changed.', err)
+        self.assertEqual(machine.boot, current)
+        self.assertIsNone(machine.previous)
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), raw)
+        self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
+        self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+        self.assertFalse((machine.root / BOOT_SNAPSHOTS).exists() and
+                         any((machine.root / BOOT_SNAPSHOTS).iterdir()))
+
+    def test_unrelated_video_pin_refuses_before_journal_creation(self):
+        packaged = kernel(12)
+        machine = self.transition(package_kernel=packaged, video_pin=sha(kernel(9)))
+        code, _, err = machine.run('--apply')
+        self.assertEqual(code, 1, err)
+        self.assertIn('not qualified', err)
+        self.assertIn('boot.bin was not changed.', err)
+        self.assertEqual(machine.boot, machine.boot_before)
+        self.assertIsNone(machine.previous)
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), machine.video_before)
+        self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), machine.audio_before)
+        self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+        snaps = machine.root / BOOT_SNAPSHOTS
+        self.assertFalse(snaps.exists() and any(snaps.iterdir()))
+
+    def test_root_snapshot_budget_and_efi_budget_refuse_separately(self):
+        """Each filesystem is named. The other one is ample, and nothing is written."""
+        packaged = kernel(12)
+
+        def run(case):
+            machine = self.transition(package_kernel=packaged)
+            efi = machine.root / 'boot' / 'efi'
+            ample = types.SimpleNamespace(f_bavail=1 << 40, f_frsize=1)
+            # The margin alone cannot pay for both snapshots.
+            tight = types.SimpleNamespace(f_bavail=MODULE.MARGIN, f_frsize=1)
+            tiny = types.SimpleNamespace(f_bavail=1, f_frsize=1)
+
+            def fake(path):
+                probed = Path(path)
+                on_efi = probed == efi or efi in probed.parents
+                if case == 'efi':
+                    return tiny if on_efi else ample
+                return ample if on_efi else tight
+
+            video = (machine.root / MODULE.VIDEO_MANIFEST).read_bytes()
+            with mock.patch.object(MODULE.os, 'statvfs', side_effect=fake):
+                code, _, err = machine.run('--apply')
+            self.assertEqual(code, 1, err)
+            if case == 'efi':
+                self.assertIn('Not enough free space on the EFI partition', err)
+                self.assertNotIn('root filesystem', err)
+            else:
+                self.assertIn('Not enough free space on the root filesystem', err)
+                self.assertNotIn('EFI partition', err)
+            self.assertIn('boot.bin was not changed.', err)
+            self.assertEqual(machine.boot, machine.boot_before)
+            self.assertIsNone(machine.previous)
+            self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), video)
+            self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+            snaps = machine.root / BOOT_SNAPSHOTS
+            self.assertFalse(snaps.exists() and any(path.is_file() for path in snaps.rglob('*')))
+
+        for case in ('efi', 'root'):
+            with self.subTest(case=case):
+                run(case)
+
+    def test_compose_refuses_a_pending_rollback_journal(self):
+        packaged = kernel(12)
+        machine = self.transition(package_kernel=packaged)
+        newer = boot(kernel_bytes=packaged, dtb=D1, loader=LOADER + b' notch')
+        plant_journal(machine, 'rollback', newer, machine.boot_before, sha(K1))
+        journal = (machine.root / BOOT_JOURNAL).read_bytes()
+        video = (machine.root / MODULE.VIDEO_MANIFEST).read_bytes()
+        code, out, err = machine.run()
+        self.assertEqual(code, 0, err)
+        self.assertFalse(json.loads(out)['applied'])
+        self.assertEqual(machine.boot, machine.boot_before)
+        code, out, err = machine.run('--apply')
+        self.assertEqual(code, 1, out + err)
+        self.assertEqual(out, '')
+        self.assertIn('rollback transition is pending', err)
+        self.assertIn('m4-boot-compose --rollback --apply', err)
+        self.assertNotIn('boot.bin was not changed', err)
+        self.assertEqual(machine.boot, machine.boot_before)
+        self.assertIsNone(machine.previous)
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), video)
+        self.assertEqual((machine.root / BOOT_JOURNAL).read_bytes(), journal)
+        self.assertEqual((machine.root / (BOOT_SNAPSHOTS + '/' + sha(newer))).read_bytes(), newer)
+        self.assertEqual((machine.root / (BOOT_SNAPSHOTS + '/' + sha(machine.boot_before))).read_bytes(),
+                         machine.boot_before)
+
+    def test_notch_preference_mismatch_names_the_toggle(self):
+        """A preference mismatch tells the owner how to put the notch back."""
+        hidden = LOADER + b' pref-hidden'
+        shown = LOADER + b' pref-shown'
+        patcher = mock.patch.dict(MODULE.KNOWN_LOADERS, {sha(hidden): 'hidden', sha(shown): 'shown'})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        current = boot(loader=shown)
+        older = boot(loader=hidden)
+        machine = Machine(self, boot_bytes=current, package_dtb=D1)
+        machine.put(MODULE.BOOT + MODULE.PREVIOUS, older)
+        video = (machine.root / MODULE.VIDEO_MANIFEST).read_bytes()
+        audio = (machine.root / MODULE.AUDIO_MANIFEST).read_bytes()
+        code, out, err = machine.run('--rollback', '--apply')
+        self.assertEqual(code, 1, err)
+        self.assertEqual(out, '')
+        self.assertIn('notch preference', err)
+        self.assertIn('m4-notch --show', err)
+        self.assertIn('m4-notch --hide', err)
+        self.assertIn('boot.bin was not changed.', err)
+        self.assertEqual(machine.boot, current)
+        self.assertEqual(machine.previous, older)
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), video)
+        self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
+        self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+        self.assertFalse((machine.root / BOOT_HOLD).exists())
 
 
 def video_with_pin(raw, pin):

@@ -12,6 +12,16 @@ partition is a different statvfs path and stays ample here.
 
 A write that lands and then raises is retried with the same command. The
 journal clears and owner boot segments stay with the unrelated video fields.
+A rollback that dies after the boot write still finishes on the retry, and
+the durable boot-compose hold remains so the packaged Image is not composed
+back. Show and hide name that pending journal when they refuse.
+
+Root space for the two snapshots is the root filesystem only when that is
+where the store lives. The nearest existing parent of the snapshot directory
+is the filesystem that must hold them. Ample space on the root filesystem
+does not pay for a short snapshot store, and the refusal comes before any
+snapshot, boot, or video write. Once the snapshot files exist, resume still
+needs only the margin.
 """
 import contextlib
 import io
@@ -187,6 +197,38 @@ class NotchPendingJournalTests(unittest.TestCase):
                     self.assertEqual(json.loads((air.root / compose.AUDIO_MANIFEST).read_bytes())['kernel_release'],
                                      '7.1.9-recovery')
 
+    def test_pending_refusal_names_the_journal(self):
+        """The notch tools name the pending journal and the command that resumes it."""
+        for operation in ('apply', 'rollback'):
+            for action, loader in (('show', notch_tests.STOCK_LOADER), ('hide', notch_tests.NOTCH_LOADER)):
+                with self.subTest(operation=operation, action=action):
+                    air, compose = self.air(loader)
+                    live = notch_tests.boot(loader=loader, kernel=notch_tests.K1)
+                    other = notch_tests.boot(loader=loader, kernel=notch_tests.K2)
+                    if operation == 'apply':
+                        from_bytes, to_bytes = live, other
+                        pin = notch_tests.sha(notch_tests.K2)
+                        command = 'sudo m4-boot-compose --apply'
+                    else:
+                        from_bytes, to_bytes = other, live
+                        pin = notch_tests.sha(notch_tests.K1)
+                        air.put(compose.VIDEO_MANIFEST, (json.dumps({
+                            'boot_kernel_sha256': notch_tests.sha(notch_tests.K2),
+                            'kernel_release': '7.1.9-recovery', 'owner_panel': 'kept'}) + '\n').encode())
+                        command = 'sudo m4-boot-compose --rollback --apply'
+                    air.put(NOTCH.BOOT, from_bytes)
+                    plant(types.SimpleNamespace(module=compose, put=air.put), operation, from_bytes, to_bytes, pin)
+                    before = self.snapshot(air, compose)
+                    with self.assertRaises((NOTCH.Refused, compose.Refused)) as caught:
+                        getattr(NOTCH, action)(air.root)
+                    message = str(caught.exception)
+                    self.assertIn('pending', message)
+                    self.assertIn('journal', message)
+                    self.assertIn(command, message)
+                    self.assertEqual(self.snapshot(air, compose), before)
+                    self.assertIsNone(before[NOTCH.BACKUP])
+                    self.assertFalse((air.root / NOTCH.PACMAN_LOCK).exists())
+
     def test_corrupt_and_wrong_journal_refuse_before_notch_writes(self):
         def corrupt(air, compose, live):
             air.put(compose.JOURNAL, b'{not a journal')
@@ -297,6 +339,45 @@ class RootSpaceTests(unittest.TestCase):
         self.assertFalse((machine.root / BOOT_JOURNAL).exists())
         self.assertTrue((machine.root / BOOT_SNAPSHOTS / MODULE.sha(current)).is_file())
 
+    def test_separate_snapshot_store_filesystem_refuses_before_writes(self):
+        """Ample root does not pay for the snapshot store's own filesystem.
+
+        The check is the nearest existing parent of
+        ``var/lib/omarchy-m4/boot-compose/snapshots``. Nothing under that store,
+        and neither boot.bin nor the video manifest, may be written. Resume
+        after the snapshots already exist is still the margin-only case above.
+        """
+        packaged = boot_tests.kernel(17)
+        machine = listed_machine(self, boot_tests.K1, packaged)
+        video = (machine.root / MODULE.VIDEO_MANIFEST).read_bytes()
+        audio = (machine.root / MODULE.AUDIO_MANIFEST).read_bytes()
+        boot_before = machine.boot
+        snaps = machine.root / MODULE.SNAPSHOTS
+        efi = machine.root / 'boot' / 'efi'
+        ample = types.SimpleNamespace(f_bavail=1 << 40, f_frsize=1)
+        short = types.SimpleNamespace(f_bavail=0, f_frsize=1)
+
+        def fake(path):
+            probed = Path(path)
+            if probed == efi or efi in probed.parents or probed == machine.root:
+                return ample
+            if probed == snaps or snaps in probed.parents or probed in snaps.parents:
+                return short
+            return ample
+
+        with mock.patch.object(MODULE.os, 'statvfs', side_effect=fake):
+            code, _, err = machine.run('--apply')
+        self.assertEqual(code, 1, err)
+        self.assertIn('Not enough free space', err)
+        self.assertTrue('snapshot' in err.lower() or MODULE.JOURNAL_DIR in err, err)
+        self.assertEqual(machine.boot, boot_before)
+        self.assertIsNone(machine.previous)
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), video)
+        self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
+        self.assertFalse((machine.root / MODULE.JOURNAL).exists())
+        self.assertFalse(snaps.exists() and any(path.is_file() for path in snaps.rglob('*')))
+        self.assertFalse((machine.root / MODULE.PACMAN_LOCK).exists())
+
 
 class InterruptedCommitTests(unittest.TestCase):
     def retry(self, operation, fail_name):
@@ -348,6 +429,64 @@ class InterruptedCommitTests(unittest.TestCase):
             for fail_name in ('j713-video-manifest.json', 'boot.bin'):
                 with self.subTest(operation=operation, fail_name=fail_name):
                     self.retry(operation, fail_name)
+
+    def test_interrupted_rollback_after_boot_write_keeps_the_hold(self):
+        """Retry finishes the rollback, and the packaged Image stays uncomposed.
+
+        The first attempt dies after ``boot.bin`` has been replaced. The retry
+        clears the journal and leaves the boot-compose hold. A later ordinary
+        compose reports the hold and writes nothing.
+        """
+        packaged = boot_tests.kernel(16)
+        new = boot_tests.sha(packaged)
+        old = boot_tests.sha(boot_tests.K1)
+        machine = listed_machine(self, packaged, packaged)
+        for patcher in (
+                mock.patch.dict(MODULE.KNOWN_KERNELS, {old: boot_tests.RELEASE, new: boot_tests.RELEASE},
+                                clear=True),
+                mock.patch.object(MODULE, 'KERNEL_TRANSITIONS', {(old, new), (new, old)})):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        loader = boot_tests.LOADER + b' notch'
+        updated = boot_tests.boot(kernel_bytes=packaged, dtb=boot_tests.D1, loader=loader)
+        restored = boot_tests.boot(kernel_bytes=boot_tests.K1, dtb=boot_tests.D1, loader=loader)
+        machine.put(MODULE.BOOT, updated)
+        machine.put(MODULE.BOOT + MODULE.PREVIOUS, restored)
+        video = {'boot_kernel_sha256': new, 'kernel_release': boot_tests.RELEASE,
+                 'owner_panel': 'kept', 'notch': 'owner'}
+        machine.put(MODULE.VIDEO_MANIFEST, (json.dumps(video, indent=4) + '\n').encode())
+        audio = (machine.root / MODULE.AUDIO_MANIFEST).read_bytes()
+        wrapped, fired = fail_after(MODULE, 'boot.bin')
+        with mock.patch.object(MODULE, 'write', side_effect=wrapped):
+            code, _, err = machine.run('--rollback', '--apply')
+        self.assertEqual(code, 1, err)
+        self.assertEqual(fired['n'], 1)
+        self.assertIn('injected write failure', err)
+        self.assertEqual(machine.boot, restored)
+        self.assertTrue((machine.root / MODULE.JOURNAL).is_file())
+        code, _, err = machine.run('--rollback', '--apply')
+        self.assertEqual((code, err), (0, ''), err)
+        self.assertEqual(machine.boot, restored)
+        self.assertFalse((machine.root / MODULE.JOURNAL).exists())
+        self.assertEqual((machine.root / MODULE.KERNEL).read_bytes(), packaged)
+        done, owner = MODULE.parse(machine.boot), MODULE.parse(restored)
+        self.assertEqual([done[name] for name in ('loader', 'bootargs', 'dtb', 'initramfs')],
+                         [owner[name] for name in ('loader', 'bootargs', 'dtb', 'initramfs')])
+        parsed = json.loads((machine.root / MODULE.VIDEO_MANIFEST).read_bytes())
+        self.assertEqual(parsed['boot_kernel_sha256'], old)
+        self.assertEqual((parsed['owner_panel'], parsed['notch']), ('kept', 'owner'))
+        self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
+        hold = machine.root / boot_tests.BOOT_HOLD
+        self.assertTrue(hold.is_file() and not hold.is_symlink())
+        held = hold.read_bytes()
+        code, out, err = machine.run('--apply')
+        self.assertEqual((code, err), (0, ''), err)
+        receipt = json.loads(out)
+        self.assertFalse(receipt['applied'])
+        self.assertIn('held', receipt['status'].lower())
+        self.assertEqual(machine.boot, restored)
+        self.assertEqual(hold.read_bytes(), held)
+        self.assertEqual((machine.root / MODULE.KERNEL).read_bytes(), packaged)
 
 
 if __name__ == '__main__':
