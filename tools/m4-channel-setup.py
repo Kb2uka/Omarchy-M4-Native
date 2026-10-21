@@ -6,10 +6,12 @@
 Trusts the channel's signing key, adds the [omarchy-m4] repository in front of
 the distribution repositories, then installs the channel packages from it.
 Only the channel's own database is refreshed, so this is not a general system
-update. The boot.bin hook keeps the installed boot object in step with the
-current installed package composition. A coherent boot hold is
-success and stays held: a reboot does not apply those boot packages. Another
-component can still need its own restart. Inspection is the default;
+update. An installed package newer than the channel copy is left alone;
+naming it on pacman -S --needed would downgrade it, because libalpm skips
+only an equal version. The boot.bin hook keeps the installed boot object in
+step with the current installed package composition. A coherent boot hold
+is success and stays held: a reboot does not apply those boot packages.
+Another component can still need its own restart. Inspection is the default;
 --apply makes the changes.
 """
 import argparse
@@ -98,6 +100,20 @@ def include_line(root):
     return 'Include = ' + str(root / SNIPPET)
 
 
+def targets_to_install(packages, installed, upgradable):
+    """Literal channel names to pass to pacman -S, in request order.
+
+    A name is included when it is not installed, or when pacman -Qu lists it.
+    An equal or newer installed name is omitted: --needed skips only an equal
+    version, so naming a newer install would downgrade it to the channel copy.
+    These names have no provider or replacement alias. A different package that
+    merely provides one of them is not that package.
+    """
+    have = set(installed)
+    stale = set(upgradable)
+    return [name for name in packages if name not in have or name in stale]
+
+
 def with_include(text, line):
     """Return pacman.conf text with the snippet included above [core], or None if present."""
     lines = text.splitlines(keepends=True)
@@ -158,6 +174,41 @@ class Machine:
             command.append('--noscriptlet')
         return self.run(command)
 
+    def captured(self, *args):
+        """Run pacman and keep both streams. The full config is the -S config."""
+        command = self.pacman_command(*args)
+        print('+ ' + ' '.join(command), file=self.output, flush=True)
+        return subprocess.run(command, check=False, capture_output=True, text=True,
+                              encoding='utf-8', errors='replace')
+
+    def install_state(self):
+        """Installed names (-Qq) and upgradable names (-Quq) after the channel refresh.
+
+        -Qq must succeed. -Quq exits 1 with empty output when nothing is
+        upgradable; a database error also exits 1, but it prints a diagnostic,
+        and that is a failure. Other statuses and query diagnostics fail closed.
+        """
+        installed = self.quiet_query('-Qq', 'Could not read installed packages', False)
+        upgradable = self.quiet_query('-Quq', 'Could not read package updates', True)
+        return installed, upgradable
+
+    def quiet_query(self, operation, message, allow_empty_exit):
+        result = self.captured(operation)
+        stdout = result.stdout or ''
+        stderr = result.stderr or ''
+        no_updates = allow_empty_exit and result.returncode == 1 and stdout == '' and stderr == ''
+        clean = result.returncode == 0 and stderr == '' and all(
+            name and name.split() == [name] for name in stdout.splitlines())
+        if not (no_updates or clean):
+            self.show_query(stdout, stderr)
+            require(False, message)
+        return [] if no_updates else stdout.splitlines()
+
+    def show_query(self, stdout, stderr):
+        for text in (stdout, stderr):
+            if text:
+                print(text, end='' if text.endswith('\n') else '\n', file=self.output, flush=True)
+
     def pacman_command(self, *args, config=None):
         command = ['pacman']
         if self.sandbox:
@@ -183,7 +234,8 @@ class Machine:
         """Run the composer as the hook would and return its status.
 
         The hook already ran when a package changed; this also completes a retry
-        after an earlier refusal, when --needed installs nothing and no hook runs.
+        after an earlier refusal, when --needed installs nothing and no hook runs,
+        and when every requested package is already equal or newer.
         """
         command = [sys.executable, str(self.root / 'usr/bin/m4-boot-compose'), '--root', str(self.root)]
         if not self.sandbox:
@@ -439,7 +491,16 @@ def connect(root, apply, server, key, fingerprint, output):
             only.write_text('[options]\nArchitecture = auto\nSigLevel = Required DatabaseRequired\n' +
                             include_line(root) + '\n')
             require(machine.pacman('-Sy', config=only) == 0, 'Could not download the M4 package database')
-            require(machine.pacman('-S', '--needed', '--noconfirm', *packages) == 0, 'Package installation failed')
+            # Same full config as -S, and only after this refresh. -Q is the local
+            # database; -Qu is that database compared with the sync databases.
+            installed_names, upgradable_names = machine.install_state()
+            selected = targets_to_install(packages, installed_names, upgradable_names)
+            plan['install'] = selected
+            # An empty -S is not a transaction. Dependencies of a selected name
+            # are still resolved by pacman, including ones this list omits.
+            if selected:
+                require(machine.pacman('-S', '--needed', '--noconfirm', *selected) == 0,
+                        'Package installation failed')
         except (Refused, OSError) as error:
             # A configured but unreachable repository would stop every later system update.
             write(conf, text, conf.stat().st_mode & 0o777)
