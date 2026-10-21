@@ -33,8 +33,10 @@ compose, including ``--apply`` and a pacman ``--hook --apply``, reports that
 hold and writes nothing while the packaged Image stays new. Inspection does
 not clear it. ``--resume-updates --apply`` releases the hold and composes the
 installed packages, keeping this machine's loader, boot arguments, and
-initramfs bytes. ``--resume-updates`` without ``--apply``, or with
-``--rollback``, is refused. A failed release leaves the hold in place.
+initramfs bytes. ``--resume-updates`` without ``--apply``, with ``--rollback``,
+or from the package hook, is refused. A release that fails before any write
+leaves every byte in place. A release that fails after the video pin keeps
+the hold and the apply journal; ordinary compose does not continue it.
 
 A corrupt journal, or a ``boot.bin`` that is neither snapshot of a pending
 transition, is unresolved recovery. The refusal tells the operator to inspect
@@ -789,7 +791,11 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual((code, err), (0, ''), err)
         receipt = json.loads(out)
         self.assertFalse(receipt['applied'])
-        self.assertIn('held', receipt['status'].lower())
+        self.assertEqual(receipt['status'], MODULE.HELD_STATUS)
+        self.assertEqual(receipt['boot_sha256'], sha(boot_bytes))
+        self.assertEqual(receipt['kernel_sha256'], sha(MODULE.parse(boot_bytes)['kernel']))
+        self.assertEqual(receipt['devicetree_sha256'], sha(MODULE.parse(boot_bytes)['dtb']))
+        self.assertNotIn('takes effect at next boot', receipt['status'])
         self.assertEqual(machine.boot, boot_bytes)
         self.assertEqual(machine.previous, previous_bytes)
         self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), video_bytes)
@@ -908,6 +914,7 @@ class ComposeTests(unittest.TestCase):
             ('--resume-updates',),
             ('--resume-updates', '--rollback'),
             ('--resume-updates', '--rollback', '--apply'),
+            ('--hook', '--resume-updates', '--apply'),
         )
         for args in cases:
             with self.subTest(args=args):
@@ -924,9 +931,13 @@ class ComposeTests(unittest.TestCase):
                 self.assertFalse((machine.root / BOOT_HOLD).exists())
 
     def test_failed_resume_updates_keeps_the_hold(self):
-        machine, restored, _, _ = self.prepare_kernel_rollback_hold()
+        """The video pin is written before boot.bin. The release stays recoverable.
+
+        Ordinary compose must not finish that journal. A later
+        ``--resume-updates --apply`` does. The preflight twin writes nothing.
+        """
+        machine, restored, updated, _ = self.prepare_kernel_rollback_hold()
         hold_bytes = (machine.root / BOOT_HOLD).read_bytes()
-        video = (machine.root / MODULE.VIDEO_MANIFEST).read_bytes()
         real = os.replace
 
         def fail_boot(source, target):
@@ -935,19 +946,60 @@ class ComposeTests(unittest.TestCase):
             return real(source, target)
 
         with mock.patch.object(MODULE.os, 'replace', side_effect=fail_boot):
-            code, _, err = self.invoke(machine, '--resume-updates', '--apply')
+            code, out, err = self.invoke(machine, '--resume-updates', '--apply')
         self.assertEqual(code, 1, err)
+        self.assertEqual(out, '')
         self.assertIn('power cut while releasing the hold', err)
+        self.assertNotIn('boot.bin was not changed', err)
+        self.assertNotIn(MODULE.HELD_STATUS, out)
         self.assertEqual(machine.boot, restored)
         self.assertEqual((machine.root / BOOT_HOLD).read_bytes(), hold_bytes)
-        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), video)
+        journal = MODULE.load_journal(machine.root)
+        self.assertEqual(journal['operation'], 'apply')
+        self.assertEqual(journal['to_bytes'], updated)
+        self.assertEqual((machine.root / (BOOT_SNAPSHOTS + '/' + journal['from_sha256'])).read_bytes(),
+                         journal['from_bytes'])
+        self.assertEqual((machine.root / (BOOT_SNAPSHOTS + '/' + journal['to_sha256'])).read_bytes(),
+                         updated)
+        video = json.loads((machine.root / MODULE.VIDEO_MANIFEST).read_bytes())
+        self.assertEqual(video['boot_kernel_sha256'], sha(MODULE.parse(updated)['kernel']))
+        self.assertNotEqual(video['boot_kernel_sha256'], sha(MODULE.parse(restored)['kernel']))
         code, out, err = self.invoke(machine, '--apply')
+        self.assertEqual(code, 1, err)
+        self.assertEqual(out, '')
+        self.assertIn('resume-updates', err)
+        self.assertNotIn('boot.bin was not changed', err)
+        self.assertEqual(machine.boot, restored)
+        self.assertEqual((machine.root / BOOT_HOLD).read_bytes(), hold_bytes)
+        self.assertTrue((machine.root / BOOT_JOURNAL).is_file())
+        code, out, err = self.invoke(machine, '--resume-updates', '--apply')
         self.assertEqual((code, err), (0, ''), err)
         receipt = json.loads(out)
-        self.assertFalse(receipt['applied'])
-        self.assertIn('held', receipt['status'].lower())
+        self.assertTrue(receipt['applied'])
+        self.assertEqual(receipt['changes'], ['kernel'])
+        self.assertEqual(receipt['boot_sha256'], sha(machine.boot))
+        self.assertEqual(machine.boot, updated)
+        self.assertFalse((machine.root / BOOT_HOLD).exists())
+        self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+
+    def test_resume_updates_preflight_failure_leaves_every_byte(self):
+        machine, restored, _, _ = self.prepare_kernel_rollback_hold()
+        hold_bytes = (machine.root / BOOT_HOLD).read_bytes()
+        video = (machine.root / MODULE.VIDEO_MANIFEST).read_bytes()
+        previous = machine.previous
+        machine.put(MODULE.AUDIO_MANIFEST, json.dumps({'kernel_release': '7.1.9-other'}).encode())
+        audio = (machine.root / MODULE.AUDIO_MANIFEST).read_bytes()
+        code, out, err = self.invoke(machine, '--resume-updates', '--apply')
+        self.assertEqual(code, 1, err)
+        self.assertEqual(out, '')
+        self.assertIn('audio stack is not qualified', err)
+        self.assertIn('boot.bin was not changed.', err)
         self.assertEqual(machine.boot, restored)
+        self.assertEqual(machine.previous, previous)
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), video)
+        self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
         self.assertEqual((machine.root / BOOT_HOLD).read_bytes(), hold_bytes)
+        self.assertFalse((machine.root / BOOT_JOURNAL).exists())
 
     def test_pending_opposite_journal_still_refuses_while_held(self):
         machine, restored, updated, _ = self.prepare_kernel_rollback_hold()
@@ -1096,8 +1148,9 @@ class ComposeTests(unittest.TestCase):
         machine.put(MODULE.AUDIO_MANIFEST, json.dumps({'kernel_release': target}).encode())
         audio = (machine.root / MODULE.AUDIO_MANIFEST).read_bytes()
         code, _, err = machine.run('--apply')
+        self.assertEqual(MODULE.transition_kind(sha(third), sha(fourth)), 'refused')
         self.assertEqual(code, 1, err)
-        self.assertIn('not the same kernel release', err)
+        self.assertIn('not qualified', err)
         self.assertIn('boot.bin was not changed.', err)
         self.assertEqual(machine.boot, current)
         self.assertIsNone(machine.previous)

@@ -207,7 +207,8 @@ def guard(root, data):
             command = 'sudo m4-boot-compose --apply'
             if journal['operation'] == 'rollback':
                 command = 'sudo m4-boot-compose --rollback --apply'
-            raise Refused('A ' + journal['operation'] + ' boot transition is pending. Resume it first with ' + command)
+            raise Refused('A ' + journal['operation'] +
+                          ' boot transition is pending in the journal. Resume it first with ' + command)
         require((root / BOOT).read_bytes() == data, 'boot.bin changed while working; nothing changed, run it again')
         yield
     finally:

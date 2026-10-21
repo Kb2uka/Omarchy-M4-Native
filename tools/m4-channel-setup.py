@@ -7,7 +7,9 @@ Trusts the channel's signing key, adds the [omarchy-m4] repository in front of
 the distribution repositories, then installs the channel packages from it.
 Only the channel's own database is refreshed, so this is not a general system
 update. The boot.bin hook keeps the installed boot object in step with the
-current installed package composition. Inspection is the default;
+current installed package composition. A coherent boot hold is
+success and stays held: a reboot does not apply those boot packages. Another
+component can still need its own restart. Inspection is the default;
 --apply makes the changes.
 """
 import argparse
@@ -74,6 +76,9 @@ BACKUP = '.pre-omarchy-m4'
 MANIFESTS = ('etc/omarchy/j713-video-manifest.json', 'etc/omarchy/j713-audio-manifest.json')
 COMPATIBLE = 'sys/firmware/devicetree/base/compatible'
 BOOT = 'boot/efi/omarchy/boot.bin'
+# Composer HELD_STATUS. Success, and not a promise that reboot applies the hold.
+HELD_BOOT = ('held; boot updates remain held until '
+             'sudo m4-boot-compose --resume-updates --apply')
 
 
 class Refused(Exception):
@@ -446,7 +451,7 @@ def connect(root, apply, server, key, fingerprint, output):
                           'Inspect m4-boot-compose and resume the pending operation it reports '
                           'after fixing the cause, then rerun omarchy-m4-update') from error
     boot = machine.compose()
-    require(boot in ('current', 'updated; takes effect at next boot'),
+    require(boot in ('current', 'updated; takes effect at next boot', HELD_BOOT),
             'The packages are installed, but the boot update needs attention: boot.bin is not in step with them '
             f'({boot}). See the detailed message above, then inspect m4-boot-compose and resume '
             'the pending operation it reports after fixing the cause, then rerun omarchy-m4-update')
@@ -454,9 +459,15 @@ def connect(root, apply, server, key, fingerprint, output):
     restart = (boot_digest(root) != before or speaker_pending(root) or mca_pending(root) or
                gpu_pending(root) or headphones_pending(root) or cpu_idle_pending(root) or
                backlight_pending(root))
-    plan.update(applied=True, boot=boot, restart_needed=restart,
-                status=('connected; restart once to apply the update' if restart else
-                        'connected; future M4 fixes arrive with omarchy-m4-update'))
+    if boot == HELD_BOOT and restart:
+        text = 'connected; restart once to apply the other update; boot updates remain held'
+    elif boot == HELD_BOOT:
+        text = 'connected; boot updates remain held'
+    elif restart:
+        text = 'connected; restart once to apply the update'
+    else:
+        text = 'connected; future M4 fixes arrive with omarchy-m4-update'
+    plan.update(applied=True, boot=boot, restart_needed=restart, status=text)
     return plan
 
 
