@@ -18,6 +18,13 @@ untrusted key.
 
 The sandbox installs the legacy stubs with --noscriptlet and then runs
 m4-boot-compose itself. That is not proof the ALPM hook fired.
+
+A smaller signed sandbox then installs a newer boot and speaker than its
+repository, plus the synthetic older kernel. The explicit
+pacman -S --needed transaction downgrades those newer packages. The corrected
+setup leaves them installed and still updates the kernel. Those extra
+packages are markers, not qualified modules, and a composer stub only lets
+that setup call finish.
 """
 import argparse
 import hashlib
@@ -191,6 +198,161 @@ def base_payload(package, scratch):
     return files
 
 
+def package_version(path):
+    """pacman -Q text for a built package filename. pkgver contains no hyphen."""
+    name, version, release, _arch = path.name.removesuffix('.pkg.tar.zst').rsplit('-', 3)
+    return f'{name} {version}-{release}'
+
+
+def marker_recipe(name, version, release, depends=()):
+    """Empty signed package. The marker file is not a qualified module."""
+    dependency = 'depends=(' + ' '.join(depends) + ')\n' if depends else ''
+    marker = f'{name} {version}-{release}'
+    return f'''pkgname={name}
+pkgver={version}
+pkgrel={release}
+arch=(aarch64)
+{dependency}options=('!strip' '!debug')
+package() {{
+  printf '%s\\n' '{marker}' | install -Dm644 /dev/stdin "$pkgdir/usr/share/omarchy-m4/{name}.marker"
+}}
+'''
+
+
+def prove_newer_candidates_stay(scratch, stub, old_kernel, old_speaker, env, fingerprint, key):
+    """Explicit --needed downgrades a newer boot and speaker; setup does not.
+
+    Reuses the synthetic older kernel, makepkg, signed_repository and sandbox.
+    The repository kernel depends on omarchy-m4-boot with no version, so the
+    already-installed newer boot satisfies that dependency. The downgrade in
+    the baseline comes from naming the package. Marker bytes are not qualified
+    modules. The composer stub is not boot composition, and the setup install
+    still passes --noscriptlet in this sandbox.
+    """
+    output = scratch / 'newer-pkgs'
+    source = scratch / 'newer-src'
+    output.mkdir()
+    source.mkdir()
+    built = {}
+
+    def build(label, name, version, release, depends=()):
+        makepkg(source / label, marker_recipe(name, version, release, depends), output)
+        package = output / f'{name}-{version}-{release}-aarch64.pkg.tar.zst'
+        require(package.is_file(), 'did not build ' + label)
+        built[label] = package
+
+    build('boot-public', 'omarchy-m4-boot', '1', '1')
+    build('boot-newer', 'omarchy-m4-boot', '1', '99')
+    build('speaker-newer', 'omarchy-m4-speaker', '1', '99')
+    build('kernel-public', 'linux-m4-omarchy', '7.1.9.m4.20261008', '2', ('omarchy-m4-boot',))
+    equals = [name for name in CHANNEL['packages']
+              if name not in ('omarchy-m4-boot', 'omarchy-m4-speaker', 'linux-m4-omarchy')]
+    for name in equals:
+        build(name, name, '1', '1')
+    repo = scratch / 'newer-repo'
+    signed_repository(repo, [built['boot-public'], old_speaker, built['kernel-public'],
+                             *[built[name] for name in equals]], env, fingerprint)
+    run('chmod', '-R', 'a+rX', repo)
+    hold = scratch / 'newer-hold'
+    hold.mkdir()
+    sandbox(hold, old_kernel, stub, old_speaker)
+
+    def pacman_of(root, *args):
+        command = ['pacman', '--root', root, '--dbpath', root / 'var/lib/pacman',
+                   '--cachedir', root / 'var/cache/pacman/pkg', '--gpgdir', root / 'etc/pacman.d/gnupg',
+                   '--hookdir', root / 'etc/pacman.d/hooks', '--logfile', root / 'var/log/pacman.log',
+                   '--config', root / 'etc/pacman.conf', *args]
+        result = sudo(*command, check=False, capture_output=True, text=True)
+        print(result.stdout + result.stderr, end='')
+        return result
+
+    added = pacman_of(hold, '-U', '--noconfirm', '--noscriptlet', built['boot-newer'],
+                      built['speaker-newer'], *[built[name] for name in equals])
+    require(added.returncode == 0, 'could not install the newer candidate packages')
+    composer = scratch / 'newer-composer.py'
+    composer.write_text('import json\nprint(json.dumps({"status": "current"}))\n')
+    sudo('mkdir', '-p', hold / 'usr/bin')
+    sudo('cp', composer, hold / 'usr/bin/m4-boot-compose')
+    sudo('chmod', '755', hold / 'usr/bin/m4-boot-compose')
+    require(pacman_of(hold, '-Q', 'omarchy-m4-boot').stdout.strip() == package_version(built['boot-newer']),
+            'the fixture did not install the newer boot')
+    require(pacman_of(hold, '-Q', 'omarchy-m4-speaker').stdout.strip() == package_version(built['speaker-newer']),
+            'the fixture did not install the newer speaker')
+    require(pacman_of(hold, '-Q', 'linux-m4-omarchy').stdout.strip() == package_version(old_kernel),
+            'the fixture did not keep the synthetic older kernel')
+    baseline = scratch / 'newer-baseline'
+    kept = scratch / 'newer-kept'
+    sudo('cp', '-a', hold, baseline)
+    sudo('cp', '-a', hold, kept)
+    server = f'file://{repo}'
+    include = 'Include = ' + str(baseline / 'etc/pacman.d/omarchy-m4.conf')
+    snippet = f'[omarchy-m4]\nSigLevel = Required DatabaseRequired\nServer = {server}\n'
+    blob = scratch / 'newer-snippet.conf'
+    blob.write_text(snippet)
+    sudo('cp', blob, baseline / 'etc/pacman.d/omarchy-m4.conf')
+    current = (baseline / 'etc/pacman.conf').read_text()
+    require(current.count('[core]\n') == 1, 'sandbox pacman.conf has no single [core]')
+    updated = scratch / 'newer-pacman.conf'
+    updated.write_text(current.replace('[core]\n', include + '\n\n[core]\n', 1))
+    sudo('cp', updated, baseline / 'etc/pacman.conf')
+    for args in (('--add', str(key)), ('--lsign-key', fingerprint)):
+        trusted = sudo('pacman-key', '--gpgdir', baseline / 'etc/pacman.d/gnupg', *args, check=False,
+                       capture_output=True, text=True)
+        print(trusted.stdout + trusted.stderr, end='')
+        require(trusted.returncode == 0, 'baseline could not trust the channel key')
+    require(pacman_of(baseline, '-Sy').returncode == 0, 'baseline database refresh failed')
+    # The pre-fix updater names every requested package. --needed skips an equal
+    # version and still downgrades a newer one. No --noscriptlet: version
+    # selection happens before scriptlets, and these markers have none.
+    downgraded = pacman_of(baseline, '-S', '--needed', '--noconfirm', *CHANNEL['packages'])
+    require(downgraded.returncode == 0, 'explicit --needed baseline failed')
+    require(pacman_of(baseline, '-Q', 'omarchy-m4-boot').stdout.strip() == package_version(built['boot-public']),
+            'explicit --needed did not downgrade the newer boot')
+    require(pacman_of(baseline, '-Q', 'omarchy-m4-speaker').stdout.strip() == package_version(old_speaker),
+            'explicit --needed did not downgrade the newer speaker')
+    require(pacman_of(baseline, '-Q', 'linux-m4-omarchy').stdout.strip() == package_version(built['kernel-public']),
+            'explicit --needed did not update the older kernel')
+    setup = ['python3', ROOT / 'tools/m4-channel-setup.py', '--root', kept, '--server', server,
+             '--key-file', key, '--fingerprint', fingerprint, '--apply']
+    corrected = sudo(*setup, check=False, capture_output=True, text=True)
+    print(corrected.stdout + corrected.stderr, end='')
+    require(corrected.returncode == 0, 'corrected setup failed')
+
+    def echoed(operation):
+        matches = [line for line in corrected.stderr.splitlines()
+                   if line.startswith('+ pacman ') and operation in line.split()]
+        require(len(matches) == 1, operation + ' was not run once')
+        return matches[0]
+
+    refresh, installed_query, update_query, install = (echoed(name) for name in ('-Sy', '-Qq', '-Quq', '-S'))
+    require(corrected.stderr.index(refresh) < corrected.stderr.index(installed_query) <
+            corrected.stderr.index(update_query) < corrected.stderr.index(install),
+            'package queries did not follow the channel refresh')
+    full = '--config ' + str(kept / 'etc/pacman.conf')
+    require(full in installed_query and full in update_query and full in install,
+            'queries did not use the same config as the install')
+    require(full not in refresh, 'the channel refresh used the full config')
+    require('--needed' in install.split() and '--noconfirm' in install.split() and '--noscriptlet' in install.split(),
+            'the install transaction did not keep --needed')
+    require('-Syu' not in install.split() and '--sysupgrade' not in install.split(),
+            'setup ran a system upgrade')
+    require('linux-m4-omarchy' in install.split(), 'the older kernel was not installed')
+    require('omarchy-m4-boot' not in install.split() and 'omarchy-m4-speaker' not in install.split(),
+            'a newer candidate was named on the install')
+    plan = json.loads(corrected.stdout)
+    require(plan['install'] == ['linux-m4-omarchy'] and plan['applied'] is True and plan['boot'] == 'current'
+            and plan['restart_needed'] is False and plan['status'].startswith('connected'),
+            'corrected setup did not finish with only the kernel transaction')
+    require(pacman_of(kept, '-Q', 'omarchy-m4-boot').stdout.strip() == package_version(built['boot-newer']),
+            'corrected setup downgraded the newer boot')
+    require(pacman_of(kept, '-Q', 'omarchy-m4-speaker').stdout.strip() == package_version(built['speaker-newer']),
+            'corrected setup downgraded the newer speaker')
+    require(pacman_of(kept, '-Q', 'linux-m4-omarchy').stdout.strip() == package_version(built['kernel-public']),
+            'corrected setup did not update the older kernel')
+    require(pacman_of(kept, '-Q', equals[0]).stdout.strip() == package_version(built[equals[0]]),
+            'corrected setup changed an equal package')
+
+
 def assert_base_kernel(root, files):
     """The installed base image and every module still match that package."""
     compared = 0
@@ -361,10 +523,13 @@ def main():
             refused = sudo('pacman', '--root', root, '--dbpath', scratch / 'forged-db', '--noconfirm',
                            '--gpgdir', root / 'etc/pacman.d/gnupg', '--config', forged, '-Sy', check=False)
             require(refused.returncode != 0, 'pacman accepted a database signed by an untrusted key')
+            prove_newer_candidates_stay(scratch, stub, old, old_speaker, env, fingerprint, key)
             print('m4-channel-e2e: passed')
         finally:
-            # pacman ran as root in these two trees; remove them before the temporary directory goes.
-            subprocess.run(['sudo', 'rm', '-rf', str(scratch / 'root'), str(scratch / 'forged-db')], check=False)
+            # pacman ran as root in these trees; remove them before the temporary directory goes.
+            subprocess.run(['sudo', 'rm', '-rf', str(scratch / 'root'), str(scratch / 'forged-db'),
+                            str(scratch / 'newer-hold'), str(scratch / 'newer-baseline'),
+                            str(scratch / 'newer-kept')], check=False)
 
 
 if __name__ == '__main__':

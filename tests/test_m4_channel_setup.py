@@ -1,6 +1,10 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 KB2UKA
-"""Channel setup: trust the key, add the repository first, install without a system upgrade."""
+"""Channel setup: trust the key, add the repository first, install without a system upgrade.
+
+The fake base kernel is already current unless a test marks it upgradable. A
+newer installed channel package is not named on the install transaction.
+"""
 import importlib.util
 import io
 import json
@@ -51,15 +55,22 @@ Include = /etc/pacman.d/mirrorlist
 
 
 class FakeSystem:
-    """Records commands; answers like a machine with alpha.1 installed."""
+    """Records commands; answers like a machine with alpha.1 installed.
+
+    `installed` is the local database (-Q and -Qq). `upgradable` is the pacman
+    -Quq name list and is independent of it. `queries` overrides one of those
+    answers with (returncode, stdout, stderr) when a test needs an error.
+    """
 
     def __init__(self, root, fail=(), boot_status='current', change_boot=False, installed=('linux-m4-omarchy',),
-                 boot_then_fail=()):
+                 boot_then_fail=(), upgradable=(), queries=None):
         self.root, self.fail, self.status, self.change_boot = root, fail, boot_status, change_boot
         self.installed, self.boot_then_fail = installed, boot_then_fail
+        self.upgradable, self.queries = upgradable, queries or {}
         self.commands, self.refresh_config = [], None
 
-    def __call__(self, command, check=False, capture_output=False, text=False, stdout=None, stderr=None):
+    def __call__(self, command, check=False, capture_output=False, text=False, stdout=None, stderr=None,
+                 encoding=None, errors=None):
         self.commands.append(command)
         joined = ' '.join(map(str, command))
         # An ALPM hook or the composer can replace boot.bin and still exit failed
@@ -73,10 +84,29 @@ class FakeSystem:
             self.refresh_config = Path(command[command.index('--config') + 1]).read_text()
         if '-S' in command and self.change_boot:
             (self.root / MODULE.BOOT).write_bytes(b'composed')
+        if '-Qq' in command or '-Quq' in command:
+            return self.query_result(command)
         failed = any(word in command for word in self.fail)
         if '-Q' in command and command[-1] not in self.installed:
             failed = True
         return types.SimpleNamespace(returncode=1 if failed else 0, stdout='', stderr='')
+
+    def query_result(self, command):
+        operation = '-Qq' if '-Qq' in command else '-Quq'
+        if operation in self.queries:
+            code, out, err = self.queries[operation]
+            return types.SimpleNamespace(returncode=code, stdout=out, stderr=err)
+        # A forced failure must not look like -Quq's empty "nothing to do" exit.
+        if any(word in command for word in self.fail):
+            stderr = '' if operation == '-Qq' else 'error: query failed\n'
+            return types.SimpleNamespace(returncode=1, stdout='', stderr=stderr)
+        if operation == '-Qq':
+            return types.SimpleNamespace(
+                returncode=0, stdout=''.join(name + '\n' for name in self.installed), stderr='')
+        if self.upgradable:
+            return types.SimpleNamespace(
+                returncode=0, stdout=''.join(name + '\n' for name in self.upgradable), stderr='')
+        return types.SimpleNamespace(returncode=1, stdout='', stderr='')
 
 
 class SetupTests(unittest.TestCase):
@@ -118,20 +148,52 @@ class SetupTests(unittest.TestCase):
         with mock.patch.object(MODULE.subprocess, 'run', system):
             return MODULE.setup(self.root, apply, output=io.StringIO())
 
+    def pacman_of(self, system):
+        return [command for command in system.commands if command[0] == 'pacman']
+
+    def assert_no_system_upgrade(self, commands):
+        for command in commands:
+            for arg in command:
+                if arg.startswith('-') and not arg.startswith('--') and arg != '-Quq':
+                    self.assertNotIn('u', arg, 'setup must never run a system upgrade: ' + ' '.join(command))
+
+    def assert_queries_after_refresh(self, system):
+        """-Qq and -Quq use the full -S config and follow the channel-only refresh."""
+        pacman = self.pacman_of(system)
+        refresh = next(command for command in pacman if '-Sy' in command)
+        installed = next(command for command in pacman if '-Qq' in command)
+        updates = next(command for command in pacman if '-Quq' in command)
+        full = str(self.root / MODULE.CONF)
+        self.assertLess(system.commands.index(refresh), system.commands.index(installed))
+        self.assertLess(system.commands.index(installed), system.commands.index(updates))
+        self.assertNotEqual(refresh[refresh.index('--config') + 1], full)
+        for command in (installed, updates):
+            self.assertEqual(command[command.index('--config') + 1], full)
+            self.assertNotIn('--noscriptlet', command)
+        installs = [command for command in pacman if '-S' in command]
+        for command in installs:
+            self.assertLess(system.commands.index(updates), system.commands.index(command))
+            self.assertEqual(command[command.index('--config') + 1], full)
+        return installs
+
     def test_connects_without_a_system_upgrade(self):
         system = FakeSystem(self.root)
         result = self.setup_with(system)
         self.assertEqual((result['status'], result['restart_needed']),
                          ('connected; future M4 fixes arrive with omarchy-m4-update', False))
-        pacman = [c for c in system.commands if c[0] == 'pacman']
+        pacman = self.pacman_of(system)
         self.assertEqual(pacman[0][-2:], ['-Q', 'linux-m4-omarchy'])
         self.assertEqual(pacman[1][-2:], ['-Q', 'gst-plugins-good'])
         self.assertEqual(pacman[2][-1], '-Sy')
-        expected = ['-S', '--needed', '--noconfirm', *CHANNEL['packages'], '--noscriptlet']
-        self.assertEqual(pacman[3][-len(expected):], expected)
-        for command in pacman:
-            self.assertFalse(any(arg.startswith('-') and not arg.startswith('--') and 'u' in arg for arg in command),
-                             'setup must never run a system upgrade: ' + ' '.join(command))
+        self.assertIn('-Qq', pacman[3])
+        self.assertIn('-Quq', pacman[4])
+        # The fake base kernel is installed and not upgradable, so it stays.
+        expected_names = [name for name in CHANNEL['packages'] if name != 'linux-m4-omarchy']
+        expected = ['-S', '--needed', '--noconfirm', *expected_names, '--noscriptlet']
+        self.assertEqual(pacman[5][-len(expected):], expected)
+        self.assertEqual(result['install'], expected_names)
+        self.assert_queries_after_refresh(system)
+        self.assert_no_system_upgrade(pacman)
         self.assertIn('[options]', system.refresh_config)
         self.assertIn(self.include, system.refresh_config)
         self.assertNotIn('[core]', system.refresh_config)
@@ -179,6 +241,84 @@ class SetupTests(unittest.TestCase):
         self.assertNotIn(MODULE.SINKS, result['install'])
         install = next(c for c in system.commands if '-S' in c)
         self.assertNotIn(MODULE.SINKS, install)
+        self.assertNotIn('linux-m4-omarchy', install)
+        self.assertIn('omarchy-m4-boot', install)
+
+    def test_newer_candidates_stay_while_another_package_upgrades(self):
+        held = ('omarchy-m4-boot', 'omarchy-m4-speaker')
+        upgrade = 'omarchy-m4-gpu'
+        missing = 'omarchy-m4-headphones'
+        installed = ('linux-m4-omarchy', *held, upgrade, 'glibc')
+        upgradable = (upgrade, 'glibc')
+        system = FakeSystem(self.root, installed=installed, upgradable=upgradable)
+        result = self.setup_with(system)
+        self.assertTrue(result['status'].startswith('connected'))
+        installs = self.assert_queries_after_refresh(system)
+        self.assertEqual(len(installs), 1)
+        install = installs[0]
+        for name in held:
+            self.assertNotIn(name, install)
+            self.assertNotIn(name, result['install'])
+        self.assertIn(upgrade, install)
+        self.assertIn(missing, install)
+        self.assertNotIn('linux-m4-omarchy', install)
+        self.assertNotIn('glibc', install)
+        requested = [name for name in CHANNEL['packages']]
+        expected = [name for name in requested if name not in installed or name in upgradable]
+        self.assertEqual(result['install'], expected)
+        self.assertEqual([arg for arg in install if arg in requested], expected)
+        self.assertLess(requested.index(upgrade), requested.index(missing))
+        self.assertLess(result['install'].index(upgrade), result['install'].index(missing))
+        self.assert_no_system_upgrade(self.pacman_of(system))
+
+    def test_missing_channel_package_is_the_only_install_target(self):
+        missing = 'omarchy-m4-backlight'
+        installed = tuple(name for name in CHANNEL['packages'] if name != missing)
+        system = FakeSystem(self.root, installed=installed)
+        result = self.setup_with(system)
+        installs = self.assert_queries_after_refresh(system)
+        expected = ['-S', '--needed', '--noconfirm', missing, '--noscriptlet']
+        self.assertEqual(installs[0][-len(expected):], expected)
+        self.assertEqual(result['install'], [missing])
+
+    def test_current_packages_skip_empty_install_and_still_finish(self):
+        system = FakeSystem(self.root, installed=tuple(CHANNEL['packages']))
+        seen = []
+        real_notifier = MODULE.Machine.start_notifier
+
+        def spy(machine):
+            seen.append(machine.sandbox)
+            return real_notifier(machine)
+
+        with mock.patch.object(MODULE.Machine, 'start_notifier', spy):
+            result = self.setup_with(system)
+        self.assert_queries_after_refresh(system)
+        self.assertFalse(any('-S' in command for command in system.commands))
+        compose = [c for c in system.commands if 'm4-boot-compose' in ' '.join(map(str, c))]
+        self.assertEqual(compose[0][-1], '--apply')
+        self.assertEqual(seen, [True])
+        self.assertEqual(result['install'], [])
+        self.assertEqual(result['boot'], 'current')
+        self.assertEqual((result['status'], result['restart_needed'], result['applied']),
+                         (QUIET_STATUS, False, True))
+
+    def test_no_update_query_accepts_empty_exit_1(self):
+        system = FakeSystem(self.root, queries={'-Quq': (1, '', '')})
+        answers = []
+        real = system.__call__
+
+        def recording(command, **options):
+            result = real(command, **options)
+            if '-Quq' in command:
+                answers.append((result.returncode, result.stdout, result.stderr, options.get('capture_output')))
+            return result
+
+        with mock.patch.object(MODULE.subprocess, 'run', side_effect=recording):
+            result = MODULE.setup(self.root, True, output=io.StringIO())
+        self.assertEqual(answers, [(1, '', '', True)])
+        self.assertTrue(result['applied'])
+        install = next(command for command in system.commands if '-S' in command)
+        self.assertNotIn('linux-m4-omarchy', install)
         self.assertIn('omarchy-m4-boot', install)
 
     def test_apply_runs_one_at_a_time(self):
@@ -688,6 +828,38 @@ class SetupTests(unittest.TestCase):
                 self.setUp()
                 with self.assertRaisesRegex(MODULE.Refused, message + '.*pacman.conf was restored'):
                     self.setup_with(FakeSystem(self.root, fail=(word,)))
+                self.assertEqual((self.root / MODULE.CONF).read_text(), AIR_CONF)
+                self.assertFalse((self.root / MODULE.SNIPPET).exists())
+
+    def test_query_failures_refuse_before_install_and_restore_config(self):
+        # -Quq exit 1 is the no-update answer only when both streams are empty.
+        # A diagnostic, a nonempty body, or any other status fails closed.
+        cases = (
+            ('installed query failed', {'-Qq': (1, '', '')}, 'Could not read installed packages', False),
+            ('installed diagnostic', {'-Qq': (0, 'linux-m4-omarchy\n', 'error: could not open database\n')},
+             'Could not read installed packages', False),
+            ('installed name garbage', {'-Qq': (0, 'not a package name\n', '')},
+             'Could not read installed packages', False),
+            ('update diagnostic', {'-Quq': (1, '', 'error: failed to synchronize all databases\n')},
+             'Could not read package updates', True),
+            ('update exit 1 with names', {'-Quq': (1, 'linux-m4-omarchy\n', '')},
+             'Could not read package updates', True),
+            ('update warning on success', {'-Quq': (0, 'omarchy-m4-gpu\n', 'warning: database file\n')},
+             'Could not read package updates', True),
+            ('update other status', {'-Quq': (2, '', '')}, 'Could not read package updates', True),
+        )
+        for label, queries, message, saw_updates in cases:
+            with self.subTest(label):
+                self.setUp()
+                system = FakeSystem(self.root, queries=queries)
+                with self.assertRaisesRegex(MODULE.Refused, message + '.*pacman.conf was restored'):
+                    self.setup_with(system)
+                self.assertTrue(any('-Sy' in command for command in system.commands))
+                self.assertTrue(any('-Qq' in command for command in system.commands))
+                self.assertEqual(any('-Quq' in command for command in system.commands), saw_updates)
+                self.assertFalse(any('-S' in command for command in system.commands))
+                self.assertFalse(any('m4-boot-compose' in ' '.join(map(str, command))
+                                     for command in system.commands))
                 self.assertEqual((self.root / MODULE.CONF).read_text(), AIR_CONF)
                 self.assertFalse((self.root / MODULE.SNIPPET).exists())
 
