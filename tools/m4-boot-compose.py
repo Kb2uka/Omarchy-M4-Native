@@ -27,7 +27,7 @@ import zlib
 # The second hash is the retained-bounds kernel. It shares the release; modules
 # stay with the base kernel package. Kernel bytes move only for KERNEL_TRANSITIONS.
 OLD_KERNEL = 'c3704cfd2afb7760e73f0b9939a68864a30bd916fcd478bd960e538373123dc9'
-NEW_KERNEL = 'a7a160b6686652d7ae93218593d015febf9cc7ab0ef838148e551116befeb05e'
+NEW_KERNEL = 'ca1fff571cf1b9d8c0b07b2e97ba0a5402f93c1b7a2d54ea2c07e24a8b70f9d0'
 RELEASE = '7.1.9-m4-gpu-backport-20261008'
 KNOWN_KERNELS = {
     OLD_KERNEL: RELEASE,

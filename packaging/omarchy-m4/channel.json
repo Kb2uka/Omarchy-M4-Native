@@ -143,8 +143,8 @@
   },
   "boot_kernel": {
     "path": "usr/lib/omarchy-m4/retained-bounds/Image.gz",
-    "image_sha256": "a7a160b6686652d7ae93218593d015febf9cc7ab0ef838148e551116befeb05e",
-    "image_bytes": 18900954,
+    "image_sha256": "ca1fff571cf1b9d8c0b07b2e97ba0a5402f93c1b7a2d54ea2c07e24a8b70f9d0",
+    "image_bytes": 18900939,
     "release": "7.1.9-m4-gpu-backport-20261008"
   },
   "mca_module": {
