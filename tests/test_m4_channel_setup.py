@@ -17,6 +17,19 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 CHANNEL = json.loads((ROOT / 'packaging/omarchy-m4/channel.json').read_text())
 
+# Synthetic module bytes. Scenario tests patch the SHA constants to these digests.
+SPEAKER_STOCK_BYTES = b'speaker-stock-module'
+SPEAKER_FIXED_BYTES = b'speaker-fixed-module'
+MCA_STOCK_BYTES = b'mca-stock-module'
+MCA_FIXED_BYTES = b'mca-fixed-module'
+UNKNOWN_AUDIO = b'unknown-audio-module'
+APPLY_STATUS = 'connected; restart once to apply the update'
+QUIET_STATUS = 'connected; future M4 fixes arrive with omarchy-m4-update'
+
+
+def audio_sha(data):
+    return MODULE.hashlib.sha256(data).hexdigest()
+
 # The installed alpha.1 Air's pacman.conf, without comments (observed 2026-10-12).
 AIR_CONF = '''[options]
 HoldPkg     = pacman glibc
@@ -93,6 +106,13 @@ class SetupTests(unittest.TestCase):
         path = self.root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
+
+    def put_bytes(self, name, data):
+        path = self.root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_symlink() or (path.exists() and not path.is_dir()):
+            path.unlink()
+        path.write_bytes(data)
 
     def setup_with(self, system, apply=True):
         with mock.patch.object(MODULE.subprocess, 'run', system):
@@ -183,25 +203,381 @@ class SetupTests(unittest.TestCase):
         self.assertTrue(result['restart_needed'])
         self.assertIn('restart once', result['status'])
 
-    def test_restart_reported_when_a_speaker_swap_is_pending(self):
-        self.put(MODULE.SPEAKER_MODULE, 'alpha.1 module')
-        self.put(MODULE.SPEAKER_STAGED, 'fixed module')
+    def _patch_audio_identities(self):
+        """Patch only the four SHA identities. Path constants stay as shipped."""
+        return mock.patch.multiple(
+            MODULE, create=True,
+            SPEAKER_STOCK=audio_sha(SPEAKER_STOCK_BYTES),
+            SPEAKER_FIXED=audio_sha(SPEAKER_FIXED_BYTES),
+            MCA_STOCK=audio_sha(MCA_STOCK_BYTES),
+            MCA_FIXED=audio_sha(MCA_FIXED_BYTES))
+
+    def _audio_identities(self, name):
+        """Read the SHA constants on each call so a fixture patch is visible."""
+        if name == 'speaker':
+            stock_bytes, fixed_bytes = SPEAKER_STOCK_BYTES, SPEAKER_FIXED_BYTES
+            stock_sha, fixed_sha = MODULE.SPEAKER_STOCK, MODULE.SPEAKER_FIXED
+        elif name == 'mca':
+            stock_bytes, fixed_bytes = MCA_STOCK_BYTES, MCA_FIXED_BYTES
+            stock_sha, fixed_sha = MODULE.MCA_STOCK, MODULE.MCA_FIXED
+        else:
+            raise AssertionError(name)
+        return stock_bytes, fixed_bytes, stock_sha, fixed_sha
+
+    def _assert_patched_identities(self):
+        for name in ('speaker', 'mca'):
+            stock_bytes, fixed_bytes, stock_sha, fixed_sha = self._audio_identities(name)
+            self.assertEqual(stock_sha, audio_sha(stock_bytes))
+            self.assertEqual(fixed_sha, audio_sha(fixed_bytes))
+            self.assertNotEqual(stock_sha, fixed_sha)
+            self.assertNotIn(audio_sha(UNKNOWN_AUDIO), (stock_sha, fixed_sha))
+
+    def component_paths(self, name):
+        if name == 'speaker':
+            return (MODULE.SPEAKER_MODULE, MODULE.SPEAKER_STAGED, MODULE.SPEAKER_HOLD, MODULE.SPEAKER_ROLLBACK)
+        if name == 'mca':
+            return (MODULE.MCA_MODULE, MODULE.MCA_STAGED, MODULE.MCA_HOLD, MODULE.MCA_ROLLBACK)
+        raise AssertionError(name)
+
+    def _release_of(self, module_rel):
+        marker = '/j713-audio/'
+        start = module_rel.index(marker) + len(marker)
+        return module_rel[start:module_rel.index('/', start)]
+
+    def _place_bytes(self, rel, data, kind):
+        path = self.root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_symlink():
+            path.unlink()
+        elif path.is_dir():
+            path.rmdir()
+        elif path.exists():
+            path.unlink()
+        if kind == 'missing':
+            return
+        if kind == 'dir':
+            path.mkdir()
+            return
+        if kind == 'file':
+            path.write_bytes(data)
+            return
+        if kind == 'symlink':
+            real = path.with_name(path.name + '.real')
+            real.write_bytes(data)
+            path.symlink_to(real.name)
+            return
+        raise AssertionError(kind)
+
+    def _write_files_pin(self, rel, module_rel, pin, release, pin_path=None, merge=False):
+        """Write the files pin selected by exact path. A second call keeps the other pin."""
+        key = '/' + (module_rel if pin_path is None else pin_path)
+        path = self.root / rel
+        document = {'kernel_release': release, 'files': {key: pin}}
+        if merge and path.is_file() and not path.is_symlink():
+            try:
+                existing = json.loads(path.read_text())
+            except (ValueError, UnicodeError):
+                existing = None
+            files = existing.get('files') if isinstance(existing, dict) else None
+            if isinstance(files, dict):
+                document['files'] = dict(files)
+                document['files'][key] = pin
+        self.put(rel, json.dumps(document, indent=2, sort_keys=True) + '\n')
+
+    def _plant_backup(self, name, kind, module_rel, stock_bytes, stock_sha, fixed_sha, release):
+        """Stock backup is the module hash plus that module's files pin. Not a full manifest copy."""
+        if not kind:
+            return
+        state = self.component_paths(name)[2].rpartition('/')[0]
+        module_backup = state + '/alpha1-module.ko'
+        manifest_backup = state + '/alpha1-manifest.json'
+        if kind == 'missing-half':
+            self.put_bytes(module_backup, stock_bytes)
+            return
+        if kind == 'symlink':
+            self.put_bytes(state + '/real-stock-module.ko', stock_bytes)
+            link = self.root / module_backup
+            if link.is_symlink() or link.exists():
+                link.unlink()
+            link.symlink_to('real-stock-module.ko')
+            self._write_files_pin(manifest_backup, module_rel, stock_sha, release)
+            return
+        if kind == 'stock':
+            data, pin = stock_bytes, stock_sha
+        elif kind == 'wrong-module':
+            data, pin = b'not-the-stock-module', stock_sha
+        elif kind == 'wrong-pin':
+            data, pin = stock_bytes, fixed_sha
+        else:
+            raise AssertionError(kind)
+        self.put_bytes(module_backup, data)
+        self._write_files_pin(manifest_backup, module_rel, pin, release)
+
+    def _plant_staged(self, rel, kind, stock_bytes, fixed_bytes):
+        if kind in (None, 'missing'):
+            return
+        if kind == 'symlink':
+            self._place_bytes(rel, fixed_bytes, 'symlink')
+            return
+        payloads = {'stock': stock_bytes, 'fixed': fixed_bytes, 'unknown': UNKNOWN_AUDIO,
+                    'corrupt': b'corrupt-staged-audio'}
+        if kind not in payloads:
+            raise AssertionError(kind)
+        self.put_bytes(rel, payloads[kind])
+
+    def _plant_marker(self, rel, kind):
+        if not kind:
+            return
+        if kind is True:
+            self.put(rel, '')
+            return
+        if kind == 'symlink':
+            self.put_bytes(rel + '.real', b'')
+            link = self.root / rel
+            if link.is_symlink() or link.exists():
+                link.unlink()
+            link.symlink_to(Path(rel).name + '.real')
+            return
+        raise AssertionError(kind)
+
+    def plant_audio_state(self, name, installed, pin, staged=None, release=None, backup=None,
+                          hold=False, rollback=False, manifest='present', module='file', pin_path=None):
+        """Plant one component's bytes, files pin, stage, and optional stock backup."""
+        module_rel, staged_rel, hold_rel, rollback_rel = self.component_paths(name)
+        stock_bytes, fixed_bytes, stock_sha, fixed_sha = self._audio_identities(name)
+        payloads = {'stock': stock_bytes, 'fixed': fixed_bytes, 'unknown': UNKNOWN_AUDIO}
+        if installed not in payloads:
+            raise AssertionError(installed)
+        pins = {'stock': stock_sha, 'fixed': fixed_sha, 'unknown': audio_sha(b'not-a-known-pin'),
+                'matches': audio_sha(payloads[installed])}
+        if pin not in pins:
+            raise AssertionError(pin)
+        chosen_release = release or self._release_of(module_rel)
+        self._place_bytes(module_rel, payloads[installed], module)
+        self._plant_staged(staged_rel, staged, stock_bytes, fixed_bytes)
+        manifest_rel = MODULE.MANIFESTS[1]
+        if manifest == 'missing':
+            (self.root / manifest_rel).unlink(missing_ok=True)
+        elif manifest == 'malformed':
+            self.put(manifest_rel, '{')
+        elif manifest == 'present':
+            self._write_files_pin(manifest_rel, module_rel, pins[pin], chosen_release,
+                                  pin_path=pin_path, merge=True)
+        else:
+            raise AssertionError(manifest)
+        self._plant_backup(name, backup, module_rel, stock_bytes, stock_sha, fixed_sha, chosen_release)
+        if hold:
+            self.put(hold_rel, '')
+        self._plant_marker(rollback_rel, rollback)
+
+    def assert_audio_pending(self, name, needed, through_setup=True, alone=True):
+        pending = MODULE.speaker_pending if name == 'speaker' else MODULE.mca_pending
+        other = MODULE.mca_pending if name == 'speaker' else MODULE.speaker_pending
+        self.assertEqual(pending(self.root), needed)
+        if alone:
+            self.assertEqual(other(self.root), False)
+        if not through_setup:
+            return
         result = self.setup_with(FakeSystem(self.root))
         self.assertEqual((result['restart_needed'], result['status']),
-                         (True, 'connected; restart once to apply the update'))
-        self.put(MODULE.SPEAKER_HOLD, '')
-        self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'held: nothing applies')
-        (self.root / MODULE.SPEAKER_HOLD).unlink()
-        self.put(MODULE.SPEAKER_MODULE, 'fixed module')
-        self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'already swapped')
+                         (needed, APPLY_STATUS if needed else QUIET_STATUS))
 
-    def test_restart_reported_when_mca_is_pending_and_boot_is_already_current(self):
-        """MCA staged against different bytes needs a restart; boot itself is current.
+    def _run_audio_cases(self, cases):
+        self._assert_patched_identities()
+        for name in ('speaker', 'mca'):
+            for case in cases:
+                with self.subTest(component=name, state=case['label']):
+                    self.setUp()
+                    options = dict(case)
+                    needed = options.pop('needed')
+                    through = options.pop('through_setup', True)
+                    options.pop('label')
+                    self.plant_audio_state(name, **options)
+                    self.assert_audio_pending(name, needed, through_setup=through)
 
-        The shipped MCA paths are the tool's own constants, independent of the
-        speaker paths. Synthetic bytes are enough for this advisory comparison
-        of the staged file with the installed file.
+    def _assert_audio_pair(self, speaker, mca):
+        self.assertEqual(MODULE.speaker_pending(self.root), speaker)
+        self.assertEqual(MODULE.mca_pending(self.root), mca)
+        restart = speaker or mca
+        result = self.setup_with(FakeSystem(self.root))
+        self.assertEqual((result['restart_needed'], result['status']),
+                         (restart, APPLY_STATUS if restart else QUIET_STATUS))
+
+    def test_audio_states_classify_forward_work(self):
+        """Stock with the fixed stage is pending; current, reverse, and unknown are not.
+
+        Fixture digests stand in for the two SHA identities. Fresh stock does not
+        need a backup. Forward interruption is pending only with a stock backup
+        and a regular staged file of the fixed identity. A recognized result is
+        pending work, not a promise that every later boot write succeeds.
         """
+        cases = (
+            dict(installed='stock', pin='stock', staged='fixed', needed=True, label='stock to fixed'),
+            dict(installed='fixed', pin='fixed', staged='fixed', needed=False, label='already fixed'),
+            dict(installed='fixed', pin='fixed', staged='corrupt', needed=False,
+                 label='fixed with a different stage'),
+            dict(installed='fixed', pin='stock', staged='fixed', backup='stock', needed=True,
+                 label='forward interruption with stock backup'),
+            dict(installed='fixed', pin='stock', staged='fixed', needed=False,
+                 label='forward interruption without backup'),
+            dict(installed='fixed', pin='stock', staged='fixed', backup='wrong-module', needed=False,
+                 label='forward interruption with the wrong module backup'),
+            dict(installed='fixed', pin='stock', staged='fixed', backup='wrong-pin', needed=False,
+                 label='forward interruption with the wrong pin backup'),
+            dict(installed='fixed', pin='stock', staged='fixed', backup='missing-half', needed=False,
+                 label='forward interruption with half a backup'),
+            dict(installed='fixed', pin='stock', staged='fixed', backup='symlink', needed=False,
+                 label='forward interruption with a symlink backup'),
+            dict(installed='fixed', pin='stock', staged='corrupt', backup='stock', needed=False,
+                 label='forward interruption with a corrupt stage'),
+            dict(installed='fixed', pin='stock', staged='missing', backup='stock', needed=False,
+                 label='forward interruption without a stage'),
+            dict(installed='fixed', pin='stock', staged='symlink', backup='stock', needed=False,
+                 label='forward interruption with a symlink stage'),
+            dict(installed='stock', pin='fixed', staged='stock', needed=False,
+                 label='reverse without a marker'),
+            dict(installed='stock', pin='fixed', staged='stock', backup='stock', needed=False,
+                 label='reverse backup without a marker'),
+            dict(installed='unknown', pin='stock', staged='fixed', needed=False, label='unknown module bytes'),
+            dict(installed='unknown', pin='matches', staged='fixed', needed=False,
+                 label='unknown bytes are not a known pin'),
+            dict(installed='unknown', pin='matches', staged='unknown', needed=False,
+                 label='unknown bytes that match their stage'),
+            dict(installed='stock', pin='unknown', staged='stock', needed=False, label='unknown pin'),
+            dict(installed='stock', pin='stock', staged='fixed', release='not-the-release', needed=False,
+                 label='wrong release'),
+            dict(installed='stock', pin='stock', staged='corrupt', needed=False,
+                 label='stock with a corrupt stage'),
+            dict(installed='stock', pin='stock', staged='missing', needed=False, label='stock without a stage'),
+            dict(installed='stock', pin='stock', staged='symlink', needed=False,
+                 label='stock with a symlink stage'),
+            dict(installed='stock', pin='stock', staged='fixed', pin_path='usr/lib/elsewhere.ko', needed=False,
+                 label='pin on another path'),
+            dict(installed='stock', pin='stock', staged='fixed', manifest='malformed', needed=False,
+                 label='malformed manifest'),
+            dict(installed='stock', pin='stock', staged='fixed', manifest='missing', through_setup=False,
+                 needed=False, label='missing manifest'),
+            dict(installed='stock', pin='stock', staged='fixed', module='symlink', needed=False,
+                 label='symlink module'),
+            dict(installed='stock', pin='stock', staged='fixed', module='dir', needed=False,
+                 label='directory module'),
+            dict(installed='stock', pin='stock', staged='fixed', module='missing', needed=False,
+                 label='missing module'),
+        )
+        with self._patch_audio_identities():
+            self._run_audio_cases(cases)
+
+    def test_audio_rollback_marker_requires_a_recognized_backup(self):
+        """A regular rollback marker is pending only for a recognized state with a stock backup.
+
+        The marker wins over hold, including restored stock. Unknown bytes, an
+        unknown pin, a bad backup, or a symlink marker are not pending. A corrupt
+        staged file is not forward repair, and it does not cancel that marker.
+        """
+        cases = (
+            dict(installed='fixed', pin='fixed', staged='fixed', backup='stock', hold=True, rollback=True,
+                 needed=True, label='fixed with marker'),
+            dict(installed='fixed', pin='stock', staged='fixed', backup='stock', hold=True, rollback=True,
+                 needed=True, label='forward with marker'),
+            dict(installed='stock', pin='fixed', staged='stock', backup='stock', hold=True, rollback=True,
+                 needed=True, label='reverse with marker'),
+            dict(installed='stock', pin='stock', staged='fixed', backup='stock', hold=True, rollback=True,
+                 needed=True, label='restored stock with marker'),
+            dict(installed='stock', pin='stock', staged='corrupt', backup='stock', hold=True, rollback=True,
+                 needed=True, label='restored stock marker ignores the stage'),
+            dict(installed='fixed', pin='stock', staged='corrupt', backup='stock', hold=True, rollback=True,
+                 needed=True, label='forward marker ignores the stage'),
+            dict(installed='fixed', pin='fixed', staged='fixed', hold=True, rollback=True, needed=False,
+                 label='fixed marker without backup'),
+            dict(installed='fixed', pin='stock', staged='fixed', hold=True, rollback=True, needed=False,
+                 label='forward marker without backup'),
+            dict(installed='stock', pin='fixed', staged='stock', hold=True, rollback=True, needed=False,
+                 label='reverse marker without backup'),
+            dict(installed='stock', pin='stock', staged='fixed', hold=True, rollback=True, needed=False,
+                 label='restored stock marker without backup'),
+            dict(installed='fixed', pin='stock', staged='fixed', backup='wrong-module', hold=True, rollback=True,
+                 needed=False, label='marker with the wrong module backup'),
+            dict(installed='fixed', pin='stock', staged='fixed', backup='wrong-pin', hold=True, rollback=True,
+                 needed=False, label='marker with the wrong pin backup'),
+            dict(installed='fixed', pin='stock', staged='fixed', backup='missing-half', hold=True, rollback=True,
+                 needed=False, label='marker with half a backup'),
+            dict(installed='fixed', pin='stock', staged='fixed', backup='symlink', hold=True, rollback=True,
+                 needed=False, label='marker with a symlink backup'),
+            dict(installed='unknown', pin='stock', staged='fixed', backup='stock', hold=True, rollback=True,
+                 needed=False, label='unknown bytes with marker'),
+            dict(installed='stock', pin='unknown', staged='stock', backup='stock', hold=True, rollback=True,
+                 needed=False, label='unknown pin with marker'),
+            dict(installed='unknown', pin='matches', staged='fixed', backup='stock', hold=True, rollback=True,
+                 needed=False, label='matching unknown pin with marker'),
+            dict(installed='stock', pin='stock', staged='fixed', backup='stock', hold=True, rollback=True,
+                 release='not-the-release', needed=False, label='wrong release with marker'),
+            dict(installed='stock', pin='stock', staged='fixed', backup='stock', hold=True, rollback=True,
+                 pin_path='usr/lib/elsewhere.ko', needed=False, label='pin on another path with marker'),
+            dict(installed='stock', pin='stock', staged='fixed', backup='stock', hold=True, rollback=True,
+                 manifest='malformed', needed=False, label='malformed manifest with marker'),
+            dict(installed='stock', pin='stock', staged='fixed', backup='stock', hold=True, rollback=True,
+                 manifest='missing', through_setup=False, needed=False,
+                 label='missing manifest with marker'),
+            dict(installed='stock', pin='stock', staged='fixed', backup='stock', hold=True, rollback=True,
+                 module='symlink', needed=False, label='symlink module with marker'),
+            dict(installed='stock', pin='stock', staged='fixed', backup='stock', hold=True, rollback=True,
+                 module='dir', needed=False, label='directory module with marker'),
+            dict(installed='stock', pin='stock', staged='fixed', backup='stock', hold=True, rollback=True,
+                 module='missing', needed=False, label='missing module with marker'),
+            dict(installed='stock', pin='stock', staged='fixed', hold=True, needed=False,
+                 label='hold without marker on stock'),
+            dict(installed='fixed', pin='stock', staged='fixed', backup='stock', hold=True, needed=False,
+                 label='hold without marker on forward'),
+            dict(installed='stock', pin='fixed', staged='stock', hold=True, needed=False,
+                 label='hold without marker on reverse'),
+            dict(installed='fixed', pin='fixed', staged='fixed', hold=True, needed=False,
+                 label='hold without marker on fixed'),
+            dict(installed='fixed', pin='fixed', staged='fixed', backup='stock', rollback='symlink', needed=False,
+                 label='symlink marker on current'),
+            dict(installed='stock', pin='stock', staged='fixed', backup='stock', hold=True, rollback='symlink',
+                 needed=False, label='symlink marker does not beat hold'),
+        )
+        with self._patch_audio_identities():
+            self._run_audio_cases(cases)
+            with self.subTest(state='speaker pending while mca marker is unknown'):
+                self.setUp()
+                self.plant_audio_state('speaker', 'stock', 'stock', staged='fixed')
+                self.plant_audio_state('mca', 'unknown', 'stock', staged='fixed', backup='stock',
+                                       hold=True, rollback=True)
+                self._assert_audio_pair(True, False)
+            with self.subTest(state='mca marker while speaker is held'):
+                self.setUp()
+                self.plant_audio_state('speaker', 'stock', 'stock', staged='fixed', hold=True)
+                self.plant_audio_state('mca', 'fixed', 'fixed', staged='fixed', backup='stock',
+                                       hold=True, rollback=True)
+                self._assert_audio_pair(False, True)
+            with self.subTest(state='speaker hold does not hide a pending mca swap'):
+                self.setUp()
+                self.plant_audio_state('speaker', 'stock', 'stock', staged='fixed', hold=True)
+                self.plant_audio_state('mca', 'stock', 'stock', staged='fixed')
+                self._assert_audio_pair(False, True)
+
+    def test_audio_sha_identities_match_the_speaker_helper(self):
+        """Updater stock and fixed SHA constants are the helper's shipped pins.
+
+        Paths and the release are compared to the helper unchanged. The SHA
+        comparison is last: a missing constant is an AttributeError.
+        """
+        spec = importlib.util.spec_from_file_location(
+            'm4_speaker_module_shipped', ROOT / 'tools/m4-speaker-module.py')
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        self.assertEqual(MODULE.SPEAKER_MODULE, helper.MODULE)
+        self.assertEqual(MODULE.SPEAKER_STAGED, helper.STAGED)
+        self.assertEqual(MODULE.SPEAKER_HOLD, helper.STATE + '/hold')
+        self.assertEqual(MODULE.SPEAKER_ROLLBACK, helper.STATE + '/rollback')
+        self.assertEqual(MODULE.MCA_MODULE, helper.MCA_MODULE)
+        self.assertEqual(MODULE.MCA_STAGED, helper.MCA_STAGED)
+        self.assertEqual(MODULE.MCA_HOLD, helper.MCA_STATE + '/hold')
+        self.assertEqual(MODULE.MCA_ROLLBACK, helper.MCA_STATE + '/rollback')
+        self.assertEqual(MODULE.MANIFESTS[1], helper.MANIFEST)
+        self.assertEqual(self._release_of(MODULE.SPEAKER_MODULE), helper.RELEASE)
+        self.assertEqual(self._release_of(MODULE.MCA_MODULE), helper.RELEASE)
         self.assertEqual(
             MODULE.MCA_MODULE,
             'usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-apple-mca.ko')
@@ -212,99 +588,10 @@ class SetupTests(unittest.TestCase):
         self.assertNotEqual(MODULE.MCA_STAGED, MODULE.SPEAKER_STAGED)
         self.assertNotEqual(MODULE.MCA_HOLD, MODULE.SPEAKER_HOLD)
         self.assertNotEqual(MODULE.MCA_ROLLBACK, MODULE.SPEAKER_ROLLBACK)
-        self.put(MODULE.MCA_MODULE, 'known old mca')
-        self.put(MODULE.MCA_STAGED, 'staged mca')
-        result = self.setup_with(FakeSystem(self.root))
-        self.assertEqual((result['restart_needed'], result['status']),
-                         (True, 'connected; restart once to apply the update'))
-        self.put(MODULE.MCA_MODULE, 'staged mca')
-        self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'], 'same bytes')
-        self.put(MODULE.MCA_MODULE, 'known old mca')
-        self.put(MODULE.MCA_HOLD, '')
-        self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'],
-                         'mca hold: nothing applies')
-        (self.root / MODULE.MCA_HOLD).unlink()
-        self.put(MODULE.SPEAKER_HOLD, '')
-        self.assertTrue(self.setup_with(FakeSystem(self.root))['restart_needed'],
-                        'speaker hold does not hide a pending MCA swap')
-
-    def component_bytes(self, name):
-        """Installed path, staged path, hold, and rollback marker for one audio component."""
-        if name == 'speaker':
-            return (MODULE.SPEAKER_MODULE, MODULE.SPEAKER_STAGED, MODULE.SPEAKER_HOLD,
-                    'var/lib/omarchy-m4/speaker-module/rollback', 'snd_soc_j713_group')
-        return (MODULE.MCA_MODULE, MODULE.MCA_STAGED, MODULE.MCA_HOLD,
-                'var/lib/omarchy-m4/mca-module/rollback', 'snd_soc_apple_mca')
-
-    def plant_audio(self, name, installed, staged, pins):
-        """Module bytes plus that component's manifest pins. ``pins`` is sha256/size/note."""
-        module, staged_path, _, _, component = self.component_bytes(name)
-        self.put(module, installed)
-        self.put(staged_path, staged)
-        document = {
-            'kernel_release': '7.1.9-m4-gpu-backport-20261008',
-            'files': {'/' + module: pins['sha256']},
-            'file_metadata': {module: {'sha256': pins['sha256'], 'size': pins['size'], 'mode': 420}},
-            'module_artifacts': {component: {
-                'module': component, 'note': pins['note'], 'path': '/' + module,
-                'sha256': pins['sha256'], 'size': pins['size']}},
-            'modules': {component: pins['note']},
-        }
-        self.put(MODULE.MANIFESTS[1], json.dumps(document, indent=2, sort_keys=True) + '\n')
-
-    def test_pending_rollback_needs_a_restart_ahead_of_hold(self):
-        """A rollback marker is a boot write even when the module bytes already match.
-
-        Boot handles the rollback marker before the hold marker, so a hold does
-        not cancel it. The other component's hold does not hide it. A hold with
-        no rollback marker and matching bytes still needs no restart.
-        """
-        fixed = 'fixed module bytes'
-        stock_pins = {'sha256': 'ab' * 32, 'size': len('stock module bytes'), 'note': 'stock-note'}
-        for name in ('speaker', 'mca'):
-            with self.subTest(component=name):
-                self.setUp()
-                module, _, hold, rollback, _ = self.component_bytes(name)
-                self.plant_audio(name, fixed, fixed, stock_pins)
-                self.put(rollback, '')
-                self.put(hold, '')
-                other = 'mca' if name == 'speaker' else 'speaker'
-                _, _, other_hold, _, _ = self.component_bytes(other)
-                self.put(other_hold, '')
-                pending = MODULE.speaker_pending if name == 'speaker' else MODULE.mca_pending
-                other_pending = MODULE.mca_pending if name == 'speaker' else MODULE.speaker_pending
-                self.assertTrue(pending(self.root))
-                self.assertFalse(other_pending(self.root))
-                result = self.setup_with(FakeSystem(self.root))
-                self.assertEqual((result['restart_needed'], result['status']),
-                                 (True, 'connected; restart once to apply the update'))
-                (self.root / rollback).unlink()
-                self.assertFalse(pending(self.root))
-                self.assertFalse(self.setup_with(FakeSystem(self.root))['restart_needed'])
-
-    def test_forward_interruption_needs_a_restart_when_bytes_already_match(self):
-        """New module bytes with the old manifest pins still boot into a manifest write.
-
-        Comparing only the staged file to the installed file reports no restart.
-        Each component is independent of the other's hold.
-        """
-        stock, fixed = 'stock module bytes', 'fixed module bytes'
-        stock_pins = {'sha256': MODULE.hashlib.sha256(stock.encode()).hexdigest(), 'size': len(stock),
-                      'note': 'stock-note-value'}
-        for name in ('speaker', 'mca'):
-            with self.subTest(component=name):
-                self.setUp()
-                self.plant_audio(name, fixed, fixed, stock_pins)
-                other = 'mca' if name == 'speaker' else 'speaker'
-                _, _, other_hold, _, _ = self.component_bytes(other)
-                self.put(other_hold, '')
-                pending = MODULE.speaker_pending if name == 'speaker' else MODULE.mca_pending
-                other_pending = MODULE.mca_pending if name == 'speaker' else MODULE.speaker_pending
-                self.assertTrue(pending(self.root))
-                self.assertFalse(other_pending(self.root))
-                result = self.setup_with(FakeSystem(self.root))
-                self.assertEqual((result['restart_needed'], result['status']),
-                                 (True, 'connected; restart once to apply the update'))
+        self.assertEqual(MODULE.SPEAKER_STOCK, helper.STOCK['sha256'])
+        self.assertEqual(MODULE.SPEAKER_FIXED, helper.FIXED['sha256'])
+        self.assertEqual(MODULE.MCA_STOCK, helper.MCA_STOCK['sha256'])
+        self.assertEqual(MODULE.MCA_FIXED, helper.MCA_FIXED['sha256'])
 
     def test_restart_reported_when_a_gpu_swap_is_pending(self):
         alpha1 = b'alpha.1 gpu module'
