@@ -5,7 +5,7 @@
 # and the m1n1-* notices from display/j713/m1n1-base/, by tools/build-m4-packages.py.
 pkgname=omarchy-m4-boot
 pkgver=1
-pkgrel=16
+pkgrel=17
 pkgdesc='Keeps the J713 boot.bin in step with the packaged M4 kernel and devicetree'
 arch=('aarch64')
 url='https://github.com/Kb2uka/Omarchy-M4-Native'
@@ -18,7 +18,8 @@ license=('MIT' 'GPL-2.0-only' 'GPL-2.0-or-later OR MIT' 'BSD-2-Clause OR GPL-2.0
 # omarchy-m4-update run that installs this version.
 # omarchy-m4-speaker>=1-3 (from 1-16): an older setup request omits the speaker
 # package, 1-1 does not stage the fixed MCA module, and 1-2 still requires the
-# manifest to match one exact byte layout.
+# manifest to match one exact byte layout. 1-17 is the same speaker package;
+# its setup script reports a pending rollback and a forward interruption.
 depends=('python' 'pacman' 'omarchy-m4-gpu' 'omarchy-m4-headphones' 'omarchy-m4-cpu' 'omarchy-m4-evdi' 'omarchy-m4-backlight' 'omarchy-m4-speaker>=1-3')
 install=omarchy-m4-boot.install
 options=('!strip' '!debug')
@@ -48,7 +49,7 @@ sha256sums=('235751ff1eefb1ef137e3875e0c9e676484d0a7b09410a54bec31969ff804f0b'
             'aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3'
             'aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3'
             'a116d5a6aa09bc2aec1393ef737f21d9cc0eaac474615cb215f48491b7db8a56'
-            '887f3a2458c4732697c14019ff65c00faf3ee492d907752523a1eeb069777bb2'
+            '402f8a69f2858394c11810aab947f757fb5d22535743668fe6c03c3b07d7cd15'
             'bde52f8012b209e06c0e2b41325413c642ae4c6e6eedce7ff04331ca4d50c0f1'
             'f605580fc7e8e672cee85f5afee930550b8f445f026b5a04c1828e52c88ea6de'
             'afb025a8f1c946d164fe962f20b2e9d5cd987cfc668985eee62e41767722b2aa'

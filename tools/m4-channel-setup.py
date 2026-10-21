@@ -39,9 +39,11 @@ LOCK = 'run/lock/omarchy-m4-setup.lock'
 SPEAKER_STAGED = 'usr/lib/omarchy-m4/j713-audio/snd-soc-j713-group.ko'
 SPEAKER_MODULE = 'usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-j713-group.ko'
 SPEAKER_HOLD = 'var/lib/omarchy-m4/speaker-module/hold'
+SPEAKER_ROLLBACK = 'var/lib/omarchy-m4/speaker-module/rollback'
 MCA_STAGED = 'usr/lib/omarchy-m4/j713-audio/snd-soc-apple-mca.ko'
 MCA_MODULE = 'usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-apple-mca.ko'
 MCA_HOLD = 'var/lib/omarchy-m4/mca-module/hold'
+MCA_ROLLBACK = 'var/lib/omarchy-m4/mca-module/rollback'
 GPU_STAGED = 'usr/lib/omarchy-m4/gpu/asahi_m4.ko'
 GPU_MODULE = 'opt/m4-gpu/asahi_m4.ko'
 GPU_HOLD = 'var/lib/omarchy-m4/gpu-module/hold'
@@ -199,24 +201,62 @@ class Machine:
         return subprocess.run(command, check=False, stdout=sys.stderr).returncode
 
 
-def speaker_pending(root):
-    """Whether omarchy-m4-speaker staged a module that the next boot will swap in."""
-    staged, module = root / SPEAKER_STAGED, root / SPEAKER_MODULE
-    if not staged.is_file() or not module.is_file() or (root / SPEAKER_HOLD).exists():
+def audio_files_pin_needs_restart(root, module_rel, installed):
+    """True only for a present, valid files pin that disagrees with these bytes.
+
+    A missing manifest, a parse failure, or a pin that is not a digest string
+    is not a forward interruption. A restart does not repair those.
+    """
+    try:
+        document = json.loads((root / MANIFESTS[1]).read_text())
+        files = document.get('files') if isinstance(document, dict) else None
+        pin = files.get('/' + module_rel) if isinstance(files, dict) else None
+        if not isinstance(pin, str) or len(pin) != 64:
+            return False
+        int(pin, 16)
+    except (OSError, ValueError, TypeError, AttributeError, UnicodeError):
         return False
-    return hashlib.sha256(module.read_bytes()).digest() != hashlib.sha256(staged.read_bytes()).digest()
+    return pin.lower() != hashlib.sha256(installed).hexdigest()
+
+
+def audio_pending(root, staged_rel, module_rel, hold_rel, rollback_rel):
+    """Whether the next boot will change this one audio component.
+
+    Boot handles that component's rollback marker before its hold, so a
+    rollback still needs a restart while held. A hold with no rollback
+    suppresses the ordinary swap. Missing staged or installed bytes are not
+    a pending apply. Equal bytes stay current unless the audio manifest's
+    files pin for this module is a valid string that differs from the
+    installed digest.
+    """
+    rollback = root / rollback_rel
+    if rollback.is_file() and not rollback.is_symlink():
+        return True
+    if (root / hold_rel).exists():
+        return False
+    staged, module = root / staged_rel, root / module_rel
+    try:
+        if not staged.is_file() or not module.is_file():
+            return False
+        installed = module.read_bytes()
+        if hashlib.sha256(installed).digest() != hashlib.sha256(staged.read_bytes()).digest():
+            return True
+    except OSError:
+        return False
+    return audio_files_pin_needs_restart(root, module_rel, installed)
+
+
+def speaker_pending(root):
+    """Whether the next boot will swap or roll back the speaker module."""
+    return audio_pending(root, SPEAKER_STAGED, SPEAKER_MODULE, SPEAKER_HOLD, SPEAKER_ROLLBACK)
 
 
 def mca_pending(root):
-    """Whether a staged MCA module differs from the installed one and is not held.
+    """Whether the next boot will swap or roll back the MCA module.
 
-    Independent of the speaker hold: each component has its own staged file,
-    installed file, and hold marker.
+    Independent of the speaker paths, hold, and rollback marker.
     """
-    staged, module = root / MCA_STAGED, root / MCA_MODULE
-    if not staged.is_file() or not module.is_file() or (root / MCA_HOLD).exists():
-        return False
-    return hashlib.sha256(module.read_bytes()).digest() != hashlib.sha256(staged.read_bytes()).digest()
+    return audio_pending(root, MCA_STAGED, MCA_MODULE, MCA_HOLD, MCA_ROLLBACK)
 
 
 def gpu_pending(root):
