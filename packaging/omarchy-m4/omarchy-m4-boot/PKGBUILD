@@ -30,7 +30,7 @@ source=('m4-boot-compose.py' '90-omarchy-m4-boot.hook' 'm4-update-check.py'
         'GPL-2.0-only.txt'
         'speakersafetyd-j713-realtime.conf' 'm4-channel-setup.py' 'omarchy-m4-update' 'm4-lid-lock.py'
         "j713-backlight.dtb::${url}/releases/download/package-inputs/j713-backlight-afb025a8.dtb"
-        "Image-retained-bounds.gz::${url}/releases/download/package-inputs/j713-retained-bounds-a7a160b6-Image.gz"
+        "Image-retained-bounds.gz::${url}/releases/download/package-inputs/j713-retained-bounds-ca1fff57-Image.gz"
         'm4-notch.py' 'omarchy-m4-notch.service'
         # Both notch preferences retain the native panel's per-boot display handoff.
         "stage2-hidden.bin::${url}/releases/download/package-inputs/j713-m1n1-stage2-backlight-b86aee68.bin"
@@ -38,7 +38,7 @@ source=('m4-boot-compose.py' '90-omarchy-m4-boot.hook' 'm4-update-check.py'
         'm1n1-LICENSE' 'm1n1-README.md' 'm1n1-LICENSE.BSD-2.libfdt' 'm1n1-LICENSE.BSD-3.arm'
         'm1n1-LICENSE.BSD-3.dwc3' 'm1n1-LICENSE.CC0' 'm1n1-LICENSE.GPL-2' 'm1n1-LICENSE.minlzma'
         'm1n1-LICENSE.OFL-1.1' 'm1n1-LICENSE.tinf')
-sha256sums=('2bb2b94391e1904345e2bc9464b647c900b4305f9966bf10ceaa561b3456613d'
+sha256sums=('235751ff1eefb1ef137e3875e0c9e676484d0a7b09410a54bec31969ff804f0b'
             'e82f9ced0dcff9fc9639fef0baf8da2dd5f168407f161503a757fd52ebcd5559'
             'bf06541caba3709e81b261c60563886e95fff902d811b74f2b49c03e70ee1685'
             '8ecdbfc8303276d8db5922f6a06aa945f58ebca27b83520f76e9155561b9c5b0'
@@ -51,7 +51,7 @@ sha256sums=('2bb2b94391e1904345e2bc9464b647c900b4305f9966bf10ceaa561b3456613d'
             'bde52f8012b209e06c0e2b41325413c642ae4c6e6eedce7ff04331ca4d50c0f1'
             'f605580fc7e8e672cee85f5afee930550b8f445f026b5a04c1828e52c88ea6de'
             'afb025a8f1c946d164fe962f20b2e9d5cd987cfc668985eee62e41767722b2aa'
-            'a7a160b6686652d7ae93218593d015febf9cc7ab0ef838148e551116befeb05e'
+            'ca1fff571cf1b9d8c0b07b2e97ba0a5402f93c1b7a2d54ea2c07e24a8b70f9d0'
             '674e448e2ea161180a26c292a85126f06274b55abafe7ee35c7c7bb3258aba76'
             'a5847d4ae7b237753f18609ab71b12e569366e7d6df8edfc50ba884eb5698e6c'
             'b86aee6840fe670b592271ec2816d42c5515cddc20a14e08bdc5bcbce547e6fd'
