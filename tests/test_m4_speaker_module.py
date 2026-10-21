@@ -446,6 +446,188 @@ class SpeakerModule(unittest.TestCase):
         self.assertEqual(restored['modules'][MODULE.NAME], STOCK['note'])
         self.assertEqual(restored['owner_calibration'], {'gain': 8})
 
+    def component(self, name):
+        """Paths and bytes for one component. The other component stays stock."""
+        if name == 'speaker':
+            return {'name': 'speaker', 'args': (), 'module': MODULE.MODULE, 'staged': MODULE.STAGED,
+                    'state': MODULE.STATE, 'stock_bytes': OLD, 'fixed_bytes': NEW, 'stock': STOCK, 'fixed': FIXED,
+                    'other_module': MCA_MODULE, 'other_bytes': MCA_OLD}
+        return {'name': 'mca', 'args': ('--component', 'mca'), 'module': MCA_MODULE, 'staged': MCA_STAGED,
+                'state': MCA_STATE, 'stock_bytes': MCA_OLD, 'fixed_bytes': MCA_NEW,
+                'stock': identity(MCA_OLD, MCA_OLD_NOTE), 'fixed': identity(MCA_NEW, MCA_NEW_NOTE),
+                'other_module': MODULE.MODULE, 'other_bytes': OLD}
+
+    def install_both(self, speaker_bytes, speaker_record, mca_bytes, mca_record, owner):
+        document = with_mca(manifest(speaker_record), mca_record)
+        document['owner_calibration'] = owner
+        self.install(speaker_bytes, document)
+        self.put(MCA_MODULE, mca_bytes)
+        self.put(MCA_STAGED, MCA_NEW)
+        self.put(MODULE.STAGED, NEW)
+        return document
+
+    def test_rollback_power_cut_before_clearing_intent_finishes_on_retry(self):
+        """Stock bytes and pins with hold and the rollback marker still present.
+
+        A power cut after the restored manifest write and before the marker is
+        removed must be finished by the next --boot. The marker goes away, the
+        hold stays, unrelated manifest fields stay, and the fixed module is
+        not applied. One injected unlink failure, then one retry, for each
+        component.
+        """
+        for name in ('speaker', 'mca'):
+            with self.subTest(name):
+                self.setUp()
+                selected = self.component(name)
+                owner = {'gain': 11, 'label': name}
+                self.install_both(OLD, STOCK, MCA_OLD, identity(MCA_OLD, MCA_OLD_NOTE), {'gain': 1})
+                self.assertEqual(self.run_tool('--boot', *selected['args'])[0], 0)
+                live = json.loads(self.manifest.read_bytes())
+                live['owner_calibration'] = owner
+                self.manifest.write_bytes(MODULE.serialize(live))
+                self.assertEqual(self.run_tool('--rollback', *selected['args'])[0], 0)
+                stage = self.root / selected['state']
+                real_unlink = Path.unlink
+
+                def fail_rollback_once(path, missing_ok=False):
+                    if path.name == 'rollback' and not fail_rollback_once.done:
+                        fail_rollback_once.done = True
+                        raise OSError('power cut before unlinking rollback')
+                    return real_unlink(path, missing_ok=missing_ok)
+
+                fail_rollback_once.done = False
+                with mock.patch.object(Path, 'unlink', fail_rollback_once):
+                    self.assertEqual(self.run_tool('--boot', *selected['args'])[0], 1)
+                self.assertEqual((self.root / selected['module']).read_bytes(), selected['stock_bytes'])
+                self.assertTrue((stage / 'hold').exists())
+                self.assertTrue((stage / 'rollback').exists())
+                cut = json.loads(self.manifest.read_bytes())
+                self.assertEqual(cut['owner_calibration'], owner)
+                self.assertEqual(cut['modules'][MODULE.NAME if name == 'speaker' else MCA_NAME],
+                                 selected['stock']['note'])
+                self.assertEqual((self.root / selected['other_module']).read_bytes(), selected['other_bytes'])
+                code, report = self.run_tool('--boot', *selected['args'])
+                self.assertEqual(code, 0, self.last_error)
+                self.assertNotIn('applied', report['status'])
+                self.assertFalse((stage / 'rollback').exists())
+                self.assertTrue((stage / 'hold').exists())
+                self.assertEqual((self.root / selected['module']).read_bytes(), selected['stock_bytes'])
+                finished = json.loads(self.manifest.read_bytes())
+                self.assertEqual(finished['owner_calibration'], owner)
+                self.assertEqual(finished['modules'][MODULE.NAME if name == 'speaker' else MCA_NAME],
+                                 selected['stock']['note'])
+                self.assertEqual((self.root / selected['other_module']).read_bytes(), selected['other_bytes'])
+                code, report = self.run_tool('--boot', *selected['args'])
+                self.assertEqual(code, 0, self.last_error)
+                self.assertEqual(report['status'], 'held after a rollback; nothing applied')
+                self.assertEqual((self.root / selected['module']).read_bytes(), selected['stock_bytes'])
+                self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
+                self.assertTrue((stage / 'hold').exists())
+                self.assertFalse((stage / 'rollback').exists())
+
+    def test_partial_stock_backup_completes_and_a_wrong_part_refuses(self):
+        """One valid backup half is finished on the next boot, then the fix applies.
+
+        A backup half that is not the stock module or stock pins refuses and
+        leaves the live module and manifest unchanged. Both missing-half
+        directions are covered.
+        """
+        for name in ('speaker', 'mca'):
+            for direction in ('module', 'manifest'):
+                with self.subTest(component=name, direction=direction, valid=True):
+                    self.setUp()
+                    selected = self.component(name)
+                    owner = {'gain': 6, 'label': name + '-' + direction}
+                    document = self.install_both(
+                        OLD, STOCK, MCA_OLD, identity(MCA_OLD, MCA_OLD_NOTE), owner)
+                    stage = self.root / selected['state']
+                    stage.mkdir(parents=True)
+                    if direction == 'module':
+                        self.put(selected['state'] + '/alpha1-module.ko', selected['stock_bytes'])
+                    else:
+                        self.put(selected['state'] + '/alpha1-manifest.json', MODULE.serialize(document))
+                    code, report = self.run_tool('--boot', *selected['args'])
+                    self.assertEqual(code, 0, self.last_error)
+                    self.assertIn('applied', report['status'])
+                    self.assertEqual((self.root / selected['module']).read_bytes(), selected['fixed_bytes'])
+                    applied = json.loads(self.manifest.read_bytes())
+                    self.assertEqual(applied['owner_calibration'], owner)
+                    self.assertEqual(applied['modules'][MODULE.NAME if name == 'speaker' else MCA_NAME],
+                                     selected['fixed']['note'])
+                    self.assertEqual((stage / 'alpha1-module.ko').read_bytes(), selected['stock_bytes'])
+                    saved = json.loads((stage / 'alpha1-manifest.json').read_bytes())
+                    self.assertEqual(saved['modules'][MODULE.NAME if name == 'speaker' else MCA_NAME],
+                                     selected['stock']['note'])
+                    self.assertEqual((self.root / selected['other_module']).read_bytes(), selected['other_bytes'])
+
+            for direction in ('module', 'manifest'):
+                with self.subTest(component=name, direction=direction, valid=False):
+                    self.setUp()
+                    selected = self.component(name)
+                    owner = {'gain': 7, 'label': 'wrong-' + direction}
+                    document = self.install_both(
+                        OLD, STOCK, MCA_OLD, identity(MCA_OLD, MCA_OLD_NOTE), owner)
+                    stage = self.root / selected['state']
+                    stage.mkdir(parents=True)
+                    if direction == 'module':
+                        self.put(selected['state'] + '/alpha1-module.ko', b'not-the-stock-module')
+                    else:
+                        wrong = json.loads(json.dumps(document))
+                        key = MODULE.NAME if name == 'speaker' else MCA_NAME
+                        wrong['modules'][key] = 'not-stock-note'
+                        self.put(selected['state'] + '/alpha1-manifest.json', MODULE.serialize(wrong))
+                    before_module = (self.root / selected['module']).read_bytes()
+                    before_manifest = self.manifest.read_bytes()
+                    before_other = (self.root / selected['other_module']).read_bytes()
+                    self.assertEqual(self.run_tool('--boot', *selected['args'])[0], 1)
+                    self.assertEqual((self.root / selected['module']).read_bytes(), before_module)
+                    self.assertEqual(self.manifest.read_bytes(), before_manifest)
+                    self.assertEqual((self.root / selected['other_module']).read_bytes(), before_other)
+                    self.assertFalse((stage / 'hold').exists())
+
+    def test_request_rollback_does_not_authorize_reverse_corruption(self):
+        """Old bytes with new pins and no rollback marker are not a request.
+
+        --rollback must not create the marker. A later --boot still leaves the
+        live module, the manifest, and the stock backup unchanged.
+        """
+        for name in ('speaker', 'mca'):
+            with self.subTest(name):
+                self.setUp()
+                selected = self.component(name)
+                owner = {'gain': 8, 'label': 'reverse-' + name}
+                if name == 'speaker':
+                    live_record, live_bytes = FIXED, OLD
+                    mca_record, mca_bytes = identity(MCA_OLD, MCA_OLD_NOTE), MCA_OLD
+                    backup_document = with_mca(manifest(STOCK), mca_record)
+                else:
+                    live_record, live_bytes = STOCK, OLD
+                    mca_record, mca_bytes = identity(MCA_NEW, MCA_NEW_NOTE), MCA_OLD
+                    backup_document = with_mca(manifest(STOCK), identity(MCA_OLD, MCA_OLD_NOTE))
+                self.install_both(live_bytes, live_record, mca_bytes, mca_record, owner)
+                backup_document['owner_calibration'] = {'gain': 1}
+                stage = self.root / selected['state']
+                stage.mkdir(parents=True)
+                self.put(selected['state'] + '/alpha1-module.ko', selected['stock_bytes'])
+                self.put(selected['state'] + '/alpha1-manifest.json', MODULE.serialize(backup_document))
+                before = (self.manifest.read_bytes(),
+                          (self.root / selected['module']).read_bytes(),
+                          (stage / 'alpha1-module.ko').read_bytes(),
+                          (stage / 'alpha1-manifest.json').read_bytes(),
+                          (self.root / selected['other_module']).read_bytes())
+                self.assertFalse((stage / 'rollback').exists())
+                self.assertEqual(self.run_tool('--rollback', *selected['args'])[0], 1)
+                self.assertFalse((stage / 'rollback').exists())
+                self.assertFalse((stage / 'hold').exists())
+                self.assertEqual(self.run_tool('--boot', *selected['args'])[0], 1)
+                self.assertEqual((self.manifest.read_bytes(),
+                                  (self.root / selected['module']).read_bytes(),
+                                  (stage / 'alpha1-module.ko').read_bytes(),
+                                  (stage / 'alpha1-manifest.json').read_bytes(),
+                                  (self.root / selected['other_module']).read_bytes()), before)
+                self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
+                self.assertFalse((stage / 'rollback').exists())
+
     def test_mca_pins_match_the_qualified_spec_and_the_fixed_module(self):
         spec = json.loads((ROOT / 'audio/j713/qualified.json').read_text())
         artifact = spec['module_artifacts'][MCA_NAME]
