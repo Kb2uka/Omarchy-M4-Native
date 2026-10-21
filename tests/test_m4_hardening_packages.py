@@ -366,6 +366,32 @@ class HardeningPackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'drop-in'):
             CHECK.check_package(self.channel, *self.speaker_package(missing))
 
+    def test_service_option_values_accepts_one_explicit_service_assignment(self):
+        # Other sections do not count. Comments are already covered by the production drop-in.
+        explicit = (
+            '[Service]\nExecStartPre=' + MCA_BOOT_COMMAND + '\n'
+            + '[Unit]\nExecStartPre=/bin/false\n'
+        )
+        self.assertEqual(service_option_values(explicit, 'ExecStartPre'), [MCA_BOOT_COMMAND])
+        rejected = (
+            ('inherited default',
+             '[DEFAULT]\nExecStartPre=' + MCA_BOOT_COMMAND + '\n[Service]\n',
+             'systemd unit does not inherit DEFAULT'),
+            ('colon instead of equals',
+             '[Service]\nExecStartPre:' + MCA_BOOT_COMMAND + '\n',
+             'malformed unit'),
+            ('missing section header',
+             'ExecStartPre=' + MCA_BOOT_COMMAND + '\n',
+             'malformed unit'),
+        )
+        for case, text, message in rejected:
+            with self.subTest(case=case):
+                # A raw configparser error must fail this assertion rather than escape.
+                with self.assertRaises(Exception) as raised:
+                    service_option_values(text, 'ExecStartPre')
+                self.assertIsInstance(raised.exception, AssertionError)
+                self.assertIn(message, str(raised.exception))
+
 
 if __name__ == '__main__':
     unittest.main()
