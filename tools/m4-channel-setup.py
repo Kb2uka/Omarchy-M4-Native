@@ -6,8 +6,8 @@
 Trusts the channel's signing key, adds the [omarchy-m4] repository in front of
 the distribution repositories, then installs the channel packages from it.
 Only the channel's own database is refreshed, so this is not a general system
-update. The boot.bin hook then keeps the installed boot object in step; on an
-Air that already has update 1 it changes nothing. Inspection is the default;
+update. The boot.bin hook keeps the installed boot object in step with the
+current installed package composition. Inspection is the default;
 --apply makes the changes.
 """
 import argparse
@@ -40,10 +40,14 @@ SPEAKER_STAGED = 'usr/lib/omarchy-m4/j713-audio/snd-soc-j713-group.ko'
 SPEAKER_MODULE = 'usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-j713-group.ko'
 SPEAKER_HOLD = 'var/lib/omarchy-m4/speaker-module/hold'
 SPEAKER_ROLLBACK = 'var/lib/omarchy-m4/speaker-module/rollback'
+SPEAKER_STOCK = '465a88aa9f70ceac8682499ad6bd9ecd34a33b35a3b5c556b42f7bd1524272d0'
+SPEAKER_FIXED = 'aaad802eb136ff6cb915feaa123001b3eb848bc2f038d0a5b71c8e2ff35d2581'
 MCA_STAGED = 'usr/lib/omarchy-m4/j713-audio/snd-soc-apple-mca.ko'
 MCA_MODULE = 'usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-apple-mca.ko'
 MCA_HOLD = 'var/lib/omarchy-m4/mca-module/hold'
 MCA_ROLLBACK = 'var/lib/omarchy-m4/mca-module/rollback'
+MCA_STOCK = 'd3194660a28d30ba8ea296b6592836ad4ca9426d9471d05ba8ce3cad284baa1e'
+MCA_FIXED = 'fb941df4d55c4f2093b4595e0392aaf97ffe3a250228518b18a4f70568bf7454'
 GPU_STAGED = 'usr/lib/omarchy-m4/gpu/asahi_m4.ko'
 GPU_MODULE = 'opt/m4-gpu/asahi_m4.ko'
 GPU_HOLD = 'var/lib/omarchy-m4/gpu-module/hold'
@@ -201,62 +205,124 @@ class Machine:
         return subprocess.run(command, check=False, stdout=sys.stderr).returncode
 
 
-def audio_files_pin_needs_restart(root, module_rel, installed):
-    """True only for a present, valid files pin that disagrees with these bytes.
-
-    A missing manifest, a parse failure, or a pin that is not a digest string
-    is not a forward interruption. A restart does not repair those.
-    """
+def audio_release(module_rel):
+    """Kernel release named by this component's installed module path."""
+    marker = '/j713-audio/'
     try:
-        document = json.loads((root / MANIFESTS[1]).read_text())
-        files = document.get('files') if isinstance(document, dict) else None
-        pin = files.get('/' + module_rel) if isinstance(files, dict) else None
-        if not isinstance(pin, str) or len(pin) != 64:
-            return False
-        int(pin, 16)
-    except (OSError, ValueError, TypeError, AttributeError, UnicodeError):
-        return False
-    return pin.lower() != hashlib.sha256(installed).hexdigest()
+        start = module_rel.index(marker) + len(marker)
+        return module_rel[start:module_rel.index('/', start)]
+    except ValueError:
+        return None
 
 
-def audio_pending(root, staged_rel, module_rel, hold_rel, rollback_rel):
-    """Whether the next boot will change this one audio component.
+def audio_digest(path):
+    """SHA-256 of one regular file. A symlink, directory, or unreadable path is None."""
+    if path.is_symlink() or not path.is_file():
+        return None
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
 
-    Boot handles that component's rollback marker before its hold, so a
-    rollback still needs a restart while held. A hold with no rollback
-    suppresses the ordinary swap. Missing staged or installed bytes are not
-    a pending apply. Equal bytes stay current unless the audio manifest's
-    files pin for this module is a valid string that differs from the
-    installed digest.
+
+def audio_files_pin(path, module_rel, release):
+    """Files pin for this exact installed path, or None when it is not that release."""
+    if path.is_symlink() or not path.is_file() or not release:
+        return None
+    try:
+        document = json.loads(path.read_text())
+    except (OSError, ValueError, UnicodeError):
+        return None
+    if not isinstance(document, dict) or document.get('kernel_release') != release:
+        return None
+    files = document.get('files')
+    pin = files.get('/' + module_rel) if isinstance(files, dict) else None
+    return pin if isinstance(pin, str) else None
+
+
+def audio_known_state(root, module_rel, stock_sha, fixed_sha):
+    """stock, forward, current, reverse, or None.
+
+    Only the two explicit identities count. Another digest, another path, a
+    wrong release, or a missing or non-regular module is unknown.
     """
+    release = audio_release(module_rel)
+    installed = audio_digest(root / module_rel)
+    if installed == stock_sha:
+        installed_kind = 'stock'
+    elif installed == fixed_sha:
+        installed_kind = 'fixed'
+    else:
+        return None
+    pin = audio_files_pin(root / MANIFESTS[1], module_rel, release)
+    if installed_kind == 'stock' and pin == stock_sha:
+        return 'stock'
+    if installed_kind == 'fixed' and pin == stock_sha:
+        return 'forward'
+    if installed_kind == 'fixed' and pin == fixed_sha:
+        return 'current'
+    if installed_kind == 'stock' and pin == fixed_sha:
+        return 'reverse'
+    return None
+
+
+def audio_stock_backup(root, state_rel, module_rel, stock_sha):
+    """True when both stock backup halves are regular and match the stock identity.
+
+    The manifest half is that module's files pin only. This reads; it does not
+    restore or write state.
+    """
+    state = root / state_rel
+    if audio_digest(state / 'alpha1-module.ko') != stock_sha:
+        return False
+    path = state / 'alpha1-manifest.json'
+    if path.is_symlink() or not path.is_file():
+        return False
+    try:
+        document = json.loads(path.read_bytes())
+    except (OSError, ValueError, UnicodeError):
+        return False
+    files = document.get('files') if isinstance(document, dict) else None
+    pin = files.get('/' + module_rel) if isinstance(files, dict) else None
+    return pin == stock_sha
+
+
+def audio_pending(root, staged_rel, module_rel, hold_rel, rollback_rel, stock_sha, fixed_sha):
+    """Whether this component has recognized pending boot work.
+
+    Stock can apply when the staged file is the fixed identity. A forward
+    interruption can complete when the stock backup pair matches too. A regular
+    rollback marker in a recognized state is pending, ahead of hold, when that
+    same backup matches, including stock left behind by an interrupted marker
+    cleanup. Current, reverse without that marker, hold without a marker, and
+    anything unrecognized are not pending. A recognized result is not a promise
+    that every later boot write succeeds.
+    """
+    state = audio_known_state(root, module_rel, stock_sha, fixed_sha)
+    if state is None:
+        return False
     rollback = root / rollback_rel
     if rollback.is_file() and not rollback.is_symlink():
-        return True
-    if (root / hold_rel).exists():
+        return audio_stock_backup(root, Path(hold_rel).parent, module_rel, stock_sha)
+    if (root / hold_rel).exists() or state in ('current', 'reverse'):
         return False
-    staged, module = root / staged_rel, root / module_rel
-    try:
-        if not staged.is_file() or not module.is_file():
-            return False
-        installed = module.read_bytes()
-        if hashlib.sha256(installed).digest() != hashlib.sha256(staged.read_bytes()).digest():
-            return True
-    except OSError:
+    if state == 'forward' and not audio_stock_backup(root, Path(hold_rel).parent, module_rel, stock_sha):
         return False
-    return audio_files_pin_needs_restart(root, module_rel, installed)
+    return audio_digest(root / staged_rel) == fixed_sha
 
 
 def speaker_pending(root):
-    """Whether the next boot will swap or roll back the speaker module."""
-    return audio_pending(root, SPEAKER_STAGED, SPEAKER_MODULE, SPEAKER_HOLD, SPEAKER_ROLLBACK)
+    """Whether the speaker module has recognized pending boot work."""
+    return audio_pending(root, SPEAKER_STAGED, SPEAKER_MODULE, SPEAKER_HOLD, SPEAKER_ROLLBACK,
+                         SPEAKER_STOCK, SPEAKER_FIXED)
 
 
 def mca_pending(root):
-    """Whether the next boot will swap or roll back the MCA module.
+    """Whether the MCA module has recognized pending boot work.
 
-    Independent of the speaker paths, hold, and rollback marker.
+    Independent of the speaker paths, hold, rollback marker, and identities.
     """
-    return audio_pending(root, MCA_STAGED, MCA_MODULE, MCA_HOLD, MCA_ROLLBACK)
+    return audio_pending(root, MCA_STAGED, MCA_MODULE, MCA_HOLD, MCA_ROLLBACK, MCA_STOCK, MCA_FIXED)
 
 
 def gpu_pending(root):
@@ -378,12 +444,12 @@ def connect(root, apply, server, key, fingerprint, output):
                 write(root / SNIPPET, current, conf.stat().st_mode & 0o777)
             raise Refused(str(error) + '; pacman.conf was restored and the boot update may be partial. '
                           'Inspect m4-boot-compose and resume the pending operation it reports '
-                          'after fixing the cause') from error
+                          'after fixing the cause, then rerun omarchy-m4-update') from error
     boot = machine.compose()
     require(boot in ('current', 'updated; takes effect at next boot'),
             'The packages are installed, but the boot update needs attention: boot.bin is not in step with them '
             f'({boot}). See the detailed message above, then inspect m4-boot-compose and resume '
-            'the pending operation it reports after fixing the cause')
+            'the pending operation it reports after fixing the cause, then rerun omarchy-m4-update')
     machine.start_notifier()
     restart = (boot_digest(root) != before or speaker_pending(root) or mca_pending(root) or
                gpu_pending(root) or headphones_pending(root) or cpu_idle_pending(root) or

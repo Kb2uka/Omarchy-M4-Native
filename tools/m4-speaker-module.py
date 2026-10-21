@@ -13,11 +13,15 @@ six manifest pins. Unrelated keys and the other component stay as they are.
 The swap runs at boot, before the audio register service loads modules. Known
 states for the selected component: stock, fixed, forward interruption (new
 module bytes, old pins), and reverse interruption (old module bytes, new pins).
---rollback requests a restore only from fixed or forward-interrupted state. A
-reverse state is finished only when a rollback marker is already present with
-a valid stock backup; a new request does not create that marker. A boot that
-finds stock bytes, stock pins, a valid stock backup, and that marker clears
-the marker and stays held. Inspection is the default.
+--rollback from fixed or forward-interrupted state requires both stock backup
+halves to already be regular files; an absent or corrupt backup refuses and
+writes no directory or marker. A reverse state is finished only when a
+rollback marker is already present with a valid stock backup; a new request
+does not create that marker. A boot that finds stock bytes, stock pins, a
+valid stock backup, and that marker clears the marker and stays held.
+Inspection of that held stock reports that nothing applies. A markerless
+reverse state reports the refusal and recovery from the verified stock backup.
+Inspection is the default.
 """
 import argparse
 import hashlib
@@ -149,7 +153,10 @@ def backup_paths(root, selected):
 
 
 def valid_stock_backup(module_backup, manifest_backup, selected):
-    """True when both backup files are the stock module and the stock pins."""
+    """True when both backup files are the stock module and the stock pins.
+
+    A missing half, a symlink, or a manifest that is not those pins is false.
+    """
     if module_backup.is_symlink() or manifest_backup.is_symlink():
         return False
     if not (module_backup.is_file() and manifest_backup.is_file()):
@@ -160,9 +167,9 @@ def valid_stock_backup(module_backup, manifest_backup, selected):
         return False
     try:
         saved = json.loads(manifest_backup.read_bytes())
-    except ValueError:
+        return pins(saved, selected['component']) == expected(identity)
+    except (ValueError, KeyError, TypeError, AttributeError, UnicodeError):
         return False
-    return pins(saved, selected['component']) == expected(identity)
 
 
 def inspect(root, component='speaker'):
@@ -340,23 +347,24 @@ def run(root, mode, component='speaker'):
     report, manifest, raw = inspect(root, selected['component'])
     stage = root / selected['state']
     if mode == 'request-rollback':
+        # Backup halves are judged before any directory or marker write.
+        _, module_backup, manifest_backup = backup_paths(root, selected)
         if report['state'] == 'reverse':
             # Old bytes with new pins are not a new request. An existing marker
             # plus a valid stock backup stays as it is and creates nothing.
-            _, module_backup, manifest_backup = backup_paths(root, selected)
             intent = stage / 'rollback'
             require(intent.is_file() and not intent.is_symlink()
                     and valid_stock_backup(module_backup, manifest_backup, selected),
                     'Interrupted rollback without a rollback request; nothing was changed')
-            report['status'] = ('rollback requested; restart to restore the alpha.1 '
-                                + selected['component'] + ' module')
         else:
             require(report['state'] in ('fixed', 'interrupted'),
                     'Nothing to roll back: state is ' + report['state'])
+            require(valid_stock_backup(module_backup, manifest_backup, selected),
+                    'Backed-up module is not the alpha.1 ' + selected['component'] + ' module and pins')
             stage.mkdir(parents=True, exist_ok=True)
             marker(stage / 'rollback')
-            report['status'] = ('rollback requested; restart to restore the alpha.1 '
-                                + selected['component'] + ' module')
+        report['status'] = ('rollback requested; restart to restore the alpha.1 '
+                            + selected['component'] + ' module')
     elif mode == 'boot':
         if report['rollback_requested']:
             report['status'] = rollback(root, report, selected['component'])
@@ -371,10 +379,15 @@ def run(root, mode, component='speaker'):
         else:
             raise Refused('Unknown ' + selected['component'] + ' module state; nothing was changed')
     else:
-        report['status'] = {'fixed': 'current', 'stock': 'staged; applies at the next boot',
-                            'interrupted': 'interrupted; completes at the next boot',
-                            'reverse': 'interrupted rollback; waiting for a rollback request',
-                            'unknown': 'unknown state; the fix will not be applied'}[report['state']]
+        if report['state'] == 'reverse' and not report['rollback_requested']:
+            report['status'] = ('refused; nothing was changed; recover from the verified stock backup')
+        elif report['state'] == 'stock' and report['held']:
+            report['status'] = 'held after a rollback; nothing applied'
+        else:
+            report['status'] = {'fixed': 'current', 'stock': 'staged; applies at the next boot',
+                                'interrupted': 'interrupted; completes at the next boot',
+                                'reverse': 'interrupted rollback; waiting for a rollback request',
+                                'unknown': 'unknown state; the fix will not be applied'}[report['state']]
     return report
 
 

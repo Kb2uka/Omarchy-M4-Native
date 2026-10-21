@@ -8,8 +8,12 @@ local copy of the repository. The sandbox carries an alpha.1-style
 linux-m4-omarchy -1, a synthetic boot.bin around the real base kernel and
 devicetree, and stand-ins for the protected video, Widevine, audio and speaker
 files. The first signed update moves that boot object to the retained-bounds
-kernel and changes only the video boot_kernel_sha256 plus boot.bin. A second
-run leaves that state in place. pacman must refuse a database signed by an
+kernel and changes only the video boot_kernel_sha256 plus boot.bin, so the
+first run reports restart_needed. A second run leaves that state in place.
+The live MCA file is arbitrary stand-in bytes, an unknown state, so that
+second run reports restart_needed false. This sandbox does not spoof a
+production hash to make the stand-in known; native evidence covers the real
+stock-to-fixed MCA migration. pacman must refuse a database signed by an
 untrusted key.
 
 The sandbox installs the legacy stubs with --noscriptlet and then runs
@@ -60,7 +64,9 @@ arch=(aarch64)
 depends=(python)
 package() { install -Dm644 /dev/null "$pkgdir/usr/bin/m4-speaker-module"; }
 '''
-# Live module the next boot would replace. Left in place until a separate boot qualification.
+# Arbitrary live bytes, not a stock or fixed identity. Left in place. The
+# updater must classify them as unknown and must not ask for a restart when
+# boot did not change. Native evidence covers the real MCA migration.
 MCA_LIVE = f'usr/lib/omarchy/j713-audio/{RELEASE}/modules/snd-soc-apple-mca.ko'
 MCA_STAND_IN = b'legacy mca stand-in\n'
 PROTECTED = {
@@ -270,8 +276,8 @@ def main():
                     results[0]['boot'] == 'updated; takes effect at next boot' and
                     results[0]['restart_needed'] is True, 'The first update did not move the old boot object')
             require(results[1]['status'].startswith('connected') and results[1]['boot'] == 'current' and
-                    results[1]['restart_needed'] is True,
-                    'The second run was not idempotent while the staged MCA still differs from the live stand-in')
+                    results[1]['restart_needed'] is False,
+                    'The second run requested a restart for the unknown MCA stand-in')
             require(snapshot(root) == after_first, 'The second run changed boot, video, or a protected file')
             assert_base_kernel(root, base_files)
             compose = runpy.run_path(str(ROOT / 'tools/m4-boot-compose.py'))
