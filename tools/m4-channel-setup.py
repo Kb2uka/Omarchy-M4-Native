@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import tempfile
@@ -344,6 +345,25 @@ def audio_stock_backup(root, state_rel, module_rel, stock_sha):
     return pin == stock_sha
 
 
+def rollback_marker_kind(path):
+    """Classify one rollback marker without opening it.
+
+    Same rule as m4-speaker-module.rollback_marker_kind. regular is a real
+    regular file. absent means nothing is at this path. uncertain is any
+    symlink, including a dangling one, or any other non-regular node such as
+    a directory or fifo. lstat does not follow a symlink or block on a fifo.
+    """
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        return 'absent'
+    except OSError:
+        return 'uncertain'
+    if stat.S_ISLNK(mode) or not stat.S_ISREG(mode):
+        return 'uncertain'
+    return 'regular'
+
+
 def audio_pending(root, staged_rel, module_rel, hold_rel, rollback_rel, stock_sha, fixed_sha):
     """Whether this component has recognized pending boot work.
 
@@ -351,15 +371,20 @@ def audio_pending(root, staged_rel, module_rel, hold_rel, rollback_rel, stock_sh
     interruption can complete when the stock backup pair matches too. A regular
     rollback marker in a recognized state is pending, ahead of hold, when that
     same backup matches, including stock left behind by an interrupted marker
-    cleanup. Current, reverse without that marker, hold without a marker, and
-    anything unrecognized are not pending. A recognized result is not a promise
-    that every later boot write succeeds.
+    cleanup. A symlink, including a dangling one, or any other non-regular
+    rollback marker is not pending: it is not rollback authorization and it is
+    not forward work. Current, reverse without that marker, hold without a
+    marker, and anything unrecognized are not pending. A recognized result is
+    not a promise that every later boot write succeeds.
     """
     state = audio_known_state(root, module_rel, stock_sha, fixed_sha)
     if state is None:
         return False
     rollback = root / rollback_rel
-    if rollback.is_file() and not rollback.is_symlink():
+    marker_kind = rollback_marker_kind(rollback)
+    if marker_kind == 'uncertain':
+        return False
+    if marker_kind == 'regular':
         return audio_stock_backup(root, Path(hold_rel).parent, module_rel, stock_sha)
     if (root / hold_rel).exists() or state in ('current', 'reverse'):
         return False

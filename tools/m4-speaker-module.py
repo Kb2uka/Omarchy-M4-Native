@@ -23,15 +23,22 @@ Inspection only reads. A known state with an existing regular rollback marker
 and a valid stock backup reports that rollback as requested and names the
 component in the restart guidance, ahead of hold. Held stock, or a held
 forward interruption, without that pending rollback reports that nothing
-applies. A markerless reverse state reports the refusal and recovery from the
-verified stock backup. A marker with an invalid backup or state does not
-promise restoration. Inspection is the default.
+applies. A markerless reverse state reports recovery from the verified stock
+backup only when both backup halves match that stock identity. A missing or
+corrupt backup reports that recovery is required instead, without asking for
+a reboot or creating a marker. An existing symlink, including a dangling one,
+or any other non-regular rollback marker is uncertain. Inspection reports
+that recovery is required. Boot refuses that marker: it is not rollback
+authorization, and boot does not apply the staged module. Nothing is written.
+A regular marker with an invalid backup or state does not promise
+restoration. Inspection is the default.
 """
 import argparse
 import hashlib
 import json
 import os
 from pathlib import Path
+import stat
 import sys
 
 RELEASE = '7.1.9-m4-gpu-backport-20261008'
@@ -207,6 +214,25 @@ def inspect(root, component='speaker'):
     return report, manifest, raw
 
 
+def rollback_marker_kind(path):
+    """Classify one rollback marker without opening it.
+
+    regular is a real regular file. absent means nothing is at this path.
+    uncertain is any symlink, including a dangling one, or any other
+    non-regular node such as a directory or fifo. lstat does not follow a
+    symlink or block on a fifo.
+    """
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        return 'absent'
+    except OSError:
+        return 'uncertain'
+    if stat.S_ISLNK(mode) or not stat.S_ISREG(mode):
+        return 'uncertain'
+    return 'regular'
+
+
 def backup_half_present(path):
     return path.exists() or path.is_symlink()
 
@@ -374,6 +400,8 @@ def run(root, mode, component='speaker'):
         report['status'] = ('rollback requested; restart to restore the alpha.1 '
                             + selected['component'] + ' module')
     elif mode == 'boot':
+        if rollback_marker_kind(stage / 'rollback') == 'uncertain':
+            raise Refused('Rollback marker is not a regular file; nothing was changed')
         if report['rollback_requested']:
             report['status'] = rollback(root, report, selected['component'])
         elif report['state'] == 'reverse':
@@ -389,7 +417,11 @@ def run(root, mode, component='speaker'):
     else:
         # Read-only, in the same order as boot. No marker or backup is created.
         intent = stage / 'rollback'
-        regular_marker = intent.is_file() and not intent.is_symlink()
+        marker_kind = rollback_marker_kind(intent)
+        if marker_kind == 'uncertain':
+            report['status'] = 'refused; nothing was changed; recovery required'
+            return report
+        regular_marker = marker_kind == 'regular'
         known = report['state'] in ('stock', 'fixed', 'interrupted', 'reverse')
         _, module_backup, manifest_backup = backup_paths(root, selected)
         backup_ok = (known and report['rollback_requested'] and
@@ -398,7 +430,10 @@ def run(root, mode, component='speaker'):
             report['status'] = ('rollback requested; restart to restore the alpha.1 '
                                 + selected['component'] + ' module')
         elif report['state'] == 'reverse' and not report['rollback_requested']:
-            report['status'] = ('refused; nothing was changed; recover from the verified stock backup')
+            if valid_stock_backup(module_backup, manifest_backup, selected):
+                report['status'] = ('refused; nothing was changed; recover from the verified stock backup')
+            else:
+                report['status'] = 'refused; nothing was changed; recovery required'
         elif known and report['rollback_requested'] and (not regular_marker or not backup_ok):
             report['status'] = 'refused; nothing was changed; recovery required'
         elif report['held'] and report['state'] in ('stock', 'interrupted'):
