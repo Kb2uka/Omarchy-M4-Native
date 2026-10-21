@@ -31,7 +31,10 @@ pending state: inspection refuses it and does not apply it.
 A finished rollback writes ``var/lib/omarchy-m4/boot-compose/hold``. Ordinary
 compose, including ``--apply`` and a pacman ``--hook --apply``, reports that
 hold and writes nothing while the packaged Image stays new. Inspection does
-not clear it. ``--resume-updates --apply`` releases the hold and composes the
+not clear it. A hold whose video pin does not match ``boot.bin`` is not that
+report: inspection, ``--apply``, and ``--hook --apply`` name
+``sudo m4-boot-compose --rollback --apply`` and write nothing.
+``--resume-updates --apply`` releases the hold and composes the
 installed packages, keeping this machine's loader, boot arguments, and
 initramfs bytes. ``--resume-updates`` without ``--apply``, with ``--rollback``,
 or from the package hook, is refused. A release that fails before any write
@@ -55,13 +58,16 @@ handoff loader) stores both boot objects before it renames anything. A failure
 after either rename still retries to the original object. The hold is created
 only after eligibility and space checks, so a refusal creates none and does
 not delete a hold that was already there. Pending recovery checks that
-eligibility before a new hold as well. Once a journal is gone, a later error
-names ``m4-boot-compose`` and the command to run; it does not send the owner
-to an operation recorded in a missing journal.
+eligibility and the space the commit will use before a new hold as well. Once
+a journal is gone, a later error names ``m4-boot-compose`` and the command to
+run, including ``--resume-updates --apply`` when that release was interrupted
+before ``boot.bin`` landed. It does not send the owner to an operation
+recorded in a missing journal.
 
 A corrupt journal, or a ``boot.bin`` that is neither snapshot of a pending
 transition, is unresolved recovery. The refusal tells the operator to inspect
-the journal path and does not claim that ``boot.bin`` was left unchanged.
+the journal under the compose root and does not claim that ``boot.bin`` was
+left unchanged. ``/`` names ``/var/lib/omarchy-m4/boot-compose/journal``.
 The journal and its snapshots stay. Other preflight refusals, where nothing
 was pending, may still say that ``boot.bin`` was not changed.
 """
@@ -1018,6 +1024,68 @@ class ComposeTests(unittest.TestCase):
         self.assertFalse((machine.root / BOOT_HOLD).exists())
         self.assertFalse((machine.root / BOOT_JOURNAL).exists())
 
+    def test_held_same_kernel_resume_interruption_names_resume_updates(self):
+        """A same-kernel release that dies before boot.bin lands has no journal.
+
+        Previous differs from the rolled-back boot, so replace writes that
+        backup and then fails the boot rename before it lands. The refusal
+        names ``--resume-updates --apply`` and does not point at a journal.
+        That command then applies the packaged tree and clears the hold.
+        """
+        machine, restored, updated, changes = self.prepare_devicetree_rollback_hold()
+        self.assertEqual(machine.boot, restored)
+        self.assertNotEqual(machine.previous, machine.boot)
+        self.assertEqual(sha(MODULE.parse(machine.boot)['dtb']), sha(D1))
+        self.assertEqual((machine.root / MODULE.DTB).read_bytes(), D2)
+        self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+        hold_bytes = (machine.root / BOOT_HOLD).read_bytes()
+        video = (machine.root / MODULE.VIDEO_MANIFEST).read_bytes()
+        audio = machine.audio_before
+        owner = MODULE.parse(restored)
+        real = os.replace
+
+        def fail_boot_before_land(source, target):
+            if Path(target).name == 'boot.bin':
+                raise OSError('power cut before boot.bin landed')
+            return real(source, target)
+
+        with mock.patch.object(MODULE.os, 'replace', side_effect=fail_boot_before_land):
+            code, out, err = self.invoke(machine, '--resume-updates', '--apply')
+        self.assertEqual(code, 1, err)
+        self.assertEqual(out, '')
+        self.assertIn('power cut before boot.bin landed', err)
+        self.assertIn('sudo m4-boot-compose --resume-updates --apply', err)
+        self.assertNotIn('--rollback', err)
+        self.assertNotIn('recorded there', err)
+        self.assertNotIn('operation recorded', err)
+        self.assertNotIn(BOOT_JOURNAL, err)
+        self.assertNotIn('boot.bin was not changed', err)
+        self.assertEqual(machine.boot, restored)
+        self.assertEqual(machine.previous, restored)
+        self.assertEqual((machine.root / BOOT_HOLD).read_bytes(), hold_bytes)
+        self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), video)
+        self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
+        self.assertEqual((machine.root / MODULE.DTB).read_bytes(), D2)
+        self.assertFalse((machine.root / MODULE.PACMAN_LOCK).exists())
+
+        code, out, err = self.invoke(machine, '--resume-updates', '--apply')
+        self.assertEqual((code, err), (0, ''), err)
+        receipt = json.loads(out)
+        self.assertTrue(receipt['applied'])
+        self.assertEqual(receipt['changes'], changes)
+        self.assertEqual(receipt['boot_sha256'], sha(updated))
+        self.assertEqual(machine.boot, updated)
+        self.assertEqual(machine.previous, restored)
+        done = MODULE.parse(machine.boot)
+        self.assertEqual([done[name] for name in ('loader', 'bootargs', 'initramfs', 'kernel')],
+                         [owner[name] for name in ('loader', 'bootargs', 'initramfs', 'kernel')])
+        self.assertEqual(done['dtb'], MODULE.parse(updated)['dtb'])
+        self.assertFalse((machine.root / BOOT_HOLD).exists())
+        self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+        self.assertEqual((machine.root / MODULE.VIDEO_MANIFEST).read_bytes(), video)
+        self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
+
     def test_resume_updates_preflight_failure_leaves_every_byte(self):
         machine, restored, _, _ = self.prepare_kernel_rollback_hold()
         hold_bytes = (machine.root / BOOT_HOLD).read_bytes()
@@ -1120,6 +1188,78 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual((machine.root / MODULE.DTB).read_bytes(), D2)
         self.assertTrue((machine.root / BOOT_HOLD).is_file())
 
+    def test_replayed_journal_receipt_names_each_changed_segment(self):
+        """A resumed apply lists every segment the journal changed.
+
+        Packages equal the recorded destination, so planning adds nothing and
+        a hard-coded kernel list cannot stand in for a devicetree change. The
+        backlight handoff also changes stage2; the receipt is the sorted union
+        of those names, with no duplicates.
+        """
+        def assert_replay(machine, original, target, changes):
+            self.assertEqual(machine.boot, original)
+            self.assertEqual((machine.root / MODULE.KERNEL).read_bytes(), MODULE.parse(target)['kernel'])
+            self.assertEqual((machine.root / MODULE.DTB).read_bytes(), MODULE.parse(target)['dtb'])
+            self.assertFalse((machine.root / BOOT_HOLD).exists())
+            machine.put(MODULE.BOOT + MODULE.PREVIOUS, original)
+            plant_journal(machine, 'apply', original, target, sha(MODULE.parse(target)['kernel']))
+            loaded = MODULE.load_journal(machine.root)
+            self.assertEqual((loaded['operation'], loaded['from_bytes'], loaded['to_bytes']),
+                             ('apply', original, target))
+            self.assertEqual(machine.boot, loaded['from_bytes'])
+            audio = (machine.root / MODULE.AUDIO_MANIFEST).read_bytes()
+            code, out, err = machine.run('--apply')
+            self.assertEqual((code, err), (0, ''), err)
+            receipt = json.loads(out)
+            self.assertEqual(receipt['changes'], changes)
+            self.assertEqual(receipt['changes'], sorted(set(receipt['changes'])))
+            self.assertEqual(receipt['boot_sha256'], sha(machine.boot))
+            self.assertEqual(receipt['boot_sha256'], sha(target))
+            self.assertTrue(receipt['applied'])
+            self.assertEqual(receipt['status'], 'updated; takes effect at next boot')
+            self.assertEqual(machine.boot, target)
+            done, want = MODULE.parse(machine.boot), MODULE.parse(target)
+            names = ('loader', 'bootargs', 'kernel', 'dtb', 'initramfs')
+            self.assertEqual([done[name] for name in names], [want[name] for name in names])
+            self.assertEqual(machine.previous, original)
+            self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+            self.assertFalse((machine.root / BOOT_HOLD).exists())
+            self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
+            parsed = json.loads((machine.root / MODULE.VIDEO_MANIFEST).read_bytes())
+            self.assertEqual(parsed['boot_kernel_sha256'], sha(want['kernel']))
+
+        packaged = kernel(33)
+        loader, bootargs, initramfs = owner_image(b'receipt-owner')
+        original = boot(kernel_bytes=K1, dtb=D1, loader=loader, bootargs=bootargs, initramfs=initramfs)
+        target = boot(kernel_bytes=packaged, dtb=D2, loader=loader, bootargs=bootargs, initramfs=initramfs)
+        self.assertEqual(MODULE.parse(original)['loader'], MODULE.parse(target)['loader'])
+        self.assertNotEqual(sha(MODULE.parse(original)['kernel']), sha(MODULE.parse(target)['kernel']))
+        self.assertNotEqual(sha(MODULE.parse(original)['dtb']), sha(MODULE.parse(target)['dtb']))
+        machine = self.transition(boot_kernel=K1, package_kernel=packaged)
+        machine.put(MODULE.BOOT, original)
+        machine.put(MODULE.DTB, D2)
+        with self.subTest(changes='dtb kernel'):
+            assert_replay(machine, original, target, ['dtb', 'kernel'])
+
+        machine, tree, old_loader, loaders, _ = self.handoff_machine()
+        patcher = mock.patch.object(
+            MODULE, 'KERNEL_TRANSITIONS', {(sha(K1), sha(K2)), (sha(K2), sha(K1))})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        machine.put(MODULE.KERNEL, K2)
+        original = boot(kernel_bytes=K1, dtb=D1, loader=old_loader)
+        target = boot(kernel_bytes=K2, dtb=tree, loader=loaders['hidden'])
+        source, dest = MODULE.parse(original), MODULE.parse(target)
+        self.assertEqual(MODULE.KNOWN_LOADERS[sha(source['loader'])], MODULE.KNOWN_LOADERS[sha(dest['loader'])])
+        self.assertNotEqual(source['loader'], dest['loader'])
+        self.assertNotEqual(sha(source['kernel']), sha(dest['kernel']))
+        self.assertNotEqual(sha(source['dtb']), sha(dest['dtb']))
+        self.assertEqual(sha(dest['dtb']), MODULE.BACKLIGHT_DTB)
+        self.assertEqual(sha(dest['loader']), MODULE.BACKLIGHT_LOADERS['hidden'][1])
+        machine.put(MODULE.BOOT, original)
+        with self.subTest(changes='dtb kernel loader'):
+            assert_replay(machine, original, target, ['dtb', 'kernel', 'loader'])
+
     def test_corrupt_journal_or_neither_side_reports_unresolved_recovery(self):
         """Do not claim boot.bin was unchanged, and do not delete the journal."""
         def preserved(machine, paths):
@@ -1161,6 +1301,54 @@ class ComposeTests(unittest.TestCase):
         assert_unresolved_recovery(self, err)
         self.assertIn('neither side', err)
         self.assertEqual(preserved(machine, paths), before)
+
+    def test_unresolved_recovery_names_the_journal_under_the_compose_root(self):
+        """Corrupt and pending refusals name ``str(root / JOURNAL)``.
+
+        A compose root of ``/`` is ``/var/lib/omarchy-m4/boot-compose/journal``.
+        This sandbox names its own journal. The check does not depend on cwd.
+        The journal is not deleted, and the refusal does not claim that
+        boot.bin was left unchanged.
+        """
+        self.assertEqual(str(Path('/') / MODULE.JOURNAL), '/var/lib/omarchy-m4/boot-compose/journal')
+
+        machine = Machine(self)
+        self.assertNotEqual(machine.root, Path('/'))
+        rooted = str(machine.root / MODULE.JOURNAL)
+        self.assertNotEqual(rooted, MODULE.JOURNAL)
+        self.assertTrue(rooted.startswith(str(machine.root) + '/'))
+        machine.put(MODULE.JOURNAL, b'{not a journal')
+        before = self.protected_bytes(machine)
+        for args in ((), ('--apply',)):
+            with self.subTest(kind='corrupt', args=args):
+                code, out, err = machine.run(*args)
+                self.assertEqual(code, 1, out + err)
+                self.assertEqual(out, '')
+                self.assertIn(rooted, err)
+                self.assertNotIn('boot.bin was not changed', err)
+                self.assertIn('unresolved', err.lower())
+                self.assertIn('recorded there', err)
+                self.assertIn('Do not assume boot.bin is unchanged.', err)
+                self.assertEqual(self.protected_bytes(machine), before)
+                self.assertEqual((machine.root / MODULE.JOURNAL).read_bytes(), b'{not a journal')
+
+        packaged = kernel(12)
+        pending = self.transition(package_kernel=packaged)
+        desired = boot(kernel_bytes=packaged, dtb=D1, loader=LOADER + b' notch')
+        plant_journal(pending, 'apply', pending.boot_before, desired, sha(packaged))
+        self.assertEqual(pending.boot, MODULE.load_journal(pending.root)['from_bytes'])
+        rooted = str(pending.root / MODULE.JOURNAL)
+        before = self.protected_bytes(pending)
+        code, out, err = pending.run('--rollback', '--apply')
+        self.assertEqual(code, 1, out + err)
+        self.assertEqual(out, '')
+        self.assertIn('apply transition is pending', err)
+        self.assertIn(rooted, err)
+        self.assertNotIn('boot.bin was not changed', err)
+        self.assertIn('recorded there', err)
+        self.assertIn('Do not assume boot.bin is unchanged.', err)
+        self.assertEqual(self.protected_bytes(pending), before)
+        self.assertFalse((pending.root / MODULE.PACMAN_LOCK).exists())
 
     def test_commit_transition_refuses_boot_on_neither_side(self):
         packaged = kernel(12)
@@ -1573,6 +1761,53 @@ class ComposeTests(unittest.TestCase):
                 self.assertEqual(self.saved_bytes(machine), before)
                 assert_unresolved_recovery(self, err)
 
+    def test_pending_rollback_efi_budget_refuses_before_hold(self):
+        """A pending rollback pays the EFI commit budget before creating a hold.
+
+        Snapshots already exist, so the store only has to keep the margin.
+        The EFI partition is too small. ``--rollback --apply`` refuses that
+        budget before any new hold. Journal, snapshots, boot, previous, video,
+        and audio stay, and the refusal does not claim boot.bin was unchanged.
+        """
+        packaged = kernel(12)
+        machine = self.transition(package_kernel=packaged)
+        original = machine.boot_before
+        current = boot(kernel_bytes=packaged, dtb=D1, loader=LOADER + b' notch')
+        machine.put(MODULE.BOOT, current)
+        machine.put(MODULE.BOOT + MODULE.PREVIOUS, original)
+        plant_journal(machine, 'rollback', current, original, sha(K1))
+        loaded = MODULE.load_journal(machine.root)
+        self.assertEqual(loaded['operation'], 'rollback')
+        self.assertEqual(loaded['from_bytes'], current)
+        self.assertEqual(machine.boot, current)
+        self.assertEqual(json.loads((machine.root / MODULE.VIDEO_MANIFEST).read_bytes())['boot_kernel_sha256'],
+                         sha(K1))
+        self.assertEqual(json.loads((machine.root / MODULE.AUDIO_MANIFEST).read_bytes())['kernel_release'],
+                         RELEASE)
+        self.assertFalse((machine.root / BOOT_HOLD).exists())
+        before = self.saved_bytes(machine)
+        efi = machine.root / 'boot' / 'efi'
+        margin = types.SimpleNamespace(f_bavail=MODULE.MARGIN, f_frsize=1)
+        tiny = types.SimpleNamespace(f_bavail=1, f_frsize=1)
+
+        def fake(path):
+            probed = Path(path)
+            on_efi = probed == efi or efi in probed.parents
+            return tiny if on_efi else margin
+
+        with mock.patch.object(MODULE.os, 'statvfs', side_effect=fake):
+            code, out, err = machine.run('--rollback', '--apply')
+        self.assertEqual(code, 1, out + err)
+        self.assertEqual(out, '')
+        self.assertIn('Not enough free space on the EFI partition', err)
+        self.assertNotIn('root filesystem', err)
+        self.assertNotIn('boot.bin was not changed', err)
+        self.assertFalse((machine.root / BOOT_HOLD).exists())
+        self.assertEqual(machine.boot, current)
+        self.assertEqual(machine.previous, original)
+        self.assertEqual(self.saved_bytes(machine), before)
+        assert_unresolved_recovery(self, err)
+
     def test_incoherent_same_kernel_rollback_target_refuses_before_hold(self):
         """A same-kernel rollback journal still requires the backlight handoff loader."""
         machine, tree, old_loader, loaders, _ = self.handoff_machine()
@@ -1621,7 +1856,13 @@ class ComposeTests(unittest.TestCase):
         self.assertTrue('--apply' in err or ('updater' in err.lower() and 'retry' in err.lower()))
 
     def test_manual_copy_back_manifest_failure_names_explicit_retry(self):
-        """Copy-back that dies while rewriting the video pin names ``--rollback --apply``."""
+        """Copy-back that dies before the video pin is replaced names ``--rollback --apply``.
+
+        The hold is present and the video pin still names the newer kernel.
+        Ordinary inspection, ordinary ``--apply``, and ``--hook --apply`` refuse
+        with that explicit rollback. They do not report a held success or tell
+        the owner to release the hold. The explicit rollback then converges.
+        """
         loader = LOADER + b' recognized handoff'
         patcher = mock.patch.dict(MODULE.KNOWN_LOADERS, {sha(loader): 'hidden'})
         patcher.start()
@@ -1653,9 +1894,39 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual((machine.root / MODULE.AUDIO_MANIFEST).read_bytes(), audio)
         self.assertTrue((machine.root / BOOT_HOLD).is_file())
         self.assertFalse((machine.root / BOOT_JOURNAL).exists())
+        held = self.protected_bytes(machine)
+        self.assertIsNotNone(held[BOOT_HOLD])
+        self.assertIsNone(held[BOOT_JOURNAL])
+        self.assertNotEqual(
+            json.loads(held[MODULE.VIDEO_MANIFEST])['boot_kernel_sha256'],
+            sha(MODULE.parse(held[MODULE.BOOT])['kernel']))
+        rollback_cmd = 'sudo m4-boot-compose --rollback --apply'
+        for args in ((), ('--apply',)):
+            with self.subTest(args=args):
+                code, out, refusal = machine.run(*args)
+                self.assertEqual(code, 1, out + refusal)
+                self.assertEqual(out, '')
+                self.assertIn(rollback_cmd, refusal)
+                self.assertNotIn('resume-updates', refusal)
+                self.assertNotIn('boot.bin was not changed', refusal)
+                self.assertNotIn(MODULE.HELD_STATUS, out)
+                self.assertEqual(self.protected_bytes(machine), held)
+                self.assertFalse((machine.root / MODULE.PACMAN_LOCK).exists())
+        machine.put(MODULE.PACMAN_LOCK, b'pacman transaction')
+        code, out, refusal = machine.run('--hook', '--apply')
+        self.assertEqual(code, 1, out + refusal)
+        self.assertEqual(out, '')
+        self.assertIn(rollback_cmd, refusal)
+        self.assertNotIn('resume-updates', refusal)
+        self.assertNotIn('boot.bin was not changed', refusal)
+        self.assertNotIn(MODULE.HELD_STATUS, out)
+        self.assertEqual(self.protected_bytes(machine), held)
+        self.assertEqual((machine.root / MODULE.PACMAN_LOCK).read_bytes(), b'pacman transaction')
+        (machine.root / MODULE.PACMAN_LOCK).unlink()
         code, out, retry_err = machine.run('--rollback', '--apply')
         self.assertEqual((code, retry_err), (0, ''), retry_err)
         receipt = json.loads(out)
+        self.assertTrue(receipt['applied'])
         self.assertEqual(receipt['status'], MODULE.HELD_STATUS)
         self.assertEqual(machine.boot, original)
         self.assertEqual(machine.previous, original)
