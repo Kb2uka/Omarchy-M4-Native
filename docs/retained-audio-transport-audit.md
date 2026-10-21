@@ -121,6 +121,9 @@ It simulates case-insensitive name lookup through a real directory alias,
 checks refusal before output creation, and checks probe cleanup and unchanged
 source pins. A mutant that returns early for an aliased parent passed the
 previous 42 tests and fails this test. The restored 43 tests pass on Homebase.
+The simulation is limited to the resolved destination directory: moving the
+probe onto the host's default temporary filesystem is also caught. That
+mutation passed before the simulation was scoped and fails afterward.
 The builder implementation is unchanged from `dc191cb`.
 
 A full ARM64 baseline kernel and then the hardened kernel linked with
@@ -141,10 +144,11 @@ build of the `91dabdf` recipe, which adds the source-closure copy and
 the case-probe check, completed on Homebase. Against one of the earlier
 outputs (build A), `cmp` of `Image.gz`, `cmp` of the receipt, and `diff -qr`
 of all five modules each exited 0. The image remains 18,900,939 bytes and the MCA module
-remains 79,152 bytes, at the hashes below. The full 5,896-byte trust region was
-verified independently: its SHA-256 is
+remains 79,152 bytes, at the hashes below. The full 5,896-byte trust region,
+starting at byte offset 42,950,656 in each decompressed `Image`, was verified
+independently. Its SHA-256 is
 `77f3aad25837130e2e41d6750019a0e526365eeda0bfd17f2c45bb7df28cc0cc`,
-matching the same region of the original qualified kernel. This is a region
+matching that region of the original qualified decompressed `Image`. This is a region
 digest, separate from either complete kernel digest. The matched receipt still sets `native_qualified`
 and `fresh_install_qualified` to false.
 
@@ -226,9 +230,11 @@ boot completed with this same image and MCA module
 79,152 bytes). The evidence for that session is in the companion pull
 request. The native acceptance requirements remain boot and repeat boot,
 keyboard and trackpad input, protected audio, GPU, and video checks. PR 157
-owns those checks and the migration evidence: protected audio readiness and
-playback, GPU state, and hardware-decoded video comparisons were observed on
-the candidate. Device enumeration and automated login are recorded separately
+owns those checks and the migration evidence. Boot and repeat boot completed;
+fresh protected-audio readiness, GPU state, and hardware-decoded video
+comparisons passed. Instrumented playback through the protected PipeWire sink
+completed for three seconds at 5% volume with exit 0; no human listening is
+claimed. Device enumeration and automated login are recorded separately
 from physical keyboard and trackpad acceptance, which remains unperformed
 for channel promotion. These source changes do not waive that gate.
 Closing issue 43 also requires the companion migration and recovery evidence. Build receipts keep `native_qualified` and
