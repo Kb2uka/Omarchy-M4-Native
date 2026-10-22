@@ -57,8 +57,11 @@ before it touches hardware.
 - **Heap location never sent (inferred).** The firmware is never told where
   the heap is.
 - **Heap and IPC contents (Linux safety choice).** Linux zeroes both
-  surfaces and cleans them to the point of coherency before mapping. The IPC
-  surface is zeroed natively (proven); heap zero-fill is a Linux choice.
+  surfaces before mapping. The IPC surface is zeroed natively (proven);
+  heap zero-fill is a Linux choice. Cleaning them to the point of coherency is
+  required before any rung that releases the processor. The exact kernel does
+  not export `dcache_clean_poc` to modules, so the cleaning method is a gate
+  before E3. E2 never lets the processor read them.
   After every rung, Linux verifies the surfaces before freeing them:
   - **The processor was never released:** they must still be all zero. A
     nonzero byte stops the ladder.
@@ -115,8 +118,9 @@ before it touches hardware.
     neither translation nor bypass.
   - Linux never sets `BYPASS_DAPF` on stream 15, because that would bypass the
     filter.
-  - E2b (section 5) reads stream 15's TCR, the DAPF registers and the PROTECT
-    word read-only before any start.
+  - E2 records stream 15's TCR, the PROTECT word and the error word on all
+    three DARTs, read-only, before attach (after the Linux DART driver's
+    reset). Reading the DAPF instance registers is a gate before E3.
   - E3 runs with stream 15 left disabled. Traffic the firmware sends on
     stream 15 then faults (inferred from the TCR bit semantics) instead of
     reaching other hardware.
@@ -352,11 +356,12 @@ start resets first (section 3, step 2).
 - `DisableCamPMU` decoded or proven unnecessary.
 - `0x28a4080` and the override words resolved by the E2c ledger.
 - The IRQ 387 sharing precondition checked.
-- The stream 15 and DAPF state from E2 reviewed.
+- The stream 15 state from E2 reviewed, and the DAPF registers read.
+- A cache-cleaning method for the heap and IPC surfaces.
 
 ## 6. Open questions
 
-1. Whether stream 15 and DAPF are needed before stage 1 or 2 (E2b, E3).
+1. Whether stream 15 and DAPF are needed before stage 1 or 2 (E2 records stream 15; DAPF reads before E3).
 2. The meaning of `0x28a4080`, `0xc00` bits 24..25 and `0x1600040` bit 25.
 3. Live GPIO0..5 after wake and the stage-2 buffer sizes (E3).
 4. The park unknowns of section 4.1 and the boot-argument `+0x00` field (before E4).
