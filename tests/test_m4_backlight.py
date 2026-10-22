@@ -311,12 +311,21 @@ class DisplayFollow(unittest.TestCase):
         self.follow(disable, lambda: seen.append(self.level.read_text()))
         self.assertEqual(seen, ['0\n'])
 
-    def test_level_set_while_dark_is_kept_on_wake(self):
+    def test_level_set_with_the_wake_is_kept(self):
         def key_wake():
             self.level.write_text('26\n')
             self.scanout(True)
         self.follow(lambda: self.scanout(False), key_wake)
         self.assertEqual(self.level.read_text(), '26\n')
+
+    def test_level_written_while_still_dark_is_held_at_zero_then_restored(self):
+        seen = []
+        self.follow(lambda: self.scanout(False),
+                    lambda: self.level.write_text('40\n'),
+                    lambda: seen.append(self.level.read_text()),
+                    lambda: self.scanout(True))
+        self.assertEqual(seen, ['0\n'])
+        self.assertEqual(self.level.read_text(), '40\n')
 
     def test_stopping_while_dark_restores_the_level_before_it_can_be_saved(self):
         def shutdown():

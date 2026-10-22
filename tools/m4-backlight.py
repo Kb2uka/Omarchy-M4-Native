@@ -226,12 +226,16 @@ def follow_display(root, sleep=time.sleep):
     saved = None  # The owner's level while the scanout is off.
     try:
         while True:
-            if saved is None and not scanout_on(connector):
-                saved = int(text(level))
-                if saved:
+            if not scanout_on(connector):
+                current = int(text(level))
+                if current:
+                    # The owner's level at blank, or one written while still dark: hold 0, restore it on wake.
+                    saved = current
                     level.write_text('0\n')
-            elif saved is not None and scanout_on(connector):
-                # A level set while dark (for example a brightness key wake) is the owner's choice.
+                elif saved is None:
+                    saved = 0
+            elif saved is not None:
+                # A level set as the scanout returns (for example a brightness key wake) is the owner's choice.
                 if saved and int(text(level)) == 0:
                     level.write_text(f'{saved}\n')
                 saved = None
