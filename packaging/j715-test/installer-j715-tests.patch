@@ -1,0 +1,124 @@
+--- a/tests/test_j713_profile.py
++++ b/tests/test_j713_profile.py
+@@ -39,7 +39,8 @@
+             ("j713ap", False, "26.5.1", False),
+             ("j773gap", False, "26.6.2", True),
+             ("j773gap", True, "26.6.2", True),
+-            ("j715ap", True, "26.5.1", False),
++            ("j715ap", True, "26.5.1", True),
++            ("j715ap", False, "26.5.1", False),
+             ("j713ap", True, "26.4", False),
+         ):
+             with self.subTest(device=device, expert=expert, version=version):
+@@ -96,7 +97,7 @@
+         self.assertTrue(main.DEVICES["j713ap"].expert_only)
+         choice = self.choose()
+         self.assertEqual(choice.version, "26.5.1")
+-        self.assertEqual(choice.devices, ["j713ap"])
++        self.assertEqual(choice.devices, ["j713ap", "j715ap"])
+         self.assertEqual(choice.url, "https://updates.cdn-apple.com/2026SpringFCS/fullrestores/122-88870/E47EBB85-45F2-4E3C-B9E7-6FF7868C2FBA/UniversalMac_26.5.1_25F80_Restore.ipsw")
+ 
+     def test_mini_retains_2662_minimum(self):
+@@ -127,7 +128,7 @@
+                 obj.choose_ipsw()
+ 
+     def test_other_m4_models_are_not_enabled(self):
+-        for name in ("j715ap", "j614ap", "j616ap"):
++        for name in ("j614ap", "j616ap"):
+             self.assertNotIn(name, main.DEVICES)
+ 
+     def test_recovery_uses_exact_qualified_hashes(self):
+--- /dev/null
++++ b/tests/test_j715_profile.py
+@@ -0,0 +1,91 @@
++# SPDX-License-Identifier: MIT
++import contextlib
++import io
++from pathlib import Path
++import tempfile
++from types import SimpleNamespace
++import unittest
++from unittest.mock import Mock, patch
++
++import main
++from gravity_firmware import update
++from gravity_firmware.bluetooth import BluetoothFWCollection
++from gravity_firmware.open_firmware import OpenFirmwareCollection
++from gravity_firmware.wifi import WiFiFWCollection
++
++
++WIFI = {
++    "brcm/brcmfmac4388c2-pcie.apple,kos.bin": "kos.trx",
++    "brcm/brcmfmac4388c2-pcie.apple,kos.clm_blob": "kos.clmb",
++    "brcm/brcmfmac4388c2-pcie.apple,kos.txcap_blob": "kos.txcb",
++    "brcm/brcmfmac4388c2-pcie.apple,kos.sig": "kos.sig",
++    "brcm/brcmfmac4388c2-pcie.apple,kos-WLMT-a.txt": "P-kos_M-WLMT_V-a__m-4.9.txt",
++    "brcm/brcmfmac4388c2-pcie.apple,kos-WLMT-u.txt": "P-kos_M-WLMT_V-u__m-4.9.txt",
++}
++BT = {
++    "brcm/brcmbt4388c2-apple,kos-u.bin": "BCM4388C2_24.1.240.1888_PCIE_macOS_Willamette_Kos_CLPC_OS_USI_20260618.bin",
++    "brcm/brcmbt4388c2-apple,kos-u.ptb": "BCM4388C2_P1v4_PCIE_macOS_Willamette_Kos_CLPC_OS_USI_K_R_20240712.ptb",
++    "brcm/brcmbt4388c2-apple,kos-a.bin": "BCM4388C2_24.1.240.1887_PCIE_macOS_Willamette_Kos_CLPC_OS_AMKOR_20260618.bin",
++    "brcm/brcmbt4388c2-apple,kos-a.ptb": "BCM4388C2_P1v4_PCIE_macOS_Willamette_Kos_CLPC_OS_AMKOR_K_R_20240712.ptb",
++}
++
++
++class J715ProfileTests(unittest.TestCase):
++    def installer(self, device="j715ap"):
++        obj = main.InstallerMain.__new__(main.InstallerMain)
++        obj.sysinfo = SimpleNamespace(sys_firmware="mBoot-18000.120.36",
++            macos_ver="26.5.1", sfr_full_ver="25.6.80.0.0,0", chip_id=0x8132,
++            device_class=device, show=Mock(), boot_mode="macOS", login_user="fixture")
++        obj.device = main.DEVICES[device]
++        obj.expert = True
++        obj.choice = lambda prompt, options, default=None: default
++        return obj
++
++    def test_j715_is_expert_only_and_uses_qualified_2651(self):
++        self.assertTrue(main.DEVICES["j715ap"].expert_only)
++        with contextlib.redirect_stdout(io.StringIO()):
++            choice = self.installer().choose_ipsw()
++        self.assertEqual(choice.version, "26.5.1")
++        self.assertIn("j715ap", choice.devices)
++
++    def test_kos_radio_selection_ignores_other_boards(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            root = Path(tmp)
++            for name in WIFI.values():
++                for board in ("kos", "garden"):
++                    path = root / "wifi/C-4388__s-C2" / name.replace("kos", board)
++                    path.parent.mkdir(parents=True, exist_ok=True)
++                    payload = f"fixture ={board}\n" if name.endswith(".txt") else board
++                    path.write_bytes(payload.encode())
++            bt = root / "bt"
++            bt.mkdir()
++            for dest, name in BT.items():
++                (bt / name).write_bytes(dest.encode())
++                (bt / name.replace("Kos", "Garden")).write_bytes(b"wrong board")
++            wifi = dict(WiFiFWCollection(str(root / "wifi"), machine="j715").files())
++            bluetooth = dict(BluetoothFWCollection(str(bt), machine="j715").files())
++            self.assertEqual(set(wifi), set(WIFI))
++            self.assertEqual(set(bluetooth), set(BT))
++            for name, firmware in wifi.items():
++                expected = "fixture=kos\n" if name.endswith(".txt") else "kos"
++                self.assertEqual(firmware.data, expected.encode())
++            for name, firmware in bluetooth.items():
++                self.assertEqual(firmware.data, name.encode())
++            for source in WIFI.values():
++                path = root / "wifi/C-4388__s-C2" / source
++                data = path.read_bytes()
++                path.unlink()
++                with self.subTest(missing=source), self.assertRaises(FileNotFoundError):
++                    list(WiFiFWCollection(str(root / "wifi"), machine="j715").files())
++                path.write_bytes(data)
++
++    def test_j715_has_no_bundled_open_firmware_and_cli_accepts_it(self):
++        self.assertEqual(list(OpenFirmwareCollection(machine="j715").files()), [])
++        with patch("sys.argv", ["gravity-fwextract", "source", "dest", "--machine", "j715"]), \
++             patch.object(update, "update_firmware") as rebuild:
++            update.main()
++        rebuild.assert_called_once_with(Path("source"), Path("dest"), machine="j715", open_firmware=None)
++
++
++if __name__ == "__main__":
++    unittest.main()

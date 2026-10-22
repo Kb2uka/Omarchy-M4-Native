@@ -62,9 +62,10 @@ def source_joins(path=None):
     target = path or SOURCE_JOINS
     require(target.is_file() and not target.is_symlink(), 'Missing channel source joins: ' + str(target))
     joins = json.loads(target.read_bytes())
-    require(joins.get('schema') == 1 and isinstance(joins.get('binaries'), dict),
+    require(joins.get('schema') == 1 and isinstance(joins.get('binaries'), dict) and
+            isinstance(joins.get('kit_binaries', {}), dict),
             'Unknown channel source joins schema')
-    for name, entry in joins['binaries'].items():
+    for name, entry in (*joins['binaries'].items(), *joins.get('kit_binaries', {}).items()):
         require(re.fullmatch(r'[0-9a-f]{64}', entry.get('sha256', '')) and
                 entry.get('correspondence') in CORRESPONDENCE and entry.get('sources'),
                 'Incomplete channel source join: ' + name)
@@ -140,19 +141,32 @@ def check_channel_joins(name, joins):
         entry = joins['binaries'][filename]
         require(entry['sha256'] == digest,
                 f'Source join names a different build of {filename}')
-        require(entry['correspondence'] == 'rebuilt-identical',
-                f'Source correspondence for {filename} is not verified by an identical rebuild: {entry.get("correspondence")}')
-        for source in entry['sources']:
-            if 'tree' in source:
-                require((ROOT / source['tree']).exists(),
-                        f'Joined source tree missing for {filename}: {source["tree"]}')
-                if 'commit' in source:
-                    pinned = git_tree_id(ROOT, source['commit'], source['tree'])
-                    require(pinned is not None,
-                            f'Joined commit {source["commit"][:12]} does not exist or does not contain {source["tree"]} for {filename}')
-                    head_tree = git_tree_id(ROOT, 'HEAD', source['tree'])
-                    require(pinned == head_tree,
-                            f'Joined source tree {source["tree"]} differs from {source["commit"][:12]} for {filename}')
+        check_rebuilt_identical(filename, entry)
+
+
+def check_rebuilt_identical(filename, entry):
+    """A rebuilt-identical join whose source trees are those of HEAD."""
+    require(entry['correspondence'] == 'rebuilt-identical',
+            f'Source correspondence for {filename} is not verified by an identical rebuild: {entry.get("correspondence")}')
+    for source in entry['sources']:
+        if 'tree' in source:
+            require((ROOT / source['tree']).exists(),
+                    f'Joined source tree missing for {filename}: {source["tree"]}')
+            if 'commit' in source:
+                pinned = git_tree_id(ROOT, source['commit'], source['tree'])
+                require(pinned is not None,
+                        f'Joined commit {source["commit"][:12]} does not exist or does not contain {source["tree"]} for {filename}')
+                head_tree = git_tree_id(ROOT, 'HEAD', source['tree'])
+                require(pinned == head_tree,
+                        f'Joined source tree {source["tree"]} differs from {source["commit"][:12]} for {filename}')
+
+
+def check_kit_joins(joins):
+    """Binaries only a tester kit carries are not channel inputs, but are held to the same rebuild rule."""
+    for filename, entry in sorted(joins.get('kit_binaries', {}).items()):
+        require(filename not in joins['binaries'],
+                f'A binary is joined both as a channel input and a kit binary: {filename}')
+        check_rebuilt_identical(filename, entry)
 
 
 def check_stale_joins(channel, joins):
@@ -420,6 +434,7 @@ def check(directory, compare_published=True):
     channel = json.loads(CHANNEL.read_text())
     joins = source_joins()
     check_stale_joins(channel, joins)
+    check_kit_joins(joins)
     packages = sorted(directory.glob('*.pkg.tar.zst'))
     require(sorted(p.name for p in directory.iterdir()) == [p.name for p in packages],
             'Only package archives may be in the build output')

@@ -1,0 +1,13 @@
+--- a/tools/m4-session-placement.py
++++ b/tools/m4-session-placement.py
+@@ -41,8 +41,8 @@ def cpu_list(value):
+ 
+ def cpu_layout(root):
+     compatible = (root / "sys/firmware/devicetree/base/compatible").read_bytes().split(b"\0")
+-    if b"apple,j713" not in compatible or b"apple,t8132" not in compatible:
+-        raise ValueError("This workaround is qualified only for J713/T8132")
++    if not ({b"apple,j713", b"apple,j715"} & set(compatible)) or b"apple,t8132" not in compatible:
++        raise ValueError("This workaround is qualified only for J713/J715 and T8132")
+     directory = root / "sys/devices/system/cpu"
+     online = cpu_list((directory / "online").read_text())
+     roles = {b"apple,donan-p": set(), b"apple,donan-e": set()}

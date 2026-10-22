@@ -655,7 +655,10 @@ its pinned corresponding source and its rebuild correspondence in
 package version not yet published has a `rebuilt-identical` join for each
 binary it downloads. A version already published byte for byte is on Airs and
 is not uploaded again, so it passes; any new version of it needs the rebuild
-first. Joins stay `unverified` until a byte-identical rebuild is recorded:
+first. Binaries that only a tester kit carries and no channel package downloads,
+such as the J715 kit's GPU module, are joined under `kit_binaries` in the same file
+and must be `rebuilt-identical`; they are not channel inputs, so they never count
+as stale joins. Joins stay `unverified` until a byte-identical rebuild is recorded:
 
 - **Kernel (`linux-m4-omarchy`):** The kernel package's build identity is recorded
   from the kernel tree and configuration published with

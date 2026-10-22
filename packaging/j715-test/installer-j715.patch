@@ -1,0 +1,73 @@
+--- a/src/main.py
++++ b/src/main.py
+@@ -42,6 +42,9 @@
+     "j773gap": Device("26.6.2", False),
+     # Experimental J713 qualification; do not relax the shared T8132 minimum.
+     "j713ap": Device("26.5.1", True, "26.5.1"),
++    # Testing J715 (15-inch M4 Air): the J713's 26.5.1 recovery image and
++    # kernelcache (BuildManifest 25F80). Installed only from a J715 tester kit.
++    "j715ap": Device("26.5.1", True, "26.5.1"),
+ }
+ 
+ IPSW_VERSIONS = [
+@@ -50,7 +53,7 @@
+     IPSW("26.6.2", "26.5", "0", "0", False, ["j773gap"],
+          "https://updates.cdn-apple.com/2026SummerFCS/fullrestores/140-75212/A2A24B94-1FC1-45A3-93F7-C51B02AF1F4D/UniversalMac_26.6.2_25G83_Restore.ipsw"),
+     # SFR uses RestoreLongVersion, not the macOS ProductVersion.
+-    IPSW("26.5.1", "26.5.1", "0", "25.6.80.0.0,0", True, ["j713ap"],
++    IPSW("26.5.1", "26.5.1", "0", "25.6.80.0.0,0", True, ["j713ap", "j715ap"],
+          "https://updates.cdn-apple.com/2026SpringFCS/fullrestores/122-88870/E47EBB85-45F2-4E3C-B9E7-6FF7868C2FBA/UniversalMac_26.5.1_25F80_Restore.ipsw"),
+ ]
+ 
+@@ -908,7 +911,7 @@
+         self.device = DEVICES.get(self.sysinfo.device_class, None)
+         if not self.chip_min_ver or not self.device or (self.device.expert_only and not self.expert):
+             p_error("This device is not supported yet!")
+-            p_error("Supported profiles: M4 Mac mini (j773gap); experimental M4 Air (j713ap) in expert mode.")
++            p_error("Supported profiles: M4 Mac mini (j773gap); experimental M4 Air (j713ap, j715ap) in expert mode.")
+             print()
+             p_error("   https://gravitylinux.org/docs/hardware")
+             print()
+--- a/gravity_firmware/bluetooth.py
++++ b/gravity_firmware/bluetooth.py
+@@ -23,6 +23,12 @@
+         "brcm/brcmbt4388c2-apple,garden-u.bin",
+         "brcm/brcmbt4388c2-apple,garden-u.ptb",
+     ),
++    "j715": (
++        "brcm/brcmbt4388c2-apple,kos-a.bin",
++        "brcm/brcmbt4388c2-apple,kos-a.ptb",
++        "brcm/brcmbt4388c2-apple,kos-u.bin",
++        "brcm/brcmbt4388c2-apple,kos-u.ptb",
++    ),
+     "j773g": (
+         "brcm/brcmbt4388c2-apple,sakhalin-a.bin",
+         "brcm/brcmbt4388c2-apple,sakhalin-a.ptb",
+--- a/gravity_firmware/open_firmware.py
++++ b/gravity_firmware/open_firmware.py
+@@ -10,6 +10,7 @@
+ # provenance is unambiguous.
+ MACHINE_FILES = {
+     "j713": (),
++    "j715": (),
+     # AVD is not part of the first M4 release. No bundled open firmware needed.
+     "j773g": (),
+ }
+--- a/gravity_firmware/wifi.py
++++ b/gravity_firmware/wifi.py
+@@ -16,6 +16,15 @@
+         "brcm/brcmfmac4388c2-pcie.apple,garden-WLMT-a.txt": "C-4388__s-C2/P-garden_M-WLMT_V-a__m-4.9.txt",
+         "brcm/brcmfmac4388c2-pcie.apple,garden-WLMT-u.txt": "C-4388__s-C2/P-garden_M-WLMT_V-u__m-4.9.txt"
+     },
++    # Experimental J715 (15-inch M4 Air); live ADT module-instance is "kos".
++    "j715": {
++        "brcm/brcmfmac4388c2-pcie.apple,kos.bin": "C-4388__s-C2/kos.trx",
++        "brcm/brcmfmac4388c2-pcie.apple,kos.clm_blob": "C-4388__s-C2/kos.clmb",
++        "brcm/brcmfmac4388c2-pcie.apple,kos.txcap_blob": "C-4388__s-C2/kos.txcb",
++        "brcm/brcmfmac4388c2-pcie.apple,kos.sig": "C-4388__s-C2/kos.sig",
++        "brcm/brcmfmac4388c2-pcie.apple,kos-WLMT-a.txt": "C-4388__s-C2/P-kos_M-WLMT_V-a__m-4.9.txt",
++        "brcm/brcmfmac4388c2-pcie.apple,kos-WLMT-u.txt": "C-4388__s-C2/P-kos_M-WLMT_V-u__m-4.9.txt"
++    },
+     "j773g": {
+         "brcm/brcmfmac4388c0-pcie.bin":
+             "C-4388__s-C2/sakhalin.trx",

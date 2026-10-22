@@ -1,0 +1,72 @@
+dockchannel-hid: accept the 15-inch M4 Air (J715) on the M4 MTP input path
+
+Apply after patches-kernel/j713-input/dockchannel-start-retry.patch,
+macsmc-key-info-lock.patch and dockchannel-afe-action.patch (kernel build 18,
+docs/release-source.md). The driver before this patch must be SHA-256
+e4eebbee612eee32bd51ce370d412afc8cf62a9a7e087a3797c2c29306cedfb4.
+
+The version-2 power requests, the multi-touch startup retry and the AFE action
+are gated on apple,j713 && apple,t8132. All three gates now use dchid_m4_air(),
+which also accepts apple,j715. The default-off module parameters still have to
+be set (m4_power_v2, m4_afe_action), as the J713 boot arguments do.
+
+The J715 ADT's multi-touch function-afe-reset (SMC key gP1c, template
+0x00010000) and stm function-stm-reset (gP1d) are the J713's, so the AFE
+checks are unchanged. A J715 has used its built-in keyboard and trackpad with
+a kernel carrying this patch since 2026-10-15.
+
+--- a/drivers/hid/dockchannel-hid/dockchannel-hid.c
++++ b/drivers/hid/dockchannel-hid/dockchannel-hid.c
+@@ -26,11 +26,19 @@
+ 
+ static bool m4_power_v2;
+ module_param(m4_power_v2, bool, 0444);
+-MODULE_PARM_DESC(m4_power_v2, "Test J713 MTP version-2 interface power requests");
++MODULE_PARM_DESC(m4_power_v2, "Test J713/J715 MTP version-2 interface power requests");
+ 
+ static bool m4_afe_action;
+ module_param(m4_afe_action, bool, 0444);
+-MODULE_PARM_DESC(m4_afe_action, "Test J713 AFE native power actions");
++MODULE_PARM_DESC(m4_afe_action, "Test J713/J715 AFE native power actions");
++
++/* M4 Airs sharing the T8132 MTP input path: J713 (13-inch), J715 (15-inch). */
++static bool dchid_m4_air(void)
++{
++	return (of_machine_is_compatible("apple,j713") ||
++		of_machine_is_compatible("apple,j715")) &&
++	       of_machine_is_compatible("apple,t8132");
++}
+ 
+ #define COMMAND_TIMEOUT_MS 1000
+ #define START_TIMEOUT_MS 2000
+@@ -396,9 +404,7 @@
+ 
+ static bool dchid_afe_action_enabled(struct dchid_iface *iface)
+ {
+-	return m4_afe_action && m4_power_v2 &&
+-		of_machine_is_compatible("apple,j713") &&
+-		of_machine_is_compatible("apple,t8132") &&
++	return m4_afe_action && m4_power_v2 && dchid_m4_air() &&
+ 		!strcmp(iface->name, "multi-touch");
+ }
+ 
+@@ -554,8 +560,7 @@
+ 	};
+ 	int ret, host_ret;
+ 
+-	if (!m4_power_v2 || !of_machine_is_compatible("apple,j713") ||
+-	    !of_machine_is_compatible("apple,t8132"))
++	if (!m4_power_v2 || !dchid_m4_air())
+ 		return dchid_comm_cmd(iface->dchid, msg, sizeof(msg));
+ 
+ 	ret = dchid_comm_cmd(iface->dchid, &request, sizeof(request));
+@@ -573,8 +578,7 @@
+ 
+ static bool dchid_start_retry_enabled(struct dchid_iface *iface)
+ {
+-	return m4_power_v2 && of_machine_is_compatible("apple,j713") &&
+-	       of_machine_is_compatible("apple,t8132") &&
++	return m4_power_v2 && dchid_m4_air() &&
+ 	       !strcmp(iface->name, "multi-touch");
+ }
+ 
