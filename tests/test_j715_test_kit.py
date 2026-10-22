@@ -439,6 +439,22 @@ class Sources(unittest.TestCase):
         trees = [source['tree'] for source in entry['sources'] if 'tree' in source]
         self.assertEqual(trees, ['gpu/j713', MODULE.G16_SOURCE[2].relative_to(ROOT).as_posix()])
 
+    def test_the_kernel_has_a_rebuilt_identical_kit_join(self):
+        joins = json.loads((ROOT / 'packaging/channel-source-joins.json').read_bytes())
+        entry = joins['kit_binaries'][f'j715-Image-{MODULE.KERNEL[1][:8]}.gz']
+        self.assertEqual(entry['sha256'], MODULE.KERNEL[1])
+        self.assertEqual(entry['correspondence'], 'rebuilt-identical')
+        trees = [source['tree'] for source in entry['sources'] if 'tree' in source]
+        self.assertEqual(trees, ['patches-kernel/j713-input/dockchannel-start-retry.patch',
+                                 'patches-kernel/j713-input/macsmc-key-info-lock.patch',
+                                 'patches-kernel/j713-input/dockchannel-afe-action.patch',
+                                 'patches-kernel/j715-input/dockchannel-hid-accept-j715.patch',
+                                 'patches-kernel/j715-input/build-certificate.pem',
+                                 'tools/build-j715-kernel.sh'])
+        archives = {source['archive']: source['sha256'] for source in entry['sources'] if 'archive' in source}
+        self.assertEqual(archives, {'source/kernel-controller.tar.gz':
+                                    '810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57'})
+
     def test_the_kit_sources_exist_and_the_live_gates_still_refuse_the_j715(self):
         for source in MODULE.SOURCES.values():
             self.assertTrue((ROOT / source).is_file(), source)

@@ -100,7 +100,9 @@ not forced, as in build 18.
 
 From a fresh tree, the script reproduced `291c4b95…` byte for byte, and its
 uncompressed `Image` equals the kit kernel's. The #155 review rebuilt it the
-same way in `m4-gravity-builder:20261008` without network access.
+same way in `m4-gravity-builder:20261008` without network access. The kernel's
+source join is `j715-Image-291c4b95.gz` under `kit_binaries` in
+`packaging/channel-source-joins.json`.
 
 ### Why the J713 services are not started
 
