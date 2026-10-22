@@ -1,20 +1,35 @@
 # Maintainer: KB2UKA
 # Built and signed by .github/workflows/packages.yml; see docs/package-channel.md.
-# m4-boot-compose.py, m4-update-check.py, m4-lid-lock.py, m4-notch.py, MIT.txt and GPL-2.0-or-later.txt are staged
-# from tools/ and LICENSES/, and the m1n1-* notices from display/j713/m1n1-base/, by tools/build-m4-packages.py.
+# m4-boot-compose.py, m4-update-check.py, m4-lid-lock.py, m4-notch.py, MIT.txt,
+# GPL-2.0-or-later.txt and GPL-2.0-only.txt are staged from tools/ and LICENSES/,
+# and the m1n1-* notices from display/j713/m1n1-base/, by tools/build-m4-packages.py.
 pkgname=omarchy-m4-boot
 pkgver=1
-pkgrel=14
+pkgrel=19
 pkgdesc='Keeps the J713 boot.bin in step with the packaged M4 kernel and devicetree'
 arch=('aarch64')
 url='https://github.com/Kb2uka/Omarchy-M4-Native'
 # The notch stage 2 is an m1n1 build: MIT, with the embedded parts its README lists.
-license=('MIT' 'GPL-2.0-or-later OR MIT' 'BSD-2-Clause OR GPL-2.0-or-later' 'BSD-3-Clause' 'Zlib' 'CC0-1.0' 'OFL-1.1')
+# GPL-2.0-only covers the retained-bounds kernel image staged beside the base package.
+license=('MIT' 'GPL-2.0-only' 'GPL-2.0-or-later OR MIT' 'BSD-2-Clause OR GPL-2.0-or-later' 'BSD-3-Clause' 'Zlib' 'CC0-1.0' 'OFL-1.1')
 # omarchy-m4-gpu (from 1-6), omarchy-m4-headphones (from 1-7), omarchy-m4-cpu (from 1-10) and
 # omarchy-m4-evdi (from 1-13) and omarchy-m4-backlight (from 1-14): an older
 # installed setup script does not list them, so this pulls them in on the first
 # omarchy-m4-update run that installs this version.
-depends=('python' 'pacman' 'omarchy-m4-gpu' 'omarchy-m4-headphones' 'omarchy-m4-cpu' 'omarchy-m4-evdi' 'omarchy-m4-backlight')
+# omarchy-m4-speaker>=1-5 (from 1-19): an older setup request omits the speaker
+# package, 1-1 does not stage the fixed MCA module, and 1-2 still requires the
+# manifest to match one exact byte layout. 1-4 validates the stock backup
+# before accepting a rollback request and reports held recovery accurately.
+# 1-5 refuses a symlink or other non-regular rollback marker: inspection
+# reports that recovery is required, boot does not apply the staged module,
+# and setup does not count the marker as pending audio work. A markerless
+# reverse state names the verified stock backup only when both halves match;
+# a missing or corrupt backup does not ask for a reboot.
+# Boot 1-19 preserves an interrupted journal, including a held resume, and the
+# notch helper uses that resume command. A non-regular hold is refused, a
+# non-string kernel pin is refused, and a refusal names the rooted recovery
+# journal. Boot 1-18 preserves boot holds and newer installed channel packages.
+depends=('python' 'pacman' 'omarchy-m4-gpu' 'omarchy-m4-headphones' 'omarchy-m4-cpu' 'omarchy-m4-evdi' 'omarchy-m4-backlight' 'omarchy-m4-speaker>=1-5')
 install=omarchy-m4-boot.install
 options=('!strip' '!debug')
 # The CPU frequency, CPU temperature, CPU thermal zone and boost-state devicetree, with P
@@ -23,8 +38,10 @@ options=('!strip' '!debug')
 # and the real-time speaker protection setting it needs (docs/j713-cpufreq.md, "All three parts").
 source=('m4-boot-compose.py' '90-omarchy-m4-boot.hook' 'm4-update-check.py'
         'omarchy-m4-update-check.service' 'omarchy-m4-update-check.timer' 'MIT.txt' 'GPL-2.0-or-later.txt'
+        'GPL-2.0-only.txt'
         'speakersafetyd-j713-realtime.conf' 'm4-channel-setup.py' 'omarchy-m4-update' 'm4-lid-lock.py'
         "j713-backlight.dtb::${url}/releases/download/package-inputs/j713-backlight-afb025a8.dtb"
+        "Image-retained-bounds.gz::${url}/releases/download/package-inputs/j713-retained-bounds-ca1fff57-Image.gz"
         'm4-notch.py' 'omarchy-m4-notch.service'
         # Both notch preferences retain the native panel's per-boot display handoff.
         "stage2-hidden.bin::${url}/releases/download/package-inputs/j713-m1n1-stage2-backlight-b86aee68.bin"
@@ -32,19 +49,21 @@ source=('m4-boot-compose.py' '90-omarchy-m4-boot.hook' 'm4-update-check.py'
         'm1n1-LICENSE' 'm1n1-README.md' 'm1n1-LICENSE.BSD-2.libfdt' 'm1n1-LICENSE.BSD-3.arm'
         'm1n1-LICENSE.BSD-3.dwc3' 'm1n1-LICENSE.CC0' 'm1n1-LICENSE.GPL-2' 'm1n1-LICENSE.minlzma'
         'm1n1-LICENSE.OFL-1.1' 'm1n1-LICENSE.tinf')
-sha256sums=('ca45d405e1152583a92d84d9fe5283e64d7abd0989c91646dd19415222ed5022'
-            'acc4f797eb99ae416fdebabb37deead81a508bbe93ede0e37459c22f3be05a2c'
+sha256sums=('6ace30fa8c07cffbd6ea3af654e1697e77425cae74d6ee91903f2f28238b6a02'
+            'e82f9ced0dcff9fc9639fef0baf8da2dd5f168407f161503a757fd52ebcd5559'
             'bf06541caba3709e81b261c60563886e95fff902d811b74f2b49c03e70ee1685'
             '8ecdbfc8303276d8db5922f6a06aa945f58ebca27b83520f76e9155561b9c5b0'
             '2e920a979cdf4d8d2075f9f3ab513c5e614eaa126f74b2c01ea5ccf0ab8a9544'
             'b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5'
             'aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3'
+            'aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3'
             'a116d5a6aa09bc2aec1393ef737f21d9cc0eaac474615cb215f48491b7db8a56'
-            '14fc187548fc15af76f574829d03ccbd1e9eaf732ade745cadf57aeda3d0c488'
+            '8277cc4615875db20c585fcbef67b8e96490d828f4b86de41b98c4c3c1d009dc'
             'bde52f8012b209e06c0e2b41325413c642ae4c6e6eedce7ff04331ca4d50c0f1'
             'f605580fc7e8e672cee85f5afee930550b8f445f026b5a04c1828e52c88ea6de'
             'afb025a8f1c946d164fe962f20b2e9d5cd987cfc668985eee62e41767722b2aa'
-            'bcc18e10693bc65acc5c4bed6095078c122d2dbc799355f91f1e0257a2b0d57d'
+            'ca1fff571cf1b9d8c0b07b2e97ba0a5402f93c1b7a2d54ea2c07e24a8b70f9d0'
+            '9d7cc0769bf42b0e742b8201c9564b08fb7714a582881ca31550bec12d14c0cf'
             'a5847d4ae7b237753f18609ab71b12e569366e7d6df8edfc50ba884eb5698e6c'
             'b86aee6840fe670b592271ec2816d42c5515cddc20a14e08bdc5bcbce547e6fd'
             '692f656cd8f6dfb2530172da518f9e2e18e6c5032df3062cd603eb4539e4c405'
@@ -68,6 +87,7 @@ package() {
   install -Dm644 m4-lid-lock.py "$pkgdir/usr/lib/omarchy-m4/m4-lid-lock.py"
   install -Dm644 -t "$pkgdir/usr/lib/systemd/user" omarchy-m4-update-check.service omarchy-m4-update-check.timer
   install -Dm644 j713-backlight.dtb "$pkgdir/usr/lib/omarchy-m4/j713.dtb"
+  install -Dm644 Image-retained-bounds.gz "$pkgdir/usr/lib/omarchy-m4/retained-bounds/Image.gz"
   install -Dm755 m4-notch.py "$pkgdir/usr/bin/m4-notch"
   install -Dm644 stage2-hidden.bin "$pkgdir/usr/lib/omarchy-m4/backlight/stage2-hidden.bin"
   install -Dm644 stage2-shown.bin "$pkgdir/usr/lib/omarchy-m4/backlight/stage2-shown.bin"
@@ -78,5 +98,5 @@ package() {
   done
   install -Dm644 speakersafetyd-j713-realtime.conf \
     "$pkgdir/usr/lib/systemd/system/speakersafetyd-j713.service.d/50-realtime.conf"
-  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" MIT.txt GPL-2.0-or-later.txt
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" MIT.txt GPL-2.0-or-later.txt GPL-2.0-only.txt
 }

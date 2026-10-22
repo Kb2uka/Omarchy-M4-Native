@@ -1,0 +1,82 @@
+--- a/drivers/hid/dockchannel-hid/dockchannel-hid.c
++++ b/drivers/hid/dockchannel-hid/dockchannel-hid.c
+@@ -1073,6 +1073,11 @@
+ 	if (length < sizeof(*hdr))
+ 		return;
+ 
++	if (!memchr(hdr->name, '\0', sizeof(hdr->name))) {
++		dev_warn(dchid->dev, "Unterminated interface name\n");
++		return;
++	}
++
+ 	iface = dchid_get_interface(dchid, hdr->iface, hdr->name);
+ 	if (!iface)
+ 		return;
+@@ -1096,7 +1101,7 @@
+ 		case INIT_GPIO_REQUEST: {
+ 			struct dchid_gpio_request *req = data;
+ 
+-			if (sizeof(*req) > length)
++			if (sizeof(*req) > blk->length)
+ 				break;
+ 
+ 			if (iface->gpio_id) {
+@@ -1116,7 +1121,7 @@
+ 		case INIT_PRODUCT_NAME: {
+ 			char *product = data;
+ 
+-			if (product[blk->length - 1] != 0) {
++			if (!blk->length || product[blk->length - 1] != 0) {
+ 				dev_warn(dchid->dev, "Unterminated product name for %s\n",
+ 					 iface->name);
+ 			} else {
+@@ -1265,11 +1270,15 @@
+ 	if (shdr->length + sizeof(*shdr) > work->hdr.length) {
+ 		dev_err(dchid->dev, "Bad sub header length (%hu > %zu)\n",
+ 			shdr->length, work->hdr.length - sizeof(*shdr));
+-		return;
++		goto cleanup;
+ 	}
+ 
+ 	switch (type) {
+ 	case HID_INPUT_REPORT:
++		if (!shdr->length) {
++			dev_err(dchid->dev, "Received zero-length input report\n");
++			break;
++		}
+ 		if (work->hdr.iface == IFACE_COMM)
+ 			dchid_handle_event(dchid, payload, shdr->length);
+ 		else
+@@ -1280,6 +1289,7 @@
+ 		break;
+ 	}
+ 
++cleanup:
+ 	kfree(work);
+ }
+ 
+@@ -1356,9 +1366,15 @@
+ 		goto done;
+ 	}
+ 
++	if (hdr.length < sizeof(struct dchid_subhdr)) {
++		dev_err(dchid->dev, "Packet shorter than subheader (%u < %zu)\n",
++			hdr.length, sizeof(struct dchid_subhdr));
++		goto done;
++	}
+ 
+ 	if (hdr.iface >= MAX_INTERFACES) {
+ 		dev_err(dchid->dev, "Bad iface %d\n", hdr.iface);
++		goto done;
+ 	}
+ 
+ 	iface = dchid->ifaces[hdr.iface];
+@@ -1382,7 +1398,7 @@
+ 
+ 	work = kzalloc(sizeof(*work) + hdr.length, GFP_KERNEL);
+ 	if (!work)
+-		return;
++		goto done;
+ 
+ 	work->hdr = hdr;
+ 	work->iface = iface;

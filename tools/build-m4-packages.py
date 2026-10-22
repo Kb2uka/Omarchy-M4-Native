@@ -39,7 +39,9 @@ STAGED = {
                         'm1n1-LICENSE.OFL-1.1': 'display/j713/m1n1-base/3rdparty_licenses/LICENSE.OFL-1.1',
                         'm1n1-LICENSE.tinf': 'display/j713/m1n1-base/3rdparty_licenses/LICENSE.tinf',
                         'MIT.txt': 'LICENSES/MIT.txt',
-                        'GPL-2.0-or-later.txt': 'LICENSES/GPL-2.0-or-later.txt'},
+                        'GPL-2.0-or-later.txt': 'LICENSES/GPL-2.0-or-later.txt',
+                        # The retained-bounds image is GPL-2.0-only. Boot did not stage that text before.
+                        'GPL-2.0-only.txt': 'LICENSES/GPL-2.0-only.txt'},
     'omarchy-m4-speaker': {'m4-speaker-module.py': 'tools/m4-speaker-module.py',
                            'MIT.txt': 'LICENSES/MIT.txt',
                            'GPL-2.0-only.txt': 'LICENSES/GPL-2.0-only.txt'},

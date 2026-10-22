@@ -130,10 +130,30 @@
     "snd-soc-j713-group-aaad802e.ko": {
       "sha256": "aaad802eb136ff6cb915feaa123001b3eb848bc2f038d0a5b71c8e2ff35d2581",
       "license": "GPL-2.0-only",
-      "correspondence": "unverified",
+      "correspondence": "rebuilt-identical",
       "sources": [
         {
-          "tree": "audio/j713/kernel",
+          "tree": "tools/build-j713-hardened.py",
+          "commit": "24920ee126207d8a5595f1297892384cef77776a"
+        },
+        {
+          "tree": "audio/j713/kernel/Makefile",
+          "commit": "1114297c752c1c1e5245ce7a4f85507f4c53fcf7"
+        },
+        {
+          "tree": "audio/j713/kernel/j713-speaker-group.c",
+          "commit": "1114297c752c1c1e5245ce7a4f85507f4c53fcf7"
+        },
+        {
+          "tree": "audio/j713/kernel/j713-speaker-group.h",
+          "commit": "1114297c752c1c1e5245ce7a4f85507f4c53fcf7"
+        },
+        {
+          "tree": "audio/j713/kernel/j713-audio.c",
+          "commit": "1114297c752c1c1e5245ce7a4f85507f4c53fcf7"
+        },
+        {
+          "tree": "audio/j713/kernel/j713-audio.h",
           "commit": "1114297c752c1c1e5245ce7a4f85507f4c53fcf7"
         },
         {
@@ -145,7 +165,7 @@
           "sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362"
         }
       ],
-      "evidence": "J713 speaker group driver. Built from audio/j713/kernel/ on the alpha.1 kernel-controller tree with reference-sound-exports.symvers (clang 21.1.8)."
+      "evidence": "J713 speaker group driver: snd-soc-j713-group.ko is aaad802eb136ff6cb915feaa123001b3eb848bc2f038d0a5b71c8e2ff35d2581, 52000 bytes. Its linked source closure is the five historical files at 1114297c752c1c1e5245ce7a4f85507f4c53fcf7 listed in this entry: Makefile, j713-speaker-group.c/.h and j713-audio.c/.h. They match the corresponding build D blobs. The group links j713-speaker-group.o and j713-audio.o; mca.c is not linked into it. Four fresh builds reproduced the same Image.gz and five audio modules: A and B used the pinned-certificate builder at 8ee57bea0d4f26d92a47f730743ec8d5563de56d; C used 91dabdf39993fb7f01ea2a4db55a2c686e6e0ba5 with verified source closure and the destination case probe; D used dc191cb3e7dc935cb5f4e13a5b44f2a835a6a331 with directory-alias compatibility. These are four builds across three recipe revisions, not four builds of the final recipe. Their saved receipts are byte-identical (SHA-256 541ba2f4fe20ff3623adc489524dea19cc500634d8d01527c3585384e234f7c8). Build D reproduced the final recipe outputs directly. The builder image is sha256:b2069edb8a23761d9211559fe632f5464aebc4cdfa9558d0f4c93211890fd7b1, with clang 21.1.8, KBUILD_BUILD_TIMESTAMP 2026-10-20, KBUILD_BUILD_VERSION 19 and conservative-v1 audio profile. Configuration 14b4437b2b195e912a2ab614d28761acd3dc79f886d4487964aa0912616a3a6e and exports 5e3c2624c6a991bae503336137ce15071e51ef043edcd20ba1ad19df4e23d67c were unchanged; supplemental exports remain 9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362. Recipe paths pinned to 24920ee126207d8a5595f1297892384cef77776a have the same Git content as build D. The historical build receipts retain native_qualified=false and fresh_install_qualified=false; subsequent native migration evidence is documented separately in docs/retained-audio-transport-audit.md and its companion rollout proof. This entry establishes source correspondence, not channel promotion or fresh-install qualification. The sibling MCA entry in this package pins the complete shared recipe prerequisites; those files are required by the build but do not add MCA objects to the group module."
     },
     "snd-soc-j713-headphones-2e743937.ko": {
       "sha256": "2e743937b4bd8315ec6dba6bef4bbfbf197d4bf6f8688761954579192df48244",
@@ -290,6 +310,110 @@
         }
       ],
       "evidence": "Issue #58: USB external displays. libevdi.so.1.15.1 (soname libevdi.so.1, needs only libc) from the unchanged upstream v1.15.1 archive, built by display/evdi/build.sh library in homebase m4-gravity-mesa-arm-builder:20261008 (ed20ced8), --network none. Two builds in separate job directories on 2026-10-17 gave the same bytes. Used by evdi_probe on the owner's Air."
+    },
+    "j713-retained-bounds-ca1fff57-Image.gz": {
+      "sha256": "ca1fff571cf1b9d8c0b07b2e97ba0a5402f93c1b7a2d54ea2c07e24a8b70f9d0",
+      "license": "GPL-2.0-only",
+      "correspondence": "rebuilt-identical",
+      "sources": [
+        {
+          "tree": "tools/build-j713-hardened.py",
+          "commit": "24920ee126207d8a5595f1297892384cef77776a"
+        },
+        {
+          "tree": "audio/j713/kernel",
+          "commit": "24920ee126207d8a5595f1297892384cef77776a"
+        },
+        {
+          "tree": "audio/j713/imported-source.sha256",
+          "commit": "24920ee126207d8a5595f1297892384cef77776a"
+        },
+        {
+          "tree": "audio/j713/kernel-inputs.sha256",
+          "commit": "24920ee126207d8a5595f1297892384cef77776a"
+        },
+        {
+          "tree": "patches-kernel/j713-input/dockchannel-start-retry.patch",
+          "commit": "24920ee126207d8a5595f1297892384cef77776a"
+        },
+        {
+          "tree": "patches-kernel/j713-input/macsmc-key-info-lock.patch",
+          "commit": "24920ee126207d8a5595f1297892384cef77776a"
+        },
+        {
+          "tree": "patches-kernel/j713-input/dockchannel-afe-action.patch",
+          "commit": "24920ee126207d8a5595f1297892384cef77776a"
+        },
+        {
+          "tree": "patches-kernel/retained-hardening/dockchannel-packet-bounds.patch",
+          "commit": "24920ee126207d8a5595f1297892384cef77776a"
+        },
+        {
+          "tree": "patches-kernel/retained-hardening/qualified-module-certificate.pem",
+          "commit": "24920ee126207d8a5595f1297892384cef77776a"
+        },
+        {
+          "archive": "source/kernel-controller.tar.gz",
+          "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/reference-sound-exports.symvers",
+          "sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362"
+        }
+      ],
+      "evidence": "Image.gz is ca1fff571cf1b9d8c0b07b2e97ba0a5402f93c1b7a2d54ea2c07e24a8b70f9d0, 18900939 bytes, release 7.1.9-m4-gpu-backport-20261008. The recipe validates and copies the listed audio source, checks both source/input manifests, applies the three historical patches and retained DockChannel bounds patch, and installs the pinned public qualified-module-certificate.pem. The complete 5896-byte embedded trust region at offset 42950656 in the decompressed Image matches the original qualified kernel (SHA-256 77f3aad25837130e2e41d6750019a0e526365eeda0bfd17f2c45bb7df28cc0cc); this does not claim possession of a private signing key. Four fresh builds reproduced the same Image.gz and five audio modules: A and B used the pinned-certificate builder at 8ee57bea0d4f26d92a47f730743ec8d5563de56d; C used 91dabdf39993fb7f01ea2a4db55a2c686e6e0ba5 with verified source closure and the destination case probe; D used dc191cb3e7dc935cb5f4e13a5b44f2a835a6a331 with directory-alias compatibility. These are four builds across three recipe revisions, not four builds of the final recipe. Their saved receipts are byte-identical (SHA-256 541ba2f4fe20ff3623adc489524dea19cc500634d8d01527c3585384e234f7c8). Build D reproduced the final recipe outputs directly. The builder image is sha256:b2069edb8a23761d9211559fe632f5464aebc4cdfa9558d0f4c93211890fd7b1, with clang 21.1.8, KBUILD_BUILD_TIMESTAMP 2026-10-20, KBUILD_BUILD_VERSION 19 and conservative-v1 audio profile. Configuration 14b4437b2b195e912a2ab614d28761acd3dc79f886d4487964aa0912616a3a6e and exports 5e3c2624c6a991bae503336137ce15071e51ef043edcd20ba1ad19df4e23d67c were unchanged; supplemental exports remain 9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362. Recipe paths pinned to 24920ee126207d8a5595f1297892384cef77776a have the same Git content as build D. The historical build receipts retain native_qualified=false and fresh_install_qualified=false; subsequent native migration evidence is documented separately in docs/retained-audio-transport-audit.md and its companion rollout proof. This entry establishes source correspondence, not channel promotion or fresh-install qualification."
+    },
+    "snd-soc-apple-mca-fb941df4.ko": {
+      "sha256": "fb941df4d55c4f2093b4595e0392aaf97ffe3a250228518b18a4f70568bf7454",
+      "license": "GPL-2.0-only",
+      "correspondence": "rebuilt-identical",
+      "sources": [
+        {
+          "tree": "tools/build-j713-hardened.py",
+          "commit": "24920ee126207d8a5595f1297892384cef77776a"
+        },
+        {
+          "tree": "audio/j713/kernel",
+          "commit": "24920ee126207d8a5595f1297892384cef77776a"
+        },
+        {
+          "tree": "audio/j713/imported-source.sha256",
+          "commit": "24920ee126207d8a5595f1297892384cef77776a"
+        },
+        {
+          "tree": "audio/j713/kernel-inputs.sha256",
+          "commit": "24920ee126207d8a5595f1297892384cef77776a"
+        },
+        {
+          "tree": "patches-kernel/j713-input/dockchannel-start-retry.patch",
+          "commit": "24920ee126207d8a5595f1297892384cef77776a"
+        },
+        {
+          "tree": "patches-kernel/j713-input/macsmc-key-info-lock.patch",
+          "commit": "24920ee126207d8a5595f1297892384cef77776a"
+        },
+        {
+          "tree": "patches-kernel/j713-input/dockchannel-afe-action.patch",
+          "commit": "24920ee126207d8a5595f1297892384cef77776a"
+        },
+        {
+          "tree": "patches-kernel/retained-hardening/dockchannel-packet-bounds.patch",
+          "commit": "24920ee126207d8a5595f1297892384cef77776a"
+        },
+        {
+          "tree": "patches-kernel/retained-hardening/qualified-module-certificate.pem",
+          "commit": "24920ee126207d8a5595f1297892384cef77776a"
+        },
+        {
+          "archive": "source/kernel-controller.tar.gz",
+          "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+        },
+        {
+          "archive": "source/reference-sound-exports.symvers",
+          "sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362"
+        }
+      ],
+      "evidence": "snd-soc-apple-mca.ko is fb941df4d55c4f2093b4595e0392aaf97ffe3a250228518b18a4f70568bf7454, 79152 bytes. It is built from audio/j713/kernel/mca.c by the same verified-input recipe as Image.gz, with the listed source manifests, historical and retained patches, and public qualified-module-certificate.pem. Four fresh builds reproduced the same Image.gz and five audio modules: A and B used the pinned-certificate builder at 8ee57bea0d4f26d92a47f730743ec8d5563de56d; C used 91dabdf39993fb7f01ea2a4db55a2c686e6e0ba5 with verified source closure and the destination case probe; D used dc191cb3e7dc935cb5f4e13a5b44f2a835a6a331 with directory-alias compatibility. These are four builds across three recipe revisions, not four builds of the final recipe. Their saved receipts are byte-identical (SHA-256 541ba2f4fe20ff3623adc489524dea19cc500634d8d01527c3585384e234f7c8). Build D reproduced the final recipe outputs directly. The builder image is sha256:b2069edb8a23761d9211559fe632f5464aebc4cdfa9558d0f4c93211890fd7b1, with clang 21.1.8, KBUILD_BUILD_TIMESTAMP 2026-10-20, KBUILD_BUILD_VERSION 19 and conservative-v1 audio profile. Configuration 14b4437b2b195e912a2ab614d28761acd3dc79f886d4487964aa0912616a3a6e and exports 5e3c2624c6a991bae503336137ce15071e51ef043edcd20ba1ad19df4e23d67c were unchanged; supplemental exports remain 9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362. Recipe paths pinned to 24920ee126207d8a5595f1297892384cef77776a have the same Git content as build D. The historical build receipts retain native_qualified=false and fresh_install_qualified=false; subsequent native migration evidence is documented separately in docs/retained-audio-transport-audit.md and its companion rollout proof. This entry establishes source correspondence, not channel promotion or fresh-install qualification."
     }
   },
   "kit_binaries": {

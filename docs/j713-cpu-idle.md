@@ -73,6 +73,17 @@ one-strike rule:
   ([#130](https://github.com/Kb2uka/Omarchy-M4-Native/issues/130)). A stop
   while a module load is still pending still leaves the marker, because that
   load's outcome is unknowable.
+- At boot, a leftover marker can earn one automatic retry if the journal
+  proves that the boot which wrote it later shut down in order. New markers
+  record their boot ID. For an older marker, its modification time must fall
+  within exactly one boot in the journal. That boot must differ from the
+  current boot and contain systemd-shutdown's final "Sending SIGTERM to
+  remaining processes" entry. A missing or unreadable journal, ambiguous boot
+  history or an unexpected marker keeps the strike. The retry writes a new
+  marker with `retry=1` before loading; that marker is never cleared
+  automatically by a later boot, even after an orderly shutdown. A successful
+  settle or clean stop during settling still clears it as usual.
+  `sudo m4-cpu-idle --start` still retries in the running session.
 - `sudo m4-cpu-idle --disable` is the off switch (hold file
   `/var/lib/omarchy-m4/cpu-idle/hold`); `--enable` turns it back on. A loaded
   driver stays until the next restart.

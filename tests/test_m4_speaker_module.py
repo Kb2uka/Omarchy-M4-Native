@@ -1,11 +1,49 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 KB2UKA
-"""The boot-time speaker module swap: only known states, six pins, always consistent."""
+"""The boot-time speaker module swap: only known states, seven pins, always consistent.
+
+MCA is a second component of the same tool, selected with ``--component mca``.
+The default remains the speaker. Fixture bytes below are synthetic and are
+patched onto ``STOCK``/``FIXED`` and ``MCA_STOCK``/``MCA_FIXED``; the real
+alpha.1 and fixed pins are asserted only against an unpatched import.
+
+Per component the tool keeps its own installed path, staged path, and state
+directory (speaker: ``var/lib/omarchy-m4/speaker-module``; MCA:
+``var/lib/omarchy-m4/mca-module``). Each directory has its own ``hold`` and
+``rollback`` markers and its own module backup. The shared audio manifest is
+updated only in that component's seven pins. Unrelated keys, the other
+component's pins, and a hand-written manifest's other bytes stay as they were.
+A forward power cut is new module bytes with the old pins, and the next boot
+finishes it. The reverse (old module bytes, new pins) is resumed only when
+this component's rollback marker and a valid backup are present. A fixed
+component with no valid stock module and manifest backup refuses ``--rollback``
+before that marker is written. Read-only inspection of a held stock rollback
+reports that nothing applies. A valid rollback marker and stock backup on
+fixed, reverse, or restored stock reports that rollback as pending or
+requested and tells the owner to restart. A held forward interruption with no
+marker reports that nothing applies. Current with no marker, and that held
+stock or forward state, do not open the stock backup: a permission error
+limited to those backup bytes leaves the current or held status unchanged.
+A markerless reverse state describes the refusal and recovery from the
+verified backup when that backup is valid. A missing or corrupt backup
+reports recovery required and does not call that backup verified. An unheld
+forward interruption promises the next boot only when that stock backup is
+valid; otherwise inspection requires recovery.
+A symlink, directory, or fifo rollback marker is recovery required: boot
+refuses it and does not apply or roll back, and ``--rollback`` refuses it
+before opening the marker. A regular file in place of the state directory
+makes lstat of the marker fail with ENOTDIR, which is the same uncertain
+result: inspection requires recovery and boot refuses, with nothing written.
+A restored stock rollback with that marker and hold stays unfinished when
+the backup is no longer valid.
+"""
 import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
+import stat
 import tempfile
 import unittest
 from unittest import mock
@@ -18,6 +56,27 @@ SPEC.loader.exec_module(MODULE)
 OLD, NEW = b'alpha.1 speaker module', b'fixed speaker module'
 STOCK = {'sha256': hashlib.sha256(OLD).hexdigest(), 'size': len(OLD), 'note': 'old-note'}
 FIXED = {'sha256': hashlib.sha256(NEW).hexdigest(), 'size': len(NEW), 'note': 'new-note'}
+# Same length so a pin-only manifest edit can keep every unrelated byte.
+MCA_OLD, MCA_NEW = b'mca-stock-module-bytes', b'mca-fixed-module-bytes'
+MCA_OLD_NOTE, MCA_NEW_NOTE = 'mca-old-note!!', 'mca-new-note!!'
+MCA_NAME = 'snd_soc_apple_mca'
+MCA_MODULE = 'usr/lib/omarchy/j713-audio/7.1.9-m4-gpu-backport-20261008/modules/snd-soc-apple-mca.ko'
+MCA_STAGED = 'usr/lib/omarchy-m4/j713-audio/snd-soc-apple-mca.ko'
+MCA_STATE = 'var/lib/omarchy-m4/mca-module'
+MCA_STOCK_PIN = {
+    'sha256': 'd3194660a28d30ba8ea296b6592836ad4ca9426d9471d05ba8ce3cad284baa1e',
+    'size': 79152,
+    'note': '040000001400000003000000474e550057b999a68c50407955e8b2ed92f242b0cfe426e9',
+}
+MCA_FIXED_PIN = {
+    'sha256': 'fb941df4d55c4f2093b4595e0392aaf97ffe3a250228518b18a4f70568bf7454',
+    'size': 79152,
+    'note': '040000001400000003000000474e55000a48e413fcbb318d62c1161c59fb2bef1de7df81',
+}
+
+
+def identity(blob, note):
+    return {'sha256': hashlib.sha256(blob).hexdigest(), 'size': len(blob), 'note': note}
 
 
 def manifest(identity):
@@ -35,6 +94,44 @@ def manifest(identity):
     }
 
 
+def with_mca(document, record):
+    """Add the seven MCA pins. ``record`` is a sha256/size/note identity."""
+    updated = json.loads(json.dumps(document))
+    updated['files']['/' + MCA_MODULE] = record['sha256']
+    updated['file_metadata'][MCA_MODULE] = {'sha256': record['sha256'], 'size': record['size'], 'mode': 420}
+    updated['module_artifacts'][MCA_NAME] = {
+        'module': MCA_NAME, 'note': record['note'], 'path': '/' + MCA_MODULE,
+        'sha256': record['sha256'], 'size': record['size']}
+    updated['modules'][MCA_NAME] = record['note']
+    return updated
+
+
+def mask_pins(raw, *records):
+    """Hide one component's pin strings so the other manifest bytes can be compared."""
+    masked = raw
+    for record in records:
+        for value in (record['sha256'], record['note']):
+            masked = masked.replace(value.encode(), b'X' * len(value))
+    return masked
+
+
+def node_identity(path):
+    """Identity from lstat. Does not follow a symlink or open a fifo."""
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        return ('absent',)
+    if stat.S_ISLNK(mode):
+        return ('symlink', os.readlink(path))
+    if stat.S_ISDIR(mode):
+        return ('directory', tuple(sorted(child.name for child in path.iterdir())))
+    if stat.S_ISREG(mode):
+        return ('file', path.read_bytes())
+    if stat.S_ISFIFO(mode):
+        return ('fifo',)
+    return ('other', stat.S_IFMT(mode))
+
+
 class SpeakerModule(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
@@ -42,6 +139,11 @@ class SpeakerModule(unittest.TestCase):
         self.root = Path(temp.name)
         for target, values in ((MODULE.STOCK, STOCK), (MODULE.FIXED, FIXED)):
             patcher = mock.patch.dict(target, values)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        for name, values in (('MCA_STOCK', identity(MCA_OLD, MCA_OLD_NOTE)),
+                             ('MCA_FIXED', identity(MCA_NEW, MCA_NEW_NOTE))):
+            patcher = mock.patch.object(MODULE, name, values, create=True)
             patcher.start()
             self.addCleanup(patcher.stop)
         self.module, self.manifest = self.root / MODULE.MODULE, self.root / MODULE.MANIFEST
@@ -59,10 +161,16 @@ class SpeakerModule(unittest.TestCase):
         self.put(MODULE.MANIFEST, MODULE.serialize(document))
 
     def run_tool(self, *args):
-        output = io.StringIO()
-        with mock.patch('sys.stdout', output), mock.patch('sys.stderr', io.StringIO()):
-            code = MODULE.main(['--root', str(self.root), *args])
-        return code, json.loads(output.getvalue()) if code == 0 else None
+        output, error = io.StringIO(), io.StringIO()
+        with mock.patch('sys.stdout', output), mock.patch('sys.stderr', error):
+            try:
+                code = MODULE.main(['--root', str(self.root), *args])
+            except SystemExit as exited:
+                code = exited.code if isinstance(exited.code, int) else 1
+        self.last_error = error.getvalue()
+        text = output.getvalue()
+        self.last_output = text
+        return code, json.loads(text) if code == 0 and text.strip() else None
 
     def state(self):
         return self.module.read_bytes(), json.loads(self.manifest.read_bytes())
@@ -73,7 +181,7 @@ class SpeakerModule(unittest.TestCase):
         self.assertEqual((code, report['status']), (0, 'staged; applies at the next boot'))
         self.assertEqual(self.state(), before)
 
-    def test_boot_applies_module_and_exactly_six_pins(self):
+    def test_boot_applies_module_and_exactly_seven_pins(self):
         code, report = self.run_tool('--boot')
         self.assertEqual(code, 0)
         self.assertIn('applied', report['status'])
@@ -97,6 +205,77 @@ class SpeakerModule(unittest.TestCase):
         self.assertEqual((code, report['status']), (0, 'current'))
         self.assertEqual(self.manifest.read_bytes(), before)
 
+    def test_forward_interruption_refuses_a_missing_or_corrupt_backup_half(self):
+        """New module bytes and stock pins are not finished without both stock backup halves.
+
+        A missing half and a corrupt half each refuse. The live module, the
+        manifest, the other component, and any backup half already on disk stay
+        as planted. Speaker and MCA are independent.
+        """
+        halves = ('missing-module', 'missing-manifest', 'corrupt-module', 'corrupt-manifest')
+        for name in ('speaker', 'mca'):
+            for kind in halves:
+                with self.subTest(component=name, kind=kind):
+                    self.setUp()
+                    selected = self.component(name)
+                    owner = {'gain': 4, 'label': name + '-' + kind}
+                    if name == 'speaker':
+                        document = with_mca(manifest(STOCK), identity(MCA_OLD, MCA_OLD_NOTE))
+                        document['owner_calibration'] = owner
+                        self.install(NEW, document)
+                        self.put(MCA_MODULE, MCA_OLD)
+                    else:
+                        document = with_mca(manifest(STOCK), identity(MCA_OLD, MCA_OLD_NOTE))
+                        document['owner_calibration'] = owner
+                        self.install(OLD, document)
+                        self.put(MCA_MODULE, MCA_NEW)
+                        self.put(MCA_STAGED, MCA_NEW)
+                    stage = self.root / selected['state']
+                    stage.mkdir(parents=True)
+                    stock_manifest = MODULE.serialize(json.loads(self.manifest.read_bytes()))
+                    if kind != 'missing-module':
+                        module_backup = selected['stock_bytes'] if kind != 'corrupt-module' else b'corrupt-backup-module'
+                        self.put(selected['state'] + '/alpha1-module.ko', module_backup)
+                    if kind != 'missing-manifest':
+                        if kind == 'corrupt-manifest':
+                            wrong = json.loads(stock_manifest)
+                            key = MODULE.NAME if name == 'speaker' else MCA_NAME
+                            wrong['modules'][key] = 'not-the-stock-note'
+                            self.put(selected['state'] + '/alpha1-manifest.json', MODULE.serialize(wrong))
+                        else:
+                            self.put(selected['state'] + '/alpha1-manifest.json', stock_manifest)
+                    before = {
+                        'module': (self.root / selected['module']).read_bytes(),
+                        'manifest': self.manifest.read_bytes(),
+                        'other': (self.root / selected['other_module']).read_bytes(),
+                        'backup_module': ((stage / 'alpha1-module.ko').read_bytes()
+                                          if (stage / 'alpha1-module.ko').is_file() else None),
+                        'backup_manifest': ((stage / 'alpha1-manifest.json').read_bytes()
+                                            if (stage / 'alpha1-manifest.json').is_file() else None),
+                    }
+                    self.assertEqual(self.run_tool('--component', name)[1]['state'], 'interrupted')
+                    self.assertEqual(self.run_tool('--boot', *selected['args'])[0], 1)
+                    self.assertIn('stock backup', self.last_error)
+                    self.assertEqual((self.root / selected['module']).read_bytes(), before['module'])
+                    self.assertEqual(self.manifest.read_bytes(), before['manifest'])
+                    self.assertEqual((self.root / selected['other_module']).read_bytes(), before['other'])
+                    self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
+                    found_module = ((stage / 'alpha1-module.ko').read_bytes()
+                                    if (stage / 'alpha1-module.ko').is_file() else None)
+                    found_manifest = ((stage / 'alpha1-manifest.json').read_bytes()
+                                      if (stage / 'alpha1-manifest.json').is_file() else None)
+                    self.assertEqual(found_module, before['backup_module'])
+                    self.assertEqual(found_manifest, before['backup_manifest'])
+                    self.assertFalse((stage / 'hold').exists())
+                    self.assertFalse((stage / 'rollback').exists())
+                    code, report = self.run_tool('--component', name)
+                    self.assertEqual(code, 0, self.last_error)
+                    self.assertEqual(report['state'], 'interrupted')
+                    self.assertEqual(report['status'],
+                                     'refused; nothing was changed; recovery required')
+                    self.assertNotIn('next boot', report['status'])
+                    self.assertNotIn('completes', report['status'])
+
     def test_interrupted_swap_is_completed_before_modules_load(self):
         real = MODULE.write
 
@@ -106,7 +285,10 @@ class SpeakerModule(unittest.TestCase):
             real(path, data, mode)
         with mock.patch.object(MODULE, 'write', side_effect=fail_on_manifest):
             self.assertEqual(self.run_tool('--boot')[0], 1)
-        self.assertEqual(self.run_tool()[1]['state'], 'interrupted')
+        code, report = self.run_tool()
+        self.assertEqual(code, 0, self.last_error)
+        self.assertEqual(report['state'], 'interrupted')
+        self.assertEqual(report['status'], 'interrupted; completes at the next boot')
         self.assertEqual(self.run_tool('--boot')[0], 0)
         self.assertEqual(self.state(), (NEW, manifest(FIXED)))
 
@@ -121,7 +303,8 @@ class SpeakerModule(unittest.TestCase):
             'other module': lambda: self.put(MODULE.MODULE, b'someone else'),
             'one pin edited': lambda: self.install(OLD, {**manifest(STOCK), 'modules': {MODULE.NAME: 'x',
                                                                                          'snd_soc_tas2764': 'amp'}}),
-            'not the image format': lambda: self.manifest.write_text(json.dumps(manifest(STOCK))),
+            'compact json with a wrong pin': lambda: self.manifest.write_text(json.dumps(
+                {**manifest(STOCK), 'modules': {MODULE.NAME: 'x', 'snd_soc_tas2764': 'amp'}})),
             'staged module differs': lambda: self.put(MODULE.STAGED, b'tampered'),
             'other kernel': lambda: self.install(OLD, {**manifest(STOCK), 'kernel_release': 'other'}),
         }
@@ -143,13 +326,1440 @@ class SpeakerModule(unittest.TestCase):
         self.assertEqual(self.run_tool('--boot')[1]['status'], 'held after a rollback; nothing applied')
         self.assertEqual(self.state()[0], OLD)
 
-    def test_rollback_without_backup_refuses(self):
-        self.install(NEW, manifest(FIXED))
-        self.run_tool('--rollback')
-        self.assertEqual(self.run_tool('--boot')[0], 1)
-        self.assertEqual(self.state(), (NEW, manifest(FIXED)))
+    def state_files(self, path):
+        if not path.exists():
+            return None
+        return {child.relative_to(path).as_posix(): child.read_bytes()
+                for child in path.rglob('*') if child.is_file() and not child.is_symlink()}
 
-    def test_pins_match_the_qualified_spec(self):
+    def test_fixed_rollback_request_refuses_before_marker_without_valid_backup(self):
+        """A fixed module with no valid stock backup is not a rollback request.
+
+        A baseline Air already runs the fixed speaker and has no stock backup
+        directory. An absent backup and a corrupt backup each refuse before
+        the rollback marker is created, for the speaker and for MCA. The live
+        module, the manifest, the other component, and every file already in
+        the state directory stay as planted. Interrupted and reverse refusals
+        are covered by their own tests.
+        """
+        for name in ('speaker', 'mca'):
+            for kind in ('absent', 'corrupt-module', 'corrupt-manifest'):
+                with self.subTest(component=name, kind=kind):
+                    self.setUp()
+                    selected = self.component(name)
+                    owner = {'gain': 13, 'label': name + '-' + kind}
+                    baseline_speaker = name == 'speaker' and kind == 'absent'
+                    if baseline_speaker:
+                        # The installed alpha.1 Air that already has the fixed
+                        # speaker: fixed bytes, fixed pins, no backup directory.
+                        self.install(NEW, manifest(FIXED))
+                    elif name == 'speaker':
+                        self.install_both(NEW, FIXED, MCA_OLD, identity(MCA_OLD, MCA_OLD_NOTE), owner)
+                    else:
+                        self.install_both(NEW, FIXED, MCA_NEW, identity(MCA_NEW, MCA_NEW_NOTE), owner)
+                    stage = self.root / selected['state']
+                    if kind != 'absent':
+                        if name == 'speaker':
+                            saved = with_mca(manifest(STOCK), identity(MCA_OLD, MCA_OLD_NOTE))
+                        else:
+                            saved = with_mca(manifest(FIXED), identity(MCA_OLD, MCA_OLD_NOTE))
+                        saved['owner_calibration'] = {'gain': 1, 'label': 'stock-half'}
+                        stage.mkdir(parents=True)
+                        if kind == 'corrupt-module':
+                            self.put(selected['state'] + '/alpha1-module.ko', b'not-the-stock-module')
+                            self.put(selected['state'] + '/alpha1-manifest.json', MODULE.serialize(saved))
+                        else:
+                            self.put(selected['state'] + '/alpha1-module.ko', selected['stock_bytes'])
+                            wrong = json.loads(json.dumps(saved))
+                            key = MODULE.NAME if name == 'speaker' else MCA_NAME
+                            wrong['modules'][key] = 'not-the-stock-note'
+                            self.put(selected['state'] + '/alpha1-manifest.json', MODULE.serialize(wrong))
+                    other = self.root / selected['other_module']
+                    before = (self.manifest.read_bytes(),
+                              (self.root / selected['module']).read_bytes(),
+                              other.read_bytes() if other.is_file() else None,
+                              self.state_files(stage))
+                    self.assertFalse((stage / 'rollback').exists())
+                    self.assertFalse((stage / 'hold').exists())
+                    code, report = self.run_tool('--rollback', *selected['args'])
+                    self.assertEqual(code, 1, report)
+                    self.assertIn('Backed-up module is not the alpha.1 ' + name + ' module and pins',
+                                  self.last_error)
+                    self.assertFalse((stage / 'rollback').exists())
+                    self.assertFalse((stage / 'hold').exists())
+                    self.assertEqual((self.manifest.read_bytes(),
+                                      (self.root / selected['module']).read_bytes(),
+                                      other.read_bytes() if other.is_file() else None,
+                                      self.state_files(stage)), before)
+                    code, report = self.run_tool('--boot', *selected['args'])
+                    self.assertEqual(code, 0, self.last_error)
+                    self.assertEqual(report['status'], 'current')
+                    self.assertFalse((stage / 'rollback').exists())
+                    self.assertEqual((self.manifest.read_bytes(),
+                                      (self.root / selected['module']).read_bytes(),
+                                      other.read_bytes() if other.is_file() else None,
+                                      self.state_files(stage)), before)
+                    if baseline_speaker:
+                        self.assertFalse(stage.exists())
+                        self.assertFalse((self.root / MCA_MODULE).exists())
+
+    def plant(self, speaker_record, mca_record, speaker_bytes, mca_bytes, extra=None):
+        document = with_mca(manifest(speaker_record), mca_record)
+        if extra:
+            document.update(extra)
+        self.install(speaker_bytes, document)
+        self.put(MCA_MODULE, mca_bytes)
+        self.put(MCA_STAGED, MCA_NEW)
+        return document
+
+    def test_mca_updates_from_stock_or_fixed_speaker_without_touching_it(self):
+        cases = {'stock speaker': (OLD, STOCK), 'fixed speaker': (NEW, FIXED)}
+        for label, (speaker_bytes, speaker_record) in cases.items():
+            with self.subTest(label):
+                self.setUp()
+                extra = {'owner_calibration': {'gain': 3}}
+                self.plant(speaker_record, identity(MCA_OLD, MCA_OLD_NOTE), speaker_bytes, MCA_OLD, extra)
+                before = self.manifest.read_bytes()
+                code, report = self.run_tool('--boot', '--component', 'mca')
+                self.assertEqual(code, 0, self.last_error)
+                self.assertIn('applied', report['status'])
+                self.assertEqual((self.root / MODULE.MODULE).read_bytes(), speaker_bytes)
+                self.assertEqual((self.root / MCA_MODULE).read_bytes(), MCA_NEW)
+                raw = self.manifest.read_bytes()
+                restored = json.loads(raw)
+                self.assertEqual(restored['modules'][MODULE.NAME], speaker_record['note'])
+                self.assertEqual(restored['modules'][MCA_NAME], MCA_NEW_NOTE)
+                self.assertEqual(restored['owner_calibration'], {'gain': 3})
+                self.assertEqual(mask_pins(raw, identity(MCA_OLD, MCA_OLD_NOTE), identity(MCA_NEW, MCA_NEW_NOTE)),
+                                 mask_pins(before, identity(MCA_OLD, MCA_OLD_NOTE), identity(MCA_NEW, MCA_NEW_NOTE)))
+                self.assertFalse((self.root / MODULE.STATE / 'rollback').exists())
+                self.assertFalse((self.root / MCA_STATE / 'hold').exists())
+                again = self.manifest.read_bytes()
+                self.assertEqual(self.run_tool('--boot', '--component', 'mca')[1]['status'], 'current')
+                self.assertEqual(self.manifest.read_bytes(), again)
+
+    def test_speaker_rollback_keeps_later_mca_pins_and_custom_values(self):
+        # The speaker backup is taken at apply time. A later MCA edit and an
+        # owner value written after that backup must survive speaker rollback.
+        document = with_mca(manifest(STOCK), identity(MCA_OLD, MCA_OLD_NOTE))
+        document['owner_calibration'] = {'gain': 3}
+        self.install(OLD, document)
+        self.put(MCA_MODULE, MCA_OLD)
+        self.assertEqual(self.run_tool('--boot')[0], 0)
+        live = json.loads(self.manifest.read_bytes())
+        live['owner_calibration'] = {'gain': 9, 'label': 'bench'}
+        live = with_mca(live, identity(MCA_NEW, MCA_NEW_NOTE))
+        self.manifest.write_bytes(MODULE.serialize(live))
+        self.put(MCA_MODULE, MCA_NEW)
+        self.assertEqual(self.run_tool('--rollback')[0], 0)
+        self.assertEqual(self.run_tool('--boot')[0], 0)
+        module, restored = self.state()
+        self.assertEqual(module, OLD)
+        self.assertEqual(restored['modules'][MODULE.NAME], STOCK['note'])
+        self.assertEqual(restored['files']['/' + MODULE.MODULE], STOCK['sha256'])
+        self.assertEqual(restored['owner_calibration'], {'gain': 9, 'label': 'bench'})
+        self.assertEqual(restored['modules'][MCA_NAME], MCA_NEW_NOTE)
+        self.assertEqual(restored['module_artifacts'][MCA_NAME]['sha256'], hashlib.sha256(MCA_NEW).hexdigest())
+        self.assertEqual((self.root / MCA_MODULE).read_bytes(), MCA_NEW)
+        self.assertTrue((self.root / MODULE.STATE / 'hold').exists())
+        self.assertFalse((self.root / MCA_STATE / 'hold').exists())
+
+    def test_mca_rollback_keeps_the_speaker_update_and_its_own_hold(self):
+        self.plant(STOCK, identity(MCA_OLD, MCA_OLD_NOTE), OLD, MCA_OLD, {'owner_calibration': {'gain': 4}})
+        self.assertEqual(self.run_tool('--boot')[0], 0)
+        self.assertEqual(self.run_tool('--boot', '--component', 'mca')[0], 0)
+        self.assertEqual(self.run_tool('--rollback', '--component', 'mca')[0], 0)
+        self.assertFalse((self.root / MODULE.STATE / 'rollback').exists())
+        self.assertEqual(self.run_tool('--boot', '--component', 'mca')[0], 0)
+        module, restored = self.state()
+        self.assertEqual(module, NEW)
+        self.assertEqual(restored['modules'][MODULE.NAME], FIXED['note'])
+        self.assertEqual(restored['modules'][MCA_NAME], MCA_OLD_NOTE)
+        self.assertEqual(restored['owner_calibration'], {'gain': 4})
+        self.assertEqual((self.root / MCA_MODULE).read_bytes(), MCA_OLD)
+        self.assertTrue((self.root / MCA_STATE / 'hold').exists())
+        self.assertFalse((self.root / MODULE.STATE / 'hold').exists())
+        self.assertEqual(self.run_tool('--boot')[1]['status'], 'current')
+
+    def test_loaded_component_refuses_only_its_own_write(self):
+        self.plant(STOCK, identity(MCA_OLD, MCA_OLD_NOTE), OLD, MCA_OLD)
+        (self.root / 'sys/module' / MODULE.NAME).mkdir(parents=True)
+        before = self.manifest.read_bytes()
+        self.assertNotEqual(self.run_tool('--boot')[0], 0)
+        self.assertEqual(self.manifest.read_bytes(), before)
+        code, report = self.run_tool('--boot', '--component', 'mca')
+        self.assertEqual(code, 0, self.last_error)
+        self.assertEqual((self.root / MCA_MODULE).read_bytes(), MCA_NEW)
+        self.assertEqual((self.root / MODULE.MODULE).read_bytes(), OLD)
+        self.assertIn('applied', report['status'])
+
+        self.setUp()
+        self.plant(STOCK, identity(MCA_OLD, MCA_OLD_NOTE), OLD, MCA_OLD)
+        (self.root / 'sys/module' / MCA_NAME).mkdir(parents=True)
+        before = (self.manifest.read_bytes(), (self.root / MCA_MODULE).read_bytes())
+        code, _ = self.run_tool('--boot', '--component', 'mca')
+        self.assertEqual(code, 1)
+        self.assertIn(MCA_NAME, self.last_error)
+        self.assertNotIn('unrecognized arguments', self.last_error)
+        self.assertEqual((self.manifest.read_bytes(), (self.root / MCA_MODULE).read_bytes()), before)
+        self.assertEqual(self.run_tool('--boot')[0], 0)
+        self.assertEqual((self.root / MODULE.MODULE).read_bytes(), NEW)
+
+    def test_mca_refuses_one_wrong_pin_or_wrong_staged_or_backup_bytes(self):
+        base = with_mca(manifest(STOCK), identity(MCA_OLD, MCA_OLD_NOTE))
+        mutations = {
+            'files': lambda document: document['files'].__setitem__('/' + MCA_MODULE, 'f' * 64),
+            'metadata sha': lambda document: document['file_metadata'][MCA_MODULE].__setitem__('sha256', 'e' * 64),
+            'metadata size': lambda document: document['file_metadata'][MCA_MODULE].__setitem__('size', 1),
+            'artifact sha': lambda document: document['module_artifacts'][MCA_NAME].__setitem__('sha256', 'd' * 64),
+            'artifact size': lambda document: document['module_artifacts'][MCA_NAME].__setitem__('size', 1),
+            'artifact note': lambda document: document['module_artifacts'][MCA_NAME].__setitem__('note', 'other-note!!!'),
+            'modules': lambda document: document['modules'].__setitem__(MCA_NAME, 'other-note!!!'),
+        }
+        for label, change in mutations.items():
+            with self.subTest(label):
+                self.setUp()
+                document = json.loads(json.dumps(base))
+                change(document)
+                self.install(OLD, document)
+                self.put(MCA_MODULE, MCA_OLD)
+                self.put(MCA_STAGED, MCA_NEW)
+                before = (self.manifest.read_bytes(), (self.root / MCA_MODULE).read_bytes(),
+                          (self.root / MODULE.MODULE).read_bytes())
+                code, _ = self.run_tool('--boot', '--component', 'mca')
+                self.assertEqual(code, 1)
+                self.assertNotIn('unrecognized arguments', self.last_error)
+                self.assertEqual((self.manifest.read_bytes(), (self.root / MCA_MODULE).read_bytes(),
+                                  (self.root / MODULE.MODULE).read_bytes()), before)
+
+        self.setUp()
+        self.plant(STOCK, identity(MCA_OLD, MCA_OLD_NOTE), OLD, MCA_OLD)
+        self.put(MCA_STAGED, b'tampered-mca-module')
+        before = (self.root / MCA_MODULE).read_bytes()
+        self.assertEqual(self.run_tool('--boot', '--component', 'mca')[0], 1)
+        self.assertNotIn('unrecognized arguments', self.last_error)
+        self.assertEqual((self.root / MCA_MODULE).read_bytes(), before)
+
+        self.setUp()
+        self.plant(FIXED, identity(MCA_NEW, MCA_NEW_NOTE), NEW, MCA_NEW)
+        stage = self.root / MCA_STATE
+        stage.mkdir(parents=True)
+        (stage / 'rollback').touch()
+        self.put(MCA_STATE + '/alpha1-module.ko', b'not-the-stock-mca')
+        self.put(MCA_STATE + '/alpha1-manifest.json', MODULE.serialize(
+            with_mca(manifest(FIXED), identity(MCA_OLD, MCA_OLD_NOTE))))
+        before = (self.root / MCA_MODULE).read_bytes()
+        self.assertEqual(self.run_tool('--boot', '--component', 'mca')[0], 1)
+        self.assertNotIn('unrecognized arguments', self.last_error)
+        self.assertEqual((self.root / MCA_MODULE).read_bytes(), before)
+
+    def test_mca_forward_interruption_completes_and_reverse_needs_rollback(self):
+        self.plant(FIXED, identity(MCA_OLD, MCA_OLD_NOTE), NEW, MCA_OLD, {'owner_calibration': {'gain': 2}})
+        real = MODULE.write
+
+        def fail_on_manifest(path, data, mode):
+            if path == self.manifest and (self.root / MCA_MODULE).read_bytes() == MCA_NEW:
+                raise OSError('power cut')
+            real(path, data, mode)
+
+        with mock.patch.object(MODULE, 'write', side_effect=fail_on_manifest):
+            self.assertEqual(self.run_tool('--boot', '--component', 'mca')[0], 1)
+        self.assertEqual((self.root / MCA_MODULE).read_bytes(), MCA_NEW)
+        self.assertEqual(json.loads(self.manifest.read_bytes())['modules'][MCA_NAME], MCA_OLD_NOTE)
+        code, report = self.run_tool('--component', 'mca')
+        self.assertEqual(code, 0, self.last_error)
+        self.assertEqual(report['state'], 'interrupted')
+        self.assertEqual(report['status'], 'interrupted; completes at the next boot')
+        self.assertEqual(self.run_tool('--boot', '--component', 'mca')[0], 0)
+        restored = json.loads(self.manifest.read_bytes())
+        self.assertEqual(restored['modules'][MCA_NAME], MCA_NEW_NOTE)
+        self.assertEqual(restored['modules'][MODULE.NAME], FIXED['note'])
+        self.assertEqual(restored['owner_calibration'], {'gain': 2})
+
+        self.setUp()
+        document = with_mca(manifest(FIXED), identity(MCA_NEW, MCA_NEW_NOTE))
+        document['owner_calibration'] = {'gain': 8}
+        self.install(NEW, document)
+        self.put(MCA_MODULE, MCA_OLD)  # old bytes, new pins: interrupted rollback
+        backup = with_mca(manifest(FIXED), identity(MCA_OLD, MCA_OLD_NOTE))
+        backup['owner_calibration'] = {'gain': 1}
+        stage = self.root / MCA_STATE
+        stage.mkdir(parents=True)
+        self.put(MCA_STATE + '/alpha1-module.ko', MCA_OLD)
+        self.put(MCA_STATE + '/alpha1-manifest.json', MODULE.serialize(backup))
+        before = self.manifest.read_bytes()
+        self.assertEqual(self.run_tool('--boot', '--component', 'mca')[0], 1)
+        self.assertEqual(self.manifest.read_bytes(), before)
+        self.assertEqual((self.root / MCA_MODULE).read_bytes(), MCA_OLD)
+        (stage / 'rollback').touch()
+        self.assertEqual(self.run_tool('--boot', '--component', 'mca')[0], 0)
+        finished = json.loads(self.manifest.read_bytes())
+        self.assertEqual(finished['modules'][MCA_NAME], MCA_OLD_NOTE)
+        self.assertEqual(finished['owner_calibration'], {'gain': 8})
+        self.assertEqual(finished['modules'][MODULE.NAME], FIXED['note'])
+        self.assertTrue((stage / 'hold').exists())
+
+    def test_fixed_mca_custom_manifest_is_not_rewritten(self):
+        document = with_mca(manifest(FIXED), identity(MCA_NEW, MCA_NEW_NOTE))
+        document['owner_calibration'] = {'gain': 5}
+        self.put(MODULE.MODULE, NEW)
+        self.put(MCA_MODULE, MCA_NEW)
+        self.manifest.write_text(json.dumps(document, indent=4))
+        before = self.manifest.read_bytes()
+        code, report = self.run_tool('--boot', '--component', 'mca')
+        self.assertEqual(code, 0, self.last_error)
+        self.assertEqual(report['status'], 'current')
+        self.assertEqual(self.manifest.read_bytes(), before)
+        self.assertEqual(self.run_tool('--boot')[1]['status'], 'current')
+        self.assertEqual(self.manifest.read_bytes(), before)
+
+    def test_reverse_speaker_interruption_resumes_only_with_rollback_intent(self):
+        live = manifest(FIXED)
+        live['owner_calibration'] = {'gain': 8}
+        self.install(OLD, live)
+        backup = manifest(STOCK)
+        backup['owner_calibration'] = {'gain': 1}
+        stage = self.root / MODULE.STATE
+        stage.mkdir(parents=True)
+        self.put(MODULE.STATE + '/alpha1-module.ko', OLD)
+        self.put(MODULE.STATE + '/alpha1-manifest.json', MODULE.serialize(backup))
+        before = self.manifest.read_bytes()
+        self.assertEqual(self.run_tool('--boot')[0], 1)
+        self.assertEqual(self.manifest.read_bytes(), before)
+        (stage / 'rollback').touch()
+        self.assertEqual(self.run_tool('--boot')[0], 0)
+        module, restored = self.state()
+        self.assertEqual(module, OLD)
+        self.assertEqual(restored['modules'][MODULE.NAME], STOCK['note'])
+        self.assertEqual(restored['owner_calibration'], {'gain': 8})
+
+    def component(self, name):
+        """Paths and bytes for one component. The other component stays stock."""
+        if name == 'speaker':
+            return {'name': 'speaker', 'args': (), 'module': MODULE.MODULE, 'staged': MODULE.STAGED,
+                    'state': MODULE.STATE, 'stock_bytes': OLD, 'fixed_bytes': NEW, 'stock': STOCK, 'fixed': FIXED,
+                    'other_module': MCA_MODULE, 'other_bytes': MCA_OLD}
+        return {'name': 'mca', 'args': ('--component', 'mca'), 'module': MCA_MODULE, 'staged': MCA_STAGED,
+                'state': MCA_STATE, 'stock_bytes': MCA_OLD, 'fixed_bytes': MCA_NEW,
+                'stock': identity(MCA_OLD, MCA_OLD_NOTE), 'fixed': identity(MCA_NEW, MCA_NEW_NOTE),
+                'other_module': MODULE.MODULE, 'other_bytes': OLD}
+
+    def install_both(self, speaker_bytes, speaker_record, mca_bytes, mca_record, owner):
+        document = with_mca(manifest(speaker_record), mca_record)
+        document['owner_calibration'] = owner
+        self.install(speaker_bytes, document)
+        self.put(MCA_MODULE, mca_bytes)
+        self.put(MCA_STAGED, MCA_NEW)
+        self.put(MODULE.STAGED, NEW)
+        return document
+
+    def test_rollback_and_boot_markers_are_owner_only(self):
+        """A new rollback marker and the hold written on the next boot are empty and mode 0600.
+
+        The process umask is 0 for the request and the boot, so the mode is the
+        creation mode, and the previous umask is restored afterwards. Speaker
+        and MCA are separate: the other component's module and markers stay.
+        """
+        previous = os.umask(0)
+        try:
+            for name in ('speaker', 'mca'):
+                with self.subTest(component=name):
+                    self.setUp()
+                    selected = self.component(name)
+                    other_stage = self.root / (MCA_STATE if name == 'speaker' else MODULE.STATE)
+                    self.install_both(OLD, STOCK, MCA_OLD, identity(MCA_OLD, MCA_OLD_NOTE),
+                                      {'gain': 2, 'label': name})
+                    self.assertEqual(self.run_tool('--boot', *selected['args'])[0], 0)
+                    stage = self.root / selected['state']
+                    other = self.root / selected['other_module']
+                    self.assertEqual(other.read_bytes(), selected['other_bytes'])
+                    self.assertFalse((stage / 'rollback').exists())
+                    self.assertFalse((stage / 'hold').exists())
+                    self.assertFalse((other_stage / 'rollback').exists())
+                    self.assertFalse((other_stage / 'hold').exists())
+                    code, report = self.run_tool('--rollback', *selected['args'])
+                    self.assertEqual(code, 0, self.last_error)
+                    self.assertEqual(report['status'],
+                                     'rollback requested; restart to restore the alpha.1 ' + name + ' module')
+                    rollback_marker = stage / 'rollback'
+                    self.assertTrue(rollback_marker.is_file())
+                    self.assertFalse(rollback_marker.is_symlink())
+                    self.assertEqual(rollback_marker.read_bytes(), b'')
+                    self.assertEqual(rollback_marker.stat().st_mode & 0o777, 0o600)
+                    self.assertFalse((stage / 'hold').exists())
+                    self.assertEqual(other.read_bytes(), selected['other_bytes'])
+                    self.assertFalse((other_stage / 'rollback').exists())
+                    self.assertFalse((other_stage / 'hold').exists())
+                    code, report = self.run_tool('--boot', *selected['args'])
+                    self.assertEqual(code, 0, self.last_error)
+                    self.assertEqual(report['status'], 'rolled back to the alpha.1 ' + name + ' module')
+                    hold = stage / 'hold'
+                    self.assertTrue(hold.is_file())
+                    self.assertFalse(hold.is_symlink())
+                    self.assertEqual(hold.read_bytes(), b'')
+                    self.assertEqual(hold.stat().st_mode & 0o777, 0o600)
+                    self.assertFalse(rollback_marker.exists())
+                    self.assertEqual(other.read_bytes(), selected['other_bytes'])
+                    self.assertFalse((other_stage / 'rollback').exists())
+                    self.assertFalse((other_stage / 'hold').exists())
+        finally:
+            os.umask(previous)
+
+    def test_rollback_power_cut_before_clearing_intent_finishes_on_retry(self):
+        """Stock bytes and pins with hold and the rollback marker still present.
+
+        A power cut after the restored manifest write and before the marker is
+        removed must be finished by the next --boot. The marker goes away, the
+        hold stays, unrelated manifest fields stay, and the fixed module is
+        not applied. One injected unlink failure, then one retry, for each
+        component.
+        """
+        for name in ('speaker', 'mca'):
+            with self.subTest(name):
+                self.setUp()
+                selected = self.component(name)
+                owner = {'gain': 11, 'label': name}
+                self.install_both(OLD, STOCK, MCA_OLD, identity(MCA_OLD, MCA_OLD_NOTE), {'gain': 1})
+                self.assertEqual(self.run_tool('--boot', *selected['args'])[0], 0)
+                live = json.loads(self.manifest.read_bytes())
+                live['owner_calibration'] = owner
+                self.manifest.write_bytes(MODULE.serialize(live))
+                self.assertEqual(self.run_tool('--rollback', *selected['args'])[0], 0)
+                stage = self.root / selected['state']
+                real_unlink = Path.unlink
+
+                def fail_rollback_once(path, missing_ok=False):
+                    if path.name == 'rollback' and not fail_rollback_once.done:
+                        fail_rollback_once.done = True
+                        raise OSError('power cut before unlinking rollback')
+                    return real_unlink(path, missing_ok=missing_ok)
+
+                fail_rollback_once.done = False
+                with mock.patch.object(Path, 'unlink', fail_rollback_once):
+                    self.assertEqual(self.run_tool('--boot', *selected['args'])[0], 1)
+                self.assertEqual((self.root / selected['module']).read_bytes(), selected['stock_bytes'])
+                self.assertTrue((stage / 'hold').exists())
+                self.assertTrue((stage / 'rollback').exists())
+                cut = json.loads(self.manifest.read_bytes())
+                self.assertEqual(cut['owner_calibration'], owner)
+                self.assertEqual(cut['modules'][MODULE.NAME if name == 'speaker' else MCA_NAME],
+                                 selected['stock']['note'])
+                self.assertEqual((self.root / selected['other_module']).read_bytes(), selected['other_bytes'])
+                code, report = self.run_tool('--boot', *selected['args'])
+                self.assertEqual(code, 0, self.last_error)
+                self.assertEqual(report['status'], 'held after a rollback; nothing applied')
+                self.assertFalse((stage / 'rollback').exists())
+                self.assertTrue((stage / 'hold').exists())
+                self.assertEqual((self.root / selected['module']).read_bytes(), selected['stock_bytes'])
+                finished = json.loads(self.manifest.read_bytes())
+                self.assertEqual(finished['owner_calibration'], owner)
+                self.assertEqual(finished['modules'][MODULE.NAME if name == 'speaker' else MCA_NAME],
+                                 selected['stock']['note'])
+                self.assertEqual((self.root / selected['other_module']).read_bytes(), selected['other_bytes'])
+                code, report = self.run_tool('--boot', *selected['args'])
+                self.assertEqual(code, 0, self.last_error)
+                self.assertEqual(report['status'], 'held after a rollback; nothing applied')
+                self.assertEqual((self.root / selected['module']).read_bytes(), selected['stock_bytes'])
+                self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
+                self.assertTrue((stage / 'hold').exists())
+                self.assertFalse((stage / 'rollback').exists())
+
+    def test_restored_rollback_completion_refuses_an_invalid_backup(self):
+        """Stock bytes, stock pins, hold, and a rollback marker are not finished without a valid backup.
+
+        This is the retry after a restored rollback, not a new request and not
+        the rollback that still has fixed or forward bytes. ``--boot`` refuses
+        when the manifest half is missing, and when the module half is the
+        stock file but the backup modules note does not match. Live bytes, the
+        manifest, both markers, the other component, and the backup files stay
+        as planted. The fixed module remains staged and is not applied.
+        """
+        def marked(path):
+            info = node_identity(path)
+            if info[0] == 'file':
+                return info + (path.stat().st_mode & 0o777,)
+            return info
+
+        for name in ('speaker', 'mca'):
+            for kind in ('missing-manifest', 'wrong-note'):
+                with self.subTest(component=name, kind=kind):
+                    self.setUp()
+                    selected = self.component(name)
+                    owner = {'gain': 12, 'label': name + '-' + kind}
+                    document = self.install_both(
+                        OLD, STOCK, MCA_OLD, identity(MCA_OLD, MCA_OLD_NOTE), owner)
+                    stage = self.root / selected['state']
+                    stage.mkdir(parents=True)
+                    self.put(selected['state'] + '/alpha1-module.ko', selected['stock_bytes'], mode=0o600)
+                    if kind == 'wrong-note':
+                        saved = json.loads(json.dumps(document))
+                        key = MODULE.NAME if name == 'speaker' else MCA_NAME
+                        saved['modules'][key] = 'not-the-stock-note'
+                        self.put(selected['state'] + '/alpha1-manifest.json', MODULE.serialize(saved),
+                                 mode=0o600)
+                    self.put(selected['state'] + '/rollback', b'rollback-marker', mode=0o640)
+                    self.put(selected['state'] + '/hold', b'hold-marker', mode=0o604)
+                    self.assertEqual((self.root / selected['staged']).read_bytes(), selected['fixed_bytes'])
+                    code, report = self.run_tool(*selected['args'])
+                    self.assertEqual(code, 0, self.last_error)
+                    self.assertEqual(report['state'], 'stock')
+                    self.assertTrue(report['rollback_requested'])
+                    self.assertTrue(report['held'])
+                    before = {
+                        'manifest': self.manifest.read_bytes(),
+                        'module': (self.root / selected['module']).read_bytes(),
+                        'other': (self.root / selected['other_module']).read_bytes(),
+                        'staged': (self.root / MODULE.STAGED).read_bytes(),
+                        'mca_staged': (self.root / MCA_STAGED).read_bytes(),
+                        'backup_module': marked(stage / 'alpha1-module.ko'),
+                        'backup_manifest': marked(stage / 'alpha1-manifest.json'),
+                        'rollback': marked(stage / 'rollback'),
+                        'hold': marked(stage / 'hold'),
+                    }
+                    self.assertEqual(before['rollback'], ('file', b'rollback-marker', 0o640))
+                    self.assertEqual(before['hold'], ('file', b'hold-marker', 0o604))
+                    self.assertEqual(before['backup_module'][0], 'file')
+                    if kind == 'missing-manifest':
+                        self.assertEqual(before['backup_manifest'], ('absent',))
+                    else:
+                        self.assertEqual(before['backup_manifest'][0], 'file')
+                    code, report = self.run_tool('--boot', *selected['args'])
+                    self.assertEqual(code, 1, report)
+                    self.assertIn('Backed-up module is not the alpha.1 ' + name + ' module and pins',
+                                  self.last_error)
+                    self.assertNotIn('Traceback', self.last_error)
+                    self.assertIsNone(report)
+                    self.assertEqual(self.manifest.read_bytes(), before['manifest'])
+                    self.assertEqual((self.root / selected['module']).read_bytes(), before['module'])
+                    self.assertEqual((self.root / selected['other_module']).read_bytes(), before['other'])
+                    self.assertEqual((self.root / MODULE.STAGED).read_bytes(), before['staged'])
+                    self.assertEqual((self.root / MCA_STAGED).read_bytes(), before['mca_staged'])
+                    self.assertEqual(marked(stage / 'alpha1-module.ko'), before['backup_module'])
+                    self.assertEqual(marked(stage / 'alpha1-manifest.json'), before['backup_manifest'])
+                    self.assertEqual(marked(stage / 'rollback'), before['rollback'])
+                    self.assertEqual(marked(stage / 'hold'), before['hold'])
+                    self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
+                    self.assertEqual((self.root / selected['module']).read_bytes(), selected['stock_bytes'])
+
+    def test_partial_stock_backup_completes_and_a_wrong_part_refuses(self):
+        """One valid backup half is finished on the next boot, then the fix applies.
+
+        A backup half that is not the stock module or stock pins refuses and
+        leaves the live module and manifest unchanged. Both missing-half
+        directions are covered.
+        """
+        for name in ('speaker', 'mca'):
+            for direction in ('module', 'manifest'):
+                with self.subTest(component=name, direction=direction, valid=True):
+                    self.setUp()
+                    selected = self.component(name)
+                    owner = {'gain': 6, 'label': name + '-' + direction}
+                    document = self.install_both(
+                        OLD, STOCK, MCA_OLD, identity(MCA_OLD, MCA_OLD_NOTE), owner)
+                    stage = self.root / selected['state']
+                    stage.mkdir(parents=True)
+                    if direction == 'module':
+                        self.put(selected['state'] + '/alpha1-module.ko', selected['stock_bytes'])
+                    else:
+                        self.put(selected['state'] + '/alpha1-manifest.json', MODULE.serialize(document))
+                    code, report = self.run_tool('--boot', *selected['args'])
+                    self.assertEqual(code, 0, self.last_error)
+                    self.assertIn('applied', report['status'])
+                    self.assertEqual((self.root / selected['module']).read_bytes(), selected['fixed_bytes'])
+                    applied = json.loads(self.manifest.read_bytes())
+                    self.assertEqual(applied['owner_calibration'], owner)
+                    self.assertEqual(applied['modules'][MODULE.NAME if name == 'speaker' else MCA_NAME],
+                                     selected['fixed']['note'])
+                    self.assertEqual((stage / 'alpha1-module.ko').read_bytes(), selected['stock_bytes'])
+                    saved = json.loads((stage / 'alpha1-manifest.json').read_bytes())
+                    self.assertEqual(saved['modules'][MODULE.NAME if name == 'speaker' else MCA_NAME],
+                                     selected['stock']['note'])
+                    self.assertEqual((self.root / selected['other_module']).read_bytes(), selected['other_bytes'])
+
+            for direction in ('module', 'manifest'):
+                with self.subTest(component=name, direction=direction, valid=False):
+                    self.setUp()
+                    selected = self.component(name)
+                    owner = {'gain': 7, 'label': 'wrong-' + direction}
+                    document = self.install_both(
+                        OLD, STOCK, MCA_OLD, identity(MCA_OLD, MCA_OLD_NOTE), owner)
+                    stage = self.root / selected['state']
+                    stage.mkdir(parents=True)
+                    if direction == 'module':
+                        self.put(selected['state'] + '/alpha1-module.ko', b'not-the-stock-module')
+                    else:
+                        wrong = json.loads(json.dumps(document))
+                        key = MODULE.NAME if name == 'speaker' else MCA_NAME
+                        wrong['modules'][key] = 'not-stock-note'
+                        self.put(selected['state'] + '/alpha1-manifest.json', MODULE.serialize(wrong))
+                    before_module = (self.root / selected['module']).read_bytes()
+                    before_manifest = self.manifest.read_bytes()
+                    before_other = (self.root / selected['other_module']).read_bytes()
+                    self.assertEqual(self.run_tool('--boot', *selected['args'])[0], 1)
+                    self.assertEqual((self.root / selected['module']).read_bytes(), before_module)
+                    self.assertEqual(self.manifest.read_bytes(), before_manifest)
+                    self.assertEqual((self.root / selected['other_module']).read_bytes(), before_other)
+                    self.assertFalse((stage / 'hold').exists())
+
+    def test_request_rollback_does_not_authorize_reverse_corruption(self):
+        """Old bytes with new pins and no rollback marker are not a request.
+
+        --rollback must not create the marker. A later --boot still leaves the
+        live module, the manifest, and the stock backup unchanged.
+        """
+        for name in ('speaker', 'mca'):
+            with self.subTest(name):
+                self.setUp()
+                selected = self.component(name)
+                owner = {'gain': 8, 'label': 'reverse-' + name}
+                if name == 'speaker':
+                    live_record, live_bytes = FIXED, OLD
+                    mca_record, mca_bytes = identity(MCA_OLD, MCA_OLD_NOTE), MCA_OLD
+                    backup_document = with_mca(manifest(STOCK), mca_record)
+                else:
+                    live_record, live_bytes = STOCK, OLD
+                    mca_record, mca_bytes = identity(MCA_NEW, MCA_NEW_NOTE), MCA_OLD
+                    backup_document = with_mca(manifest(STOCK), identity(MCA_OLD, MCA_OLD_NOTE))
+                self.install_both(live_bytes, live_record, mca_bytes, mca_record, owner)
+                backup_document['owner_calibration'] = {'gain': 1}
+                stage = self.root / selected['state']
+                stage.mkdir(parents=True)
+                self.put(selected['state'] + '/alpha1-module.ko', selected['stock_bytes'])
+                self.put(selected['state'] + '/alpha1-manifest.json', MODULE.serialize(backup_document))
+                before = (self.manifest.read_bytes(),
+                          (self.root / selected['module']).read_bytes(),
+                          (stage / 'alpha1-module.ko').read_bytes(),
+                          (stage / 'alpha1-manifest.json').read_bytes(),
+                          (self.root / selected['other_module']).read_bytes())
+                self.assertFalse((stage / 'rollback').exists())
+                self.assertEqual(self.run_tool('--rollback', *selected['args'])[0], 1)
+                self.assertFalse((stage / 'rollback').exists())
+                self.assertFalse((stage / 'hold').exists())
+                self.assertEqual(self.run_tool('--boot', *selected['args'])[0], 1)
+                self.assertEqual((self.manifest.read_bytes(),
+                                  (self.root / selected['module']).read_bytes(),
+                                  (stage / 'alpha1-module.ko').read_bytes(),
+                                  (stage / 'alpha1-manifest.json').read_bytes(),
+                                  (self.root / selected['other_module']).read_bytes()), before)
+                self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
+                self.assertFalse((stage / 'rollback').exists())
+
+    def test_inspect_after_held_stock_rollback_reports_nothing_applies(self):
+        """A finished stock rollback is held. Inspection must not promise the next boot.
+
+        Stock bytes, stock pins, a valid stock backup, and the hold marker are
+        what ``--boot`` leaves behind. Read-only inspection reports the same
+        held result boot already reports. The other component, still stock and
+        not held, still applies at the next boot. Boot itself is unchanged.
+        """
+        for name in ('speaker', 'mca'):
+            with self.subTest(component=name):
+                self.setUp()
+                selected = self.component(name)
+                owner = {'gain': 2, 'label': 'held-' + name}
+                self.install_both(OLD, STOCK, MCA_OLD, identity(MCA_OLD, MCA_OLD_NOTE), owner)
+                stage = self.root / selected['state']
+                stage.mkdir(parents=True)
+                self.put(selected['state'] + '/alpha1-module.ko', selected['stock_bytes'])
+                self.put(selected['state'] + '/alpha1-manifest.json', self.manifest.read_bytes())
+                (stage / 'hold').write_bytes(b'')
+                before = (self.manifest.read_bytes(),
+                          (self.root / selected['module']).read_bytes(),
+                          (self.root / selected['other_module']).read_bytes(),
+                          self.state_files(stage))
+                code, report = self.run_tool(*selected['args'])
+                self.assertEqual(code, 0, self.last_error)
+                self.assertEqual(report['status'], 'held after a rollback; nothing applied')
+                self.assertNotIn('applies at the next boot', report['status'])
+                self.assertNotIn('applies-next-boot', report['status'])
+                self.assertEqual((self.manifest.read_bytes(),
+                                  (self.root / selected['module']).read_bytes(),
+                                  (self.root / selected['other_module']).read_bytes(),
+                                  self.state_files(stage)), before)
+                code, report = self.run_tool('--boot', *selected['args'])
+                self.assertEqual(code, 0, self.last_error)
+                self.assertEqual(report['status'], 'held after a rollback; nothing applied')
+                self.assertEqual((self.manifest.read_bytes(),
+                                  (self.root / selected['module']).read_bytes(),
+                                  (self.root / selected['other_module']).read_bytes(),
+                                  self.state_files(stage)), before)
+                other_args = () if name == 'mca' else ('--component', 'mca')
+                code, other = self.run_tool(*other_args)
+                self.assertEqual(code, 0, self.last_error)
+                self.assertEqual(other['status'], 'staged; applies at the next boot')
+
+    def test_inspect_current_and_held_does_not_read_the_stock_backup(self):
+        """Current and held stock or forward stay reported when the backup is unreadable.
+
+        Both components have a valid mode 0600 stock backup and no rollback
+        marker. Read-only inspection goes through the CLI. ``read_bytes`` raises
+        PermissionError only for a backup half; the manifest and the live module
+        are read for real. The status stays current or held, and nothing is written.
+        """
+        rows = (
+            dict(label='current', kind='fixed', hold=False, state='fixed', status='current'),
+            dict(label='held stock', kind='stock', hold=True, state='stock',
+                 status='held after a rollback; nothing applied'),
+            dict(label='held forward', kind='interrupted', hold=True, state='interrupted',
+                 status='held after a rollback; nothing applied'),
+        )
+        backup_names = {'alpha1-module.ko', 'alpha1-manifest.json'}
+        real_read_bytes = Path.read_bytes
+
+        def read_bytes(path):
+            if path.name in backup_names:
+                raise PermissionError(13, 'Permission denied', str(path))
+            return real_read_bytes(path)
+
+        def live_for(kind, selected):
+            if kind == 'fixed':
+                return selected['fixed_bytes'], selected['fixed']
+            if kind == 'stock':
+                return selected['stock_bytes'], selected['stock']
+            if kind == 'interrupted':
+                return selected['fixed_bytes'], selected['stock']
+            raise AssertionError(kind)
+
+        def snapshot(selected):
+            stage = self.root / selected['state']
+            return (self.manifest.read_bytes(),
+                    (self.root / selected['module']).read_bytes(),
+                    (self.root / selected['other_module']).read_bytes(),
+                    (self.root / MODULE.STAGED).read_bytes(),
+                    (self.root / MCA_STAGED).read_bytes(),
+                    (stage / 'alpha1-module.ko').read_bytes(),
+                    (stage / 'alpha1-manifest.json').read_bytes(),
+                    node_identity(stage / 'hold'),
+                    node_identity(stage / 'rollback'))
+
+        for name in ('speaker', 'mca'):
+            for row in rows:
+                with self.subTest(component=name, situation=row['label']):
+                    self.setUp()
+                    selected = self.component(name)
+                    owner = {'gain': 3, 'label': name + '-' + row['label']}
+                    module_bytes, record = live_for(row['kind'], selected)
+                    if name == 'speaker':
+                        self.install_both(module_bytes, record, MCA_OLD,
+                                          identity(MCA_OLD, MCA_OLD_NOTE), owner)
+                    else:
+                        self.install_both(OLD, STOCK, module_bytes, record, owner)
+                    saved = with_mca(manifest(STOCK), identity(MCA_OLD, MCA_OLD_NOTE))
+                    stage = self.root / selected['state']
+                    self.put(selected['state'] + '/alpha1-module.ko', selected['stock_bytes'], 0o600)
+                    self.put(selected['state'] + '/alpha1-manifest.json', MODULE.serialize(saved), 0o600)
+                    if row['hold']:
+                        self.put(selected['state'] + '/hold', b'')
+                    self.assertEqual((stage / 'alpha1-module.ko').stat().st_mode & 0o777, 0o600)
+                    self.assertEqual((stage / 'alpha1-manifest.json').stat().st_mode & 0o777, 0o600)
+                    self.assertFalse((stage / 'rollback').exists())
+                    before = snapshot(selected)
+                    with mock.patch.object(Path, 'read_bytes', read_bytes):
+                        code, report = self.run_tool(*selected['args'])
+                    self.assertEqual(code, 0, self.last_error)
+                    self.assertEqual(self.last_error, '')
+                    self.assertEqual(report['state'], row['state'])
+                    self.assertEqual(report['held'], row['hold'])
+                    self.assertFalse(report['rollback_requested'])
+                    self.assertEqual(report['status'], row['status'])
+                    self.assertEqual(snapshot(selected), before)
+                    self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
+
+    def test_inspect_required_backup_states_fail_closed_when_a_half_is_unreadable(self):
+        """Required-backup inspection fails closed when one stock half cannot be read.
+
+        Markerless reverse, an unheld forward interruption, and fixed with a
+        regular rollback marker each open that component's stock backup. Both
+        halves are a valid mode 0600 backup, and the live manifest has owner
+        fields. The same fixture with no denial is recognized and returns that
+        state's normal report. ``read_bytes`` raises ``PermissionError`` only
+        for the exact selected half, so the module half is read when the
+        manifest half is denied. ``main`` returns exit 1 and a refused
+        Permission denied diagnostic. That is not a JSON report, not a verified
+        backup, and not a next-boot promise. Live bytes, the manifest, the
+        other component, and the stage, hold, rollback, and backup contents
+        and modes stay as planted.
+        """
+        rows = (
+            dict(situation='markerless-reverse', live='reverse', marker=False, state='reverse',
+                 status='refused; nothing was changed; recover from the verified stock backup'),
+            dict(situation='unheld-forward', live='interrupted', marker=False, state='interrupted',
+                 status='interrupted; completes at the next boot'),
+            dict(situation='fixed-rollback', live='fixed', marker=True, state='fixed',
+                 status='rollback requested; restart to restore the alpha.1 {name} module'),
+        )
+        halves = {'module': 'alpha1-module.ko', 'manifest': 'alpha1-manifest.json'}
+        real_read_bytes = Path.read_bytes
+
+        def snapshot(selected):
+            stage = self.root / selected['state']
+            other_stage = self.root / (MCA_STATE if selected['name'] == 'speaker' else MODULE.STATE)
+
+            def described(path):
+                # pathlib.Path has no lexists. A symlink, including a dangling
+                # one, still counts as present; exists() alone would miss it.
+                if not (path.is_symlink() or path.exists()):
+                    return ('absent',)
+                return (stat.S_IMODE(path.lstat().st_mode), node_identity(path))
+
+            return (described(self.manifest),
+                    described(self.root / selected['module']),
+                    described(self.root / selected['other_module']),
+                    described(self.root / MODULE.STAGED),
+                    described(self.root / MCA_STAGED),
+                    described(stage / 'alpha1-module.ko'),
+                    described(stage / 'alpha1-manifest.json'),
+                    described(stage / 'hold'),
+                    described(stage / 'rollback'),
+                    self.state_files(stage),
+                    self.state_files(other_stage))
+
+        for name in ('speaker', 'mca'):
+            for row in rows:
+                for half, backup_name in halves.items():
+                    with self.subTest(component=name, situation=row['situation'], half=half):
+                        self.setUp()
+                        selected = self.component(name)
+                        self.assertEqual(set(selected), {
+                            'name', 'args', 'module', 'staged', 'state', 'stock_bytes',
+                            'fixed_bytes', 'stock', 'fixed', 'other_module', 'other_bytes'})
+                        self.assertEqual(set(selected['stock']), {'sha256', 'size', 'note'})
+                        self.assertEqual(set(selected['fixed']), {'sha256', 'size', 'note'})
+                        owner = {'gain': 12, 'label': name + '-' + row['situation'] + '-' + half}
+                        module_key, record_key = {
+                            'reverse': ('stock_bytes', 'fixed'),
+                            'interrupted': ('fixed_bytes', 'stock'),
+                            'fixed': ('fixed_bytes', 'fixed'),
+                        }[row['live']]
+                        if name == 'speaker':
+                            self.install_both(selected[module_key], selected[record_key], MCA_OLD,
+                                              identity(MCA_OLD, MCA_OLD_NOTE), owner)
+                        else:
+                            self.install_both(OLD, STOCK, selected[module_key], selected[record_key], owner)
+                        saved = with_mca(manifest(STOCK), identity(MCA_OLD, MCA_OLD_NOTE))
+                        saved['owner_calibration'] = {'gain': 1, 'label': 'backup-' + name}
+                        stage = self.root / selected['state']
+                        self.put(selected['state'] + '/alpha1-module.ko', selected['stock_bytes'], 0o600)
+                        self.put(selected['state'] + '/alpha1-manifest.json', MODULE.serialize(saved), 0o600)
+                        self.assertEqual((stage / 'alpha1-module.ko').stat().st_mode & 0o777, 0o600)
+                        self.assertEqual((stage / 'alpha1-manifest.json').stat().st_mode & 0o777, 0o600)
+                        if row['marker']:
+                            self.put(selected['state'] + '/rollback', b'')
+                            self.assertTrue((stage / 'rollback').is_file())
+                            self.assertFalse((stage / 'rollback').is_symlink())
+                        else:
+                            self.assertFalse((stage / 'rollback').exists())
+                        self.assertFalse((stage / 'hold').exists())
+                        other_stage = self.root / (MCA_STATE if name == 'speaker' else MODULE.STATE)
+                        expected_files = {'alpha1-module.ko', 'alpha1-manifest.json'}
+                        if row['marker']:
+                            expected_files.add('rollback')
+                        self.assertEqual(set(self.state_files(stage)), expected_files)
+                        self.assertIsNone(self.state_files(other_stage))
+                        before = snapshot(selected)
+                        code, report = self.run_tool(*selected['args'])
+                        self.assertEqual(code, 0, self.last_error)
+                        self.assertEqual(self.last_error, '')
+                        self.assertEqual(report['component'], name)
+                        self.assertEqual(report['state'], row['state'])
+                        self.assertFalse(report['held'])
+                        self.assertEqual(report['rollback_requested'], row['marker'])
+                        self.assertEqual(report['status'], row['status'].format(name=name))
+                        self.assertEqual(snapshot(selected), before)
+                        denied = stage / backup_name
+
+                        def read_bytes(path, denied=denied):
+                            if path == denied:
+                                raise PermissionError(13, 'Permission denied', str(path))
+                            return real_read_bytes(path)
+
+                        with mock.patch.object(Path, 'read_bytes', read_bytes):
+                            code, report = self.run_tool(*selected['args'])
+                        diagnostic = ('m4-speaker-module: refused: '
+                                      + str(PermissionError(13, 'Permission denied', str(denied)))
+                                      + '\n')
+                        self.assertEqual(code, 1, self.last_output + self.last_error)
+                        self.assertIsNone(report)
+                        self.assertEqual(self.last_output, '')
+                        self.assertEqual(self.last_error, diagnostic)
+                        self.assertNotRegex(self.last_output + self.last_error,
+                                            r'(?i)verified|next boot|completes|recovery required')
+                        self.assertNotIn('Traceback', self.last_error)
+                        self.assertEqual(snapshot(selected), before)
+                        self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
+
+    def test_inspect_of_markerless_reverse_describes_refusal_not_rollback(self):
+        """Old bytes and new pins, with no marker, are not a request to run ``--rollback``.
+
+        ``--rollback`` refuses that state. Inspection says so and points at
+        recovery from the verified stock backup. It does not tell the owner to
+        pass ``--rollback``. Boot still refuses with the existing message and
+        leaves the module, the manifest, and the backup untouched.
+        """
+        for name in ('speaker', 'mca'):
+            with self.subTest(component=name):
+                self.setUp()
+                selected = self.component(name)
+                owner = {'gain': 8, 'label': 'reverse-' + name}
+                if name == 'speaker':
+                    live_record, live_bytes = FIXED, OLD
+                    mca_record, mca_bytes = identity(MCA_OLD, MCA_OLD_NOTE), MCA_OLD
+                    backup_document = with_mca(manifest(STOCK), mca_record)
+                else:
+                    live_record, live_bytes = STOCK, OLD
+                    mca_record, mca_bytes = identity(MCA_NEW, MCA_NEW_NOTE), MCA_OLD
+                    backup_document = with_mca(manifest(STOCK), identity(MCA_OLD, MCA_OLD_NOTE))
+                self.install_both(live_bytes, live_record, mca_bytes, mca_record, owner)
+                backup_document['owner_calibration'] = {'gain': 1}
+                stage = self.root / selected['state']
+                stage.mkdir(parents=True)
+                self.put(selected['state'] + '/alpha1-module.ko', selected['stock_bytes'])
+                self.put(selected['state'] + '/alpha1-manifest.json', MODULE.serialize(backup_document))
+                before = (self.manifest.read_bytes(),
+                          (self.root / selected['module']).read_bytes(),
+                          (stage / 'alpha1-module.ko').read_bytes(),
+                          (stage / 'alpha1-manifest.json').read_bytes(),
+                          (self.root / selected['other_module']).read_bytes())
+                code, report = self.run_tool(*selected['args'])
+                self.assertEqual(code, 0, self.last_error)
+                self.assertRegex(report['status'], r'(?i)refus|nothing was changed')
+                self.assertRegex(report['status'], r'(?i)verified\b.*\bbackup')
+                self.assertNotIn('--rollback', report['status'])
+                self.assertNotRegex(report['status'], r'(?i)waiting for a rollback')
+                self.assertEqual((self.manifest.read_bytes(),
+                                  (self.root / selected['module']).read_bytes(),
+                                  (stage / 'alpha1-module.ko').read_bytes(),
+                                  (stage / 'alpha1-manifest.json').read_bytes(),
+                                  (self.root / selected['other_module']).read_bytes()), before)
+                self.assertEqual(self.run_tool('--boot', *selected['args'])[0], 1)
+                self.assertIn('Interrupted rollback without a rollback request; nothing was changed',
+                              self.last_error)
+                self.assertEqual((self.manifest.read_bytes(),
+                                  (self.root / selected['module']).read_bytes(),
+                                  (stage / 'alpha1-module.ko').read_bytes(),
+                                  (stage / 'alpha1-manifest.json').read_bytes(),
+                                  (self.root / selected['other_module']).read_bytes()), before)
+                self.assertFalse((stage / 'rollback').exists())
+                self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
+
+    def test_markerless_reverse_missing_or_corrupt_backup_is_not_verified(self):
+        """Old bytes and new pins with no marker do not name a verified backup.
+
+        A missing backup, a corrupt module half, and a corrupt manifest half
+        each report recovery required for the speaker and for MCA. The report
+        does not ask for a reboot or for ``--rollback``. Boot still refuses
+        with the markerless message and does not create a marker. The live
+        module, the manifest, the other component, and any backup half stay
+        as planted.
+        """
+        def plant_backup(kind, selected, backup_document):
+            if kind == 'missing':
+                return
+            if kind == 'corrupt-module':
+                self.put(selected['state'] + '/alpha1-module.ko', b'not-the-stock-module')
+                self.put(selected['state'] + '/alpha1-manifest.json', MODULE.serialize(backup_document))
+                return
+            if kind == 'corrupt-manifest':
+                self.put(selected['state'] + '/alpha1-module.ko', selected['stock_bytes'])
+                self.put(selected['state'] + '/alpha1-manifest.json', b'{')
+                return
+            raise AssertionError(kind)
+
+        for name in ('speaker', 'mca'):
+            for kind in ('missing', 'corrupt-module', 'corrupt-manifest'):
+                with self.subTest(component=name, kind=kind):
+                    self.setUp()
+                    selected = self.component(name)
+                    owner = {'gain': 8, 'label': 'reverse-' + name + '-' + kind}
+                    if name == 'speaker':
+                        live_record, live_bytes = FIXED, OLD
+                        mca_record, mca_bytes = identity(MCA_OLD, MCA_OLD_NOTE), MCA_OLD
+                        backup_document = with_mca(manifest(STOCK), mca_record)
+                    else:
+                        live_record, live_bytes = STOCK, OLD
+                        mca_record, mca_bytes = identity(MCA_NEW, MCA_NEW_NOTE), MCA_OLD
+                        backup_document = with_mca(manifest(STOCK), identity(MCA_OLD, MCA_OLD_NOTE))
+                    self.install_both(live_bytes, live_record, mca_bytes, mca_record, owner)
+                    stage = self.root / selected['state']
+                    stage.mkdir(parents=True)
+                    plant_backup(kind, selected, backup_document)
+                    loaded = self.root / 'sys/module' / (MODULE.NAME if name == 'speaker' else MCA_NAME)
+                    self.assertFalse(loaded.exists())
+
+                    def snapshot():
+                        return (self.manifest.read_bytes(),
+                                (self.root / selected['module']).read_bytes(),
+                                (self.root / selected['other_module']).read_bytes(),
+                                node_identity(stage / 'alpha1-module.ko'),
+                                node_identity(stage / 'alpha1-manifest.json'),
+                                node_identity(stage / 'rollback'),
+                                node_identity(stage / 'hold'))
+
+                    before = snapshot()
+                    code, report = self.run_tool(*selected['args'])
+                    self.assertEqual(code, 0, self.last_error)
+                    self.assertEqual(report['state'], 'reverse')
+                    self.assertFalse(report['rollback_requested'])
+                    self.assertEqual(report['status'],
+                                     'refused; nothing was changed; recovery required')
+                    self.assertNotRegex(report['status'], r'(?i)verified')
+                    self.assertNotIn('restart', report['status'])
+                    self.assertNotIn('next boot', report['status'])
+                    self.assertNotIn('--rollback', report['status'])
+                    self.assertEqual(snapshot(), before)
+                    self.assertEqual(self.run_tool('--boot', *selected['args'])[0], 1)
+                    self.assertIn('Interrupted rollback without a rollback request; nothing was changed',
+                                  self.last_error)
+                    self.assertEqual(snapshot(), before)
+                    self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
+
+    def test_inspect_pending_rollback_and_held_forward_interruption(self):
+        """Read-only inspection of both components agrees with the next boot.
+
+        Fixed, reverse, and restored stock with a valid marker and stock backup
+        report a pending or requested rollback and restart guidance. Restored
+        stock still has the hold marker. That report is not current, not waiting
+        for a request, and not an ordinary hold. A held forward interruption
+        with no marker says nothing applies and does not promise the next boot.
+        Unknown stays unknown. A markerless reverse stays refused. Bytes and
+        markers stay as planted.
+        """
+        rows = (
+            dict(situation='fixed', live='fixed', marker=True, hold=False,
+                 state='fixed', expect='pending'),
+            dict(situation='reverse', live='reverse', marker=True, hold=False,
+                 state='reverse', expect='pending'),
+            dict(situation='restored', live='stock', marker=True, hold=True,
+                 state='stock', expect='pending'),
+            dict(situation='held-forward', live='interrupted', marker=False, hold=True,
+                 state='interrupted', expect='held'),
+            dict(situation='unknown', live='unknown', marker=False, hold=False,
+                 state='unknown', expect='unknown'),
+            dict(situation='markerless-reverse', live='reverse', marker=False, hold=False,
+                 state='reverse', expect='refused'),
+        )
+
+        def live_bytes(kind, selected):
+            stock_bytes, fixed_bytes = selected['stock_bytes'], selected['fixed_bytes']
+            stock_record, fixed_record = selected['stock'], selected['fixed']
+            unknown = b'unknown-' + selected['name'].encode()
+            return {'fixed': (fixed_bytes, fixed_record),
+                    'reverse': (stock_bytes, fixed_record),
+                    'stock': (stock_bytes, stock_record),
+                    'interrupted': (fixed_bytes, stock_record),
+                    'unknown': (unknown, stock_record)}[kind]
+
+        def snapshot(selected):
+            other_state = MCA_STATE if selected['name'] == 'speaker' else MODULE.STATE
+            return (self.manifest.read_bytes(),
+                    (self.root / selected['module']).read_bytes(),
+                    (self.root / selected['other_module']).read_bytes(),
+                    (self.root / MODULE.STAGED).read_bytes(),
+                    (self.root / MCA_STAGED).read_bytes(),
+                    self.state_files(self.root / selected['state']),
+                    self.state_files(self.root / other_state))
+
+        for name in ('speaker', 'mca'):
+            for row in rows:
+                with self.subTest(component=name, situation=row['situation']):
+                    self.setUp()
+                    selected = self.component(name)
+                    owner = {'gain': 4, 'label': name + '-' + row['situation']}
+                    module_bytes, record = live_bytes(row['live'], selected)
+                    if name == 'speaker':
+                        self.install_both(module_bytes, record, MCA_OLD,
+                                          identity(MCA_OLD, MCA_OLD_NOTE), owner)
+                    else:
+                        self.install_both(OLD, STOCK, module_bytes, record, owner)
+                    if row['live'] != 'unknown':
+                        saved = with_mca(manifest(STOCK), identity(MCA_OLD, MCA_OLD_NOTE))
+                        self.put(selected['state'] + '/alpha1-module.ko', selected['stock_bytes'])
+                        self.put(selected['state'] + '/alpha1-manifest.json', MODULE.serialize(saved))
+                    if row['marker']:
+                        self.put(selected['state'] + '/rollback', b'')
+                    if row['hold']:
+                        self.put(selected['state'] + '/hold', b'')
+                    before = snapshot(selected)
+                    code, report = self.run_tool(*selected['args'])
+                    self.assertEqual(code, 0, self.last_error)
+                    self.assertEqual(report['state'], row['state'])
+                    self.assertEqual(report['rollback_requested'], row['marker'])
+                    self.assertEqual(report['held'], row['hold'])
+                    status = report['status']
+                    if row['expect'] == 'pending':
+                        self.assertRegex(status, r'(?i)\brollback\b')
+                        self.assertRegex(status, r'(?i)\b(?:pending|requested)\b')
+                        self.assertRegex(status, r'(?i)\brestart\b')
+                        self.assertIn(name, status)
+                        self.assertNotRegex(status, r'(?i)waiting for (?:a )?(?:rollback )?request')
+                        self.assertNotRegex(status, r'(?i)\bcurrent\b')
+                        self.assertNotRegex(status, r'(?i)nothing applied|held after a rollback')
+                    elif row['expect'] == 'held':
+                        self.assertEqual(status, 'held after a rollback; nothing applied')
+                        self.assertNotIn('next boot', status)
+                        self.assertNotRegex(status, r'(?i)\bcompletes\b')
+                    elif row['expect'] == 'unknown':
+                        self.assertEqual(status, 'unknown state; the fix will not be applied')
+                    else:
+                        self.assertEqual(status, 'refused; nothing was changed; '
+                                         'recover from the verified stock backup')
+                        self.assertNotRegex(status, r'(?i)waiting for a rollback')
+                        self.assertNotIn('restart', status)
+                    self.assertEqual(snapshot(selected), before)
+                    self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
+
+    def test_inspect_fixed_nonregular_rollback_marker_requires_recovery(self):
+        """Fixed bytes and pins, a valid stock backup, and a directory or symlink marker.
+
+        The marker exists, so inspection records a rollback request, but it is
+        not a regular file. The report is the recovery-required refusal. The
+        live module, the manifest, both backup halves, and the marker stay as
+        planted. Speaker and MCA are both covered.
+        """
+        def marker_identity(path):
+            if path.is_symlink():
+                return ('symlink', Path(path.readlink()).as_posix())
+            if path.is_dir():
+                return ('directory',)
+            if path.is_file():
+                return ('file', path.read_bytes())
+            return ('absent',)
+
+        for name in ('speaker', 'mca'):
+            for kind in ('directory', 'symlink'):
+                with self.subTest(component=name, kind=kind):
+                    self.setUp()
+                    selected = self.component(name)
+                    owner = {'gain': 5, 'label': name + '-' + kind}
+                    if name == 'speaker':
+                        self.install_both(NEW, FIXED, MCA_OLD, identity(MCA_OLD, MCA_OLD_NOTE), owner)
+                    else:
+                        self.install_both(OLD, STOCK, MCA_NEW, identity(MCA_NEW, MCA_NEW_NOTE), owner)
+                    saved = with_mca(manifest(STOCK), identity(MCA_OLD, MCA_OLD_NOTE))
+                    stage = self.root / selected['state']
+                    self.put(selected['state'] + '/alpha1-module.ko', selected['stock_bytes'])
+                    self.put(selected['state'] + '/alpha1-manifest.json', MODULE.serialize(saved))
+                    marker = stage / 'rollback'
+                    if kind == 'directory':
+                        marker.mkdir()
+                    else:
+                        marker.symlink_to('alpha1-module.ko')
+                    expected_marker = ('directory',) if kind == 'directory' else ('symlink', 'alpha1-module.ko')
+                    self.assertEqual(marker_identity(marker), expected_marker)
+                    self.assertTrue(marker.exists())
+                    self.assertFalse(marker.is_file() and not marker.is_symlink())
+                    before = (self.manifest.read_bytes(),
+                              (self.root / selected['module']).read_bytes(),
+                              (self.root / selected['other_module']).read_bytes(),
+                              (self.root / MODULE.STAGED).read_bytes(),
+                              (self.root / MCA_STAGED).read_bytes(),
+                              (stage / 'alpha1-module.ko').read_bytes(),
+                              (stage / 'alpha1-manifest.json').read_bytes(),
+                              marker_identity(marker),
+                              self.state_files(stage))
+                    code, report = self.run_tool(*selected['args'])
+                    self.assertEqual(code, 0, self.last_error)
+                    self.assertEqual(report['state'], 'fixed')
+                    self.assertTrue(report['rollback_requested'])
+                    self.assertEqual(report['status'],
+                                     'refused; nothing was changed; recovery required')
+                    self.assertEqual((self.manifest.read_bytes(),
+                                      (self.root / selected['module']).read_bytes(),
+                                      (self.root / selected['other_module']).read_bytes(),
+                                      (self.root / MODULE.STAGED).read_bytes(),
+                                      (self.root / MCA_STAGED).read_bytes(),
+                                      (stage / 'alpha1-module.ko').read_bytes(),
+                                      (stage / 'alpha1-manifest.json').read_bytes(),
+                                      marker_identity(marker),
+                                      self.state_files(stage)), before)
+                    self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
+
+    def test_uncertain_rollback_marker_refuses_boot_without_writes(self):
+        """A non-regular rollback marker is neither rollback nor a forward swap.
+
+        The module is not loaded. Fixed with a valid stock backup, and stock
+        with the fixed module staged, are covered for the speaker and for MCA.
+        A symlink to a file outside the state directory, a dangling symlink, a
+        directory, or a fifo where the OS can create one makes inspection
+        report recovery required. Boot refuses. ``--rollback`` on the fixed
+        component, which already has a valid stock backup, refuses before it
+        opens the marker. A fifo request is guarded so an open of that fifo
+        fails the test instead of blocking. Nothing is written to the live
+        module, the manifest, either backup half, the marker, the other
+        component, or the symlink target.
+        """
+        try:
+            probe = self.root / 'fifo-probe'
+            os.mkfifo(probe)
+            probe.unlink()
+            kinds = ('symlink', 'dangling', 'directory', 'fifo')
+        except OSError:
+            kinds = ('symlink', 'dangling', 'directory')
+
+        def plant_marker(stage, kind):
+            marker = stage / 'rollback'
+            outside = self.root / 'var' / 'outside-rollback-target'
+            outside.parent.mkdir(parents=True, exist_ok=True)
+            outside.write_bytes(b'outside-target')
+            missing = stage.parent / 'missing-rollback-target'
+            if kind == 'symlink':
+                marker.symlink_to(Path('../../../outside-rollback-target'))
+            elif kind == 'dangling':
+                marker.symlink_to(Path('../missing-rollback-target'))
+            elif kind == 'directory':
+                marker.mkdir()
+            elif kind == 'fifo':
+                os.mkfifo(marker)
+            else:
+                raise AssertionError(kind)
+            return outside, missing
+
+        for name in ('speaker', 'mca'):
+            for live in ('fixed', 'stock'):
+                for kind in kinds:
+                    with self.subTest(component=name, live=live, kind=kind):
+                        self.setUp()
+                        selected = self.component(name)
+                        owner = {'gain': 5, 'label': name + '-' + live + '-' + kind}
+                        if live == 'fixed' and name == 'mca':
+                            self.install_both(OLD, STOCK, MCA_NEW, identity(MCA_NEW, MCA_NEW_NOTE), owner)
+                        elif live == 'fixed':
+                            self.install_both(NEW, FIXED, MCA_OLD, identity(MCA_OLD, MCA_OLD_NOTE), owner)
+                        else:
+                            self.install_both(OLD, STOCK, MCA_OLD, identity(MCA_OLD, MCA_OLD_NOTE), owner)
+                        saved = with_mca(manifest(STOCK), identity(MCA_OLD, MCA_OLD_NOTE))
+                        stage = self.root / selected['state']
+                        stage.mkdir(parents=True)
+                        self.put(selected['state'] + '/alpha1-module.ko', selected['stock_bytes'])
+                        self.put(selected['state'] + '/alpha1-manifest.json', MODULE.serialize(saved))
+                        outside, missing = plant_marker(stage, kind)
+                        if kind == 'symlink':
+                            self.assertEqual(os.readlink(stage / 'rollback'),
+                                             '../../../outside-rollback-target')
+                            linked = (stage / '../../../outside-rollback-target').resolve()
+                            self.assertEqual(linked, outside.resolve())
+                            self.assertNotIn(stage.resolve(), linked.parents)
+                        elif kind == 'dangling':
+                            self.assertEqual(os.readlink(stage / 'rollback'), '../missing-rollback-target')
+                            self.assertEqual(node_identity(missing), ('absent',))
+                        loaded = self.root / 'sys/module' / (MODULE.NAME if name == 'speaker' else MCA_NAME)
+                        self.assertFalse(loaded.exists())
+                        other_state = MCA_STATE if name == 'speaker' else MODULE.STATE
+
+                        def snapshot():
+                            return (self.manifest.read_bytes(),
+                                    (self.root / selected['module']).read_bytes(),
+                                    (self.root / selected['other_module']).read_bytes(),
+                                    (self.root / MODULE.STAGED).read_bytes(),
+                                    (self.root / MCA_STAGED).read_bytes(),
+                                    node_identity(stage / 'alpha1-module.ko'),
+                                    node_identity(stage / 'alpha1-manifest.json'),
+                                    node_identity(stage / 'rollback'),
+                                    node_identity(stage / 'hold'),
+                                    node_identity(self.root / other_state / 'rollback'),
+                                    node_identity(outside),
+                                    node_identity(missing))
+
+                        before = snapshot()
+                        code, report = self.run_tool(*selected['args'])
+                        self.assertEqual(code, 0, self.last_error)
+                        self.assertEqual(report['state'], live)
+                        self.assertEqual(report['status'],
+                                         'refused; nothing was changed; recovery required')
+                        self.assertNotIn('verified', report['status'])
+                        self.assertNotIn('restart', report['status'])
+                        self.assertNotIn('next boot', report['status'])
+                        self.assertEqual(snapshot(), before)
+                        self.assertEqual(self.run_tool('--boot', *selected['args'])[0], 1)
+                        self.assertIn('Rollback marker is not a regular file; nothing was changed',
+                                      self.last_error)
+                        self.assertNotIn('Traceback', self.last_error)
+                        self.assertNotIn('applied', self.last_error)
+                        self.assertNotIn('rolled back', self.last_error)
+                        self.assertEqual(snapshot(), before)
+                        self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
+                        if live != 'fixed':
+                            continue
+                        if kind == 'fifo':
+                            real_open = MODULE.os.open
+                            fifo = stage / 'rollback'
+
+                            def guarded_open(file, flags, *args, **kwargs):
+                                if not isinstance(file, int) and os.fspath(file) == os.fspath(fifo):
+                                    raise AssertionError(
+                                        'request-rollback opened the existing fifo rollback marker')
+                                return real_open(file, flags, *args, **kwargs)
+
+                            with mock.patch.object(MODULE.os, 'open', guarded_open):
+                                code, report = self.run_tool('--rollback', *selected['args'])
+                        else:
+                            code, report = self.run_tool('--rollback', *selected['args'])
+                        self.assertEqual(code, 1, self.last_error)
+                        self.assertIn('Rollback marker is not a regular file; nothing was changed',
+                                      self.last_error)
+                        self.assertNotIn('Traceback', self.last_error)
+                        self.assertNotIn('applied', self.last_error)
+                        self.assertNotIn('rolled back', self.last_error)
+                        self.assertIsNone(report)
+                        self.assertEqual(snapshot(), before)
+                        self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
+
+    def test_enotdir_rollback_marker_requires_recovery_and_refuses_boot(self):
+        """A regular file where the state directory should be is not an absent marker.
+
+        lstat of ``state/rollback`` raises ENOTDIR, which is uncertain. The
+        component is current: fixed bytes, the fixed pins, a complete manifest,
+        and no loaded flag. Inspection reports recovery required. Boot returns
+        1 and names the non-regular marker. Nothing is written. The other
+        component has no state directory, so its marker lstat is ENOENT and
+        inspection still reports the ordinary stock stage. Speaker and MCA
+        are both covered. A classifier that treated every OSError as absent
+        would report current and boot would return 0.
+        """
+        occupied = b'not-a-state-directory'
+
+        def described(path):
+            if path.is_symlink():
+                return ('symlink', os.readlink(path))
+            if not path.exists():
+                return ('absent',)
+            info = path.lstat()
+            mode = stat.S_IMODE(info.st_mode)
+            if stat.S_ISREG(info.st_mode):
+                return ('file', mode, path.read_bytes())
+            if stat.S_ISDIR(info.st_mode):
+                return ('directory', mode, tuple(sorted(child.name for child in path.iterdir())))
+            return ('other', mode, stat.S_IFMT(info.st_mode))
+
+        for name in ('speaker', 'mca'):
+            with self.subTest(component=name):
+                self.setUp()
+                selected = self.component(name)
+                self.assertEqual(set(selected), {
+                    'name', 'args', 'module', 'staged', 'state', 'stock_bytes',
+                    'fixed_bytes', 'stock', 'fixed', 'other_module', 'other_bytes'})
+                owner = {'gain': 6, 'label': name + '-enotdir'}
+                if name == 'speaker':
+                    self.install_both(NEW, FIXED, MCA_OLD, identity(MCA_OLD, MCA_OLD_NOTE), owner)
+                else:
+                    self.install_both(OLD, STOCK, MCA_NEW, identity(MCA_NEW, MCA_NEW_NOTE), owner)
+                kernel = MODULE.NAME if name == 'speaker' else MCA_NAME
+                other_kernel = MCA_NAME if name == 'speaker' else MODULE.NAME
+                document = json.loads(self.manifest.read_bytes())
+                self.assertEqual(set(document['module_artifacts'][kernel]),
+                                 {'module', 'note', 'path', 'sha256', 'size'})
+                self.assertEqual(set(document['file_metadata'][selected['module']]),
+                                 {'sha256', 'size', 'mode'})
+                self.assertEqual(document['modules'][kernel], selected['fixed']['note'])
+                self.assertEqual(document['files']['/' + selected['module']], selected['fixed']['sha256'])
+                self.assertEqual(document['file_metadata'][selected['module']]['size'],
+                                 selected['fixed']['size'])
+                other_note = STOCK['note'] if name == 'mca' else MCA_OLD_NOTE
+                self.assertEqual(document['modules'][other_kernel], other_note)
+                self.assertEqual((self.root / selected['other_module']).read_bytes(),
+                                 selected['other_bytes'])
+                stage = self.root / selected['state']
+                self.assertFalse(stage.exists())
+                self.assertFalse(stage.is_symlink())
+                self.put(selected['state'], occupied, 0o640)
+                self.assertTrue(stage.is_file())
+                self.assertFalse(stage.is_dir())
+                self.assertFalse(stage.is_symlink())
+                self.assertTrue(stat.S_ISREG(stage.lstat().st_mode))
+                self.assertEqual(stage.read_bytes(), occupied)
+                self.assertEqual(stat.S_IMODE(stage.lstat().st_mode), 0o640)
+                with self.assertRaises(NotADirectoryError):
+                    (stage / 'rollback').lstat()
+                loaded = self.root / 'sys/module' / kernel
+                self.assertFalse(loaded.exists())
+                self.assertFalse(loaded.is_symlink())
+                other_name = 'mca' if name == 'speaker' else 'speaker'
+                other = self.component(other_name)
+                other_stage = self.root / other['state']
+                with self.assertRaises(FileNotFoundError):
+                    (other_stage / 'rollback').lstat()
+                unrelated = (
+                    'var/lib/omarchy-m4/gpu-module',
+                    'var/lib/omarchy-m4/headphones',
+                    'var/lib/omarchy-m4/cpu-idle',
+                    'var/lib/omarchy-m4/backlight',
+                )
+
+                def snapshot():
+                    return (described(stage),
+                            described(self.root / selected['module']),
+                            described(self.root / selected['other_module']),
+                            described(self.manifest),
+                            described(self.root / MODULE.STAGED),
+                            described(self.root / MCA_STAGED),
+                            described(other_stage),
+                            described(loaded),
+                            tuple(described(self.root / rel) for rel in unrelated))
+
+                before = snapshot()
+                code, report = self.run_tool(*selected['args'])
+                self.assertEqual(code, 0, self.last_error)
+                self.assertEqual(self.last_error, '')
+                self.assertEqual(report['component'], name)
+                self.assertEqual(report['state'], 'fixed')
+                self.assertFalse(report['loaded'])
+                self.assertEqual(report['status'],
+                                 'refused; nothing was changed; recovery required')
+                self.assertNotIn('current', report['status'])
+                self.assertNotIn('applied', report['status'])
+                self.assertEqual(snapshot(), before)
+                code, report = self.run_tool('--boot', *selected['args'])
+                self.assertEqual(code, 1, self.last_output + self.last_error)
+                self.assertIsNone(report)
+                self.assertEqual(self.last_output, '')
+                self.assertIn('Rollback marker is not a regular file; nothing was changed',
+                              self.last_error)
+                self.assertNotIn('Traceback', self.last_error)
+                self.assertNotIn('applied', self.last_error)
+                self.assertNotIn('current', self.last_error)
+                self.assertEqual(snapshot(), before)
+                self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
+                other_args = () if other_name == 'speaker' else ('--component', 'mca')
+                code, other_report = self.run_tool(*other_args)
+                self.assertEqual(code, 0, self.last_error)
+                self.assertEqual(other_report['component'], other_name)
+                self.assertEqual(other_report['state'], 'stock')
+                self.assertFalse(other_report['loaded'])
+                self.assertEqual(other_report['status'], 'staged; applies at the next boot')
+                self.assertEqual(snapshot(), before)
+                self.assertEqual(json.loads(self.manifest.read_bytes())['owner_calibration'], owner)
+
+    def test_pinned_mca_identity_matches_qualified_spec_and_fixed_pin(self):
+        """Pinned sha256, size, and note literals agree with each other.
+
+        The fixed note compared here is the literal stored in the tool and in
+        this file. Equality with the built module's ELF note is checked from
+        the real build artifact and the package policy, not by this comparison.
+        """
+        spec = json.loads((ROOT / 'audio/j713/qualified.json').read_text())
+        artifact = spec['module_artifacts'][MCA_NAME]
+        metadata = spec['files'][MCA_MODULE]
+        reloaded = importlib.util.module_from_spec(SPEC)
+        SPEC.loader.exec_module(reloaded)
+        stock = getattr(reloaded, 'MCA_STOCK', {})
+        fixed = getattr(reloaded, 'MCA_FIXED', {})
+        self.assertEqual(artifact['path'], '/' + MCA_MODULE)
+        self.assertEqual((artifact['sha256'], artifact['size'], artifact['note']),
+                         (MCA_STOCK_PIN['sha256'], MCA_STOCK_PIN['size'], MCA_STOCK_PIN['note']))
+        self.assertEqual((metadata['sha256'], metadata['size']), (MCA_STOCK_PIN['sha256'], MCA_STOCK_PIN['size']))
+        self.assertEqual((stock.get('sha256'), stock.get('size'), stock.get('note')),
+                         (MCA_STOCK_PIN['sha256'], MCA_STOCK_PIN['size'], MCA_STOCK_PIN['note']))
+        self.assertEqual((fixed.get('sha256'), fixed.get('size'), fixed.get('note')),
+                         (MCA_FIXED_PIN['sha256'], MCA_FIXED_PIN['size'], MCA_FIXED_PIN['note']))
+        self.assertEqual(getattr(reloaded, 'NAME', None), 'snd_soc_j713_group')
+
+    def test_pinned_speaker_identity_matches_qualified_spec(self):
+        """Pinned sha256, size, and note literals agree with the qualified spec.
+
+        The fixed note compared here is that literal. Equality with the built
+        module's ELF note is checked from the real build artifact and the
+        package policy, not by this comparison.
+        """
         spec = json.loads((ROOT / 'audio/j713/qualified.json').read_text())
         artifact = spec['module_artifacts'][MODULE.NAME]
         reloaded = importlib.util.module_from_spec(SPEC)  # unpatched pins
@@ -158,6 +1768,118 @@ class SpeakerModule(unittest.TestCase):
                          (reloaded.FIXED['sha256'], reloaded.FIXED['size'], reloaded.FIXED['note']))
         self.assertEqual('/' + reloaded.MODULE, artifact['path'])
         self.assertEqual(spec['kernel_release'], reloaded.RELEASE)
+
+    def stock_mca_on_fixed_speaker(self, owner):
+        """Fixed speaker, stock MCA, and no component backup.
+
+        The speaker is already fixed, so a speaker boot never enters ``apply``.
+        MCA is the stock module with stock pins and no ``mca-module`` directory.
+        """
+        document = with_mca(manifest(FIXED), identity(MCA_OLD, MCA_OLD_NOTE))
+        document['owner_calibration'] = owner
+        self.put(MODULE.MODULE, NEW)
+        self.put(MODULE.STAGED, NEW)
+        self.put(MCA_MODULE, MCA_OLD)
+        self.put(MCA_STAGED, MCA_NEW)
+        return document
+
+    def test_stock_mca_boot_applies_noncanonical_manifest_and_rollback_keeps_owner_edits(self):
+        """Valid alpha.1 JSON that is not ``serialize`` bytes still applies MCA.
+
+        ``package-j713-audio`` and ``prepare-j713-release`` write
+        ``json.dumps(..., indent=2, sort_keys=True) + '\\n'``. An installed
+        manifest can be those bytes without the final newline, or the same
+        object with different indentation and key order. Boot must apply the
+        stock MCA module, leave the fixed speaker and owner keys in place, and
+        store the original manifest bytes as the backup. A later owner edit
+        survives MCA rollback, which puts the stock MCA pins back.
+        """
+        owner = {'gain': 3, 'label': 'installed'}
+        document = self.stock_mca_on_fixed_speaker(owner)
+        canonical = MODULE.serialize(document)
+        forms = {
+            'no trailing newline': canonical[:-1],
+            'different indent and key order': json.dumps(document, indent=4).encode(),
+        }
+        for label, raw in forms.items():
+            with self.subTest(label):
+                self.setUp()
+                document = self.stock_mca_on_fixed_speaker(owner)
+                self.assertNotEqual(raw, MODULE.serialize(document))
+                self.assertEqual(json.loads(raw), document)
+                self.manifest.write_bytes(raw)
+                self.assertFalse((self.root / MCA_STATE).exists())
+                self.assertFalse((self.root / MODULE.STATE).exists())
+                code, report = self.run_tool('--component', 'mca')
+                self.assertEqual(code, 0, self.last_error)
+                self.assertEqual(report['state'], 'stock')
+                code, report = self.run_tool('--boot', '--component', 'mca')
+                self.assertEqual(code, 0, self.last_error)
+                self.assertIn('applied', report['status'])
+                self.assertEqual((self.root / MODULE.MODULE).read_bytes(), NEW)
+                self.assertEqual((self.root / MCA_MODULE).read_bytes(), MCA_NEW)
+                applied = json.loads(self.manifest.read_bytes())
+                self.assertEqual(applied['owner_calibration'], owner)
+                self.assertEqual(applied['modules'][MODULE.NAME], FIXED['note'])
+                self.assertEqual(applied['files']['/' + MODULE.MODULE], FIXED['sha256'])
+                self.assertEqual(applied['modules'][MCA_NAME], MCA_NEW_NOTE)
+                self.assertEqual(applied['module_artifacts'][MCA_NAME]['sha256'],
+                                 hashlib.sha256(MCA_NEW).hexdigest())
+                self.assertEqual(applied['file_metadata'][MCA_MODULE]['size'], len(MCA_NEW))
+                stage = self.root / MCA_STATE
+                self.assertEqual((stage / 'alpha1-module.ko').read_bytes(), MCA_OLD)
+                self.assertEqual((stage / 'alpha1-manifest.json').read_bytes(), raw)
+                self.assertFalse((self.root / MODULE.STATE).exists())
+                live = json.loads(self.manifest.read_bytes())
+                live['owner_calibration'] = {'gain': 9, 'label': 'later'}
+                live['owner_note'] = 'kept'
+                self.manifest.write_bytes(MODULE.serialize(live))
+                self.assertEqual(self.run_tool('--rollback', '--component', 'mca')[0], 0)
+                code, report = self.run_tool('--boot', '--component', 'mca')
+                self.assertEqual(code, 0, self.last_error)
+                self.assertIn('rolled back', report['status'])
+                self.assertEqual((self.root / MCA_MODULE).read_bytes(), MCA_OLD)
+                self.assertEqual((self.root / MODULE.MODULE).read_bytes(), NEW)
+                restored = json.loads(self.manifest.read_bytes())
+                self.assertEqual(restored['modules'][MCA_NAME], MCA_OLD_NOTE)
+                self.assertEqual(restored['module_artifacts'][MCA_NAME]['sha256'],
+                                 hashlib.sha256(MCA_OLD).hexdigest())
+                self.assertEqual(restored['module_artifacts'][MCA_NAME]['note'], MCA_OLD_NOTE)
+                self.assertEqual(restored['files']['/' + MCA_MODULE], hashlib.sha256(MCA_OLD).hexdigest())
+                self.assertEqual(restored['file_metadata'][MCA_MODULE]['sha256'],
+                                 hashlib.sha256(MCA_OLD).hexdigest())
+                self.assertEqual(restored['file_metadata'][MCA_MODULE]['size'], len(MCA_OLD))
+                self.assertEqual(restored['modules'][MODULE.NAME], FIXED['note'])
+                self.assertEqual(restored['files']['/' + MODULE.MODULE], FIXED['sha256'])
+                self.assertEqual(restored['owner_calibration'], {'gain': 9, 'label': 'later'})
+                self.assertEqual(restored['owner_note'], 'kept')
+                self.assertTrue((stage / 'hold').exists())
+                self.assertFalse((self.root / MODULE.STATE).exists())
+
+    def test_malformed_manifest_or_unknown_mca_pins_stay_unchanged(self):
+        """A broken manifest or pins that are not stock or fixed is left as it is."""
+        owner = {'gain': 3, 'label': 'installed'}
+        document = self.stock_mca_on_fixed_speaker(owner)
+        cases = {
+            'malformed': b'{"kernel_release":',
+            'unknown pin without newline': MODULE.serialize(
+                with_mca(manifest(FIXED), {**identity(MCA_OLD, MCA_OLD_NOTE), 'note': 'not-a-stock-note'})
+            )[:-1],
+        }
+        for label, raw in cases.items():
+            with self.subTest(label):
+                self.setUp()
+                self.stock_mca_on_fixed_speaker(owner)
+                self.manifest.write_bytes(raw)
+                before = (self.manifest.read_bytes(),
+                          (self.root / MODULE.MODULE).read_bytes(),
+                          (self.root / MCA_MODULE).read_bytes())
+                self.assertEqual(self.run_tool('--boot', '--component', 'mca')[0], 1)
+                self.assertEqual((self.manifest.read_bytes(),
+                                  (self.root / MODULE.MODULE).read_bytes(),
+                                  (self.root / MCA_MODULE).read_bytes()), before)
+                self.assertFalse((self.root / MCA_STATE).exists())
+                self.assertFalse((self.root / MODULE.STATE).exists())
 
 
 if __name__ == '__main__':
