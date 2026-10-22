@@ -97,10 +97,10 @@ presented as merge-ready or as a fully reviewed camera driver.
   the module bytes did not. A parsed diff against the previous qualified ADT showed no property change in the ISP, ISP DART,
   ISP mappers or PMGR nodes. Only per-boot entropy, timestamps, memory-map entries and other coprocessors' segment ranges changed.
   The live FDT differed only in boot-relocation fields; `/soc` and the AIC phandle were unchanged.
-- **Review.** Two blind delta reviews of R5 plus the requalified launcher (Gemini 3.8 Flash High, DeepSeek v4 pro max): both
+- **Review.** Two independent blind delta reviews of R5 plus the requalified launcher: both
   APPROVE, with no blocker or major finding. Both found the same test-strength gaps: the DTBO contract does not enforce an exact
   master-node property set and does not refuse an extra fragment. The arbiter checked the exact staged DTBO: one fragment, master
-  properties exactly `compatible` and `iommus`, so the run was unaffected. Both gaps are now closed (see below). Jev
+  properties exactly `compatible` and `iommus`, so the run was unaffected. Both gaps are now closed (see below). Independent
   arbitration: one bounded run (0.97); planted false controls rejected (0.07, 0.05, 0.34).
 - **Tests.** The 69 launcher tests passed on a remote Linux host under the host lease.
 - **Not performed.** Firmware start, handshake, sensor discovery, frames, foundation KUnit, and hosted CI.
