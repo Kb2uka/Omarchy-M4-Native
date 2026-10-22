@@ -49,7 +49,8 @@
   DisplayLinkManager comes from the AUR
   ([J713 external displays](j713-external-displays.md)). No physical adapter
   has been qualified yet.
-- **Incomplete hardware qualification:** camera, suspend/resume, battery life,
+- **Incomplete hardware qualification:** camera, suspend/resume
+  ([findings](j713-suspend.md)), battery life,
   Bluetooth audio, arbitrary peripherals and fault recovery are not qualified.
   Speaker protection remains enabled; do not substitute unqualified filters or
   disable the protection services. If protection stops and the speakers go
