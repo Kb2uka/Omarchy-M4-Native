@@ -5,12 +5,14 @@
 # the exact bytes the kit pins. Run as an ordinary user in build 18's environment
 # (docs/j715-test-kit.md): Clang/LLD/LLVM 21.1.8 and Rust 1.93.1 at its packaged path,
 # with the tree at /job/kernel-backport, because Rust metadata records absolute paths.
+# m4-gravity-builder:20261008 needs patch added (apt-get install patch).
 # Usage: build-j715-kernel.sh KERNEL_CONTROLLER_TAR_GZ
 set -euo pipefail
 if [ "$#" != 1 ]; then
     echo "usage: $0 KERNEL_CONTROLLER_TAR_GZ" >&2
     exit 2
 fi
+command -v patch >/dev/null || { echo "patch is required (in m4-gravity-builder: apt-get install patch)" >&2; exit 1; }
 archive=$(realpath "$1")
 repo=$(cd "$(dirname "$0")/.." && pwd)
 tree=/job/kernel-backport
@@ -42,8 +44,17 @@ printf '%s\n' 'savedcmd_certs/signing_key.pem := openssl req -new -nodes -utf8 -
     >certs/.signing_key.pem.cmd
 
 # The archive carries x86-64 host tools and Rust libraries from its build host; rebuild them.
-find . -type f -perm -u+x -size +1k -exec file {} + | { grep -E 'ELF .*x86-64' || true; } | cut -d: -f1 |
-    xargs -r rm -f
+# An x86-64 ELF: the ELF magic, little-endian, e_machine 0x3e.
+x86_64_elf() {
+    local header
+    header=$(od -An -tx1 -N20 "$1" | tr -d ' \n')
+    [[ ${header:0:8} == 7f454c46 && ${header:10:2} == 01 && ${header:36:4} == 3e00 ]]
+}
+find . -type f -perm -u+x -size +1k -print0 | while IFS= read -r -d '' file; do
+    if x86_64_elf "$file"; then
+        rm -f "$file"
+    fi
+done
 rm -f rust/*.so rust/*.rlib rust/*.rmeta
 
 make=(make ARCH=arm64 LLVM=1 LOCALVERSION= KBUILD_BUILD_VERSION=18 KBUILD_BUILD_USER=ubuntu

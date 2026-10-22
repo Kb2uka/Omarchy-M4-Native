@@ -464,6 +464,14 @@ class Sources(unittest.TestCase):
             self.assertIn(name, script)
             self.assertTrue((ROOT / 'patches-kernel' / (name + '.patch')).is_file(), name)
         subprocess.run(['bash', '-n', str(ROOT / 'tools/build-j715-kernel.sh')], check=True)
+        self.assertNotIn('-exec file', script)  # m4-gravity-builder has no file(1)
+
+    def test_the_kernel_recipe_names_a_missing_patch_before_doing_anything(self):
+        with tempfile.TemporaryDirectory() as empty:
+            result = subprocess.run(['/bin/bash', str(ROOT / 'tools/build-j715-kernel.sh'), 'absent.tar.gz'],
+                                    capture_output=True, text=True, env={'PATH': empty})
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('patch is required', result.stderr)
 
     def test_the_installer_patch_changes_only_the_pinned_files(self):
         text = (ROOT / 'packaging/j715-test/installer-j715.patch').read_text()

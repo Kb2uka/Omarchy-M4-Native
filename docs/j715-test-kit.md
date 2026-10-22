@@ -77,8 +77,10 @@ To get there the rebuild matches build 18's toolchain and environment:
 tools/build-j715-kernel.sh kernel-controller.tar.gz
 ```
 
-Run it as an ordinary user in build 18's environment above (for example
-`m4-gravity-builder:20261008`), with no `/job/kernel-backport` yet. It checks
+Run it as an ordinary user in build 18's environment above, with no
+`/job/kernel-backport` yet. In `m4-gravity-builder:20261008`, add `patch` first
+(`apt-get install patch`); the script stops with that message without it, and
+needs nothing else outside the image. It checks
 `kernel-controller.tar.gz` (`810339d8…`, the alpha.1 source archive) and the
 configuration (`14b4437b…`), applies the three `j713-input` patches and the J715
 patch, checks both changed drivers (`dockchannel-hid.c` `6fea03db…`,
@@ -90,11 +92,15 @@ The kit kernel's built-in module certificate is published as
 `certs/signing_key.pem` with kbuild's saved command for that file, so the build
 extracts it instead of generating a new key. This configuration signs no
 modules at build time (`CONFIG_MODULE_SIG_ALL` is off), so the private key is
-never needed, and no one can sign a module for this certificate. The key was
-generated for this build alone.
+never needed. The key was generated for this build alone and deleted on
+2026-10-22, after the rebuild below. The certificate grants nothing either way:
+module signatures are not enforced (`CONFIG_MODULE_SIG_FORCE` is off), lockdown
+is not forced (`CONFIG_LOCK_DOWN_KERNEL_FORCE_NONE`), and kexec signatures are
+not forced, as in build 18.
 
 From a fresh tree, the script reproduced `291c4b95…` byte for byte, and its
-uncompressed `Image` equals the kit kernel's.
+uncompressed `Image` equals the kit kernel's. The #155 review rebuilt it the
+same way in `m4-gravity-builder:20261008` without network access.
 
 ### Why the J713 services are not started
 
