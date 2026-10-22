@@ -53,6 +53,16 @@ class ManifestTests(unittest.TestCase):
         self.load({'schema': 1, 'binaries': {'tool.ko': {
             **good, 'sources': [{'tree': 'audio/j713/kernel', 'commit': 'e' * 40}]}}})
 
+    def test_malformed_kit_joins_are_refused(self):
+        good = joined(b'kit-binary', 'rebuilt-identical')
+        for kit in ([good],
+                    {'tool.ko': {**good, 'sha256': 'abc'}},
+                    {'tool.ko': {**good, 'sources': [{'tree': 'gpu/j713'}]}},
+                    {'tool.ko': {**good, 'sources': [{'url': 'https://example.invalid/tool.ko'}]}}):
+            with self.subTest(kit=kit), self.assertRaises(ValueError):
+                self.load({'schema': 1, 'binaries': {}, 'kit_binaries': kit})
+        self.load({'schema': 1, 'binaries': {}, 'kit_binaries': {'tool.ko': good}})
+
     def test_missing_joins_file_is_refused_instead_of_falling_back(self):
         with tempfile.TemporaryDirectory() as temp:
             with self.assertRaisesRegex(ValueError, 'Missing channel source joins'):
@@ -182,6 +192,32 @@ class ChannelBinaryJoinTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Source joins for binaries the channel no longer ships: j713-cputemp.dtb'):
             CHECK.check_stale_joins(CHANNEL, fake_joins)
 
+    def test_repository_kit_joins_are_rebuilt_identical_and_not_stale(self):
+        self.assertIn('asahi_m4-55831cf4.ko', self.joins['kit_binaries'])
+        CHECK.check_kit_joins(self.joins)
+        # A kit binary is not a channel input, so it never counts as a stale channel join.
+        CHECK.check_stale_joins(CHANNEL, self.joins)
+
+    def test_unverified_or_moved_kit_join_is_refused(self):
+        for change, message in ((lambda entry: entry.update(correspondence='unverified'),
+                                 'not verified by an identical rebuild'),
+                                (lambda entry: entry.update(sources=[{'tree': 'gpu/j713',
+                                                                      'commit': '7d315920e24c6823d112683610da662c8d60fae6'}]),
+                                 'differs from'),
+                                (lambda entry: entry.update(sources=[{'tree': 'nonexistent/kit/source',
+                                                                      'commit': '0' * 40}]),
+                                 'Joined source tree missing')):
+            fake_joins = json.loads(json.dumps(self.joins))
+            change(fake_joins['kit_binaries']['asahi_m4-55831cf4.ko'])
+            with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
+                CHECK.check_kit_joins(fake_joins)
+
+    def test_a_binary_joined_twice_is_refused(self):
+        fake_joins = json.loads(json.dumps(self.joins))
+        fake_joins['binaries']['asahi_m4-55831cf4.ko'] = fake_joins['kit_binaries']['asahi_m4-55831cf4.ko']
+        with self.assertRaisesRegex(ValueError, 'both as a channel input and a kit binary'):
+            CHECK.check_kit_joins(fake_joins)
+
     def test_archive_without_sha256_is_refused(self):
         bad_joins = {
             'schema': 1,
@@ -265,12 +301,14 @@ class ChannelBinaryJoinTests(unittest.TestCase):
                 (directory / filename).write_bytes(b'')
             with mock.patch.object(CHECK, 'source_joins', return_value=joins), \
                     mock.patch.object(CHECK, 'check_stale_joins') as stale, \
+                    mock.patch.object(CHECK, 'check_kit_joins') as kit, \
                     mock.patch.object(CHECK, 'extract', return_value=({}, {})), \
                     mock.patch.object(CHECK, 'check_package',
                                       side_effect=lambda channel, package, *rest, **kw: names[package.name]) as package:
                 CHECK.check(directory, compare_published=False)
         stale.assert_called_once()
         self.assertIs(stale.call_args.args[1], joins)
+        kit.assert_called_once_with(joins)
         self.assertEqual(package.call_count, len(names))
         for call in package.call_args_list:
             self.assertIs(call.kwargs.get('joins'), joins)
