@@ -507,6 +507,7 @@ def main():
             for path, digest in CHANNEL['backlight_module'].items():
                 require(sha((root / path).read_bytes()) == digest, 'Native backlight module missing or wrong: ' + path)
             require((root / 'usr/lib/systemd/system/m4-backlight.service').is_file() and
+                    (root / 'usr/lib/systemd/system/m4-backlight-display.service').is_file() and
                     os.access(root / 'usr/bin/m4-backlight', os.X_OK), 'Native backlight startup helper is missing')
             require(os.access(root / 'usr/bin/omarchy-m4-update', os.X_OK) and
                     (root / 'usr/lib/omarchy-m4/m4-channel-setup.py').is_file(), 'omarchy-m4-update is missing')

@@ -9,6 +9,7 @@ import os
 from types import SimpleNamespace
 from unittest.mock import patch
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -243,6 +244,106 @@ class BrightnessRouting(unittest.TestCase):
         self.change('1%-', no_osd=True)
         self.assertEqual(self.calls, [['hyprctl', 'monitors', '-j'],
                                      ['omarchy', 'brightness', 'display', '--no-osd', '1%-']])
+
+
+class DisplayFollow(unittest.TestCase):
+    class Stop(Exception):
+        pass
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        board = self.root / BACKLIGHT.COMPATIBLE
+        board.parent.mkdir(parents=True)
+        board.write_bytes(b'apple,j713\0apple,t8132\0')
+        self.level = self.root / BACKLIGHT.BACKLIGHT / 'brightness'
+        self.level.parent.mkdir(parents=True)
+        self.level.write_text('158\n')
+        self.connector = self.connect('card0', 'simple-framebuffer')
+        self.intervals = []
+
+    def connect(self, card, driver):
+        drivers = self.root / 'sys/bus/platform/drivers' / driver
+        drivers.mkdir(parents=True, exist_ok=True)
+        device = self.root / BACKLIGHT.DRM / card / 'device'
+        device.mkdir(parents=True)
+        (device / 'driver').symlink_to(drivers)
+        connector = self.root / BACKLIGHT.DRM / f'{card}-Unknown-1'
+        connector.mkdir()
+        self.scanout(True, connector)
+        return connector
+
+    def scanout(self, on, connector=None):
+        connector = connector or self.connector
+        (connector / 'enabled').write_text('enabled\n' if on else 'disabled\n')
+        (connector / 'dpms').write_text('On\n' if on else 'Off\n')
+
+    def follow(self, *steps):
+        """Run the follower; each sleep applies the next step, then the follower stops."""
+        steps = list(steps)
+
+        def sleep(interval):
+            self.intervals.append(interval)
+            if not steps:
+                raise self.Stop
+            steps.pop(0)()
+
+        with self.assertRaises(self.Stop):
+            BACKLIGHT.follow_display(self.root, sleep)
+
+    def test_blank_holds_zero_and_wake_restores_the_level(self):
+        seen = []
+        self.follow(lambda: self.scanout(False),
+                    lambda: seen.append(self.level.read_text()),
+                    lambda: self.scanout(True),
+                    lambda: seen.append(self.level.read_text()))
+        self.assertEqual(seen, ['0\n', '158\n'])
+        self.assertEqual(self.intervals, [BACKLIGHT.LIT_INTERVAL, BACKLIGHT.DARK_INTERVAL,
+                                          BACKLIGHT.DARK_INTERVAL, BACKLIGHT.LIT_INTERVAL,
+                                          BACKLIGHT.LIT_INTERVAL])
+
+    def test_monitor_disabled_with_dpms_still_on_is_dark(self):
+        seen = []
+
+        def disable():
+            (self.connector / 'enabled').write_text('disabled\n')
+        self.follow(disable, lambda: seen.append(self.level.read_text()))
+        self.assertEqual(seen, ['0\n'])
+
+    def test_level_set_while_dark_is_kept_on_wake(self):
+        def key_wake():
+            self.level.write_text('26\n')
+            self.scanout(True)
+        self.follow(lambda: self.scanout(False), key_wake)
+        self.assertEqual(self.level.read_text(), '26\n')
+
+    def test_stopping_while_dark_restores_the_level_before_it_can_be_saved(self):
+        def shutdown():
+            self.assertEqual(self.level.read_text(), '0\n')
+            raise SystemExit(0)  # What the SIGTERM handler raises.
+        steps = [lambda: self.scanout(False), shutdown]
+        with self.assertRaises(SystemExit):
+            BACKLIGHT.follow_display(self.root, lambda interval: steps.pop(0)())
+        self.assertEqual(self.level.read_text(), '158\n')
+
+    def test_zero_level_at_blank_is_left_alone(self):
+        self.level.write_text('0\n')
+        self.follow(lambda: self.scanout(False), lambda: self.scanout(True))
+        self.assertEqual(self.level.read_text(), '0\n')
+
+    def test_refuses_a_second_framebuffer_panel(self):
+        self.connect('card1', 'simple-framebuffer')
+        with self.assertRaisesRegex(BACKLIGHT.Refused, 'boot-framebuffer panel'):
+            BACKLIGHT.follow_display(self.root, lambda interval: self.fail('followed'))
+
+    def test_ignores_a_panel_driven_by_another_display_driver(self):
+        shutil.rmtree(self.root / BACKLIGHT.DRM)
+        self.connect('card0', 'apple-dcp')
+        self.scanout(False, self.root / BACKLIGHT.DRM / 'card0-Unknown-1')
+        with self.assertRaisesRegex(BACKLIGHT.Refused, 'boot-framebuffer panel'):
+            BACKLIGHT.follow_display(self.root, lambda interval: self.fail('followed'))
+        self.assertEqual(self.level.read_text(), '158\n')
 
 
 class OwnerKeys(unittest.TestCase):

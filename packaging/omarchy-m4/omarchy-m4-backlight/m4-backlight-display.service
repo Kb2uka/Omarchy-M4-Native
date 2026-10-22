@@ -1,0 +1,14 @@
+[Unit]
+Description=Turn the J713 panel backlight off while its display is off
+# Ordered after systemd-backlight so that, at shutdown, this stops first and
+# restores the owner's level before systemd-backlight saves it.
+After=m4-backlight.service systemd-backlight@backlight:j713-dcp.service
+Requires=m4-backlight.service
+ConditionPathExists=/sys/class/backlight/j713-dcp
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/m4-backlight --follow-display
+
+[Install]
+WantedBy=multi-user.target
