@@ -24,7 +24,7 @@ The tool changes only the following:
 | `START-HERE.md`, `KNOWN-LIMITATIONS.md`, `UPDATES.md` | J713 instructions, limits and update channel | The J715 versions in [packaging/j715-test](../packaging/j715-test/) |
 | GPU module (`/opt/m4-gpu/asahi_m4.ko` and its line in `runtime.sha256`) | `de0337a7…`, J713 only | `55831cf4…`, built from `gpu/j713` with `packaging/j715-test/g16-j715.patch` (`apple,j715` in the Air board check) |
 | `/usr/local/bin/m4-gpu-start` | Refuses any board but `apple,j713` | Also accepts `apple,j715` |
-| New-user session placement (`/etc/skel/.local/lib/omarchy/m4-session-placement.py`) | J713 only | `tools/m4-session-placement.py` with `packaging/j715-test/m4-session-placement-j715.patch`, which admits the J715 |
+| New-user session placement (`/etc/skel/.local/lib/omarchy/m4-session-placement.py`) | `21c8ebb8…` (84a23c4), J713 only | develop's later `tools/m4-session-placement.py` (`4f535a3c…`, 594b36a, which adds the scheduler boost policy) with `packaging/j715-test/m4-session-placement-j715.patch`, which admits the J715. The J715 ran this version |
 | Start links removed | — | `m4-j713-audio-register`, `speakersafetyd-j713`, `m4-video`, `j713-owner-assets`, `m4-channel-connect.timer` |
 | Drop-ins removed | — | `10-owner-assets.conf` of `omarchy-provision-owner.service` and of `systemd-user-sessions.service` |
 | Sources added | — | `source/j715/`: the kernel patch, both installer patches, both gate patches, the patched `g16.rs` and `j715-board.dtso` |
@@ -46,8 +46,8 @@ also admits `apple,j715`; nothing else in the kernel changes. The patched
 kernel is build 18's sources (the kernel controller tree with the three
 `patches-kernel/j713-input` patches update 4 used) plus that patch, built with
 build 18's version, user, host and timestamp. Build 18's module signing key is
-not public, so a rebuild differs from build 18 in its built-in certificate as
-well. The modules in the root image are unsigned and the kernel does not
+not public, so the kit kernel differs from build 18 in its built-in certificate
+as well. The modules in the root image are unsigned and the kernel does not
 enforce signatures (`CONFIG_MODULE_SIG_FORCE` is off), so they load either way.
 
 The rebuild was checked without the J715 patch first. Its uncompressed `Image`
@@ -67,6 +67,34 @@ To get there the rebuild matches build 18's toolchain and environment:
   `make Image.gz` with no `KBUILD_BUILD_TIMESTAMP` and `date` printing
   `Mon Oct 12 20:24:06 UTC 2026`: build 18's `version.o` carries an empty
   timestamp and only `version-timestamp.o` carries the date.
+
+### Rebuilding the kit kernel
+
+`tools/build-j715-kernel.sh` rebuilds the kit kernel to the bytes `KERNEL` pins
+(`291c4b95…`, 18,901,137 bytes) from public sources only:
+
+```sh
+tools/build-j715-kernel.sh kernel-controller.tar.gz
+```
+
+Run it as an ordinary user in build 18's environment above (for example
+`m4-gravity-builder:20261008`), with no `/job/kernel-backport` yet. It checks
+`kernel-controller.tar.gz` (`810339d8…`, the alpha.1 source archive) and the
+configuration (`14b4437b…`), applies the three `j713-input` patches and the J715
+patch, checks both changed drivers (`dockchannel-hid.c` `6fea03db…`,
+`macsmc.c` `0cbe1eaf…`), builds as above and checks the result.
+
+The kit kernel's built-in module certificate is published as
+`patches-kernel/j715-input/build-certificate.pem` (`bf669f2b…`, DER
+`7a296122…`), without its private key. The script puts it at
+`certs/signing_key.pem` with kbuild's saved command for that file, so the build
+extracts it instead of generating a new key. This configuration signs no
+modules at build time (`CONFIG_MODULE_SIG_ALL` is off), so the private key is
+never needed, and no one can sign a module for this certificate. The key was
+generated for this build alone.
+
+From a fresh tree, the script reproduced `291c4b95…` byte for byte, and its
+uncompressed `Image` equals the kit kernel's.
 
 ### Why the J713 services are not started
 
@@ -90,7 +118,8 @@ J773g tester kit does, and keeps the WirePlumber audio gate.
 
 On a Linux build host with `debugfs`, `e2fsck` (e2fsprogs) and `patch`, the
 J713 update 4 installer directory (with `os/omarchy-j713-0.1.0-alpha.1.zip`),
-the J715 devicetree, the J715 kernel and the J715 GPU module:
+the J715 devicetree, the J715 kernel (`tools/build-j715-kernel.sh`, above) and
+the J715 GPU module:
 
 ```sh
 python3 tools/derive-j715-test-kit.py --kit UPDATE4/installer \

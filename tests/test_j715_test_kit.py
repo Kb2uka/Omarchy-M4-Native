@@ -2,6 +2,7 @@
 # Copyright (c) 2026 KB2UKA
 # Copyright (c) 2026 Kazuhide Takahashi
 """The 15-inch M4 Air tester kit: derived from a miniature J713 kit with a real ext4 root."""
+import base64
 import gzip
 import hashlib
 import importlib.util
@@ -381,6 +382,28 @@ class Derive(unittest.TestCase):
         self.fixture.patch.write_bytes(installer_patch().replace(b'\n update 4 main.py\n', b'\n update 4 other\n'))
         self.refused('Installer patch did not apply exactly')
 
+    def test_an_installer_patch_with_another_result_is_refused(self):
+        # It applies exactly, but one patched file is not the pinned result.
+        other = dict(INSTALLER_NEW, **{'main.py': INSTALLER_NEW['main.py'].replace(b'j715ap', b'j715ap other')})
+        self.fixture.patch.write_bytes(installer_patch(new=other))
+        self.refused('Unexpected patched installer file: main.py')
+
+    def test_a_root_that_fails_its_filesystem_check_is_refused(self):
+        e2fsck = self.base / 'e2fsck'
+        e2fsck.write_text('#!/bin/sh\necho "root: 1 error"\nexit 4\n')
+        e2fsck.chmod(0o755)
+        pins = self.fixture.pins()
+        for pin in pins:
+            pin.start()
+        try:
+            with self.assertRaisesRegex(ValueError, 'Root filesystem check failed'):
+                MODULE.derive(self.fixture.kit, self.dtb, self.kernel, self.gpu, self.output, REVISION,
+                              e2fsck=str(e2fsck))
+        finally:
+            for pin in reversed(pins):
+                pin.stop()
+        self.assertFalse(self.output.exists())
+
     def test_an_unexpected_installer_file_is_refused(self):
         with patch.dict(INSTALLER_OLD, {'main.py': b'other\nj713ap\n'}):
             self.refused('Unexpected installer file: main.py')
@@ -408,6 +431,14 @@ class Sources(unittest.TestCase):
                       *MODULE.KEPT_BOOT.values(), *(pin for pins in MODULE.INSTALLER_FILES.values() for pin in pins)):
             self.assertRegex(value, r'^[0-9a-f]{64}$')
 
+    def test_the_gpu_module_has_a_rebuilt_identical_kit_join(self):
+        joins = json.loads((ROOT / 'packaging/channel-source-joins.json').read_bytes())
+        entry = joins['kit_binaries']['asahi_m4-55831cf4.ko']
+        self.assertEqual(entry['sha256'], MODULE.GPU_NEW)
+        self.assertEqual(entry['correspondence'], 'rebuilt-identical')
+        trees = [source['tree'] for source in entry['sources'] if 'tree' in source]
+        self.assertEqual(trees, ['gpu/j713', MODULE.G16_SOURCE[2].relative_to(ROOT).as_posix()])
+
     def test_the_kit_sources_exist_and_the_live_gates_still_refuse_the_j715(self):
         for source in MODULE.SOURCES.values():
             self.assertTrue((ROOT / source).is_file(), source)
@@ -418,6 +449,21 @@ class Sources(unittest.TestCase):
                 text = kit_patch.read_text()
                 self.assertEqual(re.findall(r'^\+\+\+ b/(\S+)', text, re.M), [path])
                 self.assertIn('+', ''.join(line[0] for line in text.splitlines() if 'apple,j715' in line))
+
+    def test_the_kernel_recipe_pins_the_kit_kernel_and_a_public_certificate(self):
+        script = (ROOT / 'tools/build-j715-kernel.sh').read_text()
+        self.assertIn(f'check {MODULE.KERNEL[1]} arch/arm64/boot/Image.gz', script)
+        certificate = (ROOT / 'patches-kernel/j715-input/build-certificate.pem').read_bytes()
+        self.assertIn(f'check {digest(certificate)} certs/signing_key.pem', script)
+        self.assertNotIn(b'PRIVATE KEY', certificate)
+        body = certificate.decode().split('-----BEGIN CERTIFICATE-----\n', 1)[1].split('-----END CERTIFICATE-----', 1)[0]
+        self.assertEqual(certificate.count(b'-----BEGIN '), 1)
+        self.assertIn(f'check {digest(base64.b64decode(body))} certs/signing_key.x509', script)
+        for name in ('j713-input/dockchannel-start-retry', 'j713-input/macsmc-key-info-lock',
+                     'j713-input/dockchannel-afe-action', 'j715-input/dockchannel-hid-accept-j715'):
+            self.assertIn(name, script)
+            self.assertTrue((ROOT / 'patches-kernel' / (name + '.patch')).is_file(), name)
+        subprocess.run(['bash', '-n', str(ROOT / 'tools/build-j715-kernel.sh')], check=True)
 
     def test_the_installer_patch_changes_only_the_pinned_files(self):
         text = (ROOT / 'packaging/j715-test/installer-j715.patch').read_text()
@@ -472,6 +518,37 @@ class InstallCommand(unittest.TestCase):
                 result = subprocess.run(['bash', '-c', f'tester={tester}\n' + guard], input=answer + '\n',
                                         capture_output=True, text=True)
                 self.assertEqual('REACHED-INSTALLER' in result.stdout, reached)
+
+    def test_files_are_verified_before_anything_else_runs(self):
+        # The tester's last integrity check before the installer runs as root.
+        with tempfile.TemporaryDirectory() as temp:
+            kit, bin_dir = Path(temp) / 'kit', Path(temp) / 'bin'
+            kit.mkdir()
+            bin_dir.mkdir()
+            shutil.copy(self.SCRIPT, kit / 'Install.command')
+            data = b'{}\n'
+            (kit / 'installer_data.json').write_bytes(data)
+            (kit / 'SHA256SUMS').write_text(digest(data) + '  installer_data.json\n')
+            shasum = shutil.which('shasum')
+            if shasum:
+                os.symlink(shasum, bin_dir / 'shasum')
+            else:
+                # Arch keeps Perl's shasum off PATH; sha256sum checks the same list.
+                shim = bin_dir / 'shasum'
+                shim.write_text('#!/bin/sh\n[ "$1 $2 $3" = "-a 256 -c" ] || exit 64\nexec sha256sum -c "$4"\n')
+                shim.chmod(0o755)
+            environment = {'PATH': f'{bin_dir}:/usr/bin:/bin'}
+            run = lambda *args: subprocess.run(['bash', str(kit / 'Install.command'), *args],
+                                               capture_output=True, text=True, env=environment)
+            self.assertEqual(run('--verify-only').returncode, 0)
+            (kit / 'installer_data.json').write_text('{"changed": true}\n')
+            for args in (('--verify-only',), ('--install', '--tester')):
+                with self.subTest(args=args):
+                    result = run(*args)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('FAILED', result.stdout + result.stderr)
+                    for later in ('Install from native', 'This tester build supports only', 'TESTER BUILD'):
+                        self.assertNotIn(later, result.stdout + result.stderr)
 
     def test_it_names_the_air_firmware_ipsw(self):
         text = self.SCRIPT.read_text()

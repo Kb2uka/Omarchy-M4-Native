@@ -51,7 +51,7 @@ KEPT_BOOT = {
 }
 OLD_ZIP_NAMES = ['root.ext4', OLD_DTB[0], 'boot/initramfs.cpio.gz', OLD_KERNEL[0], 'boot/loader.bin']
 
-# The J715 devicetree (docs/j715-boot-dtb.md) and kernel (docs/j715-test-kit.md).
+# The J715 devicetree (docs/j715-boot-dtb.md) and kernel (tools/build-j715-kernel.sh rebuilds it).
 DTB = ('boot/j715.dtb', '84a19aba63365c5b07a6f53780c0b48f0d054e9bf0c787ef285e7c9cf401f066')
 KERNEL = ('boot/Image.gz', '291c4b95d3f1fbbffc0e11af3421b3125c3155050c90e97867cad6e3d244c05f')
 LABEL = 'j715-test.1'
@@ -75,7 +75,7 @@ INSTALLER_PATCH = FILES / 'installer-j715.patch'
 PATCH_PATHS = {'main.py': 'src/main.py'}
 
 # The GPU module built from gpu/j713 with apple,j715 in the Air board check
-# (packaging/channel-source-joins.json, asahi_m4-55831cf4.ko).
+# (packaging/channel-source-joins.json, kit_binaries asahi_m4-55831cf4.ko).
 GPU_MODULE = '/opt/m4-gpu/asahi_m4.ko'
 GPU_OLD = 'de0337a773930c7862a99706112dd71eaaecf2021707da248fd3d07feefdc824'
 GPU_NEW = '55831cf4e8216ed423cd68fd39bcc989907f1958e8fbc07575351463906ab1f2'
