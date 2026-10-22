@@ -31,7 +31,16 @@ mapping and start design, which has not begun.
 4. The firmware mapping and start contract is designed in
    `FIRMWARE-START.md` (revision 4, three blind design reviews arbitrated).
    It defines the ladder E1 to E5. E1 (read-only firmware hashes) is done.
-   Next is E2: map the firmware's pre-release view with the processor halted.
+5. E2 (`fwview/`) is built and reviewed. Its first live map-check on
+   2026-10-21 failed closed at the DART baseline before any overlay or map
+   (see EVIDENCE.md). Next, in order:
+   1. A blind review of the round-5 delta: the read-only `--dart-survey` mode
+      and the post-detach SID0 quiesce. Its offline tests pass; it has not
+      been reviewed.
+   2. One `--dart-survey` run, after requalifying every launcher constant if
+      the Air has rebooted.
+   3. Review the survey, then rerun the E2 map-check once. That rerun also
+      clears the leftover SID0 translation.
 
 The acceptance criteria the 2026-10-21 run met are listed below.
 For a clean mapping result expect `result`, `first_error`, `cleanup_error`,

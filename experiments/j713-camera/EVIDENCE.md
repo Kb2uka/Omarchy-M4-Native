@@ -122,3 +122,48 @@ presented as merge-ready or as a fully reviewed camera driver.
 - **Mutation check.** Removing or weakening each new guard one at a time (14 mutants) is caught each time by a targeted test.
   A no-op `DTC` and a directory `DTC` are refused.
 - **Review.** Independent blind review rounds with arbitration until no finding remained open. No hardware was touched.
+
+## 2026-10-21 firmware start design, E1 and E2
+
+- **Design.** `FIRMWARE-START.md` records the native start, park and
+  power-off order for ISP revision `0x16b`, taken from static analysis of
+  the macOS camera driver. It also records the firmware's DART view and a
+  five-rung ladder with halt rules. Three blind design reviews were
+  arbitrated before any code.
+- **E1 (read-only, `/dev/mem`).**
+  - The preloaded firmware's TEXT segment is byte-identical across two boots.
+  - DATA differs in exactly two 8-byte words, consistent with per-boot
+    values (inferred).
+- **E2 offline (`fwview/`).**
+  - Exact-kernel module build passes. The mock, layout and DTBO contract
+    tests pass.
+  - 134 launcher tests pass. 15 guard mutants were each killed by a targeted
+    test.
+  - Three blind code-review rounds found no forbidden register write, no
+    processor release and no free of preloaded memory.
+  - Bugs fixed before hardware: the DATA restore could not have worked on
+    `/dev/mem` (a file-size length check, and `msync` rejected); the
+    launcher trusted the `insmod` exit code; the writable-TEXT regression was
+    untested.
+- **E2 live, one map-check (same boot as the R5 run).**
+  - Check-only and validate passed.
+  - The map-check powered the 13 local domains (version `0x100001`, COPROC
+    halted) and then **failed closed at the DART baseline** (`-71`,
+    stage 21), before any overlay, provider, domain or mapping.
+  - Power was restored. All 16 tracked PMGR words, the boot identity, the
+    absent owned nodes and the unloaded module match the pre-run baseline.
+  - Cause: on dart0, stream 0 still had translation enabled with a valid page
+    table pointer (TCR `0x1`, TTBR `0x1006ab89`), and stream 12 was reset to
+    0. R5 earlier on that boot had programmed a different TTBR
+    (`0x1005c8f5`) and never read the DART back after teardown, so the
+    writer of the current value is not established.
+  - DART register state persists across the local power gating. The leftover
+    translation is dormant while the ISP is gated and halted.
+- **Round-5 response.**
+  - A read-only `--dart-survey` mode that records TCR and TTBR for streams
+    0..15 and the globals on all three DARTs.
+  - For the next map-check: the baseline becomes record-only, and an
+    explicit post-detach SID0 quiesce (TCR 0, TTBR 0, TLB flush, readback)
+    runs before the overlay is removed.
+  - Offline tests pass. Blind review and hardware runs are pending.
+

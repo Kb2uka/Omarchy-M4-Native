@@ -353,6 +353,20 @@ def load_args(map_check=False):
     )
 
 
+def survey_argv():
+    return [
+        "--dart-survey",
+        "--module",
+        "/tmp/j713_isp_fwview.ko",
+        "--sha256",
+        MODULE_SHA,
+    ]
+
+
+def survey_args():
+    return rp.parse_args(survey_argv())
+
+
 def param_files(**overrides):
     values = {name: 0 for name in rp.PARAM_NAMES}
     values.update(overrides)
@@ -742,6 +756,7 @@ class TestRunProbe(unittest.TestCase):
         self.assertTrue(args.check_only)
         self.assertFalse(args.validate)
         self.assertFalse(args.map_check)
+        self.assertFalse(args.dart_survey)
         self.assertFalse(args.cleanup_only)
         self.assertFalse(args.restore_data)
 
@@ -943,6 +958,13 @@ class TestRunProbe(unittest.TestCase):
             ["--restore-data", "--validate"],
             ["--restore-data", "--cleanup-only"],
             ["--restore-data", "--check-only"],
+            ["--dart-survey", "--check-only"],
+            ["--dart-survey", "--validate"],
+            ["--dart-survey", "--map-check"],
+            ["--dart-survey", "--cleanup-only"],
+            ["--dart-survey", "--restore-data"],
+            ["--dart-survey", "--map-check", "--module", "/tmp/j713_isp_fwview.ko",
+             "--sha256", MODULE_SHA, "--data-ref", DATA_REF],
         ]
         for argv in pairs:
             err = io.StringIO()
@@ -1959,6 +1981,155 @@ class TestRunProbe(unittest.TestCase):
         self.assertEqual(host.mem_writes, [])
         self.assertEqual(host.subprocess_calls, [])
         self.assertTrue(all(item[0] == data_phys for item in host.hash_calls))
+
+    def test_dart_survey_parses_without_data_ref(self):
+        args = survey_args()
+        self.assertTrue(args.dart_survey)
+        self.assertFalse(args.map_check)
+        self.assertFalse(args.validate)
+        self.assertFalse(args.check_only)
+        self.assertIsNone(args.data_ref)
+
+    def test_dart_survey_requires_module_and_hash(self):
+        err = io.StringIO()
+        with redirect_stderr(err):
+            with self.assertRaises(SystemExit) as caught:
+                rp.parse_args(["--dart-survey"])
+        self.assertNotEqual(caught.exception.code, 0)
+        self.assertIn("--module and --sha256", err.getvalue())
+
+    def test_dart_survey_loads_without_writing(self):
+        payload = good_payload()
+        cfg = dataclasses.replace(
+            fw_cfg(payload),
+            text_sha256="ab" * 32,
+            data_sha256="cd" * 32,
+        )
+        host = FakeHost(files=good_files(payload, extra=param_files()))
+        err = io.StringIO()
+        out = io.StringIO()
+        with redirect_stderr(err), redirect_stdout(out):
+            msg = rp.run_probe(survey_args(), host=host, cfg=cfg)
+        self.assertEqual(msg, "dart-survey: loaded")
+        self.assertEqual(
+            host.subprocess_calls,
+            [(
+                ["insmod", "/proc/self/fd/7", "map_check=true", "dart_survey=true"],
+                (7,),
+            )],
+        )
+        self.assertEqual(host.hash_calls, [
+            (TEXT_PHYS, len(TEXT_IMAGE), rp.DEV_MEM_PATH),
+            (DATA_PHYS, len(DATA_IMAGE), rp.DEV_MEM_PATH),
+            (TEXT_PHYS, len(TEXT_IMAGE), rp.DEV_MEM_PATH),
+            (DATA_PHYS, len(DATA_IMAGE), rp.DEV_MEM_PATH),
+        ])
+        self.assertEqual(host.phys_reads, [])
+        self.assertEqual(host.reference_events, [])
+        self.assertEqual(host.mem_writes, [])
+        self.assertEqual(host.writes, [])
+        self.assertIn("result=0", out.getvalue())
+        self.assertIn("TEXT hash unchanged", err.getvalue())
+        self.assertIn("DATA hash unchanged", err.getvalue())
+        self.assertNotIn("TEXT hash changed", err.getvalue())
+        self.assertNotIn("DATA hash changed", err.getvalue())
+
+    def test_dart_survey_clean_params_reject_nonzero(self):
+        payload = good_payload()
+        for name in rp.CLEAN_NAMES:
+            host = FakeHost(
+                files=good_files(payload, extra=param_files(**{name: 1})),
+            )
+            with self.assertRaisesRegex(rp.ProbeError, "module parameters are not clean"):
+                rp.run_probe(survey_args(), host=host, cfg=fw_cfg(payload))
+            self.assertEqual(host.mem_writes, [])
+            self.assertEqual(host.writes, [])
+            self.assertEqual(host.phys_reads, [])
+            self.assertEqual(host.reference_events, [])
+            self.assertEqual(len(host.subprocess_calls), 1)
+
+    def test_dart_survey_counters_must_be_zero(self):
+        payload = good_payload()
+        for name in ("lookup_count", "readback_count", "pte_walk_count"):
+            host = FakeHost(
+                files=good_files(payload, extra=param_files(**{name: 1})),
+            )
+            with self.assertRaisesRegex(rp.ProbeError, name + " is not 0"):
+                rp.run_probe(survey_args(), host=host, cfg=fw_cfg(payload))
+            self.assertEqual(host.mem_writes, [])
+            self.assertEqual(host.writes, [])
+            self.assertEqual(len(host.subprocess_calls), 1)
+            self.assertEqual(len(host.hash_calls), 4)
+
+    def test_dart_survey_text_hash_changed_does_not_write(self):
+        payload = good_payload()
+        host = FakeHost(
+            files=good_files(payload, extra=param_files()),
+            phys_after={(TEXT_PHYS, len(TEXT_IMAGE)): b"text-imagX"},
+        )
+        with self.assertRaisesRegex(rp.ProbeError, "TEXT hash changed"):
+            rp.run_probe(survey_args(), host=host, cfg=fw_cfg(payload))
+        self.assertEqual(len(host.subprocess_calls), 1)
+        self.assertEqual(len(host.hash_calls), 4)
+        self.assertEqual(host.mem_writes, [])
+        self.assertEqual(host.writes, [])
+        self.assertEqual(host.phys_reads, [])
+        self.assertEqual(host.reference_events, [])
+
+    def test_dart_survey_data_hash_changed_does_not_write(self):
+        payload = good_payload()
+        host = FakeHost(
+            files=good_files(payload),
+            phys_after={(DATA_PHYS, len(DATA_IMAGE)): b"data-imagX"},
+        )
+        with self.assertRaisesRegex(rp.ProbeError, "DATA hash changed"):
+            rp.run_probe(survey_args(), host=host, cfg=fw_cfg(payload))
+        self.assertEqual(len(host.hash_calls), 4)
+        self.assertEqual(host.mem_writes, [])
+        self.assertEqual(host.writes, [])
+        self.assertEqual(host.reference_events, [])
+
+    def test_dart_survey_hash_change_wins_over_insmod_failure(self):
+        payload = good_payload()
+        host = FakeHost(
+            files=good_files(payload),
+            insmod_result=FakeProc(returncode=1, stderr="insmod: ERROR: foo"),
+            phys_after={(TEXT_PHYS, len(TEXT_IMAGE)): b"text-imagX"},
+        )
+        with self.assertRaisesRegex(rp.ProbeError, "TEXT hash changed"):
+            rp.run_probe(survey_args(), host=host, cfg=fw_cfg(payload))
+        self.assertEqual(len(host.subprocess_calls), 1)
+        self.assertEqual(len(host.hash_calls), 4)
+        self.assertEqual(host.mem_writes, [])
+        self.assertEqual(host.writes, [])
+
+    def test_dart_survey_wrong_boot_does_not_hash(self):
+        payload = good_payload()
+        files = good_files(payload)
+        files[rp.BOOT_ID_PATH] = "deadbeef-0977-4eb0-93a9-e60359bec201\n"
+        host = FakeHost(files=files)
+        with self.assertRaisesRegex(rp.ProbeError, "boot UUID"):
+            rp.run_probe(survey_args(), host=host, cfg=fw_cfg(payload))
+        self.assertEqual(host.hash_calls, [])
+        self.assertEqual(host.subprocess_calls, [])
+        self.assertEqual(host.opened, [])
+        self.assertEqual(host.mem_writes, [])
+
+    def test_dart_survey_sha_mismatch_hashes_both_before_insmod(self):
+        payload = good_payload()
+        host = FakeHost(files=good_files(payload))
+        args = survey_args()
+        args.sha256 = "0" * 64
+        with self.assertRaisesRegex(rp.ProbeError, "module sha256 mismatch"):
+            rp.run_probe(args, host=host, cfg=fw_cfg(payload))
+        self.assertEqual(host.subprocess_calls, [])
+        self.assertEqual(host.hash_calls, [
+            (TEXT_PHYS, len(TEXT_IMAGE), rp.DEV_MEM_PATH),
+            (DATA_PHYS, len(DATA_IMAGE), rp.DEV_MEM_PATH),
+        ])
+        self.assertEqual(host.mem_writes, [])
+        self.assertEqual(host.phys_reads, [])
+        self.assertEqual(host.reference_events, [])
 
 
 if __name__ == "__main__":

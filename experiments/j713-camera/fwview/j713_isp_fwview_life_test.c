@@ -95,6 +95,7 @@ LIFE_STEP(life_look, J713_DM_OP_LOOKUP)
 LIFE_STEP(life_rb, J713_DM_OP_READBACK)
 LIFE_STEP(life_unmap, J713_DM_OP_UNMAP)
 LIFE_STEP(life_det, J713_DM_OP_DETACH)
+LIFE_STEP(life_quiesce, J713_DM_OP_QUIESCE)
 LIFE_STEP(life_fd, J713_DM_OP_FREE_DOMAIN)
 LIFE_STEP(life_surface, J713_DM_OP_SURFACE)
 LIFE_STEP(life_fp, J713_DM_OP_FREE_PAGES)
@@ -104,6 +105,7 @@ LIFE_STEP(life_rm, J713_DM_OP_REMOVE_OVERLAY)
 LIFE_STEP(life_unreg, J713_DM_OP_UNREG)
 LIFE_STEP(life_pd, J713_DM_OP_POWER_DOWN)
 LIFE_STEP(life_rc, J713_DM_OP_RELEASE_CLAIMS)
+LIFE_STEP(life_survey, J713_DM_OP_SURVEY)
 
 static const struct j713_dm_ops life_ops = {
 	.cpu_stopped = life_cpu,
@@ -122,6 +124,7 @@ static const struct j713_dm_ops life_ops = {
 	.readback = life_rb,
 	.unmap = life_unmap,
 	.detach = life_det,
+	.dart_quiesce = life_quiesce,
 	.free_domain = life_fd,
 	.check_surfaces = life_surface,
 	.free_pages = life_fp,
@@ -131,6 +134,7 @@ static const struct j713_dm_ops life_ops = {
 	.unregister_driver = life_unreg,
 	.power_down = life_pd,
 	.release_claims = life_rc,
+	.dart_survey = life_survey,
 };
 
 static void life_reset(struct j713_dm *dm, struct life_fake *f)
@@ -171,6 +175,7 @@ static void assert_cleanup_not_forward(const struct j713_dm *dm)
 {
 	CHECK(dm->forward_calls[J713_DM_OP_UNMAP] == 0);
 	CHECK(dm->forward_calls[J713_DM_OP_DETACH] == 0);
+	CHECK(dm->forward_calls[J713_DM_OP_QUIESCE] == 0);
 	CHECK(dm->forward_calls[J713_DM_OP_FREE_DOMAIN] == 0);
 	CHECK(dm->forward_calls[J713_DM_OP_SURFACE] == 0);
 	CHECK(dm->forward_calls[J713_DM_OP_FREE_PAGES] == 0);
@@ -192,6 +197,18 @@ static void assert_teardown_order(const struct j713_dm *dm)
 {
 	if (trace_has(dm, J713_DM_OP_UNMAP) && trace_has(dm, J713_DM_OP_DETACH))
 		CHECK(trace_before(dm, J713_DM_OP_UNMAP, J713_DM_OP_DETACH));
+	if (trace_has(dm, J713_DM_OP_DETACH) &&
+	    trace_has(dm, J713_DM_OP_QUIESCE))
+		CHECK(trace_before(dm, J713_DM_OP_DETACH, J713_DM_OP_QUIESCE));
+	if (trace_has(dm, J713_DM_OP_QUIESCE) &&
+	    trace_has(dm, J713_DM_OP_FREE_DOMAIN))
+		CHECK(trace_before(dm, J713_DM_OP_QUIESCE, J713_DM_OP_FREE_DOMAIN));
+	if (trace_has(dm, J713_DM_OP_QUIESCE) &&
+	    trace_has(dm, J713_DM_OP_UNBIND))
+		CHECK(trace_before(dm, J713_DM_OP_QUIESCE, J713_DM_OP_UNBIND));
+	if (trace_has(dm, J713_DM_OP_QUIESCE) &&
+	    trace_has(dm, J713_DM_OP_REMOVE_OVERLAY))
+		CHECK(trace_before(dm, J713_DM_OP_QUIESCE, J713_DM_OP_REMOVE_OVERLAY));
 	if (trace_has(dm, J713_DM_OP_DETACH) &&
 	    trace_has(dm, J713_DM_OP_FREE_DOMAIN))
 		CHECK(trace_before(dm, J713_DM_OP_DETACH, J713_DM_OP_FREE_DOMAIN));
@@ -338,7 +355,8 @@ static void test_life_happy(void)
 		J713_DM_OP_ALLOC_PAGES, J713_DM_OP_ALLOC_DOMAIN, J713_DM_OP_PREMISE,
 		J713_DM_OP_ATTACH, J713_DM_OP_CPU, J713_DM_OP_MAP, J713_DM_OP_LOOKUP,
 		J713_DM_OP_READBACK, J713_DM_OP_CPU, J713_DM_OP_CPU,
-		J713_DM_OP_UNMAP, J713_DM_OP_DETACH, J713_DM_OP_FREE_DOMAIN,
+		J713_DM_OP_UNMAP, J713_DM_OP_DETACH, J713_DM_OP_QUIESCE,
+		J713_DM_OP_FREE_DOMAIN,
 		J713_DM_OP_CPU, J713_DM_OP_SURFACE, J713_DM_OP_FREE_PAGES,
 		J713_DM_OP_UNMAP_RO,
 		J713_DM_OP_UNBIND, J713_DM_OP_REMOVE_OVERLAY, J713_DM_OP_UNREG
@@ -379,7 +397,12 @@ static void test_life_happy(void)
 	CHECK(dm.forward_calls[J713_DM_OP_UNMAP] == 0);
 	CHECK(dm.op_calls[J713_DM_OP_UNMAP] == 1);
 	CHECK(trace_before(&dm, J713_DM_OP_UNMAP, J713_DM_OP_DETACH));
-	CHECK(trace_before(&dm, J713_DM_OP_DETACH, J713_DM_OP_FREE_DOMAIN));
+	CHECK(trace_before(&dm, J713_DM_OP_DETACH, J713_DM_OP_QUIESCE));
+	CHECK(trace_before(&dm, J713_DM_OP_QUIESCE, J713_DM_OP_FREE_DOMAIN));
+	CHECK(dm.op_calls[J713_DM_OP_QUIESCE] == 1);
+	CHECK(dm.forward_calls[J713_DM_OP_QUIESCE] == 0);
+	CHECK(dm.op_calls[J713_DM_OP_SURVEY] == 0);
+	CHECK(!(dm.flags & J713_DM_F_NEED_QUIESCE));
 	CHECK(trace_before(&dm, J713_DM_OP_FREE_DOMAIN, J713_DM_OP_FREE_PAGES));
 	CHECK(trace_before(&dm, J713_DM_OP_FREE_PAGES, J713_DM_OP_UNMAP_RO));
 	CHECK(trace_before(&dm, J713_DM_OP_UNMAP_RO, J713_DM_OP_UNBIND));
@@ -984,6 +1007,15 @@ static void test_life_failure_matrix(void)
 			CHECK(dm.op_calls[J713_DM_OP_DETACH] == 0);
 			CHECK(dm.op_calls[J713_DM_OP_FREE_DOMAIN] == 1);
 		}
+		if (op == J713_DM_OP_MAP || op == J713_DM_OP_LOOKUP ||
+		    op == J713_DM_OP_READBACK) {
+			CHECK(dm.op_calls[J713_DM_OP_QUIESCE] == 1);
+			CHECK(trace_before(&dm, J713_DM_OP_DETACH, J713_DM_OP_QUIESCE));
+			CHECK(!(dm.flags & J713_DM_F_NEED_QUIESCE));
+		} else {
+			CHECK(dm.op_calls[J713_DM_OP_QUIESCE] == 0);
+			CHECK(!(dm.flags & J713_DM_F_NEED_QUIESCE));
+		}
 	}
 
 	for (i = 0; i < ARRAY_SIZE(tears); i++) {
@@ -1009,6 +1041,16 @@ static void test_life_failure_matrix(void)
 			CHECK(dm.op_calls[J713_DM_OP_DETACH] == 0);
 		else
 			CHECK(dm.op_calls[J713_DM_OP_DETACH] == 1);
+		if (tears[i].op == J713_DM_OP_UNMAP ||
+		    tears[i].op == J713_DM_OP_DETACH) {
+			CHECK(dm.op_calls[J713_DM_OP_QUIESCE] == 0);
+			CHECK(!(dm.flags & J713_DM_F_NEED_QUIESCE));
+		} else {
+			CHECK(dm.op_calls[J713_DM_OP_QUIESCE] == 1);
+			CHECK(!(dm.flags & J713_DM_F_NEED_QUIESCE));
+		}
+		if (tears[i].op == J713_DM_OP_DETACH)
+			CHECK(dm.flags & J713_DM_F_ATTACHED);
 		if (tears[i].op == J713_DM_OP_UNREG)
 			CHECK(dm.op_calls[J713_DM_OP_UNREG] == 1);
 		else
@@ -1034,6 +1076,10 @@ static void test_life_failure_matrix(void)
 		CHECK(dm.cleanup_error == 0);
 		CHECK(dm.flags == (J713_DM_F_POWER | J713_DM_F_OTHER_CLAIM));
 		CHECK(dm.free_while_ref == 0);
+		if (owned_ops[i] == J713_DM_OP_ATTACH)
+			CHECK(dm.op_calls[J713_DM_OP_QUIESCE] == 1);
+		else
+			CHECK(dm.op_calls[J713_DM_OP_QUIESCE] == 0);
 		assert_power_held(&dm);
 	}
 
@@ -1122,6 +1168,7 @@ static void test_life_failure_matrix(void)
 		CHECK(dm.flags & J713_DM_F_MAPPED);
 		CHECK(dm.flags & J713_DM_F_DOMAIN);
 		CHECK(dm.op_calls[J713_DM_OP_UNMAP] == 0);
+		CHECK(dm.op_calls[J713_DM_OP_QUIESCE] == 0);
 		CHECK(dm.op_calls[J713_DM_OP_CPU] == 5);
 		CHECK(dm.forward_calls[J713_DM_OP_CPU] == 4);
 		CHECK(dm.map_count == J713_DM_PAGE_COUNT);
@@ -1135,6 +1182,7 @@ static void test_life_failure_matrix(void)
 		CHECK(!(dm.flags & J713_DM_F_MAPPED));
 		CHECK(dm.op_calls[J713_DM_OP_FREE_PAGES] == 0);
 		CHECK(dm.op_calls[J713_DM_OP_FREE_DOMAIN] == 1);
+		CHECK(dm.op_calls[J713_DM_OP_QUIESCE] == 1);
 		CHECK(dm.op_calls[J713_DM_OP_REMOVE_OVERLAY] == 0);
 		CHECK(dm.op_calls[J713_DM_OP_CPU] == 6);
 		CHECK(dm.forward_calls[J713_DM_OP_CPU] == 4);
@@ -1403,6 +1451,233 @@ static void test_ladder_and_text_lookup(void)
 	assert_power_held(&dm);
 }
 
+static struct j713_dm survey_dm;
+static struct life_fake survey_fake;
+static int survey_fail_op = -1;
+static int survey_fail_err;
+
+static int survey_cb(void *ctx, struct j713_isp_state *st)
+{
+	int rc;
+
+	(void)ctx;
+	life_reset(&survey_dm, &survey_fake);
+	survey_fake.fail_op = survey_fail_op;
+	survey_fake.fail_err = survey_fail_err;
+	rc = j713_dm_run_survey(&survey_dm, &life_ops, &survey_fake);
+	/* A survey read error is published. The gates still go off. */
+	st->retain_power = 0;
+	survey_dm.retain = 0;
+	return rc;
+}
+
+static void test_life_survey(void)
+{
+	struct j713_dm dm;
+	struct life_fake f;
+
+	life_reset(&dm, &f);
+	CHECK(j713_dm_run_survey(&dm, &life_ops, &f) == 0);
+	CHECK(dm.ntrace == 2);
+	CHECK(dm.trace_op[0] == J713_DM_OP_CPU);
+	CHECK(dm.trace_op[1] == J713_DM_OP_SURVEY);
+	CHECK(dm.op_calls[J713_DM_OP_CPU] == 1);
+	CHECK(dm.forward_calls[J713_DM_OP_CPU] == 1);
+	CHECK(dm.op_calls[J713_DM_OP_SURVEY] == 1);
+	CHECK(dm.forward_calls[J713_DM_OP_SURVEY] == 1);
+	CHECK(dm.op_calls[J713_DM_OP_BASELINE] == 0);
+	CHECK(dm.op_calls[J713_DM_OP_APPLY_OVERLAY] == 0);
+	CHECK(dm.op_calls[J713_DM_OP_ATTACH] == 0);
+	CHECK(dm.op_calls[J713_DM_OP_MAP] == 0);
+	CHECK(dm.op_calls[J713_DM_OP_QUIESCE] == 0);
+	CHECK(dm.op_calls[J713_DM_OP_POWER_DOWN] == 0);
+	CHECK(dm.retain == 0);
+	CHECK(dm.first_error == 0);
+	CHECK(dm.mode == J713_DM_MODE_SURVEY);
+	CHECK(dm.stage == J713_ISP_STAGE_DONE);
+	CHECK(dm.flags & J713_DM_F_POWER);
+	CHECK(dm.saw_power_down == 0);
+	assert_power_held(&dm);
+
+	life_reset(&dm, &f);
+	f.fail_op = J713_DM_OP_SURVEY;
+	f.fail_err = -EIO;
+	CHECK(j713_dm_run_survey(&dm, &life_ops, &f) == -EIO);
+	CHECK(dm.retain == 0);
+	CHECK(dm.op_calls[J713_DM_OP_POWER_DOWN] == 0);
+	CHECK(dm.op_calls[J713_DM_OP_APPLY_OVERLAY] == 0);
+	CHECK(dm.op_calls[J713_DM_OP_ATTACH] == 0);
+	CHECK(dm.op_calls[J713_DM_OP_MAP] == 0);
+	CHECK(dm.op_calls[J713_DM_OP_SURVEY] == 1);
+	CHECK(dm.first_error == -EIO);
+	CHECK(dm.fail_stage == J713_DM_STAGE_SURVEY);
+	CHECK(dm.flags & J713_DM_F_POWER);
+	assert_power_held(&dm);
+
+	life_reset(&dm, &f);
+	f.fail_op = J713_DM_OP_CPU;
+	f.fail_err = -EBUSY;
+	CHECK(j713_dm_run_survey(&dm, &life_ops, &f) == -EBUSY);
+	CHECK(dm.op_calls[J713_DM_OP_SURVEY] == 0);
+	CHECK(dm.op_calls[J713_DM_OP_APPLY_OVERLAY] == 0);
+	CHECK(dm.retain == 0);
+	CHECK(dm.op_calls[J713_DM_OP_POWER_DOWN] == 0);
+	CHECK(dm.first_error == -EBUSY);
+	CHECK(dm.flags & J713_DM_F_POWER);
+}
+
+static void test_life_survey_restores_power(void)
+{
+	struct mock m;
+
+	survey_fail_op = -1;
+	survey_fail_err = 0;
+	load_live(&m);
+	m.isp_ver = J713_ISP_VERSION_EXACT;
+	CHECK(run_with(&m, true, survey_cb) == 0);
+	CHECK(m.st.power_restored == 1);
+	CHECK(m.st.retain_power == 0);
+	CHECK(m.st.result == 0);
+	CHECK(m.nwrites == 2 * J713_ISP_LOCAL_COUNT);
+	CHECK(m.writes[0].val == J713_ISP_ENABLE_VAL);
+	check_restores(&m);
+	CHECK(survey_dm.op_calls[J713_DM_OP_CPU] == 1);
+	CHECK(survey_dm.op_calls[J713_DM_OP_SURVEY] == 1);
+	CHECK(survey_dm.op_calls[J713_DM_OP_BASELINE] == 0);
+	CHECK(survey_dm.op_calls[J713_DM_OP_APPLY_OVERLAY] == 0);
+	CHECK(survey_dm.op_calls[J713_DM_OP_ATTACH] == 0);
+	CHECK(survey_dm.op_calls[J713_DM_OP_MAP] == 0);
+	CHECK(survey_dm.op_calls[J713_DM_OP_QUIESCE] == 0);
+	CHECK(survey_dm.op_calls[J713_DM_OP_POWER_DOWN] == 0);
+	CHECK(survey_dm.retain == 0);
+	CHECK(trace_before(&survey_dm, J713_DM_OP_CPU, J713_DM_OP_SURVEY));
+
+	survey_fail_op = J713_DM_OP_SURVEY;
+	survey_fail_err = -EIO;
+	load_live(&m);
+	m.isp_ver = J713_ISP_VERSION_EXACT;
+	CHECK(run_with(&m, true, survey_cb) == -EIO);
+	CHECK(m.st.power_restored == 1);
+	CHECK(m.st.retain_power == 0);
+	CHECK(m.st.result == -EIO);
+	check_restores(&m);
+	CHECK(survey_dm.op_calls[J713_DM_OP_SURVEY] == 1);
+	CHECK(survey_dm.op_calls[J713_DM_OP_APPLY_OVERLAY] == 0);
+	CHECK(survey_dm.op_calls[J713_DM_OP_ATTACH] == 0);
+	CHECK(survey_dm.op_calls[J713_DM_OP_MAP] == 0);
+	CHECK(survey_dm.retain == 0);
+	CHECK(survey_dm.first_error == -EIO);
+	CHECK(m.nwrites == 2 * J713_ISP_LOCAL_COUNT);
+}
+
+static void test_life_quiesce(void)
+{
+	struct j713_dm dm;
+	struct life_fake f;
+
+	life_reset(&dm, &f);
+	f.fail_op = J713_DM_OP_BASELINE;
+	f.fail_err = -EPROTO;
+	CHECK(j713_dm_run_powered(&dm, &life_ops, &f) == -EPROTO);
+	CHECK(dm.op_calls[J713_DM_OP_QUIESCE] == 0);
+	CHECK(dm.op_calls[J713_DM_OP_ATTACH] == 0);
+	CHECK(dm.retain == 0);
+
+	life_reset(&dm, &f);
+	f.fail_op = J713_DM_OP_ATTACH;
+	f.fail_err = -EIO;
+	CHECK(j713_dm_run_powered(&dm, &life_ops, &f) == -EIO);
+	CHECK(dm.op_calls[J713_DM_OP_ATTACH] == 1);
+	CHECK(dm.op_calls[J713_DM_OP_DETACH] == 0);
+	CHECK(dm.op_calls[J713_DM_OP_QUIESCE] == 0);
+
+	life_reset(&dm, &f);
+	f.fail_op = J713_DM_OP_MAP;
+	f.fail_err = -EIO;
+	CHECK(j713_dm_run_powered(&dm, &life_ops, &f) == -EIO);
+	CHECK(dm.map_count == 0);
+	CHECK(dm.op_calls[J713_DM_OP_UNMAP] == 0);
+	CHECK(dm.op_calls[J713_DM_OP_DETACH] == 1);
+	CHECK(dm.op_calls[J713_DM_OP_QUIESCE] == 1);
+	CHECK(trace_before(&dm, J713_DM_OP_DETACH, J713_DM_OP_QUIESCE));
+	CHECK(trace_before(&dm, J713_DM_OP_QUIESCE, J713_DM_OP_FREE_DOMAIN));
+	CHECK(dm.op_calls[J713_DM_OP_REMOVE_OVERLAY] == 1);
+	CHECK(dm.op_calls[J713_DM_OP_POWER_DOWN] == 0);
+	CHECK(dm.retain == 0);
+	CHECK(!(dm.flags & J713_DM_F_NEED_QUIESCE));
+
+	life_reset(&dm, &f);
+	f.fail_op = J713_DM_OP_LOOKUP;
+	f.fail_err = -EIO;
+	CHECK(j713_dm_run_powered(&dm, &life_ops, &f) == -EIO);
+	CHECK(dm.op_calls[J713_DM_OP_QUIESCE] == 1);
+	CHECK(dm.op_calls[J713_DM_OP_REMOVE_OVERLAY] == 1);
+	CHECK(dm.retain == 0);
+	CHECK(dm.op_calls[J713_DM_OP_POWER_DOWN] == 0);
+
+	life_reset(&dm, &f);
+	f.fail_op = J713_DM_OP_UNMAP;
+	f.fail_err = -EIO;
+	CHECK(j713_dm_run_powered(&dm, &life_ops, &f) == -EIO);
+	CHECK(dm.op_calls[J713_DM_OP_QUIESCE] == 0);
+	CHECK(dm.flags & J713_DM_F_ATTACHED);
+	CHECK(dm.retain == 1);
+
+	life_reset(&dm, &f);
+	f.fail_op = J713_DM_OP_DETACH;
+	f.fail_err = -EIO;
+	CHECK(j713_dm_run_powered(&dm, &life_ops, &f) == -EIO);
+	CHECK(dm.op_calls[J713_DM_OP_QUIESCE] == 0);
+	CHECK(dm.flags & J713_DM_F_ATTACHED);
+	CHECK(!(dm.flags & J713_DM_F_NEED_QUIESCE));
+	CHECK(dm.retain == 1);
+
+	life_reset(&dm, &f);
+	f.fail_op = J713_DM_OP_ATTACH;
+	f.fail_err = J713_DM_ERR_OWNED;
+	CHECK(j713_dm_run_powered(&dm, &life_ops, &f) == J713_DM_ERR_OWNED);
+	CHECK(dm.op_calls[J713_DM_OP_QUIESCE] == 1);
+	CHECK(dm.retain == 0);
+
+	life_reset(&dm, &f);
+	f.cpu_fail_at = 5;
+	CHECK(j713_dm_run_powered(&dm, &life_ops, &f) == -EBUSY);
+	CHECK(dm.op_calls[J713_DM_OP_QUIESCE] == 0);
+	CHECK(dm.flags & J713_DM_F_ATTACHED);
+	CHECK(dm.op_calls[J713_DM_OP_CPU] == 5);
+	f.cpu_fail_at = 0;
+	f.fail_op = -1;
+	CHECK(j713_dm_recover(&dm, &life_ops, &f) == 0);
+	CHECK(dm.op_calls[J713_DM_OP_QUIESCE] == 1);
+	CHECK(dm.op_calls[J713_DM_OP_POWER_DOWN] == 1);
+	CHECK(!(dm.flags & J713_DM_F_NEED_QUIESCE));
+
+	life_reset(&dm, &f);
+	f.fail_op = J713_DM_OP_QUIESCE;
+	f.fail_err = J713_DM_ERR_QUIESCE;
+	CHECK(j713_dm_run_powered(&dm, &life_ops, &f) == J713_DM_ERR_QUIESCE);
+	CHECK(dm.retain == 1);
+	CHECK(dm.cleanup_error == J713_DM_ERR_QUIESCE);
+	CHECK(dm.first_error == 0);
+	CHECK(dm.fail_stage == 0);
+	CHECK(dm.stage == J713_DM_STAGE_QUIESCE);
+	CHECK(dm.op_calls[J713_DM_OP_FREE_DOMAIN] == 0);
+	CHECK(dm.op_calls[J713_DM_OP_POWER_DOWN] == 0);
+	CHECK(dm.flags & J713_DM_F_NEED_QUIESCE);
+	CHECK(!(dm.flags & J713_DM_F_ATTACHED));
+	CHECK(dm.flags & J713_DM_F_DOMAIN);
+	CHECK(dm.flags & J713_DM_F_POWER);
+	CHECK(dm.op_calls[J713_DM_OP_QUIESCE] == 1);
+	assert_power_held(&dm);
+	f.fail_op = -1;
+	f.fail_err = 0;
+	CHECK(j713_dm_recover(&dm, &life_ops, &f) == 0);
+	CHECK(dm.op_calls[J713_DM_OP_QUIESCE] == 2);
+	CHECK(dm.op_calls[J713_DM_OP_POWER_DOWN] == 1);
+	CHECK(!(dm.flags & J713_DM_F_NEED_QUIESCE));
+	CHECK(dm.flags == 0);
+}
+
 static void test_run_fwview(void)
 {
 	test_layout_math();
@@ -1419,4 +1694,7 @@ static void test_run_fwview(void)
 	test_retain_power_callback();
 	test_premise_aborts_before_map();
 	test_ladder_and_text_lookup();
+	test_life_survey();
+	test_life_survey_restores_power();
+	test_life_quiesce();
 }

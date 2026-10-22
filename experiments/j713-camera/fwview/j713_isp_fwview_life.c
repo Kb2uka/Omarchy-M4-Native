@@ -84,6 +84,19 @@ static int teardown_devices(struct j713_dm *dm, const struct j713_dm_ops *ops,
 			return rc;
 		}
 		dm->flags &= ~J713_DM_F_ATTACHED;
+		/* Quiesce only after detach has succeeded. Unmap and detach
+		 * failures leave this flag clear so their retained masks
+		 * stay the same.
+		 */
+		dm->flags |= J713_DM_F_NEED_QUIESCE;
+	}
+	if (dm->flags & J713_DM_F_NEED_QUIESCE) {
+		rc = call_op(dm, J713_DM_OP_QUIESCE, ops->dart_quiesce, ctx, 0);
+		if (rc) {
+			mark_pending(dm, J713_DM_STAGE_QUIESCE, rc);
+			return rc;
+		}
+		dm->flags &= ~J713_DM_F_NEED_QUIESCE;
 	}
 	if (dm->flags & J713_DM_F_DOMAIN) {
 		if (dm->flags & J713_DM_F_REFS) {
@@ -243,6 +256,47 @@ static int held_or_error(const struct j713_dm *dm, int rc)
 	return 0;
 }
 
+static int begin_attempt(struct j713_dm *dm, int mode)
+{
+	unsigned int keep;
+	int i;
+
+	if (!dm)
+		return -EINVAL;
+	if (dm->retain || dm->cleanup_state == J713_DM_CLEAN_PENDING)
+		return -EBUSY;
+	if (!(dm->flags & J713_DM_F_POWER))
+		return -EINVAL;
+	if (dm->flags & J713_DM_F_BLOCKS_POWER)
+		return -EBUSY;
+
+	keep = dm->flags & (J713_DM_F_POWER | J713_DM_F_DART_CLAIM |
+			    J713_DM_F_OTHER_CLAIM);
+	dm->flags = keep;
+	dm->retain = 0;
+	dm->first_error = 0;
+	dm->cleanup_state = J713_DM_CLEAN_IDLE;
+	dm->cleanup_error = 0;
+	dm->power_restored = 0;
+	dm->fail_stage = 0;
+	dm->stage = J713_DM_STAGE_CPU;
+	dm->mode = mode;
+	dm->map_count = 0;
+	dm->map_total = 0;
+	dm->lookup_count = 0;
+	dm->readback_count = 0;
+	dm->ladder_stop = 0;
+	dm->ntrace = 0;
+	dm->free_while_ref = 0;
+	dm->power_while_blocked = 0;
+	dm->saw_power_down = 0;
+	for (i = 0; i < J713_DM_OP_COUNT; i++) {
+		dm->op_calls[i] = 0;
+		dm->forward_calls[i] = 0;
+	}
+	return 0;
+}
+
 static int after_overlay_cpu(struct j713_dm *dm, const struct j713_dm_ops *ops,
 			     void *ctx)
 {
@@ -264,45 +318,12 @@ int j713_dm_run_powered(struct j713_dm *dm, const struct j713_dm_ops *ops,
 			void *ctx)
 {
 	int rc;
-	unsigned int keep;
 
 	if (!dm || !ops)
 		return -EINVAL;
-	if (dm->retain || dm->cleanup_state == J713_DM_CLEAN_PENDING)
-		return -EBUSY;
-	if (!(dm->flags & J713_DM_F_POWER))
-		return -EINVAL;
-	if (dm->flags & J713_DM_F_BLOCKS_POWER)
-		return -EBUSY;
-
-	keep = dm->flags & (J713_DM_F_POWER | J713_DM_F_DART_CLAIM |
-			    J713_DM_F_OTHER_CLAIM);
-	dm->flags = keep;
-	dm->retain = 0;
-	dm->first_error = 0;
-	dm->cleanup_state = J713_DM_CLEAN_IDLE;
-	dm->cleanup_error = 0;
-	dm->power_restored = 0;
-	dm->fail_stage = 0;
-	dm->stage = J713_DM_STAGE_CPU;
-	dm->mode = J713_DM_MODE_MAP;
-	dm->map_count = 0;
-	dm->map_total = 0;
-	dm->lookup_count = 0;
-	dm->readback_count = 0;
-	dm->ladder_stop = 0;
-	dm->ntrace = 0;
-	dm->free_while_ref = 0;
-	dm->power_while_blocked = 0;
-	dm->saw_power_down = 0;
-	{
-		int i;
-
-		for (i = 0; i < J713_DM_OP_COUNT; i++) {
-			dm->op_calls[i] = 0;
-			dm->forward_calls[i] = 0;
-		}
-	}
+	rc = begin_attempt(dm, J713_DM_MODE_MAP);
+	if (rc)
+		return rc;
 
 	rc = call_op(dm, J713_DM_OP_CPU, ops->cpu_stopped, ctx, 1);
 	if (rc) {
@@ -417,6 +438,31 @@ devices:
 		dm->stage = J713_ISP_STAGE_DONE;
 	dm->cleanup_state = J713_DM_CLEAN_IDLE;
 	return dm->first_error;
+}
+
+int j713_dm_run_survey(struct j713_dm *dm, const struct j713_dm_ops *ops,
+		       void *ctx)
+{
+	int rc;
+
+	if (!dm || !ops)
+		return -EINVAL;
+	rc = begin_attempt(dm, J713_DM_MODE_SURVEY);
+	if (rc)
+		return rc;
+
+	rc = call_op(dm, J713_DM_OP_CPU, ops->cpu_stopped, ctx, 1);
+	if (rc) {
+		note_fail(dm, J713_DM_STAGE_CPU, rc);
+		return dm->first_error;
+	}
+	rc = call_op(dm, J713_DM_OP_SURVEY, ops->dart_survey, ctx, 1);
+	if (rc) {
+		note_fail(dm, J713_DM_STAGE_SURVEY, rc);
+		return dm->first_error;
+	}
+	dm->stage = J713_ISP_STAGE_DONE;
+	return 0;
 }
 
 int j713_dm_recover(struct j713_dm *dm, const struct j713_dm_ops *ops, void *ctx)

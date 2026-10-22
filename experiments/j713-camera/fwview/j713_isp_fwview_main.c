@@ -7,11 +7,19 @@
  * host. This file does not contain hand-written DTB bytes.
  *
  * The processor is never released. This file writes no COPROC, mailbox,
- * GPIO, fabric, 0xc00, 0x1600040, or 0x28a4080 register.
+ * GPIO, fabric, 0xc00, 0x1600040, or 0x28a4080 register. The only DART
+ * writes are SID0 TCR, SID0 TTBR, and the TLB command, and only during
+ * quiesce after detach. dart_survey writes none of them.
  *
  * map_check=false (default): board, kernel, AIC, /soc, and ISP-node guards,
  * then one shared PMGR parent map and a PMGR snapshot. No exclusive claim,
  * no COPROC/DART/version read, no overlay, no domain.
+ *
+ * dart_survey requires map_check. After the same 13 local ACKs, the exact
+ * version check, and the stopped-CPU check, it reads PARAMS1, PARAMS3,
+ * PARAMS4, PROTECT, ERROR, and TCR/TTBR for SID 0..15 on all three DARTs.
+ * Then the outer power sequence restores the gates. No overlay, provider,
+ * domain, allocation, map, or DART write.
  *
  * map_check=true, before any local-PMGR write:
  *   exclusive claims are PMGR local (0x64 bytes), version, COPROC, one
@@ -28,11 +36,13 @@
  *   paging domain, read the premise words, attach, map TEXT, DATA, heap,
  *   and IPC, software lookup of every 16KiB page, SID0 TCR/TTBR readback,
  *   then a read-only walk of the DART2 tables those TTBR values name.
- * Teardown unmaps, detaches, frees the domain, checks heap and IPC are
- * still zero, then frees those pages and removes the overlay. The outer
- * power sequence then restores the 13 local gates. Recovery is the only
- * path that restores power after a retain, and only once no DART provider,
- * domain, page, or overlay flag remains.
+ * Teardown unmaps, detaches, quiesces SID0 on all three DARTs (TCR 0,
+ * TTBR 0, TLB flush, then TCR/TTBR/ERROR readback), frees the domain,
+ * checks heap and IPC are still zero, then frees those pages and removes
+ * the overlay. The outer power sequence then restores the 13 local gates.
+ * A quiesce failure retains. Recovery is the only path that restores power
+ * after a retain, and only once no DART provider, domain, page, overlay,
+ * or quiesce flag remains.
  *
  * A failed teardown pins the module and init returns 0. cleanup_only is
  * the root-only recovery write. It never maps again.
@@ -74,6 +84,12 @@
 #define J713_DM_DART_ERROR	0x100u
 #define J713_DM_TLB_SLEEP_US	10
 #define J713_DM_TLB_TIMEOUT_US	100000
+/* DART_T8110_TLB_CMD_OP_FLUSH_SID is 1 in bits 10:8. Stream is bits 7:0.
+ * SID0 encodes as 0x100. Not ENABLE_STREAMS at 0xc00.
+ */
+#define J713_DM_TLB_FLUSH_SID0	((1u << 8) | J713_ISP_DART_SID0)
+
+_Static_assert(J713_DM_TLB_FLUSH_SID0 == 0x100u, "flush sid0");
 
 _Static_assert(J713_ISP_LOCAL_SIZE == 0x64u, "PMGR local claim is 0x64 bytes");
 _Static_assert(J713_DM_PAGE_SIZE == 0x4000u, "page is 16KiB");
@@ -134,6 +150,9 @@ struct j713_dm_span {
 };
 
 static bool map_check;
+static bool dart_survey;
+static unsigned int survey_tcr[J713_DM_SURVEY_WORDS];
+static unsigned int survey_ttbr[J713_DM_SURVEY_WORDS];
 static int result = -EAGAIN;
 static int first_error;
 static int cleanup_error;
@@ -230,6 +249,12 @@ static int owned_node_exists(void);
 
 module_param(map_check, bool, 0400);
 MODULE_PARM_DESC(map_check, "Map TEXT DATA heap IPC; default false is PMGR validate only");
+module_param(dart_survey, bool, 0400);
+MODULE_PARM_DESC(dart_survey, "Read-only DART survey; requires map_check; no overlay or DART write");
+module_param_array(survey_tcr, uint, NULL, 0444);
+MODULE_PARM_DESC(survey_tcr, "TCR for SID 0..15 on each DART; index instance*16+sid");
+module_param_array(survey_ttbr, uint, NULL, 0444);
+MODULE_PARM_DESC(survey_ttbr, "TTBR for SID 0..15 on each DART; index instance*16+sid");
 module_param(result, int, 0444);
 MODULE_PARM_DESC(result, "Experiment error, else cleanup error while retained, else power-sequence result");
 module_param(first_error, int, 0444);
@@ -980,16 +1005,16 @@ static int op_baseline(void *ctx, struct j713_dm *life)
 			return -EPROTO;
 		if (val[3] & J713_DM_PROTECT_LOCK)
 			return -EPROTO;
-		/* Idle SID0 and SID12 TCR are exactly translate-enable (0x1).
-		 * That is the value R5 read before the overlay. The mapped
-		 * readback below requires 0x9. Do not use the four-level check
-		 * here: the idle DART is not programmed yet.
+		/* SID0 and SID12 TCR and TTBR are recorded on every instance
+		 * and are not a gate. PARAMS and PROTECT still gate the map.
+		 * ERROR is judged later by the premise, version by the power
+		 * sequence, and COPROC by the stopped-CPU check. apple-dart's
+		 * probe resets every SID to TCR 0 (tcr_disabled) when the
+		 * overlay is applied, before attach. A valid TTBR left by an
+		 * earlier domain can survive the local power gates, so
+		 * requiring TCR 0x1 here aborts before that reset. The mapped
+		 * readback below still requires 0x9.
 		 */
-		if (val[4] != J713_DM_TCR_TRANSLATE ||
-		    val[6] != J713_DM_TCR_TRANSLATE)
-			return -EPROTO;
-		if ((val[5] & J713_DM_TTBR_VALID) || (val[7] & J713_DM_TTBR_VALID))
-			return -EPROTO;
 	}
 	return 0;
 }
@@ -1391,17 +1416,170 @@ static int op_lookup(void *ctx, struct j713_dm *life)
 	return life->lookup_count == J713_DM_PAGE_COUNT ? 0 : -EIO;
 }
 
+/* Read allow-list: the survey globals, every SID TCR/TTBR, and the TLB
+ * and ERROR words readback already used. PARAMS2 stays off this list.
+ * Exactly one of the exclusive and read-only windows may be live.
+ */
+static bool dart_ro_off_ok(u32 off)
+{
+	unsigned int sid;
+
+	switch (off) {
+	case J713_ISP_DART_PARAMS1:
+	case J713_ISP_DART_PARAMS3:
+	case J713_ISP_DART_PARAMS4:
+	case J713_ISP_DART_PROTECT:
+	case J713_DM_DART_ERROR:
+	case J713_DM_TLB_CMD:
+		return true;
+	default:
+		break;
+	}
+	for (sid = 0; sid < J713_DM_SID_COUNT; sid++) {
+		if (off == J713_ISP_DART_TCR(sid) || off == J713_ISP_DART_TTBR(sid))
+			return true;
+	}
+	return false;
+}
+
+/* The only DART write allow-list. SID0 TCR, SID0 TTBR, and the TLB command. */
+static bool dart_wr_off_ok(u32 off)
+{
+	return off == J713_ISP_DART_TCR(J713_ISP_DART_SID0) ||
+	       off == J713_ISP_DART_TTBR(J713_ISP_DART_SID0) ||
+	       off == J713_DM_TLB_CMD;
+}
+
 static int dart_ro_read(unsigned int inst, u32 off, u32 *val)
 {
-	if (inst >= J713_ISP_DART_INSTANCES || !val || !hw.dart_ro[inst])
+	void __iomem *base;
+
+	if (inst >= J713_ISP_DART_INSTANCES || !val || !dart_ro_off_ok(off))
+		return -EINVAL;
+	if (hw.dart_ro[inst] && hw.dart_ex[inst])
+		return -EBUSY;
+	base = hw.dart_ro[inst] ? hw.dart_ro[inst] : hw.dart_ex[inst];
+	if (!base)
+		return -EINVAL;
+	*val = readl(base + off);
+	return 0;
+}
+
+/* Requires the read-only window. Refuses when the exclusive window is
+ * also live, so a survey (exclusive only) cannot write.
+ */
+static int dart_ro_write(unsigned int inst, u32 off, u32 val)
+{
+	if (inst >= J713_ISP_DART_INSTANCES || !dart_wr_off_ok(off))
+		return -EINVAL;
+	if (!hw.dart_ro[inst])
 		return -EINVAL;
 	if (hw.dart_ex[inst])
 		return -EBUSY;
-	if (off != J713_ISP_DART_SID0_TCR && off != J713_ISP_DART_SID0_TTBR &&
-	    off != J713_DM_DART_SID15_TCR && off != J713_ISP_DART_PROTECT &&
-	    off != J713_DM_TLB_CMD && off != J713_DM_DART_ERROR)
-		return -EINVAL;
-	*val = readl(hw.dart_ro[inst] + off);
+	writel(val, hw.dart_ro[inst] + off);
+	return 0;
+}
+
+static int quiesce_fail(unsigned int inst, int rc)
+{
+	pr_err("quiesce dart%u err=%d\n", inst, rc);
+	return J713_DM_ERR_QUIESCE;
+}
+
+/* After detach and before the overlay comes off. TCR 0, then TTBR 0,
+ * then the SID0 TLB flush, then the busy-bit poll readback already uses.
+ * Stop on the first instance. Any failure is J713_DM_ERR_QUIESCE so the
+ * retain path can leave the registers up for inspection.
+ */
+static int op_quiesce(void *ctx, struct j713_dm *life)
+{
+	unsigned int inst;
+
+	(void)ctx;
+	(void)life;
+	for (inst = 0; inst < J713_ISP_DART_INSTANCES; inst++) {
+		u32 tcr = 0, ttbr = 0, tlb = 0, errw = 0;
+		int rc;
+
+		rc = dart_ro_write(inst, J713_ISP_DART_TCR(J713_ISP_DART_SID0), 0);
+		if (rc)
+			return quiesce_fail(inst, rc);
+		rc = dart_ro_write(inst, J713_ISP_DART_TTBR(J713_ISP_DART_SID0), 0);
+		if (rc)
+			return quiesce_fail(inst, rc);
+		rc = dart_ro_write(inst, J713_DM_TLB_CMD, J713_DM_TLB_FLUSH_SID0);
+		if (rc)
+			return quiesce_fail(inst, rc);
+		rc = readl_poll_timeout(hw.dart_ro[inst] + J713_DM_TLB_CMD, tlb,
+					!(tlb & J713_DM_TLB_BUSY),
+					J713_DM_TLB_SLEEP_US, J713_DM_TLB_TIMEOUT_US);
+		if (rc)
+			return quiesce_fail(inst, rc);
+		rc = dart_ro_read(inst, J713_ISP_DART_SID0_TCR, &tcr);
+		if (rc)
+			return quiesce_fail(inst, rc);
+		rc = dart_ro_read(inst, J713_ISP_DART_SID0_TTBR, &ttbr);
+		if (rc)
+			return quiesce_fail(inst, rc);
+		rc = dart_ro_read(inst, J713_DM_DART_ERROR, &errw);
+		if (rc)
+			return quiesce_fail(inst, rc);
+		if (tcr != 0 || (ttbr & J713_DM_TTBR_VALID) || errw)
+			return quiesce_fail(inst, -EIO);
+		pr_info("quiesce dart%u sid0 tcr=0x%x ttbr=0x%x error=0x%x\n",
+			inst, tcr, ttbr, errw);
+	}
+	return 0;
+}
+
+/* Exclusive window only, before the overlay. Values are recorded, not judged. */
+static int op_survey(void *ctx, struct j713_dm *life)
+{
+	unsigned int inst, sid;
+
+	(void)ctx;
+	(void)life;
+	memset(survey_tcr, 0, sizeof(survey_tcr));
+	memset(survey_ttbr, 0, sizeof(survey_ttbr));
+	for (inst = 0; inst < J713_ISP_DART_INSTANCES; inst++) {
+		u32 params1 = 0, params3 = 0, params4 = 0, protect = 0, error = 0;
+		int rc;
+
+		if (!hw.dart_ex[inst] || hw.dart_ro[inst])
+			return -EINVAL;
+		rc = dart_ro_read(inst, J713_ISP_DART_PARAMS1, &params1);
+		if (rc)
+			return rc;
+		rc = dart_ro_read(inst, J713_ISP_DART_PARAMS3, &params3);
+		if (rc)
+			return rc;
+		rc = dart_ro_read(inst, J713_ISP_DART_PARAMS4, &params4);
+		if (rc)
+			return rc;
+		rc = dart_ro_read(inst, J713_ISP_DART_PROTECT, &protect);
+		if (rc)
+			return rc;
+		rc = dart_ro_read(inst, J713_DM_DART_ERROR, &error);
+		if (rc)
+			return rc;
+		pr_info("survey dart%u params1=0x%x params3=0x%x params4=0x%x protect=0x%x error=0x%x\n",
+			inst, params1, params3, params4, protect, error);
+		for (sid = 0; sid < J713_DM_SID_COUNT; sid++) {
+			u32 tcr = 0, ttbr = 0;
+			unsigned int idx = J713_DM_SURVEY_INDEX(inst, sid);
+
+			rc = dart_ro_read(inst, J713_ISP_DART_TCR(sid), &tcr);
+			if (rc)
+				return rc;
+			rc = dart_ro_read(inst, J713_ISP_DART_TTBR(sid), &ttbr);
+			if (rc)
+				return rc;
+			survey_tcr[idx] = tcr;
+			survey_ttbr[idx] = ttbr;
+			pr_info("survey dart%u sid%u tcr=0x%x ttbr=0x%x\n",
+				inst, sid, tcr, ttbr);
+		}
+	}
 	return 0;
 }
 
@@ -1931,6 +2109,7 @@ static const struct j713_dm_ops j713_dm_ops = {
 	.readback = op_readback,
 	.unmap = op_unmap,
 	.detach = op_detach,
+	.dart_quiesce = op_quiesce,
 	.free_domain = op_free_domain,
 	.check_surfaces = op_check_surfaces,
 	.free_pages = op_free_pages,
@@ -1940,6 +2119,7 @@ static const struct j713_dm_ops j713_dm_ops = {
 	.unregister_driver = op_unregister,
 	.power_down = op_power_down,
 	.release_claims = op_release_claims,
+	.dart_survey = op_survey,
 };
 
 /* Device, domain, page, or overlay state. Power and PMGR claims are separate:
@@ -1985,6 +2165,28 @@ static int map_callback(void *ctx, struct j713_isp_state *st)
 		return rc ? rc : -EBUSY;
 	}
 	st->retain_power = 0;
+	return rc;
+}
+
+static int survey_callback(void *ctx, struct j713_isp_state *st)
+{
+	int rc;
+
+	if (dm.retain || dm.cleanup_state == J713_DM_CLEAN_PENDING ||
+	    (dm.flags & J713_DM_F_BLOCKS_POWER)) {
+		st->retain_power = 1;
+		return -EBUSY;
+	}
+	dm.flags = J713_DM_F_POWER | J713_DM_F_OTHER_CLAIM | J713_DM_F_DART_CLAIM;
+	dm.retain = 0;
+	dm.cleanup_state = J713_DM_CLEAN_IDLE;
+	dm.power_restored = 0;
+	rc = j713_dm_run_survey(&dm, &j713_dm_ops, ctx);
+	/* Survey never holds a domain. A read error is still published,
+	 * and the outer sequence restores the 13 gates.
+	 */
+	st->retain_power = 0;
+	dm.retain = 0;
 	return rc;
 }
 
@@ -2103,7 +2305,7 @@ static int __init j713_dm_init(void)
 
 	mutex_lock(&j713_dm_lock);
 	result = -EAGAIN;
-	pr_info("init map_check=%d\n", map_check);
+	pr_info("init map_check=%d dart_survey=%d\n", map_check, dart_survey);
 	ret = guard_board();
 	if (ret)
 		goto fail;
@@ -2124,6 +2326,11 @@ static int __init j713_dm_init(void)
 		if (ret)
 			goto fail;
 	}
+	if (dart_survey && !map_check) {
+		ret = -EINVAL;
+		pr_err("dart_survey requires map_check\n");
+		goto fail;
+	}
 
 	hw.pmgr = ioremap(J713_ISP_PMGR_PHYS, J713_ISP_PMGR_SIZE);
 	if (!hw.pmgr) {
@@ -2136,8 +2343,13 @@ static int __init j713_dm_init(void)
 			goto unmap;
 	}
 
-	ret = j713_isp_probe_run(&hw_ops, &hw, map_check,
-				 map_check ? map_callback : NULL, &isp);
+	{
+		j713_isp_inspect_fn cb = NULL;
+
+		if (map_check)
+			cb = dart_survey ? survey_callback : map_callback;
+		ret = j713_isp_probe_run(&hw_ops, &hw, map_check, cb, &isp);
+	}
 	ret = finish_after_probe(ret);
 	mutex_unlock(&j713_dm_lock);
 	return ret;

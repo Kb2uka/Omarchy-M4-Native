@@ -54,6 +54,27 @@ writes the reference through the same exact-range path, re-hashes, and
 prints `DATA restored` (exit 0) or `DATA restore failed` (exit 2). It
 does not insmod and it never writes TEXT.
 
+`--dart-survey` is mutually exclusive with the other modes. It requires
+`--module` and `--sha256` and the same boot, kernel, and target identity
+checks as `--validate`. It does not take `--data-ref` and it does not
+write `/dev/mem`. It loads with `map_check=true` and `dart_survey=true`.
+Before and after `insmod` it hashes TEXT and DATA and requires both
+unchanged. Those hashes are not compared with the `REQUALIFY_*`
+placeholders. A hash change is reported instead of an insmod or
+unknown-state error, and it still does not write `/dev/mem`. After the
+13 local power ACKs and version `0x100001`, and after the stopped-CPU
+check, the module reads PARAMS1, PARAMS3, PARAMS4, PROTECT, and ERROR,
+and TCR and TTBR for SID 0..15, on all three DART instances. It
+publishes `survey_tcr[48]` and `survey_ttbr[48]` at index
+`instance * 16 + sid`. Then it takes the normal power restore. It does
+not apply an overlay, bind a DART provider, allocate a domain or pages,
+or map, and it does not write a DART register. `result` is 0 when every
+read and the restore succeed. The launcher still requires `result`,
+`first_error`, `retain`, `cleanup_pending`, `map_count`, and
+`ladder_stop` to be 0, and `lookup_count`, `readback_count`, and
+`pte_walk_count` to be 0. Run this and review the survey arrays before
+the next `--map-check`.
+
 After `insmod` returns, if `/sys/module/j713_isp_fwview` published
 parameters, the launcher prints `result`, `first_error`, `retain`,
 `cleanup_pending`, `map_count`, `ladder_stop`, `text_prot`, `data_prot`,
@@ -74,12 +95,15 @@ launcher does not write `cleanup_only`. When `retain`,
 - It does not release the processor.
 - It does not write COPROC, the mailbox, GPIO, the fabric, `0xc00`,
   `0x1600040`, or `0x28a4080`.
+- The only DART writes are SID0 TCR, SID0 TTBR, and the TLB command on
+  the three ISP DARTs, and only during quiesce after detach on a
+  map-check. `--dart-survey` writes none of them.
 - It does not do cache maintenance. `dcache_clean_poc` is not exported
   on this kernel, and the processor never reads the pages in E2.
 - It does not use the section 4.2 canonical restore path. Teardown is
-  the sequence R5 proved: unmap, detach, drop the overlay, then the 13
-  local PMGR registers off. The module's existing restore path still
-  checks the 16 PMGR words. The launcher still checks the boot identity.
+  unmap, detach, quiesce SID0, drop the overlay, then the 13 local PMGR
+  registers off. The module's existing restore path still checks the 16
+  PMGR words. The launcher still checks the boot identity.
 
 ## How E2 differs from R5
 
@@ -97,8 +121,16 @@ different overlay so the two cannot be confused:
 
 TEXT and DATA are iBoot-preloaded physical memory. Linux does not
 allocate or free them. HEAP (5 pages) and IPC (7 pages) are fresh
-zeroed pages. Idle SID0 and SID12 TCR before the overlay is still
-exactly `0x1`, the value R5 read. The four-level check applies only
+zeroed pages. SID0 and SID12 TCR and TTBR are logged on all three DART
+instances before the overlay and are not a gate. R5 observed TCR `0x1`.
+A later map-check on the same boot, after R5 had detached, read dart0
+PROTECT `0x2`, SID0 TCR `0x1` with TTBR `0x1006ab89` (valid bit set),
+and SID12 TCR `0` with TTBR `0`. That TTBR is not the one R5 attached
+(`0x1005c8f5`); its writer is unknown. DART register state persists
+across the local power gates. PARAMS1, PARAMS3, PARAMS4, and PROTECT
+still gate the map. ERROR, the version word, and the stopped-CPU check
+are unchanged. When the overlay is applied, the apple-dart probe resets
+every SID to TCR 0 before attach. The four-level check applies only
 after the map.
 
 Before attach, E2 reads GPIO1, the four fabric counters, SID15 TCR,
@@ -130,8 +162,14 @@ cache, value 7). Those bits are `IOMMU_READ` (1), `IOMMU_WRITE` (2), and
 `IOMMU_CACHE` (4). `op_map` returns an error if the TEXT value ever has
 the write bit.
 
-After detach, and before the HEAP and IPC pages are freed, every byte of
-those pages must still be zero. A nonzero byte is a ladder stop: the
+After unmap and detach, and before the overlay is removed, map-check
+quiesces SID0 on all three ISP DARTs: write TCR 0, then TTBR 0, then a
+SID0 TLB flush on the TLB command register, polled with the same busy
+bit and bounded poll the readback path uses, then read back TCR 0, the
+TTBR valid bit clear, and ERROR 0. A quiesce failure is a distinct error
+and retains power so the registers can be inspected. These are the only
+DART writes. After detach, and before the HEAP and IPC pages are freed,
+every byte of those pages must still be zero. A nonzero byte is a ladder stop: the
 pages are still freed and the gates still go off. The post-detach heap
 and IPC zero check reads those pages through cacheable kernel mappings,
 so it can only detect stray writes if the ISP DART is cache-coherent.

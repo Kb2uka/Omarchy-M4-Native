@@ -92,6 +92,11 @@
 #define J713_DM_ERR_DART_FLAG		(-EIO)
 #define J713_DM_ERR_LADDER		(-EUCLEAN)
 #define J713_DM_ERR_PTE			(-EILSEQ)
+/* Quiesce readback or TLB poll failed. Distinct from the map errors. */
+#define J713_DM_ERR_QUIESCE		(-EBADR)
+
+#define J713_DM_SURVEY_INDEX(inst, sid)	((inst) * J713_DM_SID_COUNT + (sid))
+#define J713_DM_SURVEY_WORDS		(J713_ISP_DART_INSTANCES * J713_DM_SID_COUNT)
 
 #define J713_DM_CPU_RUN			0x10u
 #define J713_DM_CPU_RUNNING		0x1u
@@ -128,6 +133,13 @@
 					 (J713_DM_DART_SID15 * J713_ISP_DART_SID_STRIDE))
 
 _Static_assert(J713_DM_PAGE_SIZE == 0x4000u, "page is 16KiB");
+_Static_assert(J713_DM_SURVEY_WORDS == 48u, "survey words");
+_Static_assert(J713_DM_SURVEY_INDEX(0, 0) == 0u, "survey first");
+_Static_assert(J713_DM_SURVEY_INDEX(2, 15) == 47u, "survey last");
+_Static_assert(J713_DM_ERR_QUIESCE != J713_DM_ERR_FABRIC, "quiesce errno");
+_Static_assert(J713_DM_ERR_QUIESCE != J713_DM_ERR_DART_FLAG, "quiesce errno");
+_Static_assert(J713_DM_ERR_QUIESCE != J713_DM_ERR_LADDER, "quiesce errno");
+_Static_assert(J713_DM_ERR_QUIESCE != J713_DM_ERR_PTE, "quiesce errno");
 _Static_assert(J713_DM_TCR_4LEVEL == 0x9u, "translate plus four-level");
 _Static_assert(J713_DM_TEXT_PAGES == 0x329u, "TEXT page count");
 _Static_assert(J713_DM_DATA_PAGES == 0x1d2u, "DATA page count");

@@ -71,6 +71,21 @@ typedef uint64_t u64;
 #define J713_ISP_DART_SID0_TTBR		(J713_ISP_DART_TTBR_BASE + ((J713_ISP_DART_TTBR_COUNT * J713_ISP_DART_SID0) * J713_ISP_DART_SID_STRIDE))
 #define J713_ISP_DART_SID12_TCR		(J713_ISP_DART_TCR_BASE + (J713_ISP_DART_SID12 * J713_ISP_DART_SID_STRIDE))
 #define J713_ISP_DART_SID12_TTBR	(J713_ISP_DART_TTBR_BASE + ((J713_ISP_DART_TTBR_COUNT * J713_ISP_DART_SID12) * J713_ISP_DART_SID_STRIDE))
+/* apple-dart.c T8110: DART_T8110_TCR is 0x1000 and DART_T8110_TTBR is
+ * 0x1400. DART_TCR(dart, sid) is tcr + (sid << 2). DART_TTBR(dart, sid, idx)
+ * is ttbr + ((ttbr_count * sid) << 2) + (idx << 2), with ttbr_count 1 and
+ * idx 0. There is no macro named DART_T8110_TCR(sid).
+ */
+#define J713_ISP_DART_TCR(sid)		(J713_ISP_DART_TCR_BASE + ((sid) << 2))
+#define J713_ISP_DART_TTBR(sid)		(J713_ISP_DART_TTBR_BASE + \
+					 ((J713_ISP_DART_TTBR_COUNT * (sid)) << 2))
+
+_Static_assert(J713_ISP_DART_TCR(0) == J713_ISP_DART_SID0_TCR, "sid0 tcr");
+_Static_assert(J713_ISP_DART_TCR(12) == J713_ISP_DART_SID12_TCR, "sid12 tcr");
+_Static_assert(J713_ISP_DART_TCR(15) == 0x103cu, "sid15 tcr");
+_Static_assert(J713_ISP_DART_TTBR(0) == J713_ISP_DART_SID0_TTBR, "sid0 ttbr");
+_Static_assert(J713_ISP_DART_TTBR(12) == J713_ISP_DART_SID12_TTBR, "sid12 ttbr");
+_Static_assert(J713_ISP_DART_TTBR(15) == 0x143cu, "sid15 ttbr");
 
 #define J713_ISP_INSPECT_COUNT		(2u + J713_ISP_GPIO_COUNT + (J713_ISP_DART_INSTANCES * J713_ISP_DART_WORDS))
 

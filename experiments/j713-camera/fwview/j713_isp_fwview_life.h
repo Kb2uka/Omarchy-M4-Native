@@ -17,12 +17,15 @@
 /* Acquired, but the step did not succeed. The flag stays set. */
 #define J713_DM_ERR_OWNED		(-EBADE)
 
+_Static_assert(J713_DM_ERR_QUIESCE != J713_DM_ERR_OWNED, "quiesce errno");
+
 #define J713_DM_CLEAN_IDLE		0
 #define J713_DM_CLEAN_COMPLETE		1
 #define J713_DM_CLEAN_PENDING		2
 
 #define J713_DM_MODE_MAP		1
 #define J713_DM_MODE_RECOVER		2
+#define J713_DM_MODE_SURVEY		3
 
 #define J713_DM_F_POWER			(1u << 0)
 #define J713_DM_F_DART_CLAIM		(1u << 1)
@@ -35,6 +38,10 @@
 #define J713_DM_F_DOMAIN		(1u << 8)
 #define J713_DM_F_ATTACHED		(1u << 9)
 #define J713_DM_F_MAPPED		(1u << 10)
+/* Set only after detach succeeds, cleared only after quiesce succeeds.
+ * A programmed SID0 must not be powered off.
+ */
+#define J713_DM_F_NEED_QUIESCE		(1u << 11)
 
 /* Anything that can still touch DART MMIO, a default domain, or an
  * allocated page. POWER and claim flags alone are not in this mask:
@@ -43,7 +50,8 @@
 #define J713_DM_F_BLOCKS_POWER		(J713_DM_F_DRIVER | J713_DM_F_OVERLAY | \
 					 J713_DM_F_MASTER | J713_DM_F_DART_RO | \
 					 J713_DM_F_PAGES | J713_DM_F_DOMAIN | \
-					 J713_DM_F_ATTACHED | J713_DM_F_MAPPED)
+					 J713_DM_F_ATTACHED | J713_DM_F_MAPPED | \
+					 J713_DM_F_NEED_QUIESCE)
 #define J713_DM_F_REFS			(J713_DM_F_MAPPED | J713_DM_F_ATTACHED)
 
 enum j713_dm_op {
@@ -63,6 +71,7 @@ enum j713_dm_op {
 	J713_DM_OP_READBACK,
 	J713_DM_OP_UNMAP,
 	J713_DM_OP_DETACH,
+	J713_DM_OP_QUIESCE,
 	J713_DM_OP_FREE_DOMAIN,
 	J713_DM_OP_SURFACE,
 	J713_DM_OP_FREE_PAGES,
@@ -72,6 +81,7 @@ enum j713_dm_op {
 	J713_DM_OP_UNREG,
 	J713_DM_OP_POWER_DOWN,
 	J713_DM_OP_RELEASE_CLAIMS,
+	J713_DM_OP_SURVEY,
 	J713_DM_OP_COUNT
 };
 
@@ -99,6 +109,8 @@ enum j713_dm_op {
 #define J713_DM_STAGE_RELEASE		41
 #define J713_DM_STAGE_PREMISE		42
 #define J713_DM_STAGE_SURFACE		43
+#define J713_DM_STAGE_QUIESCE		44
+#define J713_DM_STAGE_SURVEY		45
 
 #define J713_DM_TRACE_MAX		96
 
@@ -123,6 +135,7 @@ struct j713_dm_ops {
 	j713_dm_op_fn readback;
 	j713_dm_op_fn unmap;
 	j713_dm_op_fn detach;
+	j713_dm_op_fn dart_quiesce;
 	j713_dm_op_fn free_domain;
 	j713_dm_op_fn check_surfaces;
 	j713_dm_op_fn free_pages;
@@ -132,6 +145,7 @@ struct j713_dm_ops {
 	j713_dm_op_fn unregister_driver;
 	j713_dm_op_fn power_down;
 	j713_dm_op_fn release_claims;
+	j713_dm_op_fn dart_survey;
 };
 
 struct j713_dm {
@@ -171,6 +185,8 @@ static inline int j713_dm_power_blocked(const struct j713_dm *dm)
 
 int j713_dm_run_powered(struct j713_dm *dm, const struct j713_dm_ops *ops,
 			void *ctx);
+int j713_dm_run_survey(struct j713_dm *dm, const struct j713_dm_ops *ops,
+		       void *ctx);
 int j713_dm_recover(struct j713_dm *dm, const struct j713_dm_ops *ops,
 		    void *ctx);
 

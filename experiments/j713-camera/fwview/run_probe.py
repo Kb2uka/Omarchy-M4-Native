@@ -3,8 +3,8 @@
 """Private one-shot J713 ISP firmware-view launcher.
 
 Default is --check-only. --validate loads the module with map_check=false
-(no power, overlay, or domain). --map-check is the only load path that
-may write ISP hardware. Before insmod it reads DATA through a read-only
+(no power, overlay, or domain). --map-check is the only launcher path that
+writes /dev/mem. Before insmod it reads DATA through a read-only
 /dev/mem map, checks the qualified DATA hash, and saves that byte copy to
 the --data-ref file mode 0600. It refuses if that file already exists and
 differs. Parameter reads, the unknown-state gate, firmware result
@@ -59,6 +59,15 @@ refuses a real boot. This script is not installed at boot. The flock is
 the same file as the other ISP probes. Never retries, reboots, or changes
 machine power. insmod returning 0 is not proof the map succeeded: the
 module parameters decide.
+--dart-survey is mutually exclusive with the other modes. It loads with
+map_check=true and dart_survey=true and requires --module and --sha256,
+the same identity checks as --validate. It does not take a DATA reference
+and does not write /dev/mem. It hashes TEXT and DATA before and after and
+requires both unchanged. Those hashes are not compared with the REQUALIFY
+placeholders. After insmod, the six clean parameters must be 0, and
+lookup_count, readback_count, and pte_walk_count must be 0. A hash change
+is reported instead of an insmod or unknown-state error, and it does not
+write /dev/mem.
 """
 from __future__ import annotations
 
@@ -760,7 +769,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     mode.add_argument(
         "--map-check",
         action="store_true",
-        help="load module with map_check=true; the only write path",
+        help="load module with map_check=true; the only /dev/mem write path",
+    )
+    mode.add_argument(
+        "--dart-survey",
+        action="store_true",
+        help="load with map_check=true dart_survey=true; read-only DART survey",
     )
     mode.add_argument(
         "--cleanup-only",
@@ -782,11 +796,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     if (
         not args.validate
         and not args.map_check
+        and not args.dart_survey
         and not args.cleanup_only
         and not args.restore_data
     ):
         args.check_only = True
-    if args.validate or args.map_check:
+    if args.validate or args.map_check or args.dart_survey:
         if not args.module or not args.sha256:
             parser.error("--module and --sha256 are required to load")
     if args.map_check and not args.data_ref:
@@ -820,12 +835,16 @@ def _insmod_opened_module(
     args: argparse.Namespace, host, cfg: ProbeConfig, fd: int
 ) -> None:
     try:
-        map_val = "true" if args.map_check else "false"
+        survey = bool(getattr(args, "dart_survey", False))
+        map_on = bool(args.map_check) or survey
+        map_val = "true" if map_on else "false"
         argv = [
             cfg.insmod,
             "/proc/self/fd/%d" % fd,
             "map_check=%s" % map_val,
         ]
+        if survey:
+            argv.append("dart_survey=true")
         proc = host.run_insmod(argv, pass_fds=(fd,))
     finally:
         host.close_fd(fd)
@@ -1020,6 +1039,29 @@ def _restore_data_mode(host, cfg: ProbeConfig, data_ref: Optional[str]) -> str:
     return "DATA restored"
 
 
+def _survey_hashes(host, cfg: ProbeConfig):
+    text = host.hash_phys(cfg.text_phys, cfg.text_size, cfg.devmem_path)
+    data = host.hash_phys(cfg.data_phys, cfg.data_size, cfg.devmem_path)
+    return text, data
+
+
+def _require_survey_unchanged(host, cfg: ProbeConfig, text_before: str, data_before: str) -> None:
+    text_after = host.hash_phys(cfg.text_phys, cfg.text_size, cfg.devmem_path)
+    data_after = host.hash_phys(cfg.data_phys, cfg.data_size, cfg.devmem_path)
+    _print_hash_result("TEXT", text_before, text_after)
+    _print_hash_result("DATA", data_before, data_after)
+    if text_after != text_before:
+        raise ProbeError("TEXT hash changed")
+    if data_after != data_before:
+        raise ProbeError("DATA hash changed")
+
+
+def _require_survey_counters(params: dict) -> None:
+    for name in ("lookup_count", "readback_count", "pte_walk_count"):
+        if params[name] != 0:
+            raise ProbeError("%s is not 0" % name)
+
+
 def _require_map_counters(params: dict) -> None:
     expected = (
         ("lookup_count", LOOKUP_COUNT),
@@ -1059,6 +1101,7 @@ def run_probe(
 ) -> str:
     host = host or RealHost()
     cfg = cfg or ProbeConfig()
+    survey = bool(getattr(args, "dart_survey", False))
     with host.acquire_lock(cfg.lock_path):
         check_euid(host.geteuid())
         check_release(host.uname_release(), cfg.release)
@@ -1084,10 +1127,13 @@ def run_probe(
         text_before = None
         data_hash = None
         data_blob = None
+        data_before = None
         if args.map_check:
             text_before, data_hash, data_blob = _require_firmware_reference(
                 host, cfg, getattr(args, "data_ref", None)
             )
+        elif survey:
+            text_before, data_before = _survey_hashes(host, cfg)
         # A ProbeError here is a refusal before insmod. It must propagate
         # with no parameter read, firmware print, or DATA restore.
         fd = _module_fd_before_insmod(args, host, cfg)
@@ -1099,7 +1145,7 @@ def run_probe(
         except ProbeError as exc:
             load_error = exc
         except OSError as exc:
-            if not args.map_check:
+            if not args.map_check and not survey:
                 raise
             state_error = ProbeError("module state unknown")
             state_error.__cause__ = exc
@@ -1110,7 +1156,7 @@ def run_probe(
             except ProbeError as exc:
                 state_error = exc
             except OSError as exc:
-                if not args.map_check:
+                if not args.map_check and not survey:
                     raise
                 state_error = ProbeError("module parameters unreadable")
                 state_error.__cause__ = exc
@@ -1121,7 +1167,7 @@ def run_probe(
                     host.read_text(cfg.modules_path), cfg.module_name
                 )
             except OSError as exc:
-                if not args.map_check:
+                if not args.map_check and not survey:
                     raise
                 state_error = ProbeError("module state unknown")
                 state_error.__cause__ = exc
@@ -1136,6 +1182,8 @@ def run_probe(
             ):
                 _note_recovery(params)
                 raise ProbeError("module still mapped; not writing /dev/mem")
+        if survey:
+            _require_survey_unchanged(host, cfg, text_before, data_before)
         if state_error is not None:
             if args.map_check:
                 _print_firmware_results(host, cfg, text_before, data_hash)
@@ -1150,8 +1198,12 @@ def run_probe(
             _require_clean_params(params)
             if args.map_check:
                 _require_map_counters(params)
+            if survey:
+                _require_survey_counters(params)
         if args.map_check:
             mode = "map-check"
+        elif survey:
+            mode = "dart-survey"
         else:
             mode = "validate"
         return "%s: loaded" % mode
