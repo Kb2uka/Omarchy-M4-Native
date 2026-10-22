@@ -140,9 +140,23 @@ The image's `/etc/systemd/logind.conf.d/90-m4-ram.conf` keeps
 `HandleLidSwitch=ignore`, so closing the lid does not suspend. Suspend and
 resume are unqualified on J713. Alpha.1 images have no panel backlight device;
 the [native backlight channel update](package-channel.md#omarchy-m4-backlight-1-1-and-omarchy-m4-boot-1-14)
-adds `j713-dcp` through `omarchy-m4-update`. The lock blanks the picture, but
-whether the panel itself goes dark with the lid shut has not been measured.
-Native brightness control does not qualify macOS-style sleep on lid close.
+adds `j713-dcp` through `omarchy-m4-update`. The lock blanks the picture, and
+from `omarchy-m4-backlight` 1-2 the backlight follows it to 0 while the screen
+is blank ([details](package-channel.md#omarchy-m4-backlight-1-2)). Native
+brightness control does not qualify macOS-style sleep on lid close.
+
+On an owner's Air (`omarchy` 4.0.4, `quickshell` 0.3.2-1 from Arch, Hyprland
+0.56.2), closing the lid locked and blanked only once per shell start. The
+first close locked, the panel blanked about 6 s later and the backlight
+reached 0; after the unlock, `omarchy-shell lock status` reported
+`"locked":true` with `requested`, `sessionLocked` and `secure` all false, and
+every later close answered `ok` without locking until `omarchy restart shell`.
+This is Omarchy [#14588](https://github.com/omacom/omarchy/issues/14588):
+Quickshell 0.3.2 does not emit `lockStateChanged` on unlock, so the shell's
+derived `locked` flag stays true. Omarchy fixed the lock decisions in v4.5.0-rc1
+(#14978); this repository does not change the Omarchy shell. The same Air drew
+8.86 W lit with the lid open, 3.75 W with the lid closed, locked and blanked,
+and 9.88 W with the lid closed when the lock did not engage (SMC `PSTR`, on AC).
 
 Upstream Omarchy added its own Apple SMC lid binds after 4.0.4 (commit
 `e1b0e5e`, not yet in a release). They go through the lid-close helper and its

@@ -10,6 +10,11 @@ it. --disable holds future startup without unloading a live display domain;
 
 Brightness keys use the native backlight only for the focused Unknown-1 panel.
 Other focused monitors retain Omarchy's existing Apple-display/DDC routing.
+
+--follow-display (m4-backlight-display.service) holds the panel backlight at
+zero while the boot framebuffer's scanout is off and restores it when the
+scanout returns. simpledrm cannot reach the backlight, so DPMS off, the lock
+blank and lid close otherwise leave the panel lit behind a black picture.
 """
 import argparse
 import contextlib
@@ -18,9 +23,11 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import signal
 import stat
 import subprocess
 import sys
+import time
 
 BOARD = b'apple,j713'
 COMPATIBLE = 'sys/firmware/devicetree/base/compatible'
@@ -29,6 +36,11 @@ PINS = 'usr/lib/omarchy-m4/backlight/module.json'
 STATE = 'var/lib/omarchy-m4/backlight'
 DEBUG = 'sys/kernel/debug/j713_dcp_backlight'
 BACKLIGHT = 'sys/class/backlight/j713-dcp'
+DRM = 'sys/class/drm'
+FRAMEBUFFER_DRIVER = 'simple-framebuffer'
+# Seconds between scanout checks: a blank may wait a second, a wake may not.
+LIT_INTERVAL = 1.0
+DARK_INTERVAL = 0.2
 CLIENT = 'sys/firmware/devicetree/base/soc/dcp-backlight@30ae00000'
 NAME = 'j713_dcp_backlight'
 INITIAL_NITS = 300
@@ -194,6 +206,46 @@ def brightness(step, no_osd=False, run=subprocess.run, root=Path('/')):
         os.close(fd)
 
 
+def panel_connector(root):
+    connectors = [path for path in sorted((root / DRM).glob('card*-Unknown-1'))
+                  if (root / DRM / path.name.split('-', 1)[0] / 'device/driver').resolve().name
+                  == FRAMEBUFFER_DRIVER]
+    require(len(connectors) == 1, 'No unique boot-framebuffer panel connector')
+    return connectors[0]
+
+
+def scanout_on(connector):
+    return text(connector / 'enabled') == 'enabled' and text(connector / 'dpms') == 'On'
+
+
+def follow_display(root, sleep=time.sleep):
+    require(is_j713(root), 'This is not a J713 MacBook Air')
+    level = root / BACKLIGHT / 'brightness'
+    require(level.is_file(), 'Native panel backlight is not started')
+    connector = panel_connector(root)
+    saved = None  # The owner's level while the scanout is off.
+    try:
+        while True:
+            if not scanout_on(connector):
+                current = int(text(level))
+                if current:
+                    # The owner's level at blank, or one written while still dark: hold 0, restore it on wake.
+                    saved = current
+                    level.write_text('0\n')
+                elif saved is None:
+                    saved = 0
+            elif saved is not None:
+                # A level set as the scanout returns (for example a brightness key wake) is the owner's choice.
+                if saved and int(text(level)) == 0:
+                    level.write_text(f'{saved}\n')
+                saved = None
+            sleep(LIT_INTERVAL if saved is None else DARK_INTERVAL)
+    finally:
+        # Stopping while dark (shutdown) must not leave 0 for systemd-backlight to save.
+        if saved and int(text(level)) == 0:
+            level.write_text(f'{saved}\n')
+
+
 def has_custom_brightness(source):
     # Whole-line examples are inert; command strings may contain --flags.
     return any('XF86MonBrightness' in line and not line.lstrip().startswith('--')
@@ -296,6 +348,7 @@ def main(argv=None):
     action.add_argument('--enable', action='store_true')
     action.add_argument('--disable', action='store_true')
     action.add_argument('--keys-hook', action='store_true', help=argparse.SUPPRESS)
+    action.add_argument('--follow-display', action='store_true')
     action.add_argument('--keys-remove-hook', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--root', type=Path, default=Path('/'), help=argparse.SUPPRESS)
     parser.add_argument('command', nargs='?', choices=['brightness'])
@@ -305,12 +358,17 @@ def main(argv=None):
     try:
         if args.command:
             require(args.step is not None and not any((args.boot, args.enable, args.disable,
-                                                       args.keys_hook, args.keys_remove_hook)),
+                                                       args.keys_hook, args.keys_remove_hook,
+                                                       args.follow_display)),
                     'Use brightness STEP without a startup action')
             return brightness(args.step, args.no_osd, root=args.root)
-        if args.boot or args.enable or args.disable or args.keys_hook or args.keys_remove_hook:
+        if (args.boot or args.enable or args.disable or args.keys_hook or args.keys_remove_hook or
+                args.follow_display):
             require(os.geteuid() == 0, 'This action requires root')
-        if args.keys_hook or args.keys_remove_hook:
+        if args.follow_display:
+            signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+            follow_display(args.root)
+        elif args.keys_hook or args.keys_remove_hook:
             print(json.dumps(keys_hook(args.root, remove=args.keys_remove_hook), indent=2))
         elif args.boot:
             print(json.dumps(start(args.root), indent=2))
