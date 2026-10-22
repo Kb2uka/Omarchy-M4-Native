@@ -392,10 +392,12 @@ file.
   (`/sys/class/drm/card*-Unknown-1` on `simple-framebuffer`, `enabled` and
   `dpms`) every second while lit and every 0.2 s while dark. When the scanout
   goes off, it saves the level and writes 0; when the scanout returns, it
-  writes the level back. A level set while dark (for example by a brightness
-  key that woke the screen) is kept. Hyprland reports no DPMS event, and its
-  key and mouse wake bypass every DPMS caller, so the follower watches the
-  connector rather than wrapping `omarchy-brightness-display`.
+  writes the level back. A level written while the scanout is still off is
+  held at 0 and becomes the level restored on wake; one set as the scanout
+  returns (for example by a brightness key that woke the screen) is kept.
+  Hyprland reports no DPMS event, and its key and mouse wake bypass every
+  DPMS caller, so the follower watches the connector rather than wrapping
+  `omarchy-brightness-display`.
 - **Shutdown:** the unit stops before
   `systemd-backlight@backlight:j713-dcp.service` and restores a level it is
   holding at 0, so a shutdown with the screen dark never saves 0.
