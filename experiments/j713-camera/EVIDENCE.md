@@ -166,4 +166,3 @@ presented as merge-ready or as a fully reviewed camera driver.
     explicit post-detach SID0 quiesce (TCR 0, TTBR 0, TLB flush, readback)
     runs before the overlay is removed.
   - Offline tests pass. Blind review and hardware runs are pending.
-
