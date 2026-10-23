@@ -500,7 +500,9 @@ class Sources(unittest.TestCase):
             self.assertIn(name, script)
             self.assertTrue((ROOT / 'patches-kernel' / (name + '.patch')).is_file(), name)
         subprocess.run(['bash', '-n', str(ROOT / 'tools/build-j715-kernel.sh')], check=True)
-        self.assertNotIn('-exec file', script)  # m4-gravity-builder has no file(1)
+        # m4-gravity-builder has no file(1): no line runs it, as a command, after a pipe or under -exec.
+        code = '\n'.join(line.split('#', 1)[0] for line in script.splitlines())
+        self.assertIsNone(re.search(r'(?<![$\w-])file(?=\s+["\'$\-{])', code))
 
     def test_the_kernel_recipe_names_a_missing_patch_before_doing_anything(self):
         with tempfile.TemporaryDirectory() as empty:
