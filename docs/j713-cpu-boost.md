@@ -53,7 +53,10 @@ E-cluster devicetree (`fdedc09f…`), adds:
   reading, that pins the P cooling device to state 16, which is P4. Until
   something raises that trip, P runs no faster than before. The 95 C trip for
   both clusters stays in the devicetree; the guard raises it to 100 C while it
-  runs (below).
+  runs (below). The gate takes effect once the thermal zone and cooling device
+  binding are registered at boot; during the brief initial probe window prior
+  to binding, schedutil may momentarily touch higher OPP states under boot
+  load before the 20 C passive trip engages ([issue #145](https://github.com/Kb2uka/Omarchy-M4-Native/issues/145)).
 
 DTC 1.8.1 produced 50,708 bytes, SHA-256
 `c4f036b819ce757ce790b01779a3f7532eacd5cb1c1097fa20286d1a9c9ec6ca`. The builder
