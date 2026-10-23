@@ -140,8 +140,13 @@ python3 tools/package-j713-download.py --delivery /absolute/new/j715-installer \
 
 The derivation builds in a staging directory next to the output and moves it
 into place only when complete. The installer patch must apply without offset
-or fuzz, and the repacked installer archive is deterministic. The packager
-accepts `-j715-test.N` release tags for this kit.
+or fuzz, and the repacked installer archive is deterministic. Two derivations
+from the same inputs and revision give the same bytes (#163): debugfs runs with
+`E2FSPROGS_FAKE_TIME`, so every inode, directory and the superblock it writes
+carry `REPRODUCIBLE_TIME` (update 4's OS ZIP date, 2026-10-17 12:01:16) instead
+of the clock, and the tool refuses a debugfs that ignores it; the OS ZIP members
+carry the same date. The packager accepts `-j715-test.N` release tags for this
+kit.
 
 ## Not known yet
 

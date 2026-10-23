@@ -64,8 +64,12 @@ python3 tools/package-j713-download.py --delivery /absolute/new/j773g-installer 
 ```
 
 The derivation builds in a staging directory next to the output and moves it
-into place only when complete. The packager accepts `-j773g-test.N` release
-tags for this kit.
+into place only when complete. Two derivations from the same inputs and revision give the same bytes (#163):
+debugfs runs with `E2FSPROGS_FAKE_TIME`, so every inode, directory and the
+superblock it writes carry `REPRODUCIBLE_TIME` (update 4's OS ZIP date,
+2026-10-17 12:01:16) instead of the clock, and the tool refuses a debugfs that
+ignores it; the OS ZIP members carry the same date. The packager accepts `-j773g-test.N`
+release tags for this kit.
 
 ## Not known yet
 
