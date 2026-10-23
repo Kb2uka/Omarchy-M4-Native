@@ -230,6 +230,7 @@ def planned_files(root):
         "etc/locale.gen": "\n".join(locale) + "\n",
         "etc/locale.conf": "LANG=en_US.UTF-8\n",
         "etc/xdg/uwsm/env.d/90-m4-shader-cache": "export MESA_SHADER_CACHE_DISABLE=false\n",
+        "etc/xdg/uwsm/env.d/90-m4-gdk-gl": "export GDK_GL=gles\n",
         "etc/skel/.local/lib/omarchy/m4-session-placement.py": Path(__file__).with_name("m4-session-placement.py").read_bytes(),
         "etc/systemd/zram-generator.conf.d/90-omarchy.conf": zram,
         LOCK_PAM: lock_pam(root),
@@ -244,6 +245,7 @@ def configure(root, apply=False):
     root = root.resolve(strict=True)
     files = planned_files(root)
     cache = image_path(root, "etc/xdg/uwsm/env.d/90-m4-shader-cache")
+    gdk_gl = image_path(root, "etc/xdg/uwsm/env.d/90-m4-gdk-gl")
     new_cache_dirs = []
     for parent in cache.parents:
         if parent == root:
@@ -254,7 +256,7 @@ def configure(root, apply=False):
                                     parent.stat().st_mode & 0o005 != 0o005):
             raise ValueError("Image path is not a publicly readable directory: " +
                              parent.relative_to(root).as_posix())
-    owned_modes = {cache: 0o644, image_path(root, MAIN_PLACEMENT_HOOK): 0o755,
+    owned_modes = {cache: 0o644, gdk_gl: 0o644, image_path(root, MAIN_PLACEMENT_HOOK): 0o755,
                    image_path(root, "etc/skel/.local/lib/omarchy/m4-session-placement.py"): 0o644,
                    image_path(root, LOCK_PAM): 0o644}
     different = [path.relative_to(root).as_posix() for path, content in files.items()
@@ -264,7 +266,7 @@ def configure(root, apply=False):
     if apply:
         for path, content in files.items():
             path.parent.mkdir(parents=True, exist_ok=True)
-            if path == cache and os.name != "nt":
+            if path in (cache, gdk_gl) and os.name != "nt":
                 for parent in new_cache_dirs:
                     parent.chmod(0o755)
             path.write_bytes(content)
