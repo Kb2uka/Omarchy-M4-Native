@@ -93,13 +93,15 @@ The kit kernel's built-in module certificate is published as
 extracts it instead of generating a new key. This configuration signs no
 modules at build time (`CONFIG_MODULE_SIG_ALL` is off), so the private key is
 never needed. The key was generated for this build alone and deleted on
-2026-10-22, after the rebuild below. The certificate grants nothing either way:
+2026-10-22, between the two rebuilds below. The certificate grants nothing either way:
 module signatures are not enforced (`CONFIG_MODULE_SIG_FORCE` is off), lockdown
 is not forced (`CONFIG_LOCK_DOWN_KERNEL_FORCE_NONE`), and kexec signatures are
 not forced, as in build 18.
 
-From a fresh tree, the script reproduced `291c4b95…` byte for byte, and its
-uncompressed `Image` equals the kit kernel's. The #155 review rebuilt it the
+From a fresh tree, the script reproduced `291c4b95…` byte for byte twice: with
+the recipe as of `6ffbb1f`, and, after the key was deleted, as of `36a4e73`, from
+the published certificate alone. Its uncompressed `Image` equals the kit
+kernel's. The #155 review rebuilt it the
 same way in `m4-gravity-builder:20261008` without network access. The kernel's
 source join is `j715-Image-291c4b95.gz` under `kit_binaries` in
 `packaging/channel-source-joins.json`.
@@ -140,8 +142,13 @@ python3 tools/package-j713-download.py --delivery /absolute/new/j715-installer \
 
 The derivation builds in a staging directory next to the output and moves it
 into place only when complete. The installer patch must apply without offset
-or fuzz, and the repacked installer archive is deterministic. The packager
-accepts `-j715-test.N` release tags for this kit.
+or fuzz, and the repacked installer archive is deterministic. Two derivations
+from the same inputs and revision give the same bytes (#163): debugfs runs with
+`E2FSPROGS_FAKE_TIME`, so every inode, directory and the superblock it writes
+carry `REPRODUCIBLE_TIME` (update 4's OS ZIP date, 2026-10-17 12:01:16) instead
+of the clock, and the tool refuses a debugfs that ignores it; the OS ZIP members
+carry the same date. The packager accepts `-j715-test.N` release tags for this
+kit.
 
 ## Not known yet
 

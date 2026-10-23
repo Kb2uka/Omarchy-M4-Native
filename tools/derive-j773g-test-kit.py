@@ -74,6 +74,10 @@ ROOT_DROPINS = {
 }
 REPLACED_DOCS = {'Install.command': 0o755, 'START-HERE.md': 0o644, 'KNOWN-LIMITATIONS.md': 0o644, 'UPDATES.md': 0o644}
 REWRITTEN = {'KIT.json', 'IMAGE.json', 'SHA256SUMS', 'installer_data.json', 'os/' + OLD_PACKAGE, *REPLACED_DOCS}
+# Every derivation writes the same bytes (#163): debugfs stamps what it writes with this time instead
+# of the clock, and the OS ZIP members carry its date. It is update 4's OS ZIP date, 2026-10-17 12:01:16.
+REPRODUCIBLE_TIME = 1792238476
+ZIP_TIME = (2026, 10, 17, 12, 1, 16)
 QUALIFICATION = ('J773g tester build derived from the J713 installer update 4 kit. The first tester '
                  'reported no HDMI signal; no successful desktop boot is confirmed. It is not qualified for any Mac.')
 
@@ -122,6 +126,13 @@ def debugfs_exists(debugfs, image, path):
     return 'Inode:' in result.stdout
 
 
+def write_time(image):
+    """The superblock's last write time (s_wtime)."""
+    with open(image, 'rb') as stream:
+        stream.seek(1024 + 0x30)
+        return int.from_bytes(stream.read(4), 'little')
+
+
 def patch_root(image, debugfs='debugfs', e2fsck='e2fsck'):
     """Replace the mini's root files and remove the J713-only start links, then check the filesystem."""
     image = image.resolve()
@@ -142,7 +153,10 @@ def patch_root(image, debugfs='debugfs', e2fsck='e2fsck'):
         script.write('\n'.join(commands) + '\n')
         script.flush()
         subprocess.run([debugfs, '-w', '-f', script.name, str(image)], cwd=FILES,
-                       capture_output=True, check=True)
+                       capture_output=True, check=True,
+                       env=dict(os.environ, E2FSPROGS_FAKE_TIME=str(REPRODUCIBLE_TIME)))
+    require(write_time(image) == REPRODUCIBLE_TIME,
+            'debugfs ignored E2FSPROGS_FAKE_TIME, so the root would not be reproducible')
     for path, (_, name) in ROOT_FILES.items():
         require(debugfs_read(debugfs, image, path) == (FILES / name).read_bytes(), 'Root file not replaced: ' + path)
         stat = subprocess.run([debugfs, '-R', 'stat ' + path, str(image)], capture_output=True, text=True).stdout
@@ -172,17 +186,27 @@ def installer_data(old):
     return new
 
 
+def zip_member(name, mode=0o600):
+    """A deflated member with a fixed date (#163), and the mode ZipFile gives a file or a string."""
+    info = zipfile.ZipInfo(name, ZIP_TIME)
+    info.compress_type = zipfile.ZIP_DEFLATED
+    info.external_attr = mode << 16
+    return info
+
+
 def build_zip(old_zip, root_image, dtb, output):
     with zipfile.ZipFile(old_zip) as old:
         require([info.filename for info in old.infolist()] == OLD_ZIP_NAMES, 'Unexpected OS ZIP layout')
         require(sha_bytes(old.read(OLD_DTB[0])) == OLD_DTB[1], 'Unexpected J713 devicetree')
         with zipfile.ZipFile(output, 'x', zipfile.ZIP_DEFLATED, allowZip64=True) as new:
-            new.write(root_image, 'root.ext4')
-            new.writestr(DTB[0], dtb)
+            with open(root_image, 'rb') as source, new.open(zip_member('root.ext4', 0o100644), 'w',
+                                                            force_zip64=True) as target:
+                shutil.copyfileobj(source, target, 1 << 20)
+            new.writestr(zip_member(DTB[0]), dtb)
             for name, pin in KEPT_BOOT.items():
                 data = old.read(name)
                 require(sha_bytes(data) == pin, 'Unexpected boot part: ' + name)
-                new.writestr(name, data)
+                new.writestr(zip_member(name), data)
 
 
 def write(path, data, mode=0o644):

@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -228,6 +229,31 @@ class Derive(unittest.TestCase):
                         MODULE.patch_root(image)
                 self.assertEqual(read(image, '/etc/sddm.conf.d/99-m4.conf'),
                                  SDDM_FILES['/etc/sddm.conf.d/99-m4.conf'])
+
+    def test_two_derivations_write_the_same_bytes(self):
+        # debugfs and the OS ZIP use REPRODUCIBLE_TIME, not the clock (#163).
+        first, again = self.output, self.base / 'again'
+        self.derive()
+        time.sleep(2.1)  # past debugfs's one-second and ZIP's two-second resolution
+        with patch.object(self, 'output', again):
+            self.derive()
+        for name in ('KIT.json', 'SHA256SUMS', 'IMAGE.json', 'os/' + MODULE.PACKAGE):
+            self.assertEqual((first / name).read_bytes(), (again / name).read_bytes(), name)
+
+    def test_a_debugfs_that_ignores_the_fixed_time_is_refused(self):
+        debugfs = self.base / 'debugfs'
+        debugfs.write_text('#!/bin/sh\nunset E2FSPROGS_FAKE_TIME\nexec debugfs "$@"\n')
+        debugfs.chmod(0o755)
+        pins = self.fixture.pins()
+        for pin in pins:
+            pin.start()
+        try:
+            with self.assertRaisesRegex(ValueError, 'ignored E2FSPROGS_FAKE_TIME'):
+                MODULE.derive(self.fixture.kit, self.dtb, self.output, REVISION, debugfs=str(debugfs))
+        finally:
+            for pin in reversed(pins):
+                pin.stop()
+        self.assertFalse(self.output.exists())
 
     def test_checkout_path_with_spaces_can_patch_the_root(self):
         files = self.base / 'checkout with spaces' / 'packaging'
