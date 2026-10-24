@@ -43,16 +43,18 @@ Start from a verified first-test manifest. Record the owner's evidence as JSON w
 ```sh
 python3 -B /usr/lib/omarchy-m4/j715/audio/m4-j715-audio-qualify.py --evidence evidence.json
 systemctl enable m4-j715-audio-register.service speakersafetyd-j715.service
-install -Dm644 packaging/j715-audio/80-j715-audio-ready.conf \
+install -Dm644 /usr/lib/omarchy-m4/j715/audio/session/80-j715-audio-ready.conf \
   /usr/lib/systemd/user/wireplumber.service.d/80-j715-audio-ready.conf
 ```
 
 `m4-j715-audio-qualify.py` reads a fresh speaker-ID report and writes
 `qualification.json`, bound to the payload identity and exact profile receipt. It
-replaces the first-test authorization in the manifest. It then installs the pinned
-profile members (WirePlumber policy, default-node hook, graph, FIRs and UCM) at their
-system paths. Identical files are kept. Any other existing file refuses before
-anything changes, and a later failure restores the manifest and removes created files.
+holds the registration lock, installs the pinned profile members (WirePlumber policy,
+default-node hook, graph, FIRs and UCM) at their system paths and verifies them, and only
+then replaces the first-test authorization in the manifest. Identical files are kept.
+Any other existing file refuses before anything changes, and a later failure restores
+the manifest and removes created files. An interrupted run leaves the manifest in the
+first-test form, so it can simply be rerun.
 It does not change units, modules, protection, calibration or gains.
 
 The WirePlumber drop-in runs the session gate with `--wait 60`. The user manager

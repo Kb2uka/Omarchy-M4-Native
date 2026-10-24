@@ -10,6 +10,7 @@ mutation. Any later failure restores the manifest and removes created files.
 Protection, calibration, gains, units and module bytes are never modified.
 """
 import argparse
+import fcntl
 import hashlib
 import importlib.util
 import json
@@ -27,6 +28,7 @@ s = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(s)
 
 QUALIFICATION = s.BASE + "/qualification.json"
+LOCK = "/run/lock/m4-audio-test.lock"
 EVIDENCE_KEYS = ("run", "result_sha256", "owner_confirmation", "scope")
 
 
@@ -50,13 +52,26 @@ def atomic(path: Path, data: bytes) -> None:
 
 
 def qualify(root: Path, report: bytes, evidence: dict) -> dict:
+    lock = s.at(root, LOCK)
+    s.trusted(lock.parent, root, directory=True)
+    fd = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise s.Refused("Audio registration lock is held") from error
+        return locked_qualify(root, report, evidence)
+    finally:
+        os.close(fd)
+
+
+def locked_qualify(root: Path, report: bytes, evidence: dict) -> dict:
     s.require(set(evidence) == set(EVIDENCE_KEYS) and all(
         type(evidence[k]) is str and evidence[k] for k in EVIDENCE_KEYS), "Incomplete owner evidence")
     manifest, _ = s.trusted_json(root, s.MANIFEST)
     s.require(manifest["qualification"] is None and
               manifest.get("first_qualification_authorization") == s.FIRST_AUTHORIZATION,
               "Manifest is not in first-test form")
-    s.require(not os.path.lexists(s.at(root, QUALIFICATION)), "Qualification file already exists")
     speaker_id = s.load("m4-j715-audio-profile.py").IdReport.parse(report).speaker_id
     base = manifest["profiles"][str(speaker_id)]["root"]
     receipt_raw = s.pinned(root, base + "/profile-receipt.json",
@@ -84,23 +99,27 @@ def qualify(root: Path, report: bytes, evidence: dict) -> dict:
 
     manifest_path = s.at(root, s.MANIFEST)
     original = manifest_path.read_bytes()
-    created = []
+    qualification = s.at(root, QUALIFICATION)
+    created, replaced = [], False
     try:
-        with open(s.at(root, QUALIFICATION), "xb") as stream:
-            stream.write(record_raw)
-        os.chmod(s.at(root, QUALIFICATION), 0o644)
-        created.append(s.at(root, QUALIFICATION))
-        atomic(manifest_path, (json.dumps(qualified, indent=2, sort_keys=True) + "\n").encode())
-        s.artifacts(root)
-        s.selection(root, report)
         for dest, data in installs:
             dest.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
             with open(dest, "xb") as stream:
                 stream.write(data)
             os.chmod(dest, 0o644)
             created.append(dest)
+        for name, pin in receipt["files"].items():
+            s.require(sha(s.at(root, "/" + name).read_bytes()) == pin["sha256"],
+                      "Installed profile differs: /" + name)
+        atomic(qualification, record_raw)
+        created.append(qualification)
+        replaced = True
+        atomic(manifest_path, (json.dumps(qualified, indent=2, sort_keys=True) + "\n").encode())
+        s.artifacts(root)
+        s.selection(root, report)
     except BaseException:
-        atomic(manifest_path, original)
+        if replaced:
+            atomic(manifest_path, original)
         for path in reversed(created):
             if os.path.lexists(path):
                 os.unlink(path)

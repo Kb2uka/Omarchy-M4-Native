@@ -72,6 +72,36 @@ class QualifyTests(AuthorizedFixture):
         for name in self.receipt()["files"]:
             self.assertFalse(s.at(self.root, "/" + name).exists())
 
+    def test_interrupted_run_is_rerunnable(self):
+        base = s.BASE + "/profiles/" + str(self.speaker_id)
+        for name in self.receipt()["files"]:
+            self.write("/" + name, s.at(self.root, base + "/" + name).read_bytes())
+        self.write(q.QUALIFICATION, b"{}")
+        q.qualify(self.root, self.report, EVIDENCE)
+        self.assertTrue(s.artifacts(self.root)[2]["hardware_qualified"])
+
+    def test_manifest_flips_only_after_profile_is_installed(self):
+        order = []
+        real = q.atomic
+        def record(path, data):
+            order.append(path.name)
+            self.assertTrue(all(s.at(self.root, "/" + n).exists() for n in self.receipt()["files"]))
+            real(path, data)
+        with patch.object(q, "atomic", side_effect=record):
+            q.qualify(self.root, self.report, EVIDENCE)
+        self.assertEqual(order, ["qualification.json", "manifest.json"])
+
+    def test_held_registration_lock_refuses(self):
+        import fcntl
+        import os
+        fd = os.open(s.at(self.root, q.LOCK), os.O_RDWR | os.O_CREAT, 0o600)
+        self.addCleanup(os.close, fd)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        before = s.at(self.root, s.MANIFEST).read_bytes()
+        with self.assertRaises(ValueError):
+            q.qualify(self.root, self.report, EVIDENCE)
+        self.assertEqual(s.at(self.root, s.MANIFEST).read_bytes(), before)
+
     def test_incomplete_evidence_refuses(self):
         for bad in ({}, {**EVIDENCE, "owner_confirmation": ""}, {**EVIDENCE, "extra": "x"}):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
