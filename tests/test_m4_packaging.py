@@ -113,6 +113,39 @@ class RecipeTests(unittest.TestCase):
         self.assertIn('check', result.stdout.splitlines())
         self.assertNotIn('!check', result.stdout.splitlines())
 
+    def test_xr30_probe_uses_private_gbm_metadata_before_host_metadata(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp)
+            private = source / 'build/meson-uninstalled'
+            host = source / 'host-pkgconfig'
+            private.mkdir(parents=True)
+            host.mkdir()
+            for directory, name, prefix in (
+                    (private, 'gbm-uninstalled', source / 'private-gbm'),
+                    (host, 'gbm', source / 'host-gbm'),
+                    (host, 'egl', source / 'glvnd'),
+                    (host, 'glesv2', source / 'glvnd')):
+                (directory / f'{name}.pc').write_text(
+                    f'Name: {name}\nDescription: test library\nVersion: 1.0\n'
+                    f'Libs: -L{prefix}/lib -l{name.removesuffix("-uninstalled")}\n'
+                    f'Cflags: -I{prefix}/include\n')
+            result = subprocess.run(
+                ['bash', '-c',
+                 'source "$1"; srcdir="$2"; CFLAGS=; CXXFLAGS=; '
+                 'meson() { :; }; ninja() { :; }; '
+                 'cc() { printf "%s\\n" "$@" > "$srcdir/probe-arguments"; }; build',
+                 'recipe', str(PACKAGING / 'omarchy-m4-xr30/PKGBUILD'), str(source)],
+                env={**os.environ, 'PKG_CONFIG_PATH': str(host), 'PKG_CONFIG_LIBDIR': str(host),
+                     'PKG_CONFIG_DISABLE_UNINSTALLED': ''},
+                capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            arguments = (source / 'probe-arguments').read_text().splitlines()
+            self.assertIn(f'-I{source}/private-gbm/include', arguments)
+            self.assertIn(f'-L{source}/private-gbm/lib', arguments)
+            self.assertNotIn(f'-I{source}/host-gbm/include', arguments)
+            self.assertNotIn(f'-L{source}/host-gbm/lib', arguments)
+            self.assertIn(f'-L{source}/glvnd/lib', arguments)
+
     def test_common_recipe_owns_only_the_migrated_files(self):
         # Given recipes sourced by bash exactly as makepkg sources them.
         names = ('omarchy-m4-update', 'omarchy-m4-boot')

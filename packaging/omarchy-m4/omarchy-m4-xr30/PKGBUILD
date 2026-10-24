@@ -2,7 +2,7 @@
 # tools/build-m4-packages.py stages the patch, probe and session helper.
 pkgname=omarchy-m4-xr30
 pkgver=26.3.0.r87ac51d
-pkgrel=2
+pkgrel=3
 pkgdesc='Isolated Apple9 Mesa with native RGB10/X2 rendering for J715 testers'
 arch=('aarch64')
 url='https://github.com/Kb2uka/Omarchy-M4-Native'
@@ -39,10 +39,12 @@ build() {
     -Dgles1=enabled -Dgles2=enabled -Dllvm=enabled -Ddraw-use-llvm=false \
     -Dbuild-tests=true -Dgallium-va=disabled -Dvideo-codecs=
   ninja -C "$srcdir/build" -j "${M4_BUILD_JOBS:-4}"
+  # Bind GBM to this build; EGL/GLES use the declared libglvnd dispatch ABI.
+  export PKG_CONFIG_PATH="$srcdir/build/meson-uninstalled${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   cc -O2 -g -std=c11 -Wall -Wextra -Werror -ffile-prefix-map="$srcdir"=. \
-    $(pkg-config --cflags gbm egl glesv2) \
+    $(pkg-config --cflags gbm-uninstalled egl glesv2) \
     "$srcdir/xr30-probe.c" -o "$srcdir/xr30-probe" \
-    $(pkg-config --libs gbm egl glesv2)
+    $(pkg-config --libs gbm-uninstalled egl glesv2)
 }
 
 check() {
