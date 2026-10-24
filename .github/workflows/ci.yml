@@ -68,8 +68,13 @@ jobs:
       - name: Run offline regression suite
         env:
           LUA: lua5.4
+          TMPDIR: ${{ runner.temp }}/m4-tmp
+          NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache
+          BUN_RUNTIME_TRANSPILER_CACHE_PATH: ${{ runner.temp }}/bun-transpiler-cache
           PYTHONDONTWRITEBYTECODE: '1'
-        run: python -m unittest discover -s tests -p 'test_*.py' -v
+        run: |
+          mkdir -p "$TMPDIR" "$NODE_COMPILE_CACHE" "$BUN_RUNTIME_TRANSPILER_CACHE_PATH"
+          python -m unittest discover -s tests -p 'test_*.py' -v
 
   speaker-daemon:
     name: Speaker daemon (Rust)
