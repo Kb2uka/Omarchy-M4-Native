@@ -65,6 +65,18 @@ shipped change.
    quiesces the firmware for sleep.
 4. **Bluetooth** logged `hci0: command 0x0c01 tx timeout` on resume, which
    stretched resume to 2 s. Bluetooth stayed powered.
+5. **The screen does not lock before sleep after the first unlock.**
+   Omarchy 4.0.4's shell (`shell/plugins/lock/Service.qml`) reads its
+   `locked` binding to decide a lock request. After an unlock that binding can
+   stay `true` while the request, the session lock and its secure state are
+   all `false`, so every later lock request returns `ok` and does nothing. On
+   2026-10-24 a real s2idle cycle slept unlocked:
+   `omarchy-system-sleep-lock: suspending without a secure lock (the shell did
+   not secure the session within 12000ms)`, with no lock events after the
+   earlier unlock. Upstream fixed it in
+   [basecamp/omarchy#14978](https://github.com/basecamp/omarchy/pull/14978)
+   (`d1a614ce6`), first released in `v4.5.0-rc1`, not in 4.0.5 or 4.0.6.
+   Restarting the shell (`omarchy-restart-shell`) restores one lock.
 
 ## UART: a `pm_test` artifact only
 
