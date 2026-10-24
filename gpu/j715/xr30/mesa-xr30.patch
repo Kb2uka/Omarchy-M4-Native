@@ -1,0 +1,148 @@
+diff --git a/src/asahi/compiler/agx_compile_apple9.h b/src/asahi/compiler/agx_compile_apple9.h
+index 618ca53..476266d 100644
+--- a/src/asahi/compiler/agx_compile_apple9.h
++++ b/src/asahi/compiler/agx_compile_apple9.h
+@@ -200,0 +201,3 @@ agx_apple9_color_is_packed(enum pipe_format format)
++   /* X2 retains its own NIR format: RGB bits match A2, but destination alpha
++    * must unpack as one regardless of the unused memory bits. Reload and PBE
++    * export use the same packed word and memory channel order. */
+@@ -209,0 +213,2 @@ agx_apple9_color_is_packed(enum pipe_format format)
++   case PIPE_FORMAT_R10G10B10X2_UNORM:
++   case PIPE_FORMAT_B10G10R10X2_UNORM:
+@@ -226,0 +232,2 @@ agx_apple9_block_export_format(enum pipe_format format)
++       format == PIPE_FORMAT_R10G10B10X2_UNORM ||
++       format == PIPE_FORMAT_B10G10R10X2_UNORM ||
+diff --git a/src/asahi/compiler/test/test-apple9.cpp b/src/asahi/compiler/test/test-apple9.cpp
+index 8ae9b4d..dbe543e 100644
+--- a/src/asahi/compiler/test/test-apple9.cpp
++++ b/src/asahi/compiler/test/test-apple9.cpp
+@@ -10,0 +11 @@
++#include "compiler/nir/nir_format_convert.h"
+@@ -17,0 +19,116 @@
++TEST(Apple9Compiler, X2PackedColorPreservesTenBitsAndOpaqueAlpha)
++{
++   for (auto format : {PIPE_FORMAT_R10G10B10X2_UNORM,
++                       PIPE_FORMAT_B10G10R10X2_UNORM}) {
++      SCOPED_TRACE(util_format_name(format));
++      ASSERT_TRUE(agx_apple9_color_is_packed(format));
++      EXPECT_EQ(agx_apple9_color_tile_format(format), format);
++      EXPECT_EQ(agx_apple9_color_words(format), 1u);
++      EXPECT_EQ(agx_apple9_block_export_format(format), 7u);
++      bool bgr = format == PIPE_FORMAT_B10G10R10X2_UNORM;
++      nir_builder b = nir_builder_init_simple_shader(
++         MESA_SHADER_COMPUTE, &agx_nir_options, "x2 pack reload");
++      std::vector<uint32_t> expected;
++      for (unsigned r : {0u, 1u, 101u, 517u, 1022u, 1023u}) {
++         unsigned g = 1023 - r, blue = (r + 367) & 1023;
++         uint32_t rgb = bgr ? blue | (g << 10) | (r << 20)
++                            : r | (g << 10) | (blue << 20);
++         for (unsigned x = 0; x < 4; ++x) {
++            /* X storage is not alpha, either when writing or reloading. */
++            nir_def *packed = nir_format_pack_rgba(&b, format,
++               nir_imm_vec4(&b, r / 1023.0f, g / 1023.0f,
++                             blue / 1023.0f, x / 3.0f));
++            nir_store_ssbo(&b, packed, nir_imm_int(&b, 0),
++                           nir_imm_int(&b, expected.size() * 4),
++                           .write_mask = 1, .align_mul = 4);
++            expected.push_back(rgb);
++            nir_def *unpacked = nir_format_unpack_rgba(
++               &b, nir_imm_int(&b, rgb | (x << 30)), format);
++            nir_def *roundtrip = nir_format_pack_rgba(&b, format, unpacked);
++            nir_store_ssbo(&b, roundtrip, nir_imm_int(&b, 0),
++                           nir_imm_int(&b, expected.size() * 4),
++                           .write_mask = 1, .align_mul = 4);
++            expected.push_back(rgb);
++            nir_store_ssbo(&b, nir_channel(&b, unpacked, 3),
++                           nir_imm_int(&b, 0),
++                           nir_imm_int(&b, expected.size() * 4),
++                           .write_mask = 1, .align_mul = 4);
++            expected.push_back(0x3f800000); /* float 1.0 */
++         }
++      }
++      bool progress;
++      do {
++         progress = nir_opt_constant_folding(b.shader);
++         progress |= nir_opt_copy_prop(b.shader);
++         progress |= nir_opt_dce(b.shader);
++         progress |= nir_opt_if(b.shader, nir_opt_if_optimize_phi_true_false);
++         progress |= nir_opt_dead_cf(b.shader);
++      } while (progress);
++      unsigned index = 0;
++      nir_foreach_block(block, nir_shader_get_entrypoint(b.shader)) {
++         nir_foreach_instr(instr, block) {
++            if (instr->type != nir_instr_type_intrinsic)
++               continue;
++            auto *intr = nir_instr_as_intrinsic(instr);
++            if (intr->intrinsic != nir_intrinsic_store_ssbo)
++               continue;
++            ASSERT_LT(index, expected.size());
++            ASSERT_TRUE(nir_src_is_const(intr->src[0]));
++            EXPECT_EQ(nir_src_as_uint(intr->src[0]), expected[index++]);
++         }
++      }
++      EXPECT_EQ(index, expected.size());
++      ralloc_free(b.shader);
++   }
++}
++
++TEST(Apple9Compiler, X2FragmentExportUsesOpaqueDestinationAlpha)
++{
++   for (auto format : {PIPE_FORMAT_R10G10B10X2_UNORM,
++                       PIPE_FORMAT_B10G10R10X2_UNORM}) {
++      SCOPED_TRACE(util_format_name(format));
++      ASSERT_TRUE(agx_apple9_color_is_packed(format));
++      nir_builder b = nir_builder_init_simple_shader(
++         MESA_SHADER_FRAGMENT, &agx_nir_options, "x2 fragment export");
++      nir_store_output(&b, nir_imm_vec4(&b, 101 / 1023.0f, 517 / 1023.0f,
++                                       901 / 1023.0f, 0),
++         nir_imm_int(&b, 0), .write_mask = 15, .src_type = nir_type_float32,
++         .io_semantics = {.location = FRAG_RESULT_DATA0, .num_slots = 1});
++      b.shader->info.io_lowered = true;
++      agx_apple9_blend blend = {};
++      blend.format = format;
++      blend.colormask = 15;
++      blend.rgb_src = PIPE_BLENDFACTOR_DST_ALPHA;
++      blend.alpha_src = PIPE_BLENDFACTOR_ONE;
++      blend.rgb_dst = blend.alpha_dst = PIPE_BLENDFACTOR_ZERO;
++      agx_apple9_varying_layout varyings = {};
++      agx_shader_part compiled = {};
++      const char *reason = nullptr;
++      ASSERT_TRUE(agx_compile_apple9_fragment_mrt(
++         b.shader, &varyings, &blend, 1, &compiled, &reason))
++         << (reason ? reason : "no diagnostic");
++      unsigned stores = 0, loads = 0;
++      nir_foreach_block(block, nir_shader_get_entrypoint(b.shader)) {
++         nir_foreach_instr(instr, block) {
++            if (instr->type != nir_instr_type_intrinsic)
++               continue;
++            auto *intr = nir_instr_as_intrinsic(instr);
++            loads += intr->intrinsic == nir_intrinsic_load_local_pixel_agx;
++            if (intr->intrinsic != nir_intrinsic_store_local_pixel_agx)
++               continue;
++            ++stores;
++            ASSERT_TRUE(nir_src_is_const(intr->src[0]));
++            uint32_t expected = format == PIPE_FORMAT_B10G10R10X2_UNORM
++               ? 901 | (517 << 10) | (101 << 20)
++               : 101 | (517 << 10) | (901 << 20);
++            EXPECT_EQ(nir_src_as_uint(intr->src[0]), expected);
++            EXPECT_EQ(nir_intrinsic_format(intr), PIPE_FORMAT_R32_UINT);
++         }
++      }
++      EXPECT_EQ(stores, 1u);
++      EXPECT_EQ(loads, 0u);
++      free(compiled.binary);
++      ralloc_free(b.shader);
++   }
++}
++
+@@ -9353 +9470,6 @@ TEST(Apple9Compiler, BlockExportCompilesDynamicCoordinatesAndSparseImages)
+-   for (unsigned kind = 0; kind < 4; ++kind) {
++   const pipe_format formats[] = {
++      PIPE_FORMAT_R8G8B8A8_UNORM,
++      PIPE_FORMAT_R10G10B10X2_UNORM,
++      PIPE_FORMAT_B10G10R10X2_UNORM,
++   };
++   for (unsigned kind = 0; kind < 4 * ARRAY_SIZE(formats); ++kind) {
+@@ -9369 +9491 @@ TEST(Apple9Compiler, BlockExportCompilesDynamicCoordinatesAndSparseImages)
+-            .format = PIPE_FORMAT_R8G8B8A8_UNORM);
++            .format = formats[kind / 4]);
