@@ -58,6 +58,10 @@ shipped change.
    callbacks, and nothing keeps `gfx`, `disp_cpu` or `dptx_phy` on. Without
    them the GPU firmware and the display pipe are lost. Marking the domains
    `apple,always-on` or adding sleep support to the drivers are the options.
+   [#172](https://github.com/Kb2uka/Omarchy-M4-Native/pull/172) adds
+   `apple,always-on` in the devicetree. With it, on 2026-10-24, a real 36 s
+   s2idle cycle resumed with the display, the GPU and (with #171) the speakers
+   working.
 3. **GPU mailbox wake storm.** While asleep, the GPU coprocessor mailbox
    (`302608000.mailbox-recv`) interrupted about 230 times a second, against
    about 59 a second awake, and woke the s2idle loop roughly 9,500 times in
