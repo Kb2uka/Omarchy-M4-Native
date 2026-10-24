@@ -1,0 +1,74 @@
+--- a/audio/j713/kernel/j713-mca.h
++++ b/audio/j713/kernel/j713-mca.h
+@@ -320,6 +320,7 @@ static int j713_pcm_trigger(struct j713_transport *t, struct snd_pcm_substream *
+  if (!d) WRITE_ONCE(t->tx_stopping,false);
+  goto out;
+ fail:
++ dev_err(t->mca->dev,"J713 start of stream %u failed until reboot: %d\n",d,ret);
+  j713_audio_revoke(t->audio);
+  t->failed=true;
+ out:
+@@ -336,7 +337,10 @@ static int j713_dai_trigger(struct j713_transport *t, struct snd_pcm_substream *
+  if (!t->configured && !s->stream) goto out;
+  for(i=0;i<2&&!ret;i++) if(t->dma_running & BIT(i)) ret=j713_stage(t,i,true);
+  if (!ret && (t->dma_running & 2)) ret=j713_audio_sensing(t->audio);
+- if (ret) {j713_audio_revoke(t->audio);t->failed=true;}
++ if (ret) {
++  dev_err(t->mca->dev,"J713 DAI start of stream %u failed until reboot: %d\n",s->stream,ret);
++  j713_audio_revoke(t->audio);t->failed=true;
++ }
+ out:
+  mutex_unlock(&t->lock);
+  return ret;
+@@ -395,7 +399,12 @@ static int j713_sync_stopped_locked(struct j713_transport *t,struct snd_pcm_subs
+  if(t->cleanup[s->stream].phase!=M4_STOPPED)return 0;
+  ret=m4_cleanup_direction_once(&t->cleanup[s->stream],&io,s->stream?0x10:1);
+  if(c.frame_locked)mutex_unlock(&t->frame_lock);
+- if(ret){t->failed=true;j713_audio_revoke(t->audio);}
++ if(ret){
++  const struct m4_cleanup *m=&t->cleanup[s->stream];
++  dev_err(t->mca->dev,"J713 cleanup of stream %u failed until reboot: %d (phase %d error %d control %08x level %08x)\n",
++          s->stream,ret,m->phase,m->error,m->final_control,m->final_level);
++  t->failed=true;j713_audio_revoke(t->audio);
++ }
+  return ret;
+ }
+ static int j713_sync_stop(struct snd_soc_component *component,struct snd_pcm_substream *s)
+@@ -429,9 +438,12 @@ static void j713_port_close(struct j713_transport *t,struct snd_pcm_substream *s
+  t->opened&=~BIT(s->stream);cl->port_clk_started[s->stream]=false;
+  cl->clocks_in_use[s->stream]=false;
+  if(t->opened)goto out;
++ if(t->failed)dev_err(t->mca->dev,"J713 close: transport had already failed\n");
+  ret=j713_audio_revoke(t->audio);
++ if(ret)dev_err(t->mca->dev,"J713 close: revoke failed: %d\n",ret);
+  for(i=0;i<2;i++)if(t->stream[i]) {
+   int e=j713_stop_locked(t,t->stream[i]);
++  if(e)dev_err(t->mca->dev,"J713 close: stop of stream %u failed: %d\n",i,e);
+   if(!ret)ret=e;
+   e=j713_sync_stopped_locked(t,t->stream[i]);
+   if(!ret)ret=e;
+@@ -444,14 +456,22 @@ static void j713_port_close(struct j713_transport *t,struct snd_pcm_substream *s
+   writel(t->port_saved[0],cl->base+0x2160);
+   writel(t->port_saved[1],cl->base+0x2164);
+   if(readl(cl->base+0x2160)!=t->port_saved[0] || readl(cl->base+0x2164)!=t->port_saved[1] ||
+-     readl(cl->base+0x2168)!=t->port_saved[2])ret=-EIO;
++     readl(cl->base+0x2168)!=t->port_saved[2]){
++   dev_err(t->mca->dev,"J713 close: port restore mismatch %08x %08x %08x\n",
++           readl(cl->base+0x2160),readl(cl->base+0x2164),readl(cl->base+0x2168));
++   ret=-EIO;
++  }
+   t->port_owned=false;
+  }
+  mca_modify(cl,REG_PORT_ENABLES,14,0);
+  writel(0,mca_reg(cl,REG_PORT_DATA_SEL));writel(0,mca_reg(cl,REG_PORT_CLOCK_SEL));
+  if(t->configured){mca_fe_disable_clocks(cl);t->configured=false;}
+  cl->port_clk_driver=-1;
+- if(!ret)ret=j713_audio_quiesced(t->audio);
++ if(!ret){
++  ret=j713_audio_quiesced(t->audio);
++  if(ret)dev_err(t->mca->dev,"J713 close: return to LOW failed: %d\n",ret);
++ }
++ if(ret && !t->failed)dev_err(t->mca->dev,"J713 close: transport failed until reboot: %d\n",ret);
+  if(ret)t->failed=true;
+  if(!t->failed){t->frame_ready=false;memset(t->cleanup,0,sizeof(t->cleanup));}
+ out:
