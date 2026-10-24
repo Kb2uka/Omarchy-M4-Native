@@ -1,0 +1,3 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+exec /usr/bin/python3 -B /usr/lib/omarchy-m4/backlight/j715/tools/m4-j715-backlight.py "$@"

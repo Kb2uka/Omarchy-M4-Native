@@ -1,0 +1,18 @@
+[Unit]
+Description=Start the evidence-gated J715 native panel backlight
+After=local-fs.target systemd-udev-trigger.service
+Before=graphical.target
+ConditionPathExists=/usr/lib/omarchy-m4/backlight/j715/j715_dcp_backlight.ko
+ConditionPathExists=/usr/lib/omarchy-m4/backlight/j715/module.json
+ConditionPathExists=/usr/lib/omarchy-m4/backlight/j715/profile.json
+
+[Service]
+Type=oneshot
+ExecCondition=/usr/bin/m4-j715-backlight --supported
+ExecStart=/usr/bin/m4-j715-backlight --boot
+ExecStartPost=/usr/bin/m4-j715-backlight --keys-hook
+RemainAfterExit=yes
+TimeoutStartSec=30
+
+[Install]
+WantedBy=multi-user.target
