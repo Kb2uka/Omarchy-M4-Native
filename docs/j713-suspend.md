@@ -80,9 +80,26 @@ shipped change.
      not a reply loop: the firmware rings on its own whenever the GPU idles.
      The same rate therefore applies to an idle Air with the screen off, or
      locked with the lid closed (#92).
-   - The ring it fills is not yet known. The drain (`drain_trace_rx`,
-     `g16_runtime.rs`) is inlined, and the module exposes no parameters, so
-     finding it needs an instrumented GPU test module.
+   - An instrumented test module (the shipped `de0337a7` source plus per-ring
+     counters, built in the same toolchain after reproducing `80cf3669` and
+     `de0337a7` byte for byte) showed that only one ring advances while the
+     GPU idles: the second trace receive ring drained by `drain_trace_rx`
+     (state `0xffff_fc20_0003_f400`, 256 entries), about 1 to 3 entries per
+     drain. The event ring also carries `kind 1` entries, which the driver
+     skips. The shipped driver drains these rings only while a job is
+     outstanding, so at idle the firmware keeps ringing.
+   - Draining them on every doorbell while idle does not save power. On
+     battery with CPU idle active, the screen blanked and the backlight at 0,
+     2-minute averages of `power_now`:
+
+     | GPU module | `power_now` | Doorbells |
+     | --- | --- | --- |
+     | Shipped `de0337a7` | 4.56 W | 171/s |
+     | Rings drained while idle | 6.22 W | 55/s |
+
+     One sample each, so only the direction is meaningful. The doorbells cost
+     less than draining them; the remaining fix is for the GPU driver to put
+     the firmware to sleep, or stop its tracing, while idle.
 
    CPU idle itself works in s2idle: cores 1 to 8 entered `CPU PD` 2 to 8 times
    each during a 36 s cycle and stayed there; cpu0 and cpu9 re-entered it about
