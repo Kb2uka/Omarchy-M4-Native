@@ -31,6 +31,10 @@ NOTCH_UNIT = 'usr/lib/systemd/user/omarchy-m4-notch.service'
 SPEAKER_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/20-m4-speaker-module.conf'
 MCA_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/25-m4-mca-module.conf'
 SPEAKER_DEP = 'omarchy-m4-speaker>=1-5'
+UPDATE_DEP = 'omarchy-m4-update>=1-1'
+UPDATE_FILES = {'usr/bin/omarchy-m4-update': ('tools/omarchy-m4-update', 0o755),
+                'usr/lib/omarchy-m4/m4-channel-setup.py': ('tools/m4-channel-setup.py', 0o644),
+                'usr/share/licenses/omarchy-m4-update/MIT.txt': ('LICENSES/MIT.txt', 0o644)}
 GPU_DROP_IN = 'usr/lib/systemd/system/m4-gpu.service.d/20-m4-gpu-module.conf'
 HEADPHONES_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/30-m4-headphones.conf'
 CPU_IDLE_UNIT = 'usr/lib/systemd/system/m4-cpu-idle.service'
@@ -269,6 +273,33 @@ def check_package(channel, package, info, files, root, joins=None):
                 sorted(info.get('provides', [])) == ['linux-aarch64=7.1.9', 'linux=7.1.9'] and
                 sorted(info.get('depend', [])) == ['coreutils', 'kmod', 'omarchy-m4-boot'],
                 'Kernel package relations changed')
+    elif name == 'omarchy-m4-update':
+        require(set(files) == set(UPDATE_FILES), 'Shared updater must contain only its tools and license')
+        for path, (source, mode) in UPDATE_FILES.items():
+            require(files[path] == (mode, sha((ROOT / source).read_bytes())),
+                    'Shared updater differs: ' + path)
+        require(sorted(info.get('depend', [])) == ['pacman', 'python'] and
+                not info.get('conflict') and not info.get('replaces') and
+                info.get('.INSTALL', [None]) == [None],
+                'Shared updater must not pull in, replace or script changes to board packages')
+    elif name == 'omarchy-m4-xr30':
+        dependencies = info.get('depend', [])
+        require(UPDATE_DEP in dependencies, 'Graphics package must require ' + UPDATE_DEP)
+        for path, source, mode in (
+                ('usr/bin/m4-xr30', 'tools/m4-xr30.py', 0o755),
+                ('usr/lib/systemd/user/wayland-wm@hyprland.desktop.service.d/90-m4-xr30.conf',
+                 'packaging/omarchy-m4/omarchy-m4-xr30/90-m4-xr30.conf', 0o644)):
+            require(files.get(path) == (mode, sha((ROOT / source).read_bytes())),
+                    'Graphics package differs: ' + path)
+        allowed_dependencies = {
+            'omarchy-m4-update', 'python', 'glibc', 'gcc-libs', 'libdrm', 'expat', 'zlib', 'zstd',
+            'spirv-tools', 'lm_sensors', 'libglvnd', 'libx11', 'libxcb', 'libxext', 'libxrandr',
+            'libxxf86vm', 'libxshmfence', 'wayland', 'systemd-libs',
+        }
+        require(all(re.split('[<>=]', item, maxsplit=1)[0] in allowed_dependencies for item in dependencies) and
+                not info.get('conflict') and not info.get('replaces') and
+                info.get('.INSTALL', [None]) == [None],
+                'Graphics package must not pull in, replace or script changes to board packages')
     elif name == 'omarchy-m4-boot':
         require(files.get('usr/lib/omarchy-m4/j713.dtb', (0, ''))[1] == channel['devicetree']['sha256'],
                 'Boot package does not carry the pinned devicetree')
@@ -283,9 +314,7 @@ def check_package(channel, package, info, files, root, joins=None):
         realtime = (ROOT / 'packaging/omarchy-m4/omarchy-m4-boot/speakersafetyd-j713-realtime.conf').read_bytes()
         require(files.get(REALTIME) == (0o644, sha(realtime)), 'Boot package lacks the real-time speaker setting')
         # No dependency on the sinks: a later gst-plugins-good must be able to replace them.
-        for path, source in (('usr/bin/omarchy-m4-update', 'tools/omarchy-m4-update'),
-                             ('usr/lib/omarchy-m4/m4-channel-setup.py', 'tools/m4-channel-setup.py')):
-            require(files.get(path, (0, ''))[1] == sha((ROOT / source).read_bytes()), 'Boot package differs: ' + path)
+        require(not set(UPDATE_FILES) & set(files), 'Boot package still owns shared updater files')
         names = [re.split('[<>=]', d, maxsplit=1)[0] for d in info.get('depend', [])]
         require('omarchy-m4-gst-audio' not in names, 'Boot package must not require the GStreamer sinks')
         # An older installed setup script does not list omarchy-m4-gpu; this dependency
@@ -297,6 +326,8 @@ def check_package(channel, package, info, files, root, joins=None):
         require('omarchy-m4-backlight' in names, 'Boot package must require the native backlight package')
         require(SPEAKER_DEP in info.get('depend', []),
                 'Boot package must require ' + SPEAKER_DEP)
+        require(UPDATE_DEP in info.get('depend', []),
+                'Boot package must require ' + UPDATE_DEP)
         boot_kernel = channel['boot_kernel']
         image = files.get(boot_kernel['path'])
         require(image and image[1] == boot_kernel['image_sha256'],
