@@ -51,6 +51,8 @@
   has been qualified yet.
 - **Incomplete hardware qualification:** camera, suspend/resume, battery life,
   Bluetooth audio, arbitrary peripherals and fault recovery are not qualified.
+  [Sleep power domains](j713-sleep-power-domains.md) covers the GPU and display
+  part of suspend; it is not in a release yet.
   Speaker protection remains enabled; do not substitute unqualified filters or
   disable the protection services. If protection stops and the speakers go
   silent, reboot; restarting it in the same session does not work. If the
