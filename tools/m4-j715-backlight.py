@@ -10,7 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from j715_display_profile import qualified, sha
+from j715_display_profile import parse, qualified, sha
 
 # Reuse the unchanged owner's durable locking and key-file preservation logic in
 # an isolated module instance. Neither the J713 module nor its files are mutated.
@@ -121,7 +121,7 @@ def brightness(step: str, no_osd=False, run=subprocess.run, root=Path("/")):
         return run(["omarchy", "brightness", "display"] + (["--no-osd"] if no_osd else []) +
                    [step], env=environment, check=False).returncode
     require((root / BACKLIGHT).exists(), "Native panel backlight is not started")
-    profile = qualified(root / PROFILE)
+    profile = parse(root / PROFILE)
     fd = os.open(Path(os.environ["XDG_RUNTIME_DIR"]) / "omarchy-brightness-display.lock",
                  os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:

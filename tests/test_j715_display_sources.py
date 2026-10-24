@@ -72,6 +72,24 @@ class DisplaySources(unittest.TestCase):
         with self.assertRaises(SourceError):
             local_sources(self.root, self.lock)
 
+    def test_worktree_permissions_compare_only_the_owner_executable_bit(self):
+        self.target.chmod(0o600)
+        self.assertEqual(local_sources(self.root, self.lock)[0].data, self.data)
+        self.target.chmod(0o755)
+        with self.assertRaises(SourceError) as caught:
+            local_sources(self.root, self.lock)
+        self.assertIn("Source mode differs", str(caught.exception))
+        self.commit()
+        self.target.chmod(0o700)
+        pin = FilePin("display/client.c", "100755", self.lock.files[0].blob,
+                      len(self.data), self.lock.files[0].sha256)
+        lock = SourceLock(b"", "synthetic", self.git("rev-parse", "HEAD"), (pin,), None, ("display",))
+        self.assertEqual(local_sources(self.root, lock)[0].data, self.data)
+        self.target.chmod(0o644)
+        with self.assertRaises(SourceError) as stripped:
+            local_sources(self.root, lock)
+        self.assertIn("Source mode differs", str(stripped.exception))
+
     def test_real_display_lock_matches_unchanged_upstream_tree(self):
         lock = SourceLock.read(ROOT / "display/j715/source-lock.json")
         self.assertEqual(len(local_sources(ROOT, lock)), len(lock.files))

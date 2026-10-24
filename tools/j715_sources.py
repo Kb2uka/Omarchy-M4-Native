@@ -200,9 +200,10 @@ def local_sources(root: Path, lock: SourceLock) -> tuple[SourceFile, ...]:
         path = root / pin.path
         require(not any(p.is_symlink() for p in path.parents), "Symlink source ancestor")
         mode = path.lstat().st_mode
+        # Git records only the owner-executable bit. A checkout umask may clear the rest.
         require((stat.S_ISLNK(mode) and pin.mode == "120000") or
                 (stat.S_ISREG(mode) and pin.mode != "120000" and
-                 stat.S_IMODE(mode) == int(pin.mode, 8) & 0o777),
+                 bool(stat.S_IMODE(mode) & 0o100) == (pin.mode == "100755")),
                 "Source mode differs: " + pin.path)
         if stat.S_ISLNK(mode):
             data = os.fsencode(os.readlink(path))

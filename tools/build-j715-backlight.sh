@@ -12,8 +12,14 @@ here=$(dirname "$(realpath "$0")")
 module=$(realpath -m "$1") kernel=$(realpath "$2") profile=$(realpath "$3")
 python3 -B "$here/j715_display_profile.py" "$profile"
 : "${J715_BUILD_IMAGE_ID:?immutable builder image digest required}"
-[ ! -e "$module" ] && [ ! -L "$module" ]
-[ -f "$kernel/Module.symvers" ] && [ -f "$kernel/include/generated/utsrelease.h" ]
+if [ -e "$1" ] || [ -L "$1" ] || [ -e "$module" ] || [ -L "$module" ]; then
+    echo "module output already exists: $1" >&2
+    exit 1
+fi
+if [ ! -f "$kernel/Module.symvers" ] || [ ! -f "$kernel/include/generated/utsrelease.h" ]; then
+    echo "prepared kernel inputs are missing: $kernel" >&2
+    exit 1
+fi
 llvm=/usr/lib/llvm-21/bin
 "$llvm/clang" --version | grep -Fxq 'Ubuntu clang version 21.1.8 (6ubuntu1)'
 grep -Fxq 'CONFIG_CC_VERSION_TEXT="Ubuntu clang version 21.1.8 (6ubuntu1)"' "$kernel/.config"

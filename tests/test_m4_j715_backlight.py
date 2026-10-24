@@ -177,19 +177,22 @@ class Routing(unittest.TestCase):
         def run(command, **options):
             calls.append(command)
             return SimpleNamespace(stdout='[{"name":"DP-1","focused":true}]', returncode=0)
-        with patch.object(BACKLIGHT, "qualified", side_effect=AssertionError("external profile lookup")):
+        with patch.object(BACKLIGHT, "parse", side_effect=AssertionError("external profile lookup")), \
+             patch.object(BACKLIGHT, "qualified", side_effect=AssertionError("external profile lookup")):
             BACKLIGHT.brightness("1%-", True, run, self.root)
         self.assertEqual(calls, [["hyprctl", "monitors", "-j"],
                                 ["omarchy", "brightness", "display", "--no-osd", "1%-"]])
 
-    def test_native_keys_obey_qualified_minimum_and_preserve_steps(self):
+    def test_native_keys_obey_profile_minimum_and_preserve_steps(self):
+        profile_path = self.root / BACKLIGHT.PROFILE
+        profile_path.parent.mkdir(parents=True, exist_ok=True)
+        profile_path.write_bytes(FIXTURE.read_bytes())
         for current, step, expected in ((4, "+5%", "5%"), (6, "5%-", "2%"), (2, "1%-", "2%"),
                                          (100, "+1%", "100%"), (5, "5%-", "4%"), (20, "1%", "2%")):
             with self.subTest(step=step, current=current):
                 self.calls = []
                 self.current = current
-                with patch.object(BACKLIGHT, "qualified", return_value=self.profile), \
-                     patch.dict(os.environ, XDG_RUNTIME_DIR=str(self.root)):
+                with patch.dict(os.environ, XDG_RUNTIME_DIR=str(self.root)):
                     BACKLIGHT.brightness(step, False, self.run_route, self.root)
                 self.assertIn(["brightnessctl", "-d", "j715-dcp", "set", expected], self.calls)
                 self.assertTrue(any(command[0] == "omarchy-osd" for command in self.calls))

@@ -14,7 +14,10 @@ tools=$here/../../tools
 src=$(realpath "$1") out=$(realpath -m "$2") profile=$(realpath "$3")
 python3 -B "$tools/j715_display_profile.py" "$profile"
 : "${J715_BUILD_IMAGE_ID:?immutable builder image digest required}"
-[ ! -e "$out" ] && [ ! -L "$out" ]
+if [ -e "$2" ] || [ -L "$2" ] || [ -e "$out" ] || [ -L "$out" ]; then
+    echo "output already exists: $2" >&2
+    exit 1
+fi
 [ "$(uname -m)" = aarch64 ]
 source_sha=c394517941a5700b227718bb02e3df3dd43c9ad5a8e53c9447a55d3c36846c44
 stock_sha=7431196da2fd48681b262f6f605984f82d46ce66bf7ba56cd64118358684a2c7
@@ -25,7 +28,10 @@ rustc --version | grep -Eq '^rustc 1\.93\.1 '
 scratch=$(mktemp -d "$TMPDIR/j715-loader.XXXXXXXX")
 tree=/job/bootloader-air-knownbase-stage2
 # The stock pin depends on this absolute build path. Never reuse someone else's.
-[ ! -e "$tree" ] && [ ! -L "$tree" ]
+if [ -e "$tree" ] || [ -L "$tree" ]; then
+    echo "build path already exists: $tree" >&2
+    exit 1
+fi
 mkdir "$tree"
 trap 'rm -rf -- "$tree" "$scratch"' EXIT
 python3 -B "$tools/j715_display_profile.py" "$profile" --stage "$scratch/verified"
