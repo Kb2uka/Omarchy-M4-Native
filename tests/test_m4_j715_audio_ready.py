@@ -45,7 +45,8 @@ class Fixture(unittest.TestCase):
     def setUpClass(cls):
         sources = s.load("j715_sources.py")
         cls.lock = sources.SourceLock.read(ROOT / "audio/j715/source-lock.json")
-        cls.sources = sources.local_sources(ROOT.parent / "donor-source", cls.lock)
+        donor = Path(os.environ.get("J715_DONOR_SOURCE", ROOT.parent / "donor-source"))
+        cls.sources = sources.local_sources(donor, cls.lock)
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()

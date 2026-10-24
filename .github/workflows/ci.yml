@@ -65,6 +65,15 @@ jobs:
           else
             git show --format= --check HEAD
           fi
+      - name: Fetch pinned J715 donor source
+        run: |
+          repo=$(jq -r .repository audio/j715/source-lock.json)
+          commit=$(jq -r .commit audio/j715/source-lock.json)
+          donor="$(dirname "$GITHUB_WORKSPACE")/donor-source"
+          git init -q "$donor"
+          git -C "$donor" fetch -q --depth 1 "$repo" "$commit"
+          git -C "$donor" checkout -q --detach FETCH_HEAD
+          echo "J715_DONOR_SOURCE=$donor" >> "$GITHUB_ENV"
       - name: Run offline regression suite
         env:
           LUA: lua5.4
