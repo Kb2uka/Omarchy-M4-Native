@@ -4,6 +4,7 @@ import contextlib
 import importlib.util
 import io
 from pathlib import Path
+import subprocess
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -32,6 +33,7 @@ class Machine:
         self.protection = protection
         self.user_units = set(user_units)
         self.calls = []
+        self.hangs = set()
         self.after_stop = LOW
         self.tx = 'closed'
         self.write_group(OWNED if protection else LOW)
@@ -47,7 +49,13 @@ class Machine:
         path.write_text(self.tx + '\n')
 
     def run(self, command, **kwargs):
+        # A call without a bound could hang suspend; subprocess.run raises once the bound passes.
+        assert kwargs.get('timeout'), command
         args = list(command[1:])
+        key = ('user', args[3]) if args[:1] == ['--user'] else ('system', args[0])
+        if key in self.hangs:
+            self.calls.append((*key, 'timed out'))
+            raise subprocess.TimeoutExpired(command, kwargs['timeout'])
         if args[:1] == ['--user']:
             user, verb, units = args[2].split('@')[0], args[3], args[4:]
             self.calls.append(('user', user, verb, tuple(units)))
@@ -164,21 +172,27 @@ class SleepCoordination(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertEqual(machine.calls, [])
 
-    def test_failed_pre_step_still_restores_user_audio(self):
+    def test_hung_user_stop_still_stops_protection_and_restores_everything(self):
         machine = Machine(self.root)
-        original = machine.run
-
-        def failing(command, **kwargs):
-            if list(command[1:3]) == ['stop', SLEEP.PROTECTION]:
-                machine.calls.append(('system', 'stop', SLEEP.PROTECTION))
-                return SimpleNamespace(returncode=1, stdout='', stderr='timed out')
-            return original(command, **kwargs)
-
-        machine.run = failing
+        machine.hangs = {('user', 'stop')}
         self.assertEqual(self.run_phase(machine, 'pre')[0], 0)
-        machine.run = original
+        self.assertIn(('system', 'stop', SLEEP.PROTECTION), machine.calls)
+        machine.hangs = set()
+        status, _ = self.run_phase(machine, 'post')
+        self.assertEqual(status, 0)
+        self.assertIn(('system', 'start', SLEEP.PROTECTION), machine.calls)
+        self.assertIn(('user', 'owner', 'start', SLEEP.USER_UNITS), machine.calls)
+
+    def test_hung_protection_stop_keeps_speakers_off_and_restores_user_audio(self):
+        machine = Machine(self.root)
+        machine.hangs = {('system', 'stop')}
+        status, log = self.run_phase(machine, 'pre')
+        self.assertEqual(status, 0)
+        self.assertIn('timed out', log)
+        machine.hangs = set()
         status, _ = self.run_phase(machine, 'post')
         self.assertEqual(status, 1)
+        self.assertNotIn(('system', 'start', SLEEP.PROTECTION), machine.calls)
         self.assertEqual(machine.user_units, set(SLEEP.USER_UNITS))
 
 

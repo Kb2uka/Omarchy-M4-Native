@@ -77,8 +77,12 @@ reached the verified LOW before sleep and found the group `CANCELLED` after it,
 so protection stayed off. With group `dcbf085a…` and MCA `dad7fb96…` built from
 `audio/j713/kernel/` plus `suspend-keeps-verified-low.patch` and
 `transport-failure-logging.patch`, protection was ready again 15 s after resume,
-idle and during playback, and a test tone then played (group ACTIVE). Real
-s2idle was not tested: the GPU and display domains are still lost (#92).
+idle and during playback, and a test tone then played (group ACTIVE). With
+the same modules and the devicetree from
+[#172](https://github.com/Kb2uka/Omarchy-M4-Native/pull/172), which keeps the
+GPU and display domains on, a real 36 s s2idle cycle woken by the power button
+gave the same result: protection ready 16 s after resume, then a tone played.
+Without that devicetree, real s2idle loses the GPU and display (#92).
 
 Faults remain latched and the protection service retains `Restart=no`. This
 package does not promise automatic recovery after thermal faults, capture XRUNs,

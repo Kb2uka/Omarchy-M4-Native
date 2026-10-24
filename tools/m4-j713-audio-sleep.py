@@ -36,14 +36,26 @@ USER_UNITS = ('pipewire.socket', 'pipewire-pulse.socket', 'wireplumber.service',
 CLEAN_LOW = {'stable': '1', 'phase': '0', 'owner': '0', 'cancelled': '1', 'faulted': '0', 'removing': '0',
              'error': '0', 'gpio_error': '0', 'gpio_low_verified': '1', 'deadline_ns': '0', 'profile': '1'}
 TX_CLOSE_SECONDS = 5
+# Every systemctl call is bounded, so a hung call is logged as a failure and the
+# next step still runs. pre (TimeoutStartSec=60): 5 + users * (5 + 10) + 5 + 15,
+# 55 s for two logged-in users. post (TimeoutStopSec=180): protection and the
+# WirePlumber readiness gate each allow 65 s to start, 150 s for one user.
+QUERY_SECONDS = 5
+USER_STOP_SECONDS = 10
+PROTECTION_STOP_SECONDS = 15
+START_SECONDS = 75
 
 
 def log(message):
     print(message, file=sys.stderr, flush=True)
 
 
-def systemctl(*args):
-    return subprocess.run(('systemctl', *args), capture_output=True, text=True)
+def systemctl(*args, timeout):
+    command = ('systemctl', *args)
+    try:
+        return subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(command, 124, '', f'timed out after {timeout} s')
 
 
 def group(root):
@@ -81,12 +93,12 @@ def users(root):
     return found
 
 
-def user_systemctl(user, *args):
-    return systemctl('--user', '--machine', user + '@.host', *args)
+def user_systemctl(user, *args, timeout):
+    return systemctl('--user', '--machine', user + '@.host', *args, timeout=timeout)
 
 
 def active_units(user):
-    result = user_systemctl(user, 'is-active', *USER_UNITS)
+    result = user_systemctl(user, 'is-active', *USER_UNITS, timeout=QUERY_SECONDS)
     states = result.stdout.split()
     return [unit for unit, state in zip(USER_UNITS, states) if state == 'active']
 
@@ -124,24 +136,25 @@ def before_sleep(root):
         log('No J713 speaker group; nothing to do')
         write_state(root, state)
         return state
-    if systemctl('is-active', '--quiet', PROTECTION).returncode != 0:
+    if systemctl('is-active', '--quiet', PROTECTION, timeout=QUERY_SECONDS).returncode != 0:
         log('Speaker protection is not running; leaving it off')
         write_state(root, state)
         return state
     for user in users(root):
         units = active_units(user)
-        if not units:
-            continue
-        state['users'][user] = units
-        result = user_systemctl(user, 'stop', *units)
-        log(f'Stopped user audio for {user}: {" ".join(units)}'
-            + ('' if result.returncode == 0 else f' (systemctl: {result.stderr.strip()})'))
-    # Write before stopping protection, so resume restores user audio even if a later step fails.
+        if units:
+            state['users'][user] = units
+    # Record before stopping anything, so resume restores whatever was stopped
+    # even if a later step fails or this run is cut short.
     state['protection'] = True
     write_state(root, state)
+    for user, units in state['users'].items():
+        result = user_systemctl(user, 'stop', *units, timeout=USER_STOP_SECONDS)
+        log(f'Stopped user audio for {user}: {" ".join(units)}'
+            + ('' if result.returncode == 0 else f' (systemctl: {result.stderr.strip()})'))
     if not wait(lambda: tx_closed(root), TX_CLOSE_SECONDS):
         log('Speaker output is still open; protection cannot return to LOW and stays off until a reboot')
-    result = systemctl('stop', PROTECTION)
+    result = systemctl('stop', PROTECTION, timeout=PROTECTION_STOP_SECONDS)
     if result.returncode != 0:
         log(f'Stopping speaker protection failed: {result.stderr.strip()}')
     fields = group(root)
@@ -169,7 +182,7 @@ def after_resume(root):
             log('Speaker output opened while protection was off; speakers stay off until a reboot')
             status = 1
         else:
-            result = systemctl('start', PROTECTION)
+            result = systemctl('start', PROTECTION, timeout=START_SECONDS)
             if result.returncode == 0:
                 log('Speaker protection is ready again')
             else:
@@ -177,7 +190,7 @@ def after_resume(root):
                 status = 1
     for user, units in sorted(state.get('users', {}).items()):
         units = [unit for unit in units if unit in USER_UNITS]
-        result = user_systemctl(user, 'start', *units)
+        result = user_systemctl(user, 'start', *units, timeout=START_SECONDS)
         log(f'Started user audio for {user}: {" ".join(units)}'
             + ('' if result.returncode == 0 else f' (systemctl: {result.stderr.strip()})'))
     return status

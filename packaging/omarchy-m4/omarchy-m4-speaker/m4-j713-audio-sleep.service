@@ -14,7 +14,7 @@ RuntimeDirectoryMode=0700
 ExecStart=/usr/bin/m4-j713-audio-sleep pre
 ExecStop=/usr/bin/m4-j713-audio-sleep post
 TimeoutStartSec=60
-TimeoutStopSec=150
+TimeoutStopSec=180
 
 [Install]
 WantedBy=sleep.target
