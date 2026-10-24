@@ -3,7 +3,7 @@
 """Package policy for the retained-bounds boot kernel and the fixed MCA module.
 
 The base linux-m4-omarchy package keeps the qualified image and its modules.
-omarchy-m4-boot 1-19 carries the new image beside that package, and
+omarchy-m4-boot 1-20 carries the new image beside that package, and
 omarchy-m4-speaker carries the fixed MCA module. Pins come from the shipped channel.
 """
 import configparser
@@ -21,7 +21,7 @@ MCA_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/25-m4-mca
 MCA_DROP_IN_SOURCE = ROOT / 'packaging/omarchy-m4/omarchy-m4-speaker/25-m4-mca-module.conf'
 # The leading '-' is systemd's ignore-failure prefix and is part of the command.
 MCA_BOOT_COMMAND = '-/usr/bin/m4-speaker-module --component mca --boot'
-BOOT_VERSION = '1-19'
+BOOT_VERSION = '1-20'
 SPEAKER_VERSION = '1-5'
 
 
@@ -116,7 +116,8 @@ class HardeningPackageTests(unittest.TestCase):
 
     def boot_info(self, depend=None):
         if depend is None:
-            depend = ['python', 'pacman', 'omarchy-m4-gpu', 'omarchy-m4-headphones', 'omarchy-m4-cpu',
+            depend = ['python', 'pacman', 'omarchy-m4-update>=1-1', 'omarchy-m4-xr30',
+                      'omarchy-m4-gpu', 'omarchy-m4-headphones', 'omarchy-m4-cpu',
                       'omarchy-m4-evdi', 'omarchy-m4-backlight', 'omarchy-m4-speaker>=1-5']
         return {'pkgname': ['omarchy-m4-boot'], 'pkgver': [BOOT_VERSION], 'arch': ['aarch64'], 'depend': depend}
 
@@ -125,8 +126,6 @@ class HardeningPackageTests(unittest.TestCase):
         root = self.root()
         composer = staged('omarchy-m4-boot', 'm4-boot-compose.py')
         notch = staged('omarchy-m4-boot', 'm4-notch.py')
-        update = staged('omarchy-m4-boot', 'omarchy-m4-update')
-        setup = staged('omarchy-m4-boot', 'm4-channel-setup.py')
         hook = (ROOT / 'packaging/omarchy-m4/omarchy-m4-boot/90-omarchy-m4-boot.hook').read_bytes()
         realtime = (ROOT / 'packaging/omarchy-m4/omarchy-m4-boot/speakersafetyd-j713-realtime.conf').read_bytes()
         unit = (ROOT / 'packaging/omarchy-m4/omarchy-m4-boot/omarchy-m4-notch.service').read_bytes()
@@ -142,8 +141,6 @@ class HardeningPackageTests(unittest.TestCase):
             'usr/bin/m4-boot-compose': (0o755, sha(composer)),
             'usr/share/libalpm/hooks/90-omarchy-m4-boot.hook': (0o644, sha(hook)),
             'usr/lib/omarchy-m4/j713.dtb': (0o644, self.channel['devicetree']['sha256']),
-            'usr/bin/omarchy-m4-update': (0o755, sha(update)),
-            'usr/lib/omarchy-m4/m4-channel-setup.py': (0o644, sha(setup)),
             CHECK.REALTIME: (0o644, sha(realtime)),
             pin['path']: (0o644, pin['image_sha256']),
         })

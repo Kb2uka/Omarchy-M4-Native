@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 KB2UKA
-"""Connect an installed J713 alpha.1 Air to the signed M4 package channel.
+"""Connect an installed J713 Air or J715 graphics tester to the signed channel.
 
 Trusts the channel's signing key, adds the [omarchy-m4] repository in front of
 the distribution repositories, then installs the channel packages from it.
@@ -13,6 +13,10 @@ step with the current installed package composition. A coherent boot hold
 is success and stays held: a reboot does not apply those boot packages.
 Another component can still need its own restart. Inspection is the default;
 --apply makes the changes.
+
+J715 is a separate graphics-only route: it preserves the tester kernel,
+boot object and audio state. Only keyring, updater and XR30 packages may
+enter its resolved transaction. Graphics take effect at the next login.
 """
 import argparse
 import fcntl
@@ -24,6 +28,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from typing import Final
 
 REPOSITORY = 'omarchy-m4'
 SERVER = 'https://github.com/Kb2uka/Omarchy-M4-Native/releases/download/packages'
@@ -70,8 +75,12 @@ CPU_GUARD_STAGED = 'usr/lib/omarchy-m4/cpu/j713_pguard.ko'
 CPU_IDLE_STATE = 'var/lib/omarchy-m4/cpu-idle'
 BACKLIGHT_STAGED = 'usr/lib/omarchy-m4/backlight/j713_dcp_backlight.ko'
 BACKLIGHT_STATE = 'var/lib/omarchy-m4/backlight'
-PACKAGES = ('omarchy-m4-keyring', 'omarchy-m4-boot', 'linux-m4-omarchy', 'omarchy-m4-gst-audio', 'omarchy-m4-speaker',
-            'omarchy-m4-gpu', 'omarchy-m4-headphones', 'omarchy-m4-cpu', 'omarchy-m4-evdi', 'omarchy-m4-backlight')
+PACKAGES = ('omarchy-m4-keyring', 'omarchy-m4-update', 'omarchy-m4-xr30', 'omarchy-m4-boot',
+            'linux-m4-omarchy', 'omarchy-m4-gst-audio', 'omarchy-m4-speaker', 'omarchy-m4-gpu',
+            'omarchy-m4-headphones', 'omarchy-m4-cpu', 'omarchy-m4-evdi', 'omarchy-m4-backlight')
+GRAPHICS_PACKAGES: Final = ('omarchy-m4-keyring', 'omarchy-m4-update', 'omarchy-m4-xr30')
+TESTER_RELEASE: Final = '7.1.9-m4-gpu-backport-20261008'
+TESTER_PACKAGE: Final = 'linux-m4-omarchy 7.1.9.m4.20261008-1'
 SINKS = 'omarchy-m4-gst-audio'  # gst-plugins-good already has both sinks and conflicts with it
 BOARD = b'apple,j713'
 CONF = 'etc/pacman.conf'
@@ -533,6 +542,53 @@ def preflight(root, machine):
             'The alpha.1 kernel package linux-m4-omarchy is not installed')
 
 
+def graphics_preflight(root: Path, machine: Machine) -> None:
+    """Admit the tester base, not the J713 full-update or boot contract.
+
+    derive-j715-test-kit preserves the J713-named stack manifests and the
+    base kernel package. Their identity is deliberately not rewritten to
+    claim J715 audio/video qualification or a particular boot-image hash.
+    """
+    compatible = (root / COMPATIBLE).read_bytes()
+    require(compatible in (b'apple,j715\0apple,t8132\0',
+                           b'apple,j715\0apple,t8132\0apple,arm-platform\0'),
+            'Graphics updates require exactly J715/T8132')
+    require((root / CONF).is_file(), 'Missing /' + CONF)
+    require((root / 'proc/sys/kernel/osrelease').read_text().strip() == TESTER_RELEASE,
+            'Graphics updates require the running tester kernel release')
+    for name in MANIFESTS:
+        document = audio_json_document(root / name)
+        require(isinstance(document, dict) and
+                all(document.get(key) == value for key, value in (
+                    ('schema', 1), ('board', 'apple,j713'), ('soc', 'apple,t8132'),
+                    ('kernel_release', TESTER_RELEASE))),
+                'Incoherent inherited tester manifest: /' + name)
+    kernel = machine.captured('-Q', 'linux-m4-omarchy')
+    require(kernel.returncode == 0 and kernel.stdout.strip() == TESTER_PACKAGE and not kernel.stderr,
+            'Graphics updates require the installed tester base kernel package')
+    require(not machine.installed('omarchy-m4-boot'),
+            'J715 graphics enrollment refuses an installed J713 boot package')
+
+
+def graphics_transaction(machine: Machine, selected: list[str]) -> list[str]:
+    """Resolve the same repository-qualified targets before allowing a write.
+
+    Even a signed package must not expand this transaction into boot, kernel,
+    modules or distribution dependencies. Conflicts and replacements are
+    refused too, since a name-only add list would miss package removals.
+    """
+    targets = [REPOSITORY + '/' + name for name in selected]
+    result = machine.captured('-S', '--print', '--print-format', '%n|%r|%H|%R',
+                              '--needed', '--noconfirm', *targets)
+    require(result.returncode == 0, 'Could not resolve graphics transaction')
+    rows = [line.split('|') for line in result.stdout.splitlines()]
+    require(rows and all(len(row) == 4 and row[0] in GRAPHICS_PACKAGES and
+                         row[1:] == [REPOSITORY, '', ''] for row in rows) and
+            set(selected) <= {row[0] for row in rows},
+            'Graphics transaction would install or remove packages outside its scope')
+    return targets
+
+
 def setup(root, apply=False, server=SERVER, key=PUBLIC_KEY, fingerprint=FINGERPRINT, output=sys.stderr):
     if not apply:
         return connect(root, False, server, key, fingerprint, output)
@@ -547,8 +603,14 @@ def setup(root, apply=False, server=SERVER, key=PUBLIC_KEY, fingerprint=FINGERPR
 
 def connect(root, apply, server, key, fingerprint, output):
     machine = Machine(root, output)
-    preflight(root, machine)
-    packages = [p for p in PACKAGES if p != SINKS or not machine.installed('gst-plugins-good')]
+    compatible = root / COMPATIBLE
+    graphics = compatible.is_file() and b'apple,j715' in compatible.read_bytes().split(b'\0')
+    if graphics:
+        graphics_preflight(root, machine)
+        packages = list(GRAPHICS_PACKAGES)
+    else:
+        preflight(root, machine)
+        packages = [p for p in PACKAGES if p != SINKS or not machine.installed('gst-plugins-good')]
     conf = root / CONF
     text = conf.read_text()
     updated = with_include(text, include_line(root))
@@ -556,11 +618,12 @@ def connect(root, apply, server, key, fingerprint, output):
     current = (root / SNIPPET).read_text() if (root / SNIPPET).is_file() else None
     plan = {'trust_key': fingerprint, 'snippet': str(root / SNIPPET), 'snippet_changes': current != wanted,
             'pacman_conf_changes': updated is not None, 'install': packages, 'applied': False}
+    plan['scope'] = 'j715-graphics' if graphics else 'j713-full'
     if not apply:
         plan['status'] = 'ready; rerun with --apply'
         return plan
     require(machine.sandbox or os.geteuid() == 0, 'Run with sudo')
-    before = boot_digest(root)
+    before = None if graphics else boot_digest(root)
     with tempfile.TemporaryDirectory(prefix='omarchy-m4-setup-') as scratch:
         scratch = Path(scratch)
         key_file = scratch / 'omarchy-m4.asc'
@@ -591,7 +654,8 @@ def connect(root, apply, server, key, fingerprint, output):
             # An empty -S is not a transaction. Dependencies of a selected name
             # are still resolved by pacman, including ones this list omits.
             if selected:
-                require(machine.pacman('-S', '--needed', '--noconfirm', *selected) == 0,
+                targets = graphics_transaction(machine, selected) if graphics else selected
+                require(machine.pacman('-S', '--needed', '--noconfirm', *targets) == 0,
                         'Package installation failed')
         except (Refused, OSError) as error:
             # A configured but unreachable repository would stop every later system update.
@@ -600,9 +664,19 @@ def connect(root, apply, server, key, fingerprint, output):
                 (root / SNIPPET).unlink(missing_ok=True)
             elif current != wanted:
                 write(root / SNIPPET, current, conf.stat().st_mode & 0o777)
+            if graphics:
+                raise Refused(str(error) + '; pacman.conf was restored. Graphics installation may be partial; '
+                              'fix the cause and rerun omarchy-m4-update before the next graphical login') from error
             raise Refused(str(error) + '; pacman.conf was restored and the boot update may be partial. '
                           'Inspect m4-boot-compose and resume the pending operation it reports '
                           'after fixing the cause, then rerun omarchy-m4-update') from error
+    if graphics:
+        login = 'omarchy-m4-xr30' in selected
+        plan.update(applied=True, boot='unchanged; graphics-only update', restart_needed=False,
+                    graphical_login_needed=login,
+                    status=('connected; graphics update takes effect at next graphical login' if login else
+                            'connected; future graphics fixes arrive with omarchy-m4-update'))
+        return plan
     boot = machine.compose()
     require(boot in ('current', 'updated; takes effect at next boot', HELD_BOOT),
             'The packages are installed, but the boot update needs attention: boot.bin is not in step with them '

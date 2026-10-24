@@ -48,7 +48,7 @@ def covers_protected(path, protected):
     return path.endswith('/') and any(p.startswith(path) for p in protected)
 
 
-BOOT_VERSION = '1-19'
+BOOT_VERSION = '1-20'
 SPEAKER_VERSION = '1-5'
 
 
@@ -62,6 +62,85 @@ def write_size(root, relative, size):
 
 
 class RecipeTests(unittest.TestCase):
+    def test_pinned_builder_refuses_an_existing_destination(self):
+        with tempfile.TemporaryDirectory() as temp:
+            destination = Path(temp) / 'builder'
+            destination.mkdir()
+            marker = destination / 'owner-file'
+            marker.write_bytes(b'keep')
+            result = subprocess.run(
+                ['bash', str(ROOT / 'tools/ci/bootstrap-m4-makepkg.sh'), str(destination)],
+                capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(marker.read_bytes(), b'keep')
+            self.assertEqual(list(destination.iterdir()), [marker])
+
+    def test_pinned_builder_refuses_an_untrusted_download_before_extracting(self):
+        with tempfile.TemporaryDirectory() as temp:
+            temp = Path(temp)
+            commands = temp / 'bin'
+            commands.mkdir()
+            curl = commands / 'curl'
+            curl.write_text('#!/bin/sh\n'
+                            'while [ "$#" -gt 0 ]; do\n'
+                            '  case "$1" in\n'
+                            '    --output) output=$2; shift 2 ;;\n'
+                            '    *) shift ;;\n'
+                            '  esac\n'
+                            'done\n'
+                            'printf untrusted > "$output"\n')
+            curl.chmod(0o755)
+            destination = temp / 'builder'
+            result = subprocess.run(
+                ['bash', str(ROOT / 'tools/ci/bootstrap-m4-makepkg.sh'), str(destination)],
+                env={**os.environ, 'PATH': str(commands) + ':' + os.environ['PATH']},
+                capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(destination.exists())
+
+    def test_source_package_refuses_non_native_builder_before_writing(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / 'packages'
+            with patch.object(BUILD.platform, 'machine', return_value='x86_64'):
+                with self.assertRaises(SystemExit):
+                    BUILD.build(output)
+            self.assertFalse(output.exists())
+
+    def test_source_package_checks_are_enabled(self):
+        result = subprocess.run(
+            ['bash', '-c', BUILD.MAKEPKG_CONF + '\nprintf "%s\\n" "${BUILDENV[@]}"'],
+            capture_output=True, text=True, check=True)
+        self.assertIn('check', result.stdout.splitlines())
+        self.assertNotIn('!check', result.stdout.splitlines())
+
+    def test_common_recipe_owns_only_the_migrated_files(self):
+        # Given recipes sourced by bash exactly as makepkg sources them.
+        names = ('omarchy-m4-update', 'omarchy-m4-boot')
+        metadata = {}
+        for name in names:
+            result = subprocess.run(['bash', '-c',
+                                     'source "$1"; printf "%s\\n" "$pkgver-$pkgrel" "${depends[@]}"',
+                                     'recipe', str(PACKAGING / name / 'PKGBUILD')],
+                                    check=True, capture_output=True, text=True)
+            metadata[name] = result.stdout.splitlines()
+        # Then boot retains its identity and brings the independent common package.
+        self.assertEqual(metadata['omarchy-m4-boot'][0], BOOT_VERSION)
+        self.assertIn('omarchy-m4-update>=1-1', metadata['omarchy-m4-boot'][1:])
+        self.assertEqual(metadata['omarchy-m4-update'], ['1-1', 'python', 'pacman'])
+        # Invoke package(), without compilation or makepkg, to check real file ownership.
+        with tempfile.TemporaryDirectory() as temporary:
+            stage = Path(temporary)
+            for source in ('tools/m4-channel-setup.py', 'tools/omarchy-m4-update', 'LICENSES/MIT.txt'):
+                (stage / Path(source).name).write_bytes((ROOT / source).read_bytes())
+            output = stage / 'root'
+            subprocess.run(['bash', '-c', 'source "$1"; pkgdir="$2"; package',
+                            'recipe', str(PACKAGING / 'omarchy-m4-update/PKGBUILD'), str(output)],
+                           cwd=stage, check=True)
+            files = {p.relative_to(output).as_posix(): (p.stat().st_mode & 0o777,
+                     hashlib.sha256(p.read_bytes()).hexdigest()) for p in output.rglob('*') if p.is_file()}
+            self.assertEqual(files, {path: (mode, file_sha(source))
+                                    for path, (source, mode) in CHECK.UPDATE_FILES.items()})
+
     def test_a_directory_over_a_protected_path_is_caught(self):
         self.assertTrue(covers_protected('usr/lib/', CHANNEL['protected_paths']))
         self.assertFalse(covers_protected('usr/lib/gstreamer-1.0/', CHANNEL['protected_paths']))
@@ -208,6 +287,46 @@ class PolicyTests(unittest.TestCase):
             with self.subTest(message):
                 with self.assertRaisesRegex(ValueError, message):
                     CHECK.check_package(CHANNEL, *self.package('omarchy-m4-boot', files))
+
+    def test_shared_updater_rejects_board_dependencies_and_migration_scriptlets(self):
+        files = {path: (mode, file_sha(source)) for path, (source, mode) in CHECK.UPDATE_FILES.items()}
+        info = {'pkgname': ['omarchy-m4-update'], 'pkgver': ['1-1'], 'arch': ['aarch64'],
+                'depend': ['python', 'pacman'], '.INSTALL': [None]}
+        CHECK.check_package(CHANNEL, *self.package('omarchy-m4-update', files, info))
+        for change in ({'depend': ['python', 'pacman', 'omarchy-m4-boot']},
+                       {'conflict': ['omarchy-m4-boot<1-20']}, {'replaces': ['omarchy-m4-boot']},
+                       {'.INSTALL': ['scriptlet']}):
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, 'board packages'):
+                CHECK.check_package(CHANNEL, *self.package('omarchy-m4-update', files, {**info, **change}))
+        for path in files:
+            with self.subTest(path=path), self.assertRaisesRegex(ValueError, 'only its tools'):
+                CHECK.check_package(CHANNEL, *self.package(
+                    'omarchy-m4-update', {p: value for p, value in files.items() if p != path}, info))
+
+    def test_graphics_package_cannot_depend_on_boot_or_board_packages(self):
+        files = {'usr/bin/m4-xr30': (0o755, 'synthetic helper')}
+        info = {'pkgname': ['omarchy-m4-xr30'], 'pkgver': ['1-1'], 'arch': ['aarch64'],
+                'depend': ['python', 'omarchy-m4-update>=1-1']}
+        CHECK.check_package(CHANNEL, *self.package('omarchy-m4-xr30', files, info))
+        for dependency in ('omarchy-m4-boot', 'linux-m4-omarchy', 'omarchy-m4-gpu', 'omarchy-m4-speaker'):
+            with self.subTest(dependency=dependency), self.assertRaisesRegex(ValueError, 'board packages'):
+                CHECK.check_package(CHANNEL, *self.package(
+                    'omarchy-m4-xr30', files, {**info, 'depend': [*info['depend'], dependency]}))
+
+    def test_boot_requires_common_package_without_owning_its_files(self):
+        files = {**self.boot_files(), CHECK.REALTIME: (0o644, file_sha(
+                 'packaging/omarchy-m4/omarchy-m4-boot/speakersafetyd-j713-realtime.conf'))}
+        info = self.boot_info()
+        info['depend'].remove('omarchy-m4-update>=1-1')
+        with self.assertRaisesRegex(ValueError, 'must require omarchy-m4-update'):
+            CHECK.check_package(CHANNEL, *self.boot_package(files, info))
+        # Even an erroneous allowlist cannot authorize double ownership.
+        channel = json.loads(json.dumps(CHANNEL))
+        path = 'usr/bin/omarchy-m4-update'
+        channel['allowed_paths']['omarchy-m4-boot'].append(path)
+        with self.assertRaisesRegex(ValueError, 'still owns shared'):
+            CHECK.check_package(channel, *self.boot_package(
+                {**files, path: (0o755, file_sha('tools/omarchy-m4-update'))}))
 
     def test_only_the_listed_protected_exception_passes(self):
         realtime = (PACKAGING / 'omarchy-m4-boot/speakersafetyd-j713-realtime.conf').read_bytes()
@@ -448,7 +567,8 @@ class PolicyTests(unittest.TestCase):
     def boot_info(self):
         return {'pkgname': ['omarchy-m4-boot'], 'pkgver': [BOOT_VERSION], 'arch': ['aarch64'],
                 'depend': ['python', 'pacman', 'omarchy-m4-gpu', 'omarchy-m4-headphones', 'omarchy-m4-cpu',
-                           'omarchy-m4-evdi', 'omarchy-m4-backlight', 'omarchy-m4-speaker>=1-5']}
+                           'omarchy-m4-evdi', 'omarchy-m4-backlight', 'omarchy-m4-speaker>=1-5',
+                           'omarchy-m4-update>=1-1']}
 
     def boot_files(self):
         """A boot package that passes every check except the ones under test, unpacked on disk."""
@@ -469,8 +589,6 @@ class PolicyTests(unittest.TestCase):
                 'usr/bin/m4-boot-compose': (0o755, hashlib.sha256(composer).hexdigest()),
                 'usr/share/libalpm/hooks/90-omarchy-m4-boot.hook': (0o644, hashlib.sha256(hook).hexdigest()),
                 'usr/lib/omarchy-m4/j713.dtb': (0o644, CHANNEL['devicetree']['sha256']),
-                'usr/bin/omarchy-m4-update': (0o755, file_sha('tools/omarchy-m4-update')),
-                'usr/lib/omarchy-m4/m4-channel-setup.py': (0o644, file_sha('tools/m4-channel-setup.py')),
                 pin['path']: (0o644, pin['image_sha256'])}
 
     def test_boot_package_requires_both_pinned_handoff_variants(self):

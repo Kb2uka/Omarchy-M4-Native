@@ -5,13 +5,15 @@
 
 Each package directory under packaging/omarchy-m4/ is copied to a scratch
 tree together with the repository files its PKGBUILD names, then built for
-aarch64. No package compiles code, so an x86_64 host builds them. Sources are
-checked against the PKGBUILD hashes; SOURCE_DATE_EPOCH is the commit time.
+aarch64. The XR30 Mesa package compiles code and requires a native aarch64
+builder. Sources are checked against the PKGBUILD hashes; SOURCE_DATE_EPOCH
+is the commit time.
 """
 import argparse
 import json
 import os
 from pathlib import Path
+import platform
 import shutil
 import subprocess
 import tempfile
@@ -23,8 +25,6 @@ HEADPHONES = 'audio/j713/headphones/policy/usr/share/'
 STAGED = {
     'omarchy-m4-boot': {'m4-boot-compose.py': 'tools/m4-boot-compose.py',
                         'm4-update-check.py': 'tools/m4-update-check.py',
-                        'm4-channel-setup.py': 'tools/m4-channel-setup.py',
-                        'omarchy-m4-update': 'tools/omarchy-m4-update',
                         'm4-lid-lock.py': 'tools/m4-lid-lock.py',
                         'm4-notch.py': 'tools/m4-notch.py',
                         # Notices for the notch stage 2, an m1n1 build (display/j713).
@@ -42,6 +42,12 @@ STAGED = {
                         'GPL-2.0-or-later.txt': 'LICENSES/GPL-2.0-or-later.txt',
                         # The retained-bounds image is GPL-2.0-only. Boot did not stage that text before.
                         'GPL-2.0-only.txt': 'LICENSES/GPL-2.0-only.txt'},
+    'omarchy-m4-update': {'m4-channel-setup.py': 'tools/m4-channel-setup.py',
+                          'omarchy-m4-update': 'tools/omarchy-m4-update',
+                          'MIT.txt': 'LICENSES/MIT.txt'},
+    'omarchy-m4-xr30': {'mesa-xr30.patch': 'gpu/j715/xr30/mesa-xr30.patch',
+                        'xr30-probe.c': 'gpu/j715/xr30/xr30-probe.c',
+                        'm4-xr30.py': 'tools/m4-xr30.py'},
     'omarchy-m4-speaker': {'m4-speaker-module.py': 'tools/m4-speaker-module.py',
                            'MIT.txt': 'LICENSES/MIT.txt',
                            'GPL-2.0-only.txt': 'LICENSES/GPL-2.0-only.txt'},
@@ -70,7 +76,10 @@ CARCH="aarch64"
 CHOST="aarch64-unknown-linux-gnu"
 DLAGENTS=('https::/usr/bin/curl -qgfL --proto =https --proto-redir =https --retry 3 --retry-delay 5 -o %o %u')
 VCSCLIENTS=()
-BUILDENV=(!distcc !color !ccache !check !sign)
+BUILDENV=(!distcc !color !ccache check !sign)
+CFLAGS="-O2 -pipe -fstack-protector-strong"
+CXXFLAGS="$CFLAGS"
+LDFLAGS="-Wl,-O1,--as-needed,-z,relro,-z,now"
 OPTIONS=(!strip docs !libtool !staticlibs emptydirs !zipman !purge !debug !lto)
 INTEGRITY_CHECK=(sha256)
 PACKAGER="KB2UKA <kb2uka80@gmail.com>"
@@ -93,6 +102,8 @@ def commit_time():
 def build(output, sources=None):
     require(not output.exists() and not output.is_symlink(), 'Output must be a new directory')
     names = json.loads((PACKAGING / 'channel.json').read_text())['packages']
+    require(platform.machine() in ('aarch64', 'arm64'),
+            'The source-built XR30 package requires a native aarch64 builder')
     output.mkdir(parents=True)
     with tempfile.TemporaryDirectory(prefix='m4-packages-') as scratch:
         scratch = Path(scratch)

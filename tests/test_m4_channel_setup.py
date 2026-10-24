@@ -104,6 +104,15 @@ class FakeSystem:
             return types.SimpleNamespace(returncode=1, stdout='', stderr='verification failed')
         if 'm4-boot-compose' in joined:
             return types.SimpleNamespace(returncode=0, stdout=json.dumps({'status': self.status}), stderr='')
+        if '--print' in command:
+            names = [arg.split('/', 1)[1] for arg in command if arg.startswith('omarchy-m4/')]
+            default = (0, ''.join(name + '|omarchy-m4||\n' for name in names), '')
+            code, out, err = self.queries.get('--print', default)
+            return types.SimpleNamespace(returncode=code, stdout=out, stderr=err)
+        if command[-2:] == ['-Q', 'linux-m4-omarchy'] and capture_output:
+            default = (0, 'linux-m4-omarchy 7.1.9.m4.20261008-1\n', '')
+            code, out, err = self.queries.get('tester-kernel', default)
+            return types.SimpleNamespace(returncode=code, stdout=out, stderr=err)
         if '-Sy' in command:
             self.refresh_config = Path(command[command.index('--config') + 1]).read_text()
         if '-S' in command and self.change_boot:
@@ -133,7 +142,7 @@ class FakeSystem:
         return types.SimpleNamespace(returncode=1, stdout='', stderr='')
 
 
-class SetupTests(unittest.TestCase):
+class SetupFixture(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
@@ -200,6 +209,8 @@ class SetupTests(unittest.TestCase):
             self.assertEqual(command[command.index('--config') + 1], full)
         return installs
 
+
+class SetupTests(SetupFixture):
     def test_connects_without_a_system_upgrade(self):
         system = FakeSystem(self.root)
         result = self.setup_with(system)
@@ -352,15 +363,28 @@ class SetupTests(unittest.TestCase):
         held = open(lock, 'a')
         fcntl.flock(held, fcntl.LOCK_EX)
         done = threading.Event()
+        contended = threading.Event()
         system = FakeSystem(self.root)
-        thread = threading.Thread(target=lambda: (self.setup_with(system), done.set()))
-        thread.start()
-        self.assertFalse(done.wait(0.5), 'a second run must wait for the lock')
-        self.assertEqual(system.commands, [])
-        fcntl.flock(held, fcntl.LOCK_UN)
-        held.close()
-        self.assertTrue(done.wait(10))
-        thread.join()
+        real_flock = fcntl.flock
+
+        def acquiring(stream, operation):
+            with self.assertRaises(BlockingIOError):
+                real_flock(stream, operation | fcntl.LOCK_NB)
+            contended.set()
+            return real_flock(stream, operation)
+
+        with mock.patch.object(MODULE.fcntl, 'flock', acquiring):
+            thread = threading.Thread(target=lambda: (self.setup_with(system), done.set()))
+            thread.start()
+            try:
+                self.assertTrue(contended.wait(10))
+                self.assertFalse(done.is_set())
+                self.assertEqual(system.commands, [])
+            finally:
+                real_flock(held, fcntl.LOCK_UN)
+                held.close()
+                thread.join(10)
+        self.assertTrue(done.is_set())
 
     def test_restart_reported_when_boot_changes(self):
         result = self.setup_with(FakeSystem(self.root, change_boot=True))
@@ -1513,6 +1537,139 @@ class SetupTests(unittest.TestCase):
         self.assertIn('boot.bin is not in step', str(caught.exception))
         self.assertIn(status, str(caught.exception))
         self.assertNotIn(MODULE.HELD_BOOT, str(caught.exception))
+
+
+class GraphicsSetupTests(SetupFixture):
+    def setUp(self):
+        super().setUp()
+        self.put(MODULE.COMPATIBLE, 'apple,j715\0apple,t8132\0apple,arm-platform\0')
+        self.put('proc/sys/kernel/osrelease', '7.1.9-m4-gpu-backport-20261008\n')
+        for name in MODULE.MANIFESTS:
+            self.put(name, json.dumps({'schema': 1, 'board': 'apple,j713', 'soc': 'apple,t8132',
+                                      'kernel_release': '7.1.9-m4-gpu-backport-20261008'}))
+        self.put(MODULE.SPEAKER_MODULE, 'tester audio')
+        self.put('usr/lib/omarchy-m4/Image.gz', 'tester base kernel')
+        self.protected = (MODULE.BOOT, *MODULE.MANIFESTS, MODULE.SPEAKER_MODULE,
+                          'usr/lib/omarchy-m4/Image.gz')
+
+    def protected_bytes(self):
+        return {name: (self.root / name).read_bytes() for name in self.protected}
+
+    def test_inspection_plans_only_graphics_when_tester_is_coherent(self):
+        # Given the real tester's inherited manifest and package identities.
+        before = self.protected_bytes()
+        system = FakeSystem(self.root)
+        # When inspecting enrollment.
+        result = self.setup_with(system, apply=False)
+        # Then only graphics targets are planned, without any write.
+        self.assertEqual(result['scope'], 'j715-graphics')
+        self.assertEqual(result['install'], ['omarchy-m4-keyring', 'omarchy-m4-update', 'omarchy-m4-xr30'])
+        self.assertFalse(result['applied'])
+        self.assertEqual(self.protected_bytes(), before)
+        self.assertFalse((self.root / MODULE.SNIPPET).exists())
+        self.assertFalse(any(c[0] == 'pacman-key' or '-S' in c for c in system.commands))
+
+    def test_enrollment_installs_only_graphics_without_boot_or_audio_work(self):
+        before = self.protected_bytes()
+        system = FakeSystem(self.root, upgradable=('linux-m4-omarchy', 'omarchy-m4-speaker'))
+        # These must not be reached, even if stale J713 files happen to exist.
+        with mock.patch.object(MODULE.Machine, 'compose', side_effect=AssertionError('composer reached')), \
+             mock.patch.object(MODULE.Machine, 'start_notifier', side_effect=AssertionError('notifier reached')), \
+             mock.patch.object(MODULE, 'speaker_pending', side_effect=AssertionError('audio reached')):
+            result = self.setup_with(system)
+        self.assertEqual(self.protected_bytes(), before)
+        self.assertTrue(result['applied'])
+        self.assertFalse(result['restart_needed'])
+        self.assertTrue(result['graphical_login_needed'])
+        installs = [c for c in system.commands if '-S' in c and '--print' not in c]
+        self.assertEqual(len(installs), 1)
+        self.assertEqual(installs[0][-7:], ['-S', '--needed', '--noconfirm',
+                         'omarchy-m4/omarchy-m4-keyring', 'omarchy-m4/omarchy-m4-update',
+                         'omarchy-m4/omarchy-m4-xr30', '--noscriptlet'])
+        self.assert_no_system_upgrade(self.pacman_of(system))
+
+    def test_current_graphics_skip_transaction_when_kernel_has_update(self):
+        system = FakeSystem(self.root, installed=('linux-m4-omarchy', *MODULE.GRAPHICS_PACKAGES),
+                            upgradable=('linux-m4-omarchy',))
+        result = self.setup_with(system)
+        self.assertEqual(result['install'], [])
+        self.assertFalse(result['graphical_login_needed'])
+        self.assertFalse(any('-S' in c for c in system.commands))
+
+    def test_updater_only_change_does_not_request_graphical_login(self):
+        system = FakeSystem(self.root, installed=('linux-m4-omarchy', *MODULE.GRAPHICS_PACKAGES),
+                            upgradable=('omarchy-m4-update',))
+        result = self.setup_with(system)
+        self.assertEqual(result['install'], ['omarchy-m4-update'])
+        self.assertFalse(result['graphical_login_needed'])
+
+    def test_dependency_or_removal_escape_refuses_before_install(self):
+        good = ''.join(name + '|omarchy-m4||\n' for name in MODULE.GRAPHICS_PACKAGES)
+        answers = [
+            (0, good + name + '|omarchy-m4||\n', '')
+            for name in ('omarchy-m4-boot', 'linux-m4-omarchy', 'omarchy-m4-speaker',
+                         'omarchy-m4-gpu', 'glibc')
+        ]
+        answers += [(0, good.replace('omarchy-m4-xr30|omarchy-m4||', row), '') for row in (
+            'omarchy-m4-xr30|extra||', 'omarchy-m4-xr30|omarchy-m4|omarchy-m4-boot|',
+            'omarchy-m4-xr30|omarchy-m4||linux-m4-omarchy', 'malformed')]
+        answers += [(1, '', 'resolution failed'), (0, '', '')]
+        for answer in answers:
+            with self.subTest(answer=answer):
+                before = self.protected_bytes()
+                system = FakeSystem(self.root, queries={'--print': answer})
+                with self.assertRaises(MODULE.Refused):
+                    self.setup_with(system)
+                self.assertEqual(self.protected_bytes(), before)
+                self.assertEqual((self.root / MODULE.CONF).read_text(), AIR_CONF)
+                self.assertFalse((self.root / MODULE.SNIPPET).exists())
+                self.assertFalse(any('-S' in c and '--print' not in c for c in system.commands))
+
+    def test_failed_graphics_install_preserves_tester_and_restores_repository(self):
+        before = self.protected_bytes()
+        system = FakeSystem(self.root, fail=('-S',))
+        with self.assertRaises(MODULE.Refused) as caught:
+            self.setup_with(system)
+        self.assertEqual(self.protected_bytes(), before)
+        self.assertEqual((self.root / MODULE.CONF).read_text(), AIR_CONF)
+        self.assertFalse((self.root / MODULE.SNIPPET).exists())
+        self.assertNotIn('m4-boot-compose', str(caught.exception))
+        self.assertFalse(any('m4-boot-compose' in ' '.join(c) for c in system.commands))
+
+    def test_incoherent_manifests_refuse_before_key_trust(self):
+        for name in MODULE.MANIFESTS:
+            original = (self.root / name).read_bytes()
+            for value in ('not-json', '[]', '{}', *(
+                    json.dumps({**json.loads(original), key: bad}) for key, bad in (
+                        ('schema', 2), ('board', 'apple,j715'), ('soc', 'apple,t6040'),
+                        ('kernel_release', '7.2.0-other')))):
+                with self.subTest(name=name, value=value):
+                    self.put(name, value)
+                    system = FakeSystem(self.root)
+                    with self.assertRaises(MODULE.Refused):
+                        self.setup_with(system)
+                    self.assertEqual(system.commands, [])
+            (self.root / name).write_bytes(original)
+
+    def test_wrong_kernel_identity_or_boot_package_refuses_enrollment(self):
+        for answer in ((1, '', 'not installed'), (0, 'linux-m4-omarchy 7.1.9.m4.20261008-2\n', ''),
+                       (0, 'linux-m4-omarchy 7.1.9.m4.20261008-1\n', 'database error')):
+            with self.subTest(answer=answer):
+                system = FakeSystem(self.root, queries={'tester-kernel': answer})
+                with self.assertRaises(MODULE.Refused):
+                    self.setup_with(system)
+                self.assertFalse(any(c[0] == 'pacman-key' for c in system.commands))
+        system = FakeSystem(self.root, installed=('linux-m4-omarchy', 'omarchy-m4-boot'))
+        with self.assertRaises(MODULE.Refused):
+            self.setup_with(system)
+        self.assertFalse(any(c[0] == 'pacman-key' for c in system.commands))
+
+    def test_wrong_running_release_refuses_before_package_queries(self):
+        self.put('proc/sys/kernel/osrelease', '7.2.0-other\n')
+        system = FakeSystem(self.root)
+        with self.assertRaises(MODULE.Refused):
+            self.setup_with(system)
+        self.assertEqual(system.commands, [])
 
 
 if __name__ == '__main__':

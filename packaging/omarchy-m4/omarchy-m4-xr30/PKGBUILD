@@ -1,0 +1,71 @@
+# Build from the pinned public Mesa source, not the private compositor experiment.
+# tools/build-m4-packages.py stages the patch, probe and session helper.
+pkgname=omarchy-m4-xr30
+pkgver=26.3.0.r87ac51d
+pkgrel=1
+pkgdesc='Isolated Apple9 Mesa with native RGB10/X2 rendering for J715 testers'
+arch=('aarch64')
+url='https://github.com/Kb2uka/Omarchy-M4-Native'
+license=('MIT' 'BSD-3-Clause' 'SGI-B-2.0' 'Apache-2.0')
+depends=('omarchy-m4-update>=1-1' 'python' 'glibc' 'gcc-libs' 'libdrm' 'expat'
+         'zlib' 'zstd' 'spirv-tools' 'lm_sensors' 'libglvnd' 'libx11' 'libxcb'
+         'libxext' 'libxrandr' 'libxxf86vm' 'libxshmfence' 'wayland' 'systemd-libs')
+makedepends=('meson>=1.4' 'ninja' 'pkgconf' 'bison' 'flex' 'python-mako'
+             'python-packaging' 'python-pyyaml' 'llvm' 'clang'
+             'spirv-llvm-translator' 'glslang' 'wayland-protocols>=1.41'
+             'xorgproto' 'libelf')
+options=('!strip' '!debug')
+_commit=87ac51d411f0e58a9433567ec2666f457be89e1d
+source=("mesa-${_commit}.tar.gz::https://codeload.github.com/GravityLinux/mesa/tar.gz/${_commit}"
+        'mesa-xr30.patch' 'xr30-probe.c' 'm4-xr30.py' '90-m4-xr30.conf')
+sha256sums=('1195f212bcf5816b8b893113b0b5dc578ce744d420856b6ad4f42008889e231e'
+            '2a583daa5d3f71347635a985f3cfaf2cda680c237ad9cf54bca4574e2e728e36'
+            '06f0d078286bb832085ed2e2115b6c42203dd0028fdf9d8bbcdd91ebb658277a'
+            '2da0658c6f16e72d66a2e432bc4681a3131c2cb2d8e1dffc7dd380faf85f5488'
+            'fe24f97311eb382b76eb68237af015b6a22cf66a640fd3df4287b3b0bd750f57')
+
+prepare() {
+  cd "$srcdir/mesa-${_commit}"
+  patch -Np1 -i "$srcdir/mesa-xr30.patch"
+}
+
+build() {
+  export CFLAGS="$CFLAGS -ffile-prefix-map=$srcdir=."
+  export CXXFLAGS="$CXXFLAGS -ffile-prefix-map=$srcdir=."
+  meson setup "$srcdir/build" "$srcdir/mesa-${_commit}" \
+    --prefix=/usr/lib/omarchy-m4/mesa --libdir=lib --buildtype=release \
+    -Dgallium-drivers=asahi -Dvulkan-drivers= -Dplatforms=x11,wayland \
+    -Dglx=dri -Dglvnd=enabled -Degl=enabled -Dgbm=enabled \
+    -Dgles1=enabled -Dgles2=enabled -Dllvm=enabled -Ddraw-use-llvm=false \
+    -Dbuild-tests=true -Dgallium-va=disabled -Dvideo-codecs=
+  ninja -C "$srcdir/build" -j "${M4_BUILD_JOBS:-4}"
+  cc -O2 -g -std=c11 -Wall -Wextra -Werror -ffile-prefix-map="$srcdir"=. \
+    $(pkg-config --cflags gbm egl glesv2) \
+    "$srcdir/xr30-probe.c" -o "$srcdir/xr30-probe" \
+    $(pkg-config --libs gbm egl glesv2)
+}
+
+check() {
+  "$srcdir/build/src/asahi/compiler/agx_tests"
+  "$srcdir/xr30-probe" --self-test
+}
+
+package() {
+  DESTDIR="$pkgdir" meson install -C "$srcdir/build" --no-rebuild
+  # This is a private runtime, not a second system development SDK.
+  rm -rf "$pkgdir/usr/lib/omarchy-m4/mesa/include" \
+         "$pkgdir/usr/lib/omarchy-m4/mesa/lib/pkgconfig"
+  # The channel accepts regular files only. Materialize the runtime's aliases
+  # inside the staging directory instead of loosening its archive policy.
+  while IFS= read -r -d '' link; do
+    target=$(readlink -f "$link")
+    cp --remove-destination "$target" "$link"
+  done < <(find "$pkgdir/usr/lib/omarchy-m4/mesa" -type l -print0)
+  install -Dm755 "$srcdir/m4-xr30.py" "$pkgdir/usr/bin/m4-xr30"
+  install -Dm755 "$srcdir/xr30-probe" "$pkgdir/usr/lib/omarchy-m4/xr30/xr30-probe"
+  install -Dm644 "$srcdir/90-m4-xr30.conf" \
+    "$pkgdir/usr/lib/systemd/user/wayland-wm@hyprland.desktop.service.d/90-m4-xr30.conf"
+  install -Dm644 "$srcdir/mesa-${_commit}/docs/license.rst" \
+    "$pkgdir/usr/share/licenses/$pkgname/Mesa.txt"
+  cp -a "$srcdir/mesa-${_commit}/licenses" "$pkgdir/usr/share/licenses/$pkgname/"
+}
