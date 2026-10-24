@@ -1,0 +1,64 @@
+--- a/src/kboot.c
++++ b/src/kboot.c
+@@ -2103,8 +2103,7 @@
+ 
+ static int dt_set_sep(void)
+ {
+-    const char *path = fdt_get_alias(dt, "sep");
+-    if (path == NULL) {
++    if (fdt_get_alias(dt, "sep") == NULL) {
+         printf("FDT: sep alias not found in devtree\n");
+         return 0;
+     }
+@@ -2114,9 +2113,10 @@
+         bail("ADT: /chosen/memory-map not found \n");
+ 
+     u64 phys_map[2];
+-    size_t ret = ADT_GETPROP_ARRAY(adt, anode_mmap, "SEPFW", phys_map);
++    int ret = ADT_GETPROP_ARRAY(adt, anode_mmap, "SEPFW", phys_map);
+     if (ret != sizeof(phys_map))
+         bail("ADT: could not get sepfw memory\n");
++    printf("FDT: SEP SEPFW present len=%lu\n", phys_map[1]);
+ 
+     const char *node_name = "sep-firmware";
+     int mem_node =
+@@ -2125,13 +2125,15 @@
+         bail("FDT: failed to reserve sepfw");
+ 
+     uint32_t mem_phandle = fdt_get_phandle(dt, mem_node);
+-    ret = dt_device_add_mem_region(path, mem_phandle, "sepfw");
++    /* FDT mutations move alias property storage; resolve a stable alias. */
++    ret = dt_device_add_mem_region("sep", mem_phandle, "sepfw");
+     if (ret < 0)
+         bail("FDT: failed to add sepfw region");
+ 
+-    int node = fdt_path_offset(dt, path);
++    int node = fdt_path_offset(dt, "sep");
+     if (node < 0)
+-        bail("FDT: sep not not found in devtree\n");
++        bail("FDT: sep node not found in devtree\n");
++    printf("FDT: SEP memory-region present\n");
+ 
+     int anode_manifest = adt_path_offset(adt, "/chosen/boot-object-manifests");
+     if (anode_manifest < 0)
+@@ -2140,12 +2142,18 @@
+     ret = ADT_GETPROP_ARRAY(adt, anode_manifest, "lpol", phys_map);
+     if (ret != sizeof(phys_map))
+         bail("ADT: could not get local policy\n");
+-    fdt_setprop(dt, node, "local-policy-manifest", (void *)phys_map[0], phys_map[1]);
++    ret = fdt_setprop(dt, node, "local-policy-manifest", (void *)phys_map[0], phys_map[1]);
++    if (ret < 0)
++        bail("FDT: failed to set local policy manifest\n");
++    printf("FDT: SEP lpol present len=%lu\n", phys_map[1]);
+ 
+     ret = ADT_GETPROP_ARRAY(adt, anode_manifest, "ibot", phys_map);
+     if (ret != sizeof(phys_map))
+         bail("ADT: could not get iboot manifest\n");
+-    fdt_setprop(dt, node, "iboot-manifest", (void *)phys_map[0], phys_map[1]);
++    ret = fdt_setprop(dt, node, "iboot-manifest", (void *)phys_map[0], phys_map[1]);
++    if (ret < 0)
++        bail("FDT: failed to set iboot manifest\n");
++    printf("FDT: SEP ibot present len=%lu\n", phys_map[1]);
+ 
+     return 0;
+ }
