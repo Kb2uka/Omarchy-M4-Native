@@ -65,8 +65,29 @@ shipped change.
 3. **GPU mailbox wake storm.** While asleep, the GPU coprocessor mailbox
    (`302608000.mailbox-recv`) interrupted about 230 times a second, against
    about 59 a second awake, and woke the s2idle loop roughly 9,500 times in
-   30 seconds. The SoC never stays in its idle state until the GPU driver
-   quiesces the firmware for sleep.
+   30 seconds. Traced on 2026-10-24:
+   - Every interrupt is one firmware message, RTKit endpoint `0x20`,
+     `0x0042000000000000`: `MSG_RX_DOORBELL`, the firmware asking the host to
+     drain its rings. `g16.rs` answers it by waking its ring worker.
+   - The mailbox driver requests its receive interrupt with `IRQF_NO_SUSPEND`
+     (`drivers/soc/apple/mailbox.c`), for every coprocessor, so suspend does
+     not mask it. Its `wakeup` is disabled; it does not end s2idle, it only
+     brings cpu0 (and cpu9) out of the deep `CPU PD` state each time.
+   - The rate is not caused by sleep. Awake, it was 68 to 79 a second with the
+     screen lit and 219 a second with the screen blanked (DPMS off), back to
+     68 after waking it. Over 8 s with the screen dark the firmware sent about
+     360 doorbells a second while the host sent the GPU no messages, so it is
+     not a reply loop: the firmware rings on its own whenever the GPU idles.
+     The same rate therefore applies to an idle Air with the screen off, or
+     locked with the lid closed (#92).
+   - The ring it fills is not yet known. The drain (`drain_trace_rx`,
+     `g16_runtime.rs`) is inlined, and the module exposes no parameters, so
+     finding it needs an instrumented GPU test module.
+
+   CPU idle itself works in s2idle: cores 1 to 8 entered `CPU PD` 2 to 8 times
+   each during a 36 s cycle and stayed there; cpu0 and cpu9 re-entered it about
+   8,600 times each. (`s2idle/time` under-reports, because the scheduler clock
+   is suspended once every CPU is frozen.)
 4. **Bluetooth** logged `hci0: command 0x0c01 tx timeout` on resume, which
    stretched resume to 2 s. Bluetooth stayed powered.
 5. **The screen does not lock before sleep after the first unlock.**
