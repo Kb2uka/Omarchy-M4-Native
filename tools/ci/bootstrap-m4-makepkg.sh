@@ -10,7 +10,8 @@ if [[ -e "$destination" || -L "$destination" ]]; then
 fi
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
-url=https://archive.ubuntu.com/ubuntu/pool/universe/p/pacman-package-manager/makepkg_6.0.2-6ubuntu2_amd64.deb
+# A dated archive view is independent of supersession in the live pool.
+url=https://snapshot.ubuntu.com/ubuntu/20261024T000000Z/pool/universe/p/pacman-package-manager/makepkg_6.0.2-6ubuntu2_amd64.deb
 curl --fail --location --silent --show-error --output "$scratch/makepkg.deb" "$url"
 printf '%s  %s\n' \
   bf4a72330e297a7fc4b259ef5be5c05eab0b5c6882cf3eccc65e0bb8c3271d1c \
