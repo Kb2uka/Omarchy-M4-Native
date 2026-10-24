@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "board": "apple,j715",
+  "profile": "conservative-v1",
+  "source_lock": "audio/j715/source-lock.json",
+  "patch": "audio/j715/patches/mca-bclk-width.patch",
+  "patch_reference": "patches-kernel/j713-audio/mca-bclk-width.patch",
+  "kernel_inventory": "audio/j713/kernel-inputs.sha256",
+  "sound_exports_sha256": "9f3e2cf8c83045e3a89b94ef7c8526c4dfb10b386d872669819cd8f4f35d4362",
+  "abi_reference": "audio/j713/qualified.json",
+  "daemon_source": "audio/j713/speakersafetyd",
+  "models": ["audio/j713/j713.conf", "audio/j715/j715.conf"],
+  "components": [
+    {
+      "source": "audio/j713/kernel",
+      "outputs": ["snd-soc-j713-group.ko", "snd-soc-tas2764.ko", "snd-soc-macaudio.ko", "snd-soc-apple-mca.ko", "apple-admac.ko"]
+    },
+    {
+      "source": "audio/j715/bootstrap",
+      "outputs": ["j713_audio_bootstrap.ko"]
+    },
+    {
+      "source": "audio/j715/topology",
+      "outputs": ["j713_audio_dt3.ko"]
+    }
+  ],
+  "payload_namespace": "payload/j715",
+  "daemon_output": "speakersafetyd-j715",
+  "target": "aarch64-unknown-linux-gnu",
+  "hardware_qualified": false
+}

@@ -1,0 +1,59 @@
+{
+  "schema": 1,
+  "backend": "native-prepared-external",
+  "board": "apple,j715",
+  "hardware_qualified": false,
+  "release_equivalence": false,
+  "kernel": {
+    "release": "7.1.9-m4-gpu-backport-20261008",
+    "build_version": "#19 SMP PREEMPT_DYNAMIC Sat Oct 24 06:30:00 UTC 2026",
+    "gnu_build_id": "14abe5081b1dd9a206fe7442dd45c12467a79ed4",
+    "inputs": {
+      ".config": "65f6ed7cfd41347b5559f69f3d2c5d43e647721304adcbf5f6c45960c8c8d555",
+      "Module.symvers": "5e3c2624c6a991bae503336137ce15071e51ef043edcd20ba1ad19df4e23d67c",
+      "include/generated/autoconf.h": "bd2024f622b06a6f0f102ffce8082ef09694763dc2f3d74075e07529cc77e4bf",
+      "include/config/auto.conf": "596c8188a66b91cb971c038e1325a584ce9d7c9d787335bd2a9ad8cb4b614448",
+      "include/generated/utsrelease.h": "d3a278f46c0d5ab1e31d270fdda0464f42fcb958c15939cb23a15a2c30bc76d5",
+      "include/config/kernel.release": "621bb4a80668d08d186d82e78e5bba29b68f23ad4e76a9c1c4a07a2e979f0b42"
+    }
+  },
+  "llvm_version": "Ubuntu clang version 21.1.8 (6ubuntu1)",
+  "rust_version": "rustc 1.99.1",
+  "rust_package_sha256": "23621e769f562a99ce339b49e755f2e8bf222581cd9d5b1a2d93136e3959c341",
+  "integration_sources": {
+    "tools/build-j715-native-audio.py": "fc984f7281cfb9beafb1dc9bc285467607018107ed3b6c1fab82546f90486162",
+    "tools/j715_native_audio_receipt.py": "d768d72669fda4ff3091c99e9123918a3835307e3bb68bd8bc389c619425f94b"
+  },
+  "inherited_inputs": {
+    "audio/j715/build-contract.json": "81a2b9a726fcee8c545fd2e7dba1256b31eacb1a01aac4d22e23c7c6b9e6eb12",
+    "audio/j715/source-lock.json": "3f1c66bd70b595e34773ecb14beb901994561d29ba92f2b56ab61220f80e17d5",
+    "tools/prepare-j715-audio-build.py": "7d6ffd6a2c716f96cf6d8f21cedf8646723b87415c7d6d76ea6166a0821fec70",
+    "tools/j715_sources.py": "b645d0f42c1d96a3ac5710a0f05e1f2cd9b920b2c7dd51e9c8e3af903e5f87a0"
+  },
+  "needed": ["libasound.so.2", "libgcc_s.so.1", "libm.so.6", "libc.so.6", "ld-linux-aarch64.so.1"],
+  "host_helpers": {
+    "scripts/basic/fixdep": "24447e94a27c4bb1ac035282c7655123dd0ea8427f650879d1990facf75e6f84",
+    "scripts/mod/modpost": "cb82c2ca1f24559a11840ba32d5b58c9bd2419228f8aafdc7e88cc80eed1cf79"
+  },
+  "tool_executables": {
+    "llvm:lib/llvm-21/bin/clang": "3d91c53a01052091b2d6624ff1008f89748ac45d7cfb2709ad618bf399882eb1",
+    "llvm:lib/llvm-21/bin/ld.lld": "007205bb0fb0514ae69f8b55e33a240b2eeb41e3193cb0320bf72b96442b442f",
+    "llvm:lib/llvm-21/bin/llvm-ar": "a1d4269ef633d4e2621bf26d55f962fc38bcbefedea23c7e684a112e5f45c0f1",
+    "llvm:lib/llvm-21/bin/llvm-nm": "03f15f9348714773e5647af1337da1b03cca9bf744f28adbb76932c574420ab6",
+    "llvm:lib/llvm-21/bin/llvm-objcopy": "dd347b03f80deab8702dcb30ae33932ac63872ed35ea9c1fcd06cb989dc09fc3",
+    "llvm:lib/llvm-21/bin/llvm-objdump": "fc06a844c23d2aa96a061b3c44733185bfc39e733b8461b59e79b7694dd215a3",
+    "llvm:lib/llvm-21/bin/llvm-readelf": "069f6687c80272d570b5e6bd604a4af0c63656bf1da6e09b50a90fec60de71ca",
+    "llvm:lib/llvm-21/bin/llvm-strip": "dd347b03f80deab8702dcb30ae33932ac63872ed35ea9c1fcd06cb989dc09fc3",
+    "rust:bin/rustc": "3e2b08709921762f08fc8b888d867bedaf9c57aee812f224e38bdbe59c3611c3",
+    "rust:bin/cargo": "1413eaba459793fcc99b90daa9449a385b9a69dd8d1f2f9d83512c6193d3040a"
+  },
+  "abi_files": {
+    "usr/lib/libasound.so": {"symlink": "libasound.so.2.0.0"},
+    "usr/lib/libasound.so.2": {"symlink": "libasound.so.2.0.0"},
+    "usr/lib/libasound.so.2.0.0": {"size": 1116792, "sha256": "5ab60457a31f4f47ff5bfa9d6541631828eb826e71bd49672949b4444b4ff92e"},
+    "usr/lib/libgcc_s.so.1": {"size": 133352, "sha256": "ac598673a4bf67c0295b6609e46b1fafd0d4adf3f80a513d61ac49ecff772e48"},
+    "usr/lib/libm.so.6": {"size": 788960, "sha256": "71ed8de709c40acd4fd0177258fc71251a5acdb1d075122409ad42529d6c7a4e"},
+    "usr/lib/libc.so.6": {"size": 1853736, "sha256": "6ab264fb4e8df9942b0fb75b48fcd5c30b2f081d8dfaa6c25d7be1d3fce5b2ab"},
+    "usr/lib/ld-linux-aarch64.so.1": {"size": 201832, "sha256": "b1f2738bdb51e6419d7062f96c8a44bd68853698dc5ac624fa6ca9f9b03d456d"}
+  }
+}

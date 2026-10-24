@@ -375,6 +375,20 @@ def check_package(channel, package, info, files, root, joins=None):
                 helper['GUARD_PIN']['sha256'] == channel['cpu_guard_module'][helper['GUARD_STAGED']] and
                 helper['RELEASE'] == kernel['release'], 'CPU idle tool pins a different module or kernel')
     elif name == 'omarchy-m4-backlight':
+        j715 = 'usr/lib/omarchy-m4/backlight/j715/'
+        additions = {
+            'usr/bin/m4-j715-backlight': (0o755, 'packaging/j715-backlight/m4-j715-backlight'),
+            'usr/lib/systemd/system/m4-j715-backlight.service':
+                (0o644, 'packaging/j715-backlight/m4-j715-backlight.service'),
+            'usr/lib/udev/rules.d/90-j715-backlight.rules':
+                (0o644, 'packaging/j715-backlight/90-j715-backlight.rules'),
+            j715 + 'display/j715/profile.schema.json': (0o644, 'display/j715/profile.schema.json'),
+        }
+        for helper in ('m4-j715-backlight.py', 'm4-backlight.py', 'j715_display_profile.py', 'j715_sources.py'):
+            additions[j715 + 'tools/' + helper] = (0o644, 'tools/' + helper)
+        for path, (mode, source) in additions.items():
+            require(files.get(path) == (mode, sha((ROOT / source).read_bytes())),
+                    'J715 backlight integration differs: ' + path)
         for path, digest in channel['backlight_module'].items():
             require(files.get(path) == (0o644, digest), 'Staged native backlight module differs from its pin')
         helper = (ROOT / 'tools/m4-backlight.py').read_bytes()

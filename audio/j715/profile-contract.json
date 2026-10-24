@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "board": "apple,j715",
+  "speaker_ids": [0, 3],
+  "report_keys": ["board", "chip", "pins", "speaker_id"],
+  "pins": ["4", "13"],
+  "graph_gain": 0.336,
+  "maximum_gain_times_l1": 0.976,
+  "lanes": 6,
+  "activated": false,
+  "profile_accepted": false,
+  "hardware_qualified": false,
+  "authorization": "Offline candidate only. Runtime must obtain and bind a fresh helper report to current boot, source and profile receipts. Neither this file nor a user-writable report authorizes playback. ID 0 requires separate ID-0 hardware qualification."
+}

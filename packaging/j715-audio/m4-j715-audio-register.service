@@ -1,0 +1,18 @@
+[Unit]
+Description=Qualified J715 speaker registration
+After=systemd-udev-trigger.service
+Before=speakersafetyd-j715.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+RuntimeDirectory=omarchy/j715-audio-registration
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+ExecStart=/usr/bin/python3 -B /usr/lib/omarchy-m4/j715/audio/m4-j715-audio-register.py
+TimeoutStartSec=120
+Restart=no
+Environment=PYTHONDONTWRITEBYTECODE=1 GIT_MASTER=1 TMPDIR=/tmp NODE_COMPILE_CACHE=/tmp BUN_RUNTIME_TRANSPILER_CACHE_PATH=/tmp
+
+[Install]
+WantedBy=multi-user.target
