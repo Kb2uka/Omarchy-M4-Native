@@ -31,21 +31,29 @@ shipped change.
 
 ## Blockers
 
-1. **Speaker protection does not survive a freeze.** At thaw the capture
+1. **Speaker protection does not survive a suspend.** At thaw the capture
    stream returns an XRUN and `speakersafetyd-j713` panics in
    `src/main.rs` (`avail().expect("J713 capture availability")`, `EPIPE`).
    The lease lapses, so the kernel holds the amps low and marks the speaker
    group `CANCELLED`, which is the intended fail-closed result. Restarting the
-   daemon does not help, even with PipeWire and WirePlumber stopped and nothing
-   holding `/dev/snd`: `snd_pcm_open` returns `EBUSY` from `j713_port_open`,
-   because `j713_audio_low_ready()` requires the group to be `LOW`. Only
-   `j713_audio_quiesced()`, at the end of the last-stream close in
-   `audio/j713/kernel/j713-mca.h`, returns it to `LOW`, and only if every
-   unwind step succeeded. One did not, and the failing step is not logged.
-   The fix belongs in the J713 MCA transport (`snd-soc-apple-mca`): log the
-   failing unwind step, reach `LOW` after a lapsed lease or suspended DMA,
-   and handle ALSA suspend. A sleep coordinator that stops audio before sleep
-   and restarts protection after resume depends on that fix.
+   daemon then fails with `snd_pcm_open` `EBUSY` from `j713_port_open`,
+   because `j713_audio_low_ready()` requires the group to be `LOW`. Two
+   causes were found on 2026-10-24 ([#171](https://github.com/Kb2uka/Omarchy-M4-Native/pull/171)):
+   - The group's suspend callback (`j713_suspend` in
+     `audio/j713/kernel/j713-audio.c`) turns every state into `CANCELLED`,
+     including an ownerless LOW reached by stopping protection cleanly before
+     sleep. Only the last-stream close returns it to `LOW`, so protection
+     cannot start again until a reboot.
+   - If PipeWire was playing, its next start of the output after the lease
+     lapsed fails the lease check and latches the MCA transport's `failed`
+     flag until reboot (`J713 start of stream 0 failed until reboot: -125`
+     with #171's logging). With the output idle, a `pm_test=freezer` cycle
+     left the group at a clean LOW and protection started again.
+
+   #171 keeps a verified, ownerless LOW across suspend and adds a sleep
+   coordinator that stops user audio, then protection, before sleep and
+   starts them again after resume. With it, `pm_test=devices` cycles
+   recovered protection and playback, idle and while playing.
 2. **GPU and display power domains.** `asahi_m4` has no system-sleep
    callbacks, and nothing keeps `gfx`, `disp_cpu` or `dptx_phy` on. Without
    them the GPU firmware and the display pipe are lost. Marking the domains
