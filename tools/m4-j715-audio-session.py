@@ -245,11 +245,35 @@ def selected(root: Path, manifest) -> None:
     require(manifest == expected, "Selected generation differs")
 
 
+def unit_property(unit: str, name: str) -> str:
+    return subprocess.run(["systemctl", "show", "-p", name, "--value", unit], capture_output=True,
+                          text=True, timeout=5, env=command_environment(), check=False).stdout.strip()
+
+
+def wait_ready(root: Path, seconds: int, sleep=time.sleep, prop=unit_property) -> None:
+    """Delay the session until protection publishes readiness or cannot this boot.
+
+    Waiting grants nothing: the unchanged gate below still decides admission."""
+    for _ in range(seconds * 2):
+        if at(root, READY).exists() or at(root, STATE + "/hold").exists():
+            return
+        if prop("m4-j715-audio-register.service", "UnitFileState") != "enabled":
+            return
+        if any(prop(unit, "ActiveState") == "failed"
+               for unit in ("m4-j715-audio-register.service", SERVICE)):
+            return
+        sleep(0.5)
+
+
 def main(argv: list[str] | None = None, root: Path = Path("/")) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--require-registration", action="store_true")
+    parser.add_argument("--wait", type=int, default=0, choices=range(121), metavar="SECONDS",
+                        help="wait up to SECONDS (0-120) for protection readiness before gating")
     args = parser.parse_args(argv)
     try:
+        if args.wait:
+            wait_ready(root, args.wait)
         if args.require_registration:
             ready = load("m4-j715-audio-ready.py")
             ready.payload(root, trusted_json(root, SELECTED)[0])

@@ -21,7 +21,7 @@
     "usr/share/wireplumber/scripts/default-nodes/j715-protected.lua",
     "usr/share/asahi-audio/j715/graph.json",
     "usr/share/asahi-audio/j715/contract.json",
-    "usr/lib/systemd/user/pipewire.service.d/80-j715-audio-ready.conf"
+    "usr/lib/systemd/user/wireplumber.service.d/80-j715-audio-ready.conf"
   ],
   "model": "/usr/lib/omarchy-m4/j715/audio/config/apple/j715.conf",
   "display_integration_sources": [

@@ -27,6 +27,7 @@
     "tools/m4-j715-audio-register.py",
     "tools/m4-j715-audio-ready.py",
     "tools/m4-j715-audio-session.py",
+    "tools/m4-j715-audio-qualify.py",
     "tools/m4-j715-speaker-id.py",
     "tools/m4-j715-audio-profile.py",
     "tools/j715_sources.py",
