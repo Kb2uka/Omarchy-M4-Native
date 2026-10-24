@@ -1,7 +1,8 @@
 # J715 inactive channel payload
 
-This assembler prepares files, not an installation. No J715 hardware success
-exists yet. Internal speakers require a protected exact-ID owner qualification;
+This assembler prepares files, not an installation. Internal speakers play on
+an owner-qualified speaker-ID-3 unit; see [J715 protected speakers](j715-audio.md).
+Other units still require a protected exact-ID owner qualification;
 native panel F1/F2 additionally require genuine N5 panel, protocol, firmware and
 handoff evidence. Offline compiler fixtures are not qualified binaries.
 
