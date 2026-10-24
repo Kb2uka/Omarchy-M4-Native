@@ -1,0 +1,28 @@
+[Unit]
+Description=J715 speaker protection and root readiness attestation
+Requires=m4-j715-audio-register.service
+After=m4-j715-audio-register.service sound.target
+
+[Service]
+Type=simple
+ExecCondition=/usr/bin/python3 -B /usr/lib/omarchy-m4/j715/audio/m4-j715-audio-session.py --require-registration
+ExecStartPre=/usr/bin/python3 -B /usr/lib/omarchy-m4/j715/audio/m4-j715-audio-ready.py invalidate
+ExecStart=/usr/lib/omarchy-m4/j715/audio/speakersafetyd-j715 --config-path /usr/lib/omarchy-m4/j715/audio/config
+ExecStartPost=/usr/bin/chrt --other 0 /usr/bin/python3 -B /usr/lib/omarchy-m4/j715/audio/m4-j715-audio-ready.py startup --manifest /run/omarchy/j715-audio-registration/selected.json --publish
+ExecStopPost=/usr/bin/python3 -B /usr/lib/omarchy-m4/j715/audio/m4-j715-audio-ready.py invalidate
+RuntimeDirectory=speakersafetyd omarchy/j715-audio-readiness
+RuntimeDirectoryMode=0755
+TimeoutStartSec=65
+Restart=no
+LimitRTPRIO=50
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=20
+LimitMEMLOCK=64M
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+Environment=PYTHONDONTWRITEBYTECODE=1 GIT_MASTER=1 TMPDIR=/tmp NODE_COMPILE_CACHE=/tmp BUN_RUNTIME_TRANSPILER_CACHE_PATH=/tmp
+
+[Install]
+WantedBy=multi-user.target

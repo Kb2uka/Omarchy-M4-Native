@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Inactive J715 channel assembly receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "board", "activated", "hardware_qualified", "features", "qualification_receipt_present", "inventory", "channel_paths_sha256", "assembler_sha256"],
+  "properties": {
+    "schema": {"const": 1},
+    "board": {"const": "apple,j715"},
+    "activated": {"const": false},
+    "hardware_qualified": {"const": false},
+    "qualification_receipt_present": {"const": false},
+    "features": {
+      "type": "object", "additionalProperties": false,
+      "required": ["audio", "display"],
+      "properties": {"audio": {"const": "prepared"}, "display": {"enum": ["prepared", "omitted"]}}
+    },
+    "channel_paths_sha256": {"$ref": "#/$defs/sha"},
+    "assembler_sha256": {"$ref": "#/$defs/sha"},
+    "inventory": {
+      "type": "object", "minProperties": 1,
+      "propertyNames": {"pattern": "^/(usr|etc)/[^\\u0000]+$"},
+      "additionalProperties": {
+        "type": "object", "additionalProperties": false,
+        "required": ["sha256", "size", "mode"],
+        "properties": {
+          "sha256": {"$ref": "#/$defs/sha"},
+          "size": {"type": "integer", "minimum": 0},
+          "mode": {"enum": ["0644", "0755"]}
+        }
+      }
+    }
+  },
+  "$defs": {"sha": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

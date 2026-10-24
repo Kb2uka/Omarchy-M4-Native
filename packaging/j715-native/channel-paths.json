@@ -1,0 +1,58 @@
+{
+  "schema": 1,
+  "board": "apple,j715",
+  "immutable_roots": ["/usr/lib/omarchy-m4/j715/audio/", "/usr/lib/omarchy-m4/j715/backlight/"],
+  "protected_exceptions": [
+    "usr/lib/systemd/system/m4-j715-audio-register.service",
+    "usr/lib/systemd/system/speakersafetyd-j715.service",
+    "usr/share/alsa/ucm2/conf.d/macaudio/Apple J715.conf",
+    "usr/share/alsa/ucm2/conf.d/macaudio/J715-HiFi.conf"
+  ],
+  "audio_sources": {
+    "usr/lib/systemd/system/m4-j715-audio-register.service": "packaging/j715-audio/m4-j715-audio-register.service",
+    "usr/lib/systemd/system/speakersafetyd-j715.service": "packaging/j715-audio/speakersafetyd-j715.service",
+    "usr/share/alsa/ucm2/conf.d/macaudio/Apple J715.conf": "audio/j715/policy/usr/share/alsa/ucm2/conf.d/macaudio/Apple J715.conf",
+    "usr/share/alsa/ucm2/conf.d/macaudio/J715-HiFi.conf": "audio/j715/policy/usr/share/alsa/ucm2/conf.d/macaudio/J715-HiFi.conf"
+  },
+  "later_selected_paths": [
+    "etc/wireplumber/wireplumber.conf.d/80-j715-protected.conf",
+    "etc/wireplumber/wireplumber.conf.d/81-j715-busy-discovery.conf",
+    "etc/wireplumber/wireplumber.conf.d/82-j715-protected-default.conf",
+    "usr/share/wireplumber/scripts/default-nodes/j715-protected.lua",
+    "usr/share/asahi-audio/j715/graph.json",
+    "usr/share/asahi-audio/j715/contract.json",
+    "usr/lib/systemd/user/pipewire.service.d/80-j715-audio-ready.conf"
+  ],
+  "model": "/usr/lib/omarchy-m4/j715/audio/config/apple/j715.conf",
+  "display_integration_sources": [
+    "tools/j715_display_profile.py",
+    "tools/j715_sources.py",
+    "tools/build-j715-backlight-dt.py",
+    "tools/build-j715-backlight.sh",
+    "tools/m4-j715-backlight.py",
+    "tools/m4-backlight.py",
+    "display/j715/profile.schema.json",
+    "display/j715/backlight/Kbuild",
+    "display/j715/backlight/client.c",
+    "display/j715/backlight/profile.h",
+    "display/j715/build-backlight-loader.sh",
+    "display/j715/m1n1-sep-handoff.patch",
+    "display/j715/m1n1-preserve-sep-rng.patch",
+    "display/j715/m1n1-j715-handoff.patch"
+  ],
+  "selected_fir_paths": [
+    "usr/share/asahi-audio/j715/j715-spk0-static-minimal-lane0-48000.wav",
+    "usr/share/asahi-audio/j715/j715-spk0-static-minimal-lane1-48000.wav",
+    "usr/share/asahi-audio/j715/j715-spk0-static-minimal-lane2-48000.wav",
+    "usr/share/asahi-audio/j715/j715-spk0-static-minimal-lane3-48000.wav",
+    "usr/share/asahi-audio/j715/j715-spk0-static-minimal-lane4-48000.wav",
+    "usr/share/asahi-audio/j715/j715-spk0-static-minimal-lane5-48000.wav",
+    "usr/share/asahi-audio/j715/j715-spk3-static-minimal-lane0-48000.wav",
+    "usr/share/asahi-audio/j715/j715-spk3-static-minimal-lane1-48000.wav",
+    "usr/share/asahi-audio/j715/j715-spk3-static-minimal-lane2-48000.wav",
+    "usr/share/asahi-audio/j715/j715-spk3-static-minimal-lane3-48000.wav",
+    "usr/share/asahi-audio/j715/j715-spk3-static-minimal-lane4-48000.wav",
+    "usr/share/asahi-audio/j715/j715-spk3-static-minimal-lane5-48000.wav"
+  ],
+  "activation": false
+}
