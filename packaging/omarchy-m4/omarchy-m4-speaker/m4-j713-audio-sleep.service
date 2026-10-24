@@ -1,0 +1,20 @@
+# Installed by omarchy-m4-speaker. Stops J713 speaker protection, after the
+# user audio stack, before sleep, and starts it again after resume (#92).
+[Unit]
+Description=Stop J713 speaker protection for sleep and start it after resume
+Before=sleep.target
+StopWhenUnneeded=yes
+ConditionPathExists=/sys/bus/platform/devices/speaker-group/status
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+RuntimeDirectory=omarchy-m4-audio-sleep
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/m4-j713-audio-sleep pre
+ExecStop=/usr/bin/m4-j713-audio-sleep post
+TimeoutStartSec=60
+TimeoutStopSec=150
+
+[Install]
+WantedBy=sleep.target
