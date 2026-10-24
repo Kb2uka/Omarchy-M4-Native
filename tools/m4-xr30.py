@@ -41,9 +41,12 @@ def native_panel(root):
         if not re.fullmatch(r'card[0-9]+', card.name):
             continue
         device = card / 'device'
-        if (device / 'driver').resolve(strict=True).name != 'simple-framebuffer':
+        try:
+            if (device / 'driver').resolve(strict=True).name != 'simple-framebuffer':
+                continue
+            node = (device / 'of_node').resolve(strict=True)
+        except FileNotFoundError:
             continue
-        node = (device / 'of_node').resolve(strict=True)
         if node.parent != (tree / 'chosen').resolve():
             continue
         if b'simple-framebuffer' not in tokens(node / 'compatible'):

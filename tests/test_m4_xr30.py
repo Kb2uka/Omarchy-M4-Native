@@ -100,6 +100,31 @@ class Xr30Tests(unittest.TestCase):
         (self.card / 'device/driver').unlink()
         self.assert_bypass()
 
+    def test_unrelated_cards_without_driver_or_node_do_not_block_real_startup(self):
+        device = self.root / MODULE.DRM / 'card1/device'
+        device.mkdir(parents=True)
+        for with_driver in (False, True):
+            with self.subTest(with_driver=with_driver):
+                if with_driver:
+                    (device / 'driver').symlink_to(self.card / 'device/driver')
+                result = self.launch(environment={**os.environ, **ORIGINAL})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                environment = json.loads(result.stdout)['environment']
+                self.assertEqual(environment['GBM_BACKENDS_PATH'], '/usr/lib/omarchy-m4/mesa/lib/gbm')
+
+    def test_unreadable_card_link_still_fails_qualification_closed(self):
+        driver = self.root / MODULE.DRM / 'card1/device/driver'
+        driver.parent.mkdir(parents=True)
+        resolve = Path.resolve
+
+        def unreadable(path, *args, **kwargs):
+            if path == driver:
+                raise PermissionError('unreadable card link')
+            return resolve(path, *args, **kwargs)
+
+        with mock.patch.object(Path, 'resolve', unreadable):
+            self.assert_bypass()
+
     def test_another_driver_does_not_qualify(self):
         (self.card / 'device/driver').unlink()
         driver = self.root / 'sys/other-driver'
