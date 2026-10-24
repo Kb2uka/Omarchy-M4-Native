@@ -105,8 +105,29 @@ shipped change.
    each during a 36 s cycle and stayed there; cpu0 and cpu9 re-entered it about
    8,600 times each. (`s2idle/time` under-reports, because the scheduler clock
    is suspended once every CPU is frozen.)
-4. **Bluetooth** logged `hci0: command 0x0c01 tx timeout` on resume, which
-   stretched resume to 2 s. Bluetooth stayed powered.
+4. **Bluetooth stops working after some suspends, until a reboot.** The
+   BCM4388 (`hci_bcm4377`, PCI `0000:01:00.1`) sometimes stops answering
+   during the suspend's Set Event Mask (`hci0: command 0x0c01 tx timeout`,
+   `Opcode 0x0c01 failed: -110`). After that every command times out
+   (`0x0c24`, `0x2005`, `0x2041`), discovery stays stuck "in progress" and
+   bluetoothd logs `Failed to add UUID`, still failing ten minutes later.
+   On 2026-10-22 one of three boots that suspended hit it; on 2026-10-24
+   every boot that suspended did, at `pm_test=devices`, `platform` and real
+   s2idle alike, though one `devices` cycle came through clean.
+
+   Rebinding the PCI function recovers it: the driver's probe resets the chip
+   (`hci_bcm4377 … resetting`, `reset done`) and Bluetooth is powered and
+   discovering again within 2 s, with Wi-Fi on the same chip unaffected.
+   Unbinding before sleep and rebinding after resume avoids the failure: on
+   2026-10-24, four `pm_test=devices` cycles in a row came back with no HCI
+   errors and discovery working, against a failure on the second cycle
+   without it. Paired-device reconnection after the rebind is untested (no
+   device was paired), and real s2idle with the rebind is untested.
+
+   ```sh
+   echo 0000:01:00.1 | sudo tee /sys/bus/pci/drivers/hci_bcm4377/unbind  # before
+   echo 0000:01:00.1 | sudo tee /sys/bus/pci/drivers/hci_bcm4377/bind    # after
+   ```
 5. **The screen does not lock before sleep after the first unlock.**
    Omarchy 4.0.4's shell (`shell/plugins/lock/Service.qml`) reads its
    `locked` binding to decide a lock request. After an unlock that binding can
