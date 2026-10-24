@@ -146,6 +146,43 @@ class RecipeTests(unittest.TestCase):
             self.assertNotIn(f'-L{source}/host-gbm/lib', arguments)
             self.assertIn(f'-L{source}/glvnd/lib', arguments)
 
+    def test_xr30_check_loads_private_gbm_and_preserves_library_path(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp)
+            private = source / 'build/src/gbm'
+            host = source / 'host'
+            private.mkdir(parents=True)
+            host.mkdir()
+            library = source / 'gbm.c'
+            for directory, identity in ((private, 7), (host, 3)):
+                library.write_text(f'int test_gbm_identity(void) {{ return {identity}; }}\n')
+                subprocess.run(
+                    ['cc', '-shared', '-fPIC', '-Wl,-soname,libgbm.so.1', str(library),
+                     '-o', str(directory / 'libgbm.so.1')], check=True, capture_output=True)
+            probe = source / 'probe.c'
+            probe.write_text(
+                '#include <stdio.h>\n#include <stdlib.h>\n'
+                'extern int test_gbm_identity(void);\n'
+                'int main(void) { puts(getenv("LD_LIBRARY_PATH")); '
+                'return test_gbm_identity() != 7; }\n')
+            subprocess.run(
+                ['cc', str(probe), '-L' + str(private), '-l:libgbm.so.1',
+                 '-o', str(source / 'xr30-probe')], check=True, capture_output=True)
+            compiler_tests = source / 'build/src/asahi/compiler/agx_tests'
+            compiler_tests.parent.mkdir(parents=True)
+            compiler_tests.write_text('#!/bin/sh\nexit 0\n')
+            compiler_tests.chmod(0o755)
+            for inherited in ('', str(host)):
+                with self.subTest(inherited=inherited):
+                    result = subprocess.run(
+                        ['bash', '-c', 'source "$1"; srcdir="$2"; check',
+                         'recipe', str(PACKAGING / 'omarchy-m4-xr30/PKGBUILD'), str(source)],
+                        env={**os.environ, 'LD_LIBRARY_PATH': inherited},
+                        capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout.strip(),
+                                     str(private) + (':' + inherited if inherited else ''))
+
     def test_common_recipe_owns_only_the_migrated_files(self):
         # Given recipes sourced by bash exactly as makepkg sources them.
         names = ('omarchy-m4-update', 'omarchy-m4-boot')
