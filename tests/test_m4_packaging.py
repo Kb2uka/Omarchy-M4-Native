@@ -304,7 +304,11 @@ class PolicyTests(unittest.TestCase):
                     'omarchy-m4-update', {p: value for p, value in files.items() if p != path}, info))
 
     def test_graphics_package_cannot_depend_on_boot_or_board_packages(self):
-        files = {'usr/bin/m4-xr30': (0o755, 'synthetic helper')}
+        files = {
+            'usr/bin/m4-xr30': (0o755, file_sha('tools/m4-xr30.py')),
+            'usr/lib/systemd/user/wayland-wm@hyprland.desktop.service.d/90-m4-xr30.conf':
+                (0o644, file_sha('packaging/omarchy-m4/omarchy-m4-xr30/90-m4-xr30.conf')),
+        }
         info = {'pkgname': ['omarchy-m4-xr30'], 'pkgver': ['1-1'], 'arch': ['aarch64'],
                 'depend': ['python', 'omarchy-m4-update>=1-1']}
         CHECK.check_package(CHANNEL, *self.package('omarchy-m4-xr30', files, info))
@@ -312,6 +316,23 @@ class PolicyTests(unittest.TestCase):
             with self.subTest(dependency=dependency), self.assertRaisesRegex(ValueError, 'board packages'):
                 CHECK.check_package(CHANNEL, *self.package(
                     'omarchy-m4-xr30', files, {**info, 'depend': [*info['depend'], dependency]}))
+
+    def test_graphics_package_requires_source_matched_login_files_and_modes(self):
+        files = {
+            'usr/bin/m4-xr30': (0o755, file_sha('tools/m4-xr30.py')),
+            'usr/lib/systemd/user/wayland-wm@hyprland.desktop.service.d/90-m4-xr30.conf':
+                (0o644, file_sha('packaging/omarchy-m4/omarchy-m4-xr30/90-m4-xr30.conf')),
+        }
+        info = {'pkgname': ['omarchy-m4-xr30'], 'pkgver': ['1-1'], 'arch': ['aarch64'],
+                'depend': ['python', 'omarchy-m4-update>=1-1']}
+        for path, (mode, digest) in files.items():
+            for change, invalid in (
+                    ('missing', {name: value for name, value in files.items() if name != path}),
+                    ('changed', {**files, path: (mode, '0' * 64)}),
+                    ('mode', {**files, path: (0o644 if mode == 0o755 else 0o755, digest)})):
+                with self.subTest(path=path, change=change):
+                    with self.assertRaisesRegex(ValueError, re.escape(path)):
+                        CHECK.check_package(CHANNEL, *self.package('omarchy-m4-xr30', invalid, info))
 
     def test_boot_requires_common_package_without_owning_its_files(self):
         files = {**self.boot_files(), CHECK.REALTIME: (0o644, file_sha(

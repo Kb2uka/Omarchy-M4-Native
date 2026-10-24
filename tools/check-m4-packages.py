@@ -285,6 +285,12 @@ def check_package(channel, package, info, files, root, joins=None):
     elif name == 'omarchy-m4-xr30':
         dependencies = info.get('depend', [])
         require(UPDATE_DEP in dependencies, 'Graphics package must require ' + UPDATE_DEP)
+        for path, source, mode in (
+                ('usr/bin/m4-xr30', 'tools/m4-xr30.py', 0o755),
+                ('usr/lib/systemd/user/wayland-wm@hyprland.desktop.service.d/90-m4-xr30.conf',
+                 'packaging/omarchy-m4/omarchy-m4-xr30/90-m4-xr30.conf', 0o644)):
+            require(files.get(path) == (mode, sha((ROOT / source).read_bytes())),
+                    'Graphics package differs: ' + path)
         allowed_dependencies = {
             'omarchy-m4-update', 'python', 'glibc', 'gcc-libs', 'libdrm', 'expat', 'zlib', 'zstd',
             'spirv-tools', 'lm_sensors', 'libglvnd', 'libx11', 'libxcb', 'libxext', 'libxrandr',
