@@ -16,6 +16,7 @@ not at a clean LOW after resume, protection is left off until a reboot, as
 before. Each step is logged; a failed step never blocks sleep.
 """
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
@@ -37,9 +38,10 @@ CLEAN_LOW = {'stable': '1', 'phase': '0', 'owner': '0', 'cancelled': '1', 'fault
              'error': '0', 'gpio_error': '0', 'gpio_low_verified': '1', 'deadline_ns': '0', 'profile': '1'}
 TX_CLOSE_SECONDS = 5
 # Every systemctl call is bounded, so a hung call is logged as a failure and the
-# next step still runs. pre (TimeoutStartSec=60): 5 + users * (5 + 10) + 5 + 15,
-# 55 s for two logged-in users. post (TimeoutStopSec=180): protection and the
-# WirePlumber readiness gate each allow 65 s to start, 150 s for one user.
+# next step still runs. Each user's calls run at the same time, so the totals do
+# not grow with the number of logged-in users. pre (TimeoutStartSec=60):
+# 5 + 5 + 10 + 5 + 15 = 40 s. post (TimeoutStopSec=180): protection and the
+# WirePlumber readiness gate each allow 65 s to start, 75 + 75 = 150 s.
 QUERY_SECONDS = 5
 USER_STOP_SECONDS = 10
 PROTECTION_STOP_SECONDS = 15
@@ -97,9 +99,20 @@ def user_systemctl(user, *args, timeout):
     return systemctl('--user', '--machine', user + '@.host', *args, timeout=timeout)
 
 
+def for_each(function, items):
+    """Run function on every item at once and return the results in order."""
+    with ThreadPoolExecutor(max_workers=max(1, len(items))) as pool:
+        return list(pool.map(function, items))
+
+
 def active_units(user):
     result = user_systemctl(user, 'is-active', *USER_UNITS, timeout=QUERY_SECONDS)
     states = result.stdout.split()
+    if len(states) != len(USER_UNITS):
+        # An unanswered query is not proof the output is closed: stop them all.
+        log(f'Could not query user audio for {user}; stopping all of it'
+            + (f' (systemctl: {result.stderr.strip()})' if result.stderr.strip() else ''))
+        return list(USER_UNITS)
     return [unit for unit, state in zip(USER_UNITS, states) if state == 'active']
 
 
@@ -136,22 +149,28 @@ def before_sleep(root):
         log('No J713 speaker group; nothing to do')
         write_state(root, state)
         return state
-    if systemctl('is-active', '--quiet', PROTECTION, timeout=QUERY_SECONDS).returncode != 0:
+    # Only a confirmed stop leaves protection alone; a failed or timed-out query
+    # stops it, as stopping an inactive unit does nothing.
+    if systemctl('is-active', PROTECTION, timeout=QUERY_SECONDS).stdout.strip() in ('inactive', 'failed'):
         log('Speaker protection is not running; leaving it off')
         write_state(root, state)
         return state
-    for user in users(root):
-        units = active_units(user)
+    names = users(root)
+    for user, units in zip(names, for_each(active_units, names)):
         if units:
             state['users'][user] = units
     # Record before stopping anything, so resume restores whatever was stopped
     # even if a later step fails or this run is cut short.
     state['protection'] = True
     write_state(root, state)
-    for user, units in state['users'].items():
+
+    def stop(item):
+        user, units = item
         result = user_systemctl(user, 'stop', *units, timeout=USER_STOP_SECONDS)
         log(f'Stopped user audio for {user}: {" ".join(units)}'
             + ('' if result.returncode == 0 else f' (systemctl: {result.stderr.strip()})'))
+
+    for_each(stop, list(state['users'].items()))
     if not wait(lambda: tx_closed(root), TX_CLOSE_SECONDS):
         log('Speaker output is still open; protection cannot return to LOW and stays off until a reboot')
     result = systemctl('stop', PROTECTION, timeout=PROTECTION_STOP_SECONDS)
@@ -188,11 +207,15 @@ def after_resume(root):
             else:
                 log(f'Speaker protection did not start: {result.stderr.strip()}')
                 status = 1
-    for user, units in sorted(state.get('users', {}).items()):
+
+    def start(item):
+        user, units = item
         units = [unit for unit in units if unit in USER_UNITS]
         result = user_systemctl(user, 'start', *units, timeout=START_SECONDS)
         log(f'Started user audio for {user}: {" ".join(units)}'
             + ('' if result.returncode == 0 else f' (systemctl: {result.stderr.strip()})'))
+
+    for_each(start, sorted(state.get('users', {}).items()))
     return status
 
 

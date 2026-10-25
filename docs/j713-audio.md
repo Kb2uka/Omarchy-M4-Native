@@ -61,7 +61,10 @@ so the speaker output closes, then stops `speakersafetyd-j713`, so the speaker
 group returns to an ownerless, verified LOW. The published group's suspend
 callback turns even that LOW into `CANCELLED`;
 `patches-kernel/j713-audio/suspend-keeps-verified-low.patch` keeps it (any owned
-or unverified state is still forced LOW and `CANCELLED`).
+or unverified state is still forced LOW and `CANCELLED`). A status query that
+fails or times out counts as running, so those units are stopped rather than
+assumed off. Each user's units are stopped and started at the same time, so the
+time limits hold for any number of logged-in users.
 After resume it starts protection only from that LOW with the output closed,
 then the user units it stopped; protection's readiness check and the
 WirePlumber gate decide as at boot. It never clears a fault, a lapsed lease or

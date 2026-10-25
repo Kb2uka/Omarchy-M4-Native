@@ -70,7 +70,8 @@ class Machine:
         verb, unit = args[0], args[-1]
         self.calls.append(('system', verb, unit))
         if verb == 'is-active':
-            return SimpleNamespace(returncode=0 if self.protection else 3, stdout='', stderr='')
+            state = 'active' if self.protection else 'inactive'
+            return SimpleNamespace(returncode=0 if self.protection else 3, stdout=state + '\n', stderr='')
         if verb == 'stop':
             self.protection = False
             self.write_group(self.after_stop)
@@ -194,6 +195,24 @@ class SleepCoordination(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertNotIn(('system', 'start', SLEEP.PROTECTION), machine.calls)
         self.assertEqual(machine.user_units, set(SLEEP.USER_UNITS))
+
+    def test_unanswered_protection_query_still_stops_protection(self):
+        machine = Machine(self.root)
+        machine.hangs = {('system', 'is-active')}
+        self.run_phase(machine, 'pre')
+        self.assertIn(('user', 'owner', 'stop', SLEEP.USER_UNITS), machine.calls)
+        self.assertIn(('system', 'stop', SLEEP.PROTECTION), machine.calls)
+        machine.hangs = set()
+        self.assertEqual(self.run_phase(machine, 'post')[0], 0)
+        self.assertTrue(machine.protection)
+
+    def test_unanswered_user_query_stops_all_user_audio_before_protection(self):
+        machine = Machine(self.root, user_units=('pipewire.socket', 'pipewire.service'))
+        machine.hangs = {('user', 'is-active')}
+        self.run_phase(machine, 'pre')
+        actions = [call for call in machine.calls if 'stop' in call]
+        self.assertEqual(actions, [('user', 'owner', 'stop', SLEEP.USER_UNITS), ('system', 'stop', SLEEP.PROTECTION)])
+        self.assertEqual(machine.user_units, set())
 
 
 if __name__ == '__main__':
