@@ -138,8 +138,9 @@ shipped change.
    not secure the session within 12000ms)`, with no lock events after the
    earlier unlock. Upstream fixed it in
    [basecamp/omarchy#14978](https://github.com/basecamp/omarchy/pull/14978)
-   (`d1a614ce6`), first released in `v4.5.0-rc1`, not in 4.0.5 or 4.0.6.
-   Restarting the shell (`omarchy-restart-shell`) restores one lock.
+   (`d1a614ce6`), released in `v4.0.6` (`9eb52129f`) and `v4.5.0-rc1`, not in
+   4.0.5 or earlier. On earlier versions, restarting the shell
+   (`omarchy-restart-shell`) restores one lock.
 
 ## UART: a `pm_test` artifact only
 
