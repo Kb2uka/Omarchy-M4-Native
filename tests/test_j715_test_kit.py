@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -32,6 +33,10 @@ def load(name, path):
 MODULE = load('j715_test_kit', 'tools/derive-j715-test-kit.py')
 PACKAGER = load('j713_download', 'tools/package-j713-download.py')
 TOOLS = all(shutil.which(tool) for tool in ('mkfs.ext4', 'debugfs', 'e2fsck', 'patch'))
+# file(1) in command position: at a line start, after ; & | ( ! or a backquote, or after a shell keyword,
+# exec (so find -exec) or xargs and its flags, whatever its first argument looks like.
+FILE_COMMAND = re.compile(r'(?:^|[;&|(!`]|\b(?:if|elif|then|else|do|while|until|exec|command|time)\b'
+                          r'|\bxargs\b(?:\s+-\S+)*)\s*file(?![\w=.-])', re.M)
 REVISION = 'a' * 40
 digest = lambda data: hashlib.sha256(data).hexdigest()
 
@@ -302,11 +307,37 @@ class Derive(unittest.TestCase):
         self.assertEqual([name for name in old_headers if old_headers[name] != new_headers[name]],
                          ['./' + name for name in INSTALLER_OLD])
 
-    def test_the_installer_archive_is_reproducible(self):
-        # The root is not: debugfs stamps the files it writes with the current time.
+    def test_two_derivations_write_the_same_bytes(self):
+        # debugfs and the OS ZIP use REPRODUCIBLE_TIME, not the clock (#163).
         first = self.derive()
+        time.sleep(2.1)  # past debugfs's one-second and ZIP's two-second resolution
         second = self.derive(self.base / 'again')
-        self.assertEqual(first['installer_sha256'], second['installer_sha256'])
+        self.assertEqual(first, second)
+        for name in ('KIT.json', 'SHA256SUMS', 'IMAGE.json', 'os/' + MODULE.PACKAGE):
+            self.assertEqual((self.output / name).read_bytes(), (self.base / 'again' / name).read_bytes(), name)
+        with zipfile.ZipFile(self.output / 'os' / MODULE.PACKAGE) as archive:
+            for info in archive.infolist():
+                root = info.filename == 'root.ext4'
+                self.assertEqual((info.date_time, info.compress_type, info.external_attr >> 16),
+                                 (MODULE.ZIP_TIME, zipfile.ZIP_DEFLATED, 0o100644 if root else 0o600), info.filename)
+                if root:  # the real root is about 17 GB: without ZIP64 the write fails past 2 GiB
+                    self.assertGreaterEqual(info.extract_version, zipfile.ZIP64_VERSION)
+
+    def test_a_debugfs_that_ignores_the_fixed_time_is_refused(self):
+        debugfs = self.base / 'debugfs'
+        debugfs.write_text('#!/bin/sh\nunset E2FSPROGS_FAKE_TIME\nexec debugfs "$@"\n')
+        debugfs.chmod(0o755)
+        pins = self.fixture.pins()
+        for pin in pins:
+            pin.start()
+        try:
+            with self.assertRaisesRegex(ValueError, 'ignored E2FSPROGS_FAKE_TIME'):
+                MODULE.derive(self.fixture.kit, self.dtb, self.kernel, self.gpu, self.output, REVISION,
+                              debugfs=str(debugfs))
+        finally:
+            for pin in reversed(pins):
+                pin.stop()
+        self.assertFalse(self.output.exists())
 
     def test_the_root_changes_are_exactly_the_reviewed_ones(self):
         self.assertEqual(list(MODULE.ROOT_LINKS), [
@@ -480,7 +511,17 @@ class Sources(unittest.TestCase):
             self.assertIn(name, script)
             self.assertTrue((ROOT / 'patches-kernel' / (name + '.patch')).is_file(), name)
         subprocess.run(['bash', '-n', str(ROOT / 'tools/build-j715-kernel.sh')], check=True)
-        self.assertNotIn('-exec file', script)  # m4-gravity-builder has no file(1)
+        # m4-gravity-builder has no file(1): no line runs it, as a command, after a pipe or under -exec.
+        code = '\n'.join(line.split('#', 1)[0] for line in script.splitlines())
+        self.assertIsNone(FILE_COMMAND.search(code))
+
+    def test_the_no_file_check_finds_file_in_command_position(self):
+        for line in ('file arch/arm64/boot/Image.gz', 'file "$f"', 'if file "$f" | grep -q x86-64; then',
+                     'find . -exec file {} +', 'xargs -0 file', 'cat list | file -f -', 'true && file Image'):
+            self.assertIsNotNone(FILE_COMMAND.search(line), line)
+        for line in ("read -r -d '' file; do", 'x86_64_elf "$file"', 'local file=$1', 'for file in *; do',
+                     'make --file Makefile', 'cp profile out'):
+            self.assertIsNone(FILE_COMMAND.search(line), line)
 
     def test_the_kernel_recipe_names_a_missing_patch_before_doing_anything(self):
         with tempfile.TemporaryDirectory() as empty:
