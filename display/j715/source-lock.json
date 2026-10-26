@@ -1,0 +1,216 @@
+{
+  "schema": 1,
+  "repository": "https://github.com/Kb2uka/Omarchy-M4-Native",
+  "commit": "6c6d2e4dd48b6306416c28686b5212b6bc4f77dc",
+  "upstream_reuse_commit": "46760b2eb7d1d2ebb9d011f2149d4a935477e5d0",
+  "selected_paths": [
+    "display/j713"
+  ],
+  "companion_archive": {
+    "archive": "source/m1n1-stage2-source.tar.gz",
+    "sha256": "c394517941a5700b227718bb02e3df3dd43c9ad5a8e53c9447a55d3c36846c44"
+  },
+  "afk_original_archive": {
+    "archive": "source/kernel-controller.tar.gz",
+    "sha256": "810339d85aa3171fb1a982b71d01c0bf4de816f81ebbe9149d0dd3268e98ce57"
+  },
+  "source_status": "Project-modified upstream reuse; not unchanged Asahi source. Companion bytes are a separate build prerequisite.",
+  "licenses": [
+    "display/j713/backlight/LICENSES/GPL-2.0",
+    "display/j713/backlight/LICENSES/MIT",
+    "display/j713/backlight/NOTICE",
+    "display/j713/m1n1-base/3rdparty_licenses/LICENSE.BSD-2.libfdt",
+    "display/j713/m1n1-base/3rdparty_licenses/LICENSE.BSD-3.arm",
+    "display/j713/m1n1-base/3rdparty_licenses/LICENSE.BSD-3.dwc3",
+    "display/j713/m1n1-base/3rdparty_licenses/LICENSE.CC0",
+    "display/j713/m1n1-base/3rdparty_licenses/LICENSE.GPL-2",
+    "display/j713/m1n1-base/3rdparty_licenses/LICENSE.minlzma",
+    "display/j713/m1n1-base/3rdparty_licenses/LICENSE.OFL-1.1",
+    "display/j713/m1n1-base/3rdparty_licenses/LICENSE.tinf",
+    "display/j713/m1n1-base/LICENSE"
+  ],
+  "files": [
+    {
+      "path": "display/j713/.gitattributes",
+      "mode": "100644",
+      "blob": "cd4ff12067f8b81562a9c946dd205b75ae8d035d",
+      "size": 150,
+      "sha256": "e255295c2f81cffe280c889621d9c691f2c372a429f27501601fba0cf327f670"
+    },
+    {
+      "path": "display/j713/backlight/afk.c",
+      "mode": "100644",
+      "blob": "7a59f1bca0e13a15e07484136d79ad5f8ad11cdd",
+      "size": 21555,
+      "sha256": "c1b2bf40b4b7bf0ded9394c2ea5c12c1aabdf7b887120bc64ac6288731220f33"
+    },
+    {
+      "path": "display/j713/backlight/afk.h",
+      "mode": "100644",
+      "blob": "5d180df2feca4380f1d2049d7ae4504cd9d289c8",
+      "size": 860,
+      "sha256": "92a6e350cbaf35a1f1284d71f2f7f78e62b31c67e548411ff848299c53f83f0c"
+    },
+    {
+      "path": "display/j713/backlight/client.c",
+      "mode": "100644",
+      "blob": "d06c1cb9f017fd5c85148406f74eb811e02f7cbd",
+      "size": 12164,
+      "sha256": "4c3675f39fba2439c7594da996bd0c734a644b266a85892c631a7c433ec5e49c"
+    },
+    {
+      "path": "display/j713/backlight/Kbuild",
+      "mode": "100644",
+      "blob": "9dc80749738783ef2e5db36b1fd610211ecfd7a5",
+      "size": 109,
+      "sha256": "72ab5634266f5185a228f5bec2d9b42b74a1fec2e6f6a1a2f97b9deb4899ecb3"
+    },
+    {
+      "path": "display/j713/backlight/LICENSES/GPL-2.0",
+      "mode": "100644",
+      "blob": "e38a29f57e80e943c4781f498eb2b24d02e3da39",
+      "size": 17882,
+      "sha256": "77dc7854b1bdc02d96ab5e531e1023482c94dc4a24d28637e2d3d26554b33346"
+    },
+    {
+      "path": "display/j713/backlight/LICENSES/MIT",
+      "mode": "100644",
+      "blob": "4d84b49ccc6e4c11cf726bfd65ae98d864a4f595",
+      "size": 1084,
+      "sha256": "c9bb6d6a048ced56562cb3ae3cdea0af0e093e61830a80188a25022b270e3520"
+    },
+    {
+      "path": "display/j713/backlight/native-wire.h",
+      "mode": "100644",
+      "blob": "f9a17c2be6a6aca0b849bf4272d1ef82817a2115",
+      "size": 2081,
+      "sha256": "7faedcf18409d234554b10ca3911c95c93d9727726a8adbe8f3e20b09ede8968"
+    },
+    {
+      "path": "display/j713/backlight/NOTICE",
+      "mode": "100644",
+      "blob": "80ed4422303229f5637b3da2097fbcfe69207a89",
+      "size": 1081,
+      "sha256": "14f8288e71131582403f5db6763a3a8239b09fe07519e55e4f62defd94d21031"
+    },
+    {
+      "path": "display/j713/build-backlight-loader.sh",
+      "mode": "100755",
+      "blob": "7c5815497c6916d37375aa5ab384b0f81a222d7e",
+      "size": 2804,
+      "sha256": "230695e59b3ea94a0389336579b88bfdd91751b8797000c9d85740375d036189"
+    },
+    {
+      "path": "display/j713/build-notch-loader.sh",
+      "mode": "100755",
+      "blob": "a5a59cde7721cc8fa9d7932f463de2141fce06d6",
+      "size": 2335,
+      "sha256": "163709e17b435e9be2f2ffd2be6bf289da40647673abaa6b85caa1867b473107"
+    },
+    {
+      "path": "display/j713/m1n1-base/3rdparty_licenses/LICENSE.BSD-2.libfdt",
+      "mode": "100644",
+      "blob": "292cc5470f28e6e81efe6331681c0d0827b4f2b7",
+      "size": 1315,
+      "sha256": "b410d206e6a11b2eb4aa7766a01b6cdf705b2a3c8ea26a00530587859ad873cd"
+    },
+    {
+      "path": "display/j713/m1n1-base/3rdparty_licenses/LICENSE.BSD-3.arm",
+      "mode": "100644",
+      "blob": "4eaaa1a2201d50d097f47887971da89812dce679",
+      "size": 1488,
+      "sha256": "ba420ebd24cc61d4b97d7173acd216e742524ed304ee2b2df6cf8546fbfca48e"
+    },
+    {
+      "path": "display/j713/m1n1-base/3rdparty_licenses/LICENSE.BSD-3.dwc3",
+      "mode": "100644",
+      "blob": "fb2640fa3f00c516b8f110881039e5f0841c0cea",
+      "size": 1776,
+      "sha256": "aaef31cc73e25d5b48fa903957fae7243db7628f270b0511bf4232be871c5434"
+    },
+    {
+      "path": "display/j713/m1n1-base/3rdparty_licenses/LICENSE.CC0",
+      "mode": "100644",
+      "blob": "0e259d42c996742e9e3cba14c677129b2c1b6311",
+      "size": 7048,
+      "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499"
+    },
+    {
+      "path": "display/j713/m1n1-base/3rdparty_licenses/LICENSE.GPL-2",
+      "mode": "100644",
+      "blob": "0e845b5e312bd35fde93cccd591f65b7d756df6f",
+      "size": 18094,
+      "sha256": "86dc744860e6dfacfeba2f33fea908db03fe67c7e37a878285b7aae8e4596735"
+    },
+    {
+      "path": "display/j713/m1n1-base/3rdparty_licenses/LICENSE.minlzma",
+      "mode": "100644",
+      "blob": "cea77da9d6953b44ed2e12a0b4376ee59c688391",
+      "size": 1069,
+      "sha256": "c8d8f2121d2bd6ffbe66f9ee9ade1076dc2951f685f6d0c65992121c21fbf12e"
+    },
+    {
+      "path": "display/j713/m1n1-base/3rdparty_licenses/LICENSE.OFL-1.1",
+      "mode": "100644",
+      "blob": "9efccbc0297b7ee475fe3cd356969fbb4f843f68",
+      "size": 4485,
+      "sha256": "2e14ee65e55dbcc7d66347cd7c76a10a1a18ac49dd7989a2b3838b479676f746"
+    },
+    {
+      "path": "display/j713/m1n1-base/3rdparty_licenses/LICENSE.tinf",
+      "mode": "100644",
+      "blob": "c90a73c56a90970dc20684e370b6cc4af4081f32",
+      "size": 903,
+      "sha256": "f39b507b81b9ba1edce7fe742bbd68fda4b852063ce7299274ae97991d48814b"
+    },
+    {
+      "path": "display/j713/m1n1-base/LICENSE",
+      "mode": "100644",
+      "blob": "aff0557da45ae68209934ef48887a8112663ca45",
+      "size": 1076,
+      "sha256": "11ca423a564b52d3b7f260398baa20d016c25ae180fbdd0067c27b7d1ed7b420"
+    },
+    {
+      "path": "display/j713/m1n1-base/README.md",
+      "mode": "100644",
+      "blob": "1223783f999dd83fc769181eadce9265e747ca3a",
+      "size": 6358,
+      "sha256": "21c70db99baa16e61413a28abc35b777397869889362f5cc17d058670305fb89"
+    },
+    {
+      "path": "display/j713/m1n1-base/SHA256SUMS",
+      "mode": "100644",
+      "blob": "edefe74bf8ba113e99b6aa57be22ba838a0dd64b",
+      "size": 1183,
+      "sha256": "880c2ddde179c9d9a50b9e79395027eae7ee01d31aa962975b0fcac5b3888246"
+    },
+    {
+      "path": "display/j713/m1n1-base/src/dart.c",
+      "mode": "100644",
+      "blob": "dbef5554e6454ab1f69921f97d80616c0f1bfcf7",
+      "size": 24948,
+      "sha256": "775a0780207b8fe866f35677a522b18b8ff90bc5abdc1829dfac2d7ee5d0bd23"
+    },
+    {
+      "path": "display/j713/m1n1-base/src/dart.h",
+      "mode": "100644",
+      "blob": "0040dc2c2e414983bb08f91e3d53cdcc4a91dcf6",
+      "size": 1678,
+      "sha256": "3d20071c817180084721189bc524e5edc9b0368a36728c927b68f92c0b18c3f4"
+    },
+    {
+      "path": "display/j713/m1n1-base/src/kboot.c",
+      "mode": "100644",
+      "blob": "b7ad1c7e5b3c9006cd9ad57e25638f2d4144dd6e",
+      "size": 103757,
+      "sha256": "33f699e5ac66bd45719ea4ed04b8284e1b570c2b320e370a6bc63ddc9926f0a0"
+    },
+    {
+      "path": "display/j713/m1n1-show-notch.patch",
+      "mode": "100644",
+      "blob": "fe1f317d310aa84e4b1fcc4836a9b925da48967d",
+      "size": 778,
+      "sha256": "9a829165b73882576d8fe184c3b495c2447dafd870fe03e5c97e20a4df99e89d"
+    }
+  ]
+}
