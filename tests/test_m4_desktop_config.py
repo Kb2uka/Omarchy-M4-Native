@@ -128,6 +128,20 @@ class DesktopImageTests(unittest.TestCase):
         self.assertEqual(report["changed_files"], ["etc/xdg/uwsm/env.d/90-m4-shader-cache"])
         self.assertEqual(override.read_bytes(), b"export MESA_SHADER_CACHE_DISABLE=false\n")
 
+    def test_gdk_gl_override_is_installed_and_checked(self):
+        desktop.configure(self.root, apply=True)
+        override = self.root / "etc/xdg/uwsm/env.d/90-m4-gdk-gl"
+        self.assertEqual(override.read_bytes(), b"export GDK_GL=gles\n")
+
+        override.write_bytes(b"export GDK_GL=gl\n")
+        before = self.snapshot()
+        with self.assertRaisesRegex(ValueError, "etc/xdg/uwsm/env.d/90-m4-gdk-gl"):
+            desktop.configure(self.root)
+        self.assertEqual(self.snapshot(), before)
+        report = desktop.configure(self.root, apply=True)
+        self.assertEqual(report["changed_files"], ["etc/xdg/uwsm/env.d/90-m4-gdk-gl"])
+        self.assertEqual(override.read_bytes(), b"export GDK_GL=gles\n")
+
     def test_chromium_default_preserves_stock_and_existing_owner(self):
         owner = self.write("home/owner/.config/chromium-flags.conf", "--owner-choice\n")
         desktop.configure(self.root, apply=True)
@@ -395,6 +409,26 @@ class DesktopImageTests(unittest.TestCase):
                     desktop.configure(self.root)
                 report = desktop.configure(self.root, apply=True)
                 self.assertIn("etc/xdg/uwsm/env.d/90-m4-shader-cache", report["changed_files"])
+                self.assertEqual(override.stat().st_mode & 0o777, 0o644)
+
+    @unittest.skipIf(os.name == "nt", "POSIX image permissions")
+    def test_gdk_gl_remains_readable_under_restrictive_umask(self):
+        previous = os.umask(0o077)
+        try:
+            desktop.configure(self.root, apply=True)
+        finally:
+            os.umask(previous)
+        override = self.root / "etc/xdg/uwsm/env.d/90-m4-gdk-gl"
+        self.assertEqual(override.stat().st_mode & 0o777, 0o644)
+        for parent in (override.parent, override.parent.parent, override.parent.parent.parent):
+            self.assertEqual(parent.stat().st_mode & 0o777, 0o755)
+        for mode in (0o600, 0o666):
+            with self.subTest(mode=oct(mode)):
+                override.chmod(mode)
+                with self.assertRaisesRegex(ValueError, "90-m4-gdk-gl"):
+                    desktop.configure(self.root)
+                report = desktop.configure(self.root, apply=True)
+                self.assertIn("etc/xdg/uwsm/env.d/90-m4-gdk-gl", report["changed_files"])
                 self.assertEqual(override.stat().st_mode & 0o777, 0o644)
 
     @unittest.skipIf(os.name == "nt", "POSIX image permissions")

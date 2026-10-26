@@ -227,6 +227,15 @@ Apple M4 and read back the expected pixel without GL errors. The sandbox
 remained enabled. Browser launches must inherit the matching M4 library paths;
 starting from a sparse SSH environment selected incompatible system libraries.
 
+The image helper also installs `etc/xdg/uwsm/env.d/90-m4-gdk-gl` to export
+`GDK_GL=gles` ([issue #158](https://github.com/Kb2uka/Omarchy-M4-Native/issues/158)).
+The project's M4 Mesa libraries under `/opt/m4-mesa/lib` supply EGL, GLES and GBM
+without desktop OpenGL (`libGL.so`). By default GTK3 requests a desktop OpenGL
+context through libepoxy and falls back to software with broken textures when
+desktop GL is missing. Setting `GDK_GL=gles` in the session environment instructs
+GTK3 applications (such as RustDesk and Tauri/WebKitGTK apps) to request an
+OpenGL ES context instead, allowing them to render on the M4 GPU.
+
 This corrects one startup failure. Local 60 fps playback still dropped frames
 after the change. The installed
 session was tested by relaunching the browser; a fresh native owner boot with
@@ -261,6 +270,8 @@ root:
 sudo install -d -m 0755 /etc/xdg /etc/xdg/uwsm /etc/xdg/uwsm/env.d
 printf '%s\n' 'export MESA_SHADER_CACHE_DISABLE=false' | sudo tee /etc/xdg/uwsm/env.d/90-m4-shader-cache >/dev/null
 sudo chmod 0644 /etc/xdg/uwsm/env.d/90-m4-shader-cache
+printf '%s\n' 'export GDK_GL=gles' | sudo tee /etc/xdg/uwsm/env.d/90-m4-gdk-gl >/dev/null
+sudo chmod 0644 /etc/xdg/uwsm/env.d/90-m4-gdk-gl
 ```
 
 Save work, log out and log back in to reload the session environment. Verify
