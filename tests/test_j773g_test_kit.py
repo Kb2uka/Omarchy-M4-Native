@@ -239,6 +239,13 @@ class Derive(unittest.TestCase):
             self.derive()
         for name in ('KIT.json', 'SHA256SUMS', 'IMAGE.json', 'os/' + MODULE.PACKAGE):
             self.assertEqual((first / name).read_bytes(), (again / name).read_bytes(), name)
+        with zipfile.ZipFile(first / 'os' / MODULE.PACKAGE) as archive:
+            for info in archive.infolist():
+                root = info.filename == 'root.ext4'
+                self.assertEqual((info.date_time, info.compress_type, info.external_attr >> 16),
+                                 (MODULE.ZIP_TIME, zipfile.ZIP_DEFLATED, 0o100644 if root else 0o600), info.filename)
+                if root:  # the real root is about 17 GB: without ZIP64 the write fails past 2 GiB
+                    self.assertGreaterEqual(info.extract_version, zipfile.ZIP64_VERSION)
 
     def test_a_debugfs_that_ignores_the_fixed_time_is_refused(self):
         debugfs = self.base / 'debugfs'

@@ -33,6 +33,10 @@ def load(name, path):
 MODULE = load('j715_test_kit', 'tools/derive-j715-test-kit.py')
 PACKAGER = load('j713_download', 'tools/package-j713-download.py')
 TOOLS = all(shutil.which(tool) for tool in ('mkfs.ext4', 'debugfs', 'e2fsck', 'patch'))
+# file(1) in command position: at a line start, after ; & | ( ! or a backquote, or after a shell keyword,
+# exec (so find -exec) or xargs and its flags, whatever its first argument looks like.
+FILE_COMMAND = re.compile(r'(?:^|[;&|(!`]|\b(?:if|elif|then|else|do|while|until|exec|command|time)\b'
+                          r'|\bxargs\b(?:\s+-\S+)*)\s*file(?![\w=.-])', re.M)
 REVISION = 'a' * 40
 digest = lambda data: hashlib.sha256(data).hexdigest()
 
@@ -311,6 +315,13 @@ class Derive(unittest.TestCase):
         self.assertEqual(first, second)
         for name in ('KIT.json', 'SHA256SUMS', 'IMAGE.json', 'os/' + MODULE.PACKAGE):
             self.assertEqual((self.output / name).read_bytes(), (self.base / 'again' / name).read_bytes(), name)
+        with zipfile.ZipFile(self.output / 'os' / MODULE.PACKAGE) as archive:
+            for info in archive.infolist():
+                root = info.filename == 'root.ext4'
+                self.assertEqual((info.date_time, info.compress_type, info.external_attr >> 16),
+                                 (MODULE.ZIP_TIME, zipfile.ZIP_DEFLATED, 0o100644 if root else 0o600), info.filename)
+                if root:  # the real root is about 17 GB: without ZIP64 the write fails past 2 GiB
+                    self.assertGreaterEqual(info.extract_version, zipfile.ZIP64_VERSION)
 
     def test_a_debugfs_that_ignores_the_fixed_time_is_refused(self):
         debugfs = self.base / 'debugfs'
@@ -502,7 +513,15 @@ class Sources(unittest.TestCase):
         subprocess.run(['bash', '-n', str(ROOT / 'tools/build-j715-kernel.sh')], check=True)
         # m4-gravity-builder has no file(1): no line runs it, as a command, after a pipe or under -exec.
         code = '\n'.join(line.split('#', 1)[0] for line in script.splitlines())
-        self.assertIsNone(re.search(r'(?<![$\w-])file(?=\s+["\'$\-{])', code))
+        self.assertIsNone(FILE_COMMAND.search(code))
+
+    def test_the_no_file_check_finds_file_in_command_position(self):
+        for line in ('file arch/arm64/boot/Image.gz', 'file "$f"', 'if file "$f" | grep -q x86-64; then',
+                     'find . -exec file {} +', 'xargs -0 file', 'cat list | file -f -', 'true && file Image'):
+            self.assertIsNotNone(FILE_COMMAND.search(line), line)
+        for line in ("read -r -d '' file; do", 'x86_64_elf "$file"', 'local file=$1', 'for file in *; do',
+                     'make --file Makefile', 'cp profile out'):
+            self.assertIsNone(FILE_COMMAND.search(line), line)
 
     def test_the_kernel_recipe_names_a_missing_patch_before_doing_anything(self):
         with tempfile.TemporaryDirectory() as empty:
