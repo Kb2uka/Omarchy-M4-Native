@@ -179,7 +179,7 @@
     "/soc/usb@40a280000/ports/port@1",
     "/soc/usb@40a280000/ports/port@1/endpoint"
    ],
-   "enabled_digest": "0abfac1e14dbcd90d35a06ebcd58eda6bf10b74a38b8ab7dfeb1874ff6cb6693",
+   "enabled_digest": "3a02f2d37b2b6d861f4c5632b15fcda06dc77d02135f0e7ff9ce494162fc993f",
    "model": "Apple MacBook Air (13-inch, M4, 2025)",
    "warnings": [
     "Warning (simple_bus_reg): /soc/interrupt-controller@381180000: simple-bus unit address format error, expected \"381000000\""
@@ -248,6 +248,7 @@
   "0014-fix-dts-j713-use-adt-mtp-reset-gpios.patch",
   "0015-fix-dts-t8132-ans-receive-irq-roles.patch",
   "0016-fix-dts-j713-attach-nvme-storage-system-domain.patch",
-  "0017-fix-dts-t8132-keep-board-wired-parts-disabled-outside-j713.patch"
+  "0017-fix-dts-t8132-keep-board-wired-parts-disabled-outside-j713.patch",
+  "0018-fix-dts-t8132-sep-mailbox-irq-roles.patch"
  ]
 }

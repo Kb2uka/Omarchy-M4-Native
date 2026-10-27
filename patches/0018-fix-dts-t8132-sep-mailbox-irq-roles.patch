@@ -1,0 +1,38 @@
+From: Audrey Tang <au@civic.ai>
+Subject: [PATCH] fix(dts): t8132: correct SEP mailbox IRQ roles
+
+Patch 0004 copied the SEP mailbox interrupts in ADT order, which is not
+the Linux role order. As patch 0015 found for the ANS mailbox, the line
+in the recv-not-empty slot (391) is the one asserted while the receive
+FIFO is empty. The ASC v4 mailbox has no IRQ acknowledge, so starting the
+SEP channel makes the receive handler poll an empty FIFO forever and the
+machine freezes.
+
+On a J715, loading a SEP driver froze the machine at mailbox start every
+time with the ADT order. With the roles below the same load starts the
+channel, the SEP answers and recv-not-empty (392) counts its replies.
+The send pair is exchanged to match, as in patch 0015.
+
+The SoC include affects every T8132 board; hardware validation is J715
+only. The SEP node itself stays disabled.
+---
+ arch/arm64/boot/dts/apple/t8132.dtsi | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+--- a/arch/arm64/boot/dts/apple/t8132.dtsi
++++ b/arch/arm64/boot/dts/apple/t8132.dtsi
+@@ -592,10 +592,10 @@ sep_mbox: mbox@3aa608000 {
+ 			compatible = "apple,t8132-asc-mailbox", "apple,asc-mailbox-v4";
+ 			reg = <0x3 0xaa608000 0x0 0x4000>;
+ 			interrupt-parent = <&aic>;
+-			interrupts = <AIC_IRQ 390 IRQ_TYPE_LEVEL_HIGH>,
+-			             <AIC_IRQ 389 IRQ_TYPE_LEVEL_HIGH>,
+-			             <AIC_IRQ 392 IRQ_TYPE_LEVEL_HIGH>,
+-			             <AIC_IRQ 391 IRQ_TYPE_LEVEL_HIGH>;
++			interrupts = <AIC_IRQ 389 IRQ_TYPE_LEVEL_HIGH>,
++			             <AIC_IRQ 390 IRQ_TYPE_LEVEL_HIGH>,
++			             <AIC_IRQ 391 IRQ_TYPE_LEVEL_HIGH>,
++			             <AIC_IRQ 392 IRQ_TYPE_LEVEL_HIGH>;
+ 			interrupt-names = "send-empty", "send-not-empty",
+ 			                  "recv-empty", "recv-not-empty";
+ 			#mbox-cells = <0>;
