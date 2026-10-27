@@ -1,0 +1,15 @@
+--- a/audio/j713/kernel/j713-audio.c
++++ b/audio/j713/kernel/j713-audio.c
+@@ -754,9 +754,11 @@ static void j713_remove(struct platform_device *pdev)
+ 	WRITE_ONCE(a->notifications_ready, false);
+ 	cancel_work_sync(&a->notify_cutoff);
+ }
++/* A verified, ownerless LOW is already the cutoff: keep it so protection can
++ * start again after resume. Anything else is forced LOW and CANCELLED. */
+ static int j713_suspend(struct device *dev)
+ {
+-	return j713_group_revoke(&((struct j713_audio *)dev_get_drvdata(dev))->gate);
++	return j713_audio_revoke(dev_get_drvdata(dev));
+ }
+ static const struct dev_pm_ops j713_pm = { .suspend = j713_suspend, .freeze = j713_suspend, .poweroff = j713_suspend };
+ static const struct of_device_id j713_match[] = {{ .compatible = "apple,j713-speaker-group" }, {}};

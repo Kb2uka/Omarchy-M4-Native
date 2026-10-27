@@ -52,8 +52,40 @@ The sustained observation included manual video changes; it is not a claim of
 not establish arbitrary reboot reliability. The offline image apply/check path
 has filesystem-fixture coverage and was not used to create that native install.
 Fresh-image installation on another machine, acoustic calibration, broad load
-coverage and suspend/resume remain unqualified. The separate experimental sleep
-coordinator, PM changes and resume daemon are not included in this runtime.
+coverage and suspend/resume remain unqualified.
+
+Sleep ([#92](https://github.com/Kb2uka/Omarchy-M4-Native/issues/92)):
+`m4-j713-audio-sleep.service` runs `tools/m4-j713-audio-sleep.py` around
+`sleep.target`. Before sleep it stops the user's PipeWire and WirePlumber units,
+so the speaker output closes, then stops `speakersafetyd-j713`, so the speaker
+group returns to an ownerless, verified LOW. The published group's suspend
+callback turns even that LOW into `CANCELLED`;
+`patches-kernel/j713-audio/suspend-keeps-verified-low.patch` keeps it (any owned
+or unverified state is still forced LOW and `CANCELLED`). A status query that
+fails or times out counts as running, so those units are stopped rather than
+assumed off. Each user's units are stopped and started at the same time, so the
+time limits hold for any number of logged-in users.
+After resume it starts protection only from that LOW with the output closed,
+then the user units it stopped; protection's readiness check and the
+WirePlumber gate decide as at boot. It never clears a fault, a lapsed lease or
+a failed transport. Without it, a daemon frozen while it owns the speakers
+loses its lease and fails closed; if PipeWire was playing, its next start of
+the output fails the lease check and leaves the transport failed until a reboot.
+The unit, the script and group and MCA modules rebuilt with the patches are not
+yet in a channel package.
+
+On the owner's Air (2026-10-24, `pm_test=devices` through `systemctl suspend`,
+UART unbound): with the published group module (`aaad802e…`) the coordinator
+reached the verified LOW before sleep and found the group `CANCELLED` after it,
+so protection stayed off. With group `dcbf085a…` and MCA `dad7fb96…` built from
+`audio/j713/kernel/` plus `suspend-keeps-verified-low.patch` and
+`transport-failure-logging.patch`, protection was ready again 15 s after resume,
+idle and during playback, and a test tone then played (group ACTIVE). With
+the same modules and the devicetree from
+[#172](https://github.com/Kb2uka/Omarchy-M4-Native/pull/172), which keeps the
+GPU and display domains on, a real 36 s s2idle cycle woken by the power button
+gave the same result: protection ready 16 s after resume, then a tone played.
+Without that devicetree, real s2idle loses the GPU and display (#92).
 
 Faults remain latched and the protection service retains `Restart=no`. This
 package does not promise automatic recovery after thermal faults, capture XRUNs,
@@ -61,6 +93,12 @@ lease loss or a changed ABI. Offline image apply/check refuses a mismatched
 kernel, libasound, payload or customized destination. Runtime registration and
 readiness pin the kernel and installed payloads; they do not re-attest the shared
 library ABI after a system update. Such updates require separate qualification.
+`patches-kernel/j713-audio/transport-failure-logging.patch` makes the MCA
+transport log the step that leaves it failed until reboot (`J713 close: …`,
+`J713 start of stream …`, `J713 DAI start of stream …` or
+`J713 cleanup of stream …` in `journalctl -k`). In the playback case above
+without the coordinator, the step was `J713 start of stream 0 failed until
+reboot: -125`: PipeWire restarting the output after the lease lapsed.
 
 ## Reproduce the source checks
 
