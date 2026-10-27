@@ -9,6 +9,9 @@ ConditionPathExists=/sys/class/backlight/j713-dcp
 [Service]
 Type=exec
 ExecStart=/usr/bin/m4-backlight --follow-display
+# A follower killed while dark restarts and restores the level it published in /run.
+Restart=on-failure
+RestartSec=1
 
 [Install]
 WantedBy=multi-user.target

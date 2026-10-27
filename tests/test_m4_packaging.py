@@ -401,6 +401,29 @@ class PolicyTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     CHECK.check_package(CHANNEL, package, info, changed, root)
 
+    def test_backlight_package_must_be_the_pin(self):
+        module, = CHANNEL['backlight_module']
+        pins = PACKAGING / 'omarchy-m4-backlight/module.json'
+        good = {module: (0o644, CHANNEL['backlight_module'][module]),
+                'usr/bin/m4-backlight': (0o755, file_sha('tools/m4-backlight.py')),
+                'usr/lib/omarchy-m4/backlight/module.json': (0o644, hashlib.sha256(pins.read_bytes()).hexdigest()),
+                CHECK.BACKLIGHT_UNIT: (0o644, file_sha('packaging/omarchy-m4/omarchy-m4-backlight/m4-backlight.service')),
+                CHECK.BACKLIGHT_DISPLAY_UNIT: (
+                    0o644, file_sha('packaging/omarchy-m4/omarchy-m4-backlight/m4-backlight-display.service'))}
+        package, info, files, root = self.package('omarchy-m4-backlight', good, version='1-2')
+        (root / module).parent.mkdir(parents=True)
+        (root / module).write_bytes(bytes(json.loads(pins.read_text())['module_bytes']))
+        (root / 'usr/lib/omarchy-m4/backlight/module.json').write_bytes(pins.read_bytes())
+        CHECK.check_package(CHANNEL, package, info, files, root)
+        for changed, message in (({**good, 'usr/bin/m4-backlight': (0o755, '0' * 64)}, 'helper differs'),
+                                 ({**good, CHECK.BACKLIGHT_UNIT: (0o644, '0' * 64)}, 'boot unit differs'),
+                                 ({**good, CHECK.BACKLIGHT_DISPLAY_UNIT: (0o644, '0' * 64)}, 'display unit differs'),
+                                 ({k: v for k, v in good.items() if k != CHECK.BACKLIGHT_DISPLAY_UNIT},
+                                  'display unit differs')):
+            with self.subTest(message):
+                with self.assertRaisesRegex(ValueError, message):
+                    CHECK.check_package(CHANNEL, package, info, changed, root)
+
     def test_cpu_idle_tool_pin_must_match_the_channel(self):
         for key in ('cpu_idle_module', 'cpu_guard_module'):
             with self.subTest(key):

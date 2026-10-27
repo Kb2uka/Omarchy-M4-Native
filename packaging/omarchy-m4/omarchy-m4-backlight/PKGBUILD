@@ -13,10 +13,10 @@ options=('!strip' '!debug')
 source=('m4-backlight.py' 'module.json' 'm4-backlight.service' 'm4-backlight-display.service'
         'NOTICE' 'MIT.txt' 'GPL-2.0-only.txt'
         "j713_dcp_backlight.ko::${url}/releases/download/package-inputs/j713-dcp-backlight-2186b280.ko")
-sha256sums=('715a2bef256e0de747d69bfe0c621a9994f973071576b226d43b797e3df66cde'
+sha256sums=('3a8571843b92de06dbdd6ffe67f5cbffa77909a1df45782918306c259efcabaf'
             'ff21a39817e86971a30ff2412c0e5deee6578b4a247d19cd837fcda355381db6'
             '65dc5be7e0632a97b9022e5fc06655c9273fae61656703f5a95b6175ab2b6a4f'
-            'c1bdf8dbf7b55f5fac70f4b6aa23292ca1a9a7f8f1d2fc79748da27696b78270'
+            '6a975144237b1f591e41e870457550f771ddd5d0c1618f56e60ca291e9e4484e'
             '14f8288e71131582403f5db6763a3a8239b09fe07519e55e4f62defd94d21031'
             'c9bb6d6a048ced56562cb3ae3cdea0af0e093e61830a80188a25022b270e3520'
             '77dc7854b1bdc02d96ab5e531e1023482c94dc4a24d28637e2d3d26554b33346'

@@ -15,6 +15,8 @@ Other focused monitors retain Omarchy's existing Apple-display/DDC routing.
 zero while the boot framebuffer's scanout is off and restores it when the
 scanout returns. simpledrm cannot reach the backlight, so DPMS off, the lock
 blank and lid close otherwise leave the panel lit behind a black picture.
+While it holds zero it publishes the owner's level in /run, so a brightness key
+pressed while blanked steps from that level and a restarted follower restores it.
 """
 import argparse
 import contextlib
@@ -38,6 +40,7 @@ DEBUG = 'sys/kernel/debug/j713_dcp_backlight'
 BACKLIGHT = 'sys/class/backlight/j713-dcp'
 DRM = 'sys/class/drm'
 FRAMEBUFFER_DRIVER = 'simple-framebuffer'
+HELD = 'run/omarchy-m4/backlight-held'
 # Seconds between scanout checks: a blank may wait a second, a wake may not.
 LIT_INTERVAL = 1.0
 DARK_INTERVAL = 0.2
@@ -186,7 +189,12 @@ def brightness(step, no_osd=False, run=subprocess.run, root=Path('/')):
         except BlockingIOError:
             return 0  # Same intentional overlap drop as Omarchy's brightness keys.
         result = run(['brightnessctl', '-d', 'j713-dcp', '-m'], check=True, capture_output=True, text=True)
-        current = int(result.stdout.strip().split(',')[3].rstrip('%'))
+        fields = result.stdout.strip().split(',')
+        current = int(fields[3].rstrip('%'))
+        held = held_level(root) if int(fields[2]) == 0 else None
+        if held:
+            # Blanked by the follower: step from the owner's level, not from its zero.
+            current = round(held * 100 / int(fields[4]))
         # Preserve Omarchy's small steps near minimum and absolute percentage rounding.
         if step == '+5%':
             step = f'{min(100, current + (1 if current < 5 else 5))}%'
@@ -218,19 +226,45 @@ def scanout_on(connector):
     return text(connector / 'enabled') == 'enabled' and text(connector / 'dpms') == 'On'
 
 
+def held_level(root):
+    try:
+        fd = os.open(root / HELD, os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return None
+    with os.fdopen(fd) as stream:
+        return int(stream.read().strip())
+
+
+def publish_held(root, saved):
+    held = root / HELD
+    if saved:
+        held.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+        require(not held.parent.is_symlink(), 'Held backlight directory is a symlink')
+        staged = held.with_name(held.name + '.new')
+        fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
+        with os.fdopen(fd, 'w') as stream:
+            stream.write(f'{saved}\n')
+        os.replace(staged, held)
+    elif os.path.lexists(held):
+        held.unlink()
+
+
 def follow_display(root, sleep=time.sleep):
     require(is_j713(root), 'This is not a J713 MacBook Air')
     level = root / BACKLIGHT / 'brightness'
     require(level.is_file(), 'Native panel backlight is not started')
     connector = panel_connector(root)
-    saved = None  # The owner's level while the scanout is off.
+    # The owner's level while the scanout is off; a follower stopped abruptly while dark left it in /run.
+    saved = held_level(root)
     try:
         while True:
             if not scanout_on(connector):
                 current = int(text(level))
                 if current:
                     # The owner's level at blank, or one written while still dark: hold 0, restore it on wake.
+                    # Publish it first, so a brightness key never sees the zero without it.
                     saved = current
+                    publish_held(root, saved)
                     level.write_text('0\n')
                 elif saved is None:
                     saved = 0
@@ -239,11 +273,13 @@ def follow_display(root, sleep=time.sleep):
                 if saved and int(text(level)) == 0:
                     level.write_text(f'{saved}\n')
                 saved = None
+                publish_held(root, None)
             sleep(LIT_INTERVAL if saved is None else DARK_INTERVAL)
     finally:
         # Stopping while dark (shutdown) must not leave 0 for systemd-backlight to save.
         if saved and int(text(level)) == 0:
             level.write_text(f'{saved}\n')
+        publish_held(root, None)
 
 
 def has_custom_brightness(source):

@@ -395,12 +395,18 @@ file.
   writes the level back. A level written while the scanout is still off is
   held at 0 and becomes the level restored on wake; one set as the scanout
   returns (for example by a brightness key that woke the screen) is kept.
+  While it holds 0 it publishes the saved level in
+  `/run/omarchy-m4/backlight-held`, and a brightness key on the blanked panel
+  steps from that level rather than from 0, so a key wake comes back one step
+  from the owner's level instead of at 1%.
   Hyprland reports no DPMS event, and its key and mouse wake bypass every
   DPMS caller, so the follower watches the connector rather than wrapping
   `omarchy-brightness-display`.
 - **Shutdown:** the unit stops before
   `systemd-backlight@backlight:j713-dcp.service` and restores a level it is
-  holding at 0, so a shutdown with the screen dark never saves 0.
+  holding at 0, so a shutdown with the screen dark never saves 0. A follower
+  killed while dark restarts (`Restart=on-failure`) and restores the level it
+  published.
 - **Scope:** it refuses unless exactly one `Unknown-1` connector belongs to
   `simple-framebuffer`, so a future native display driver is not
   second-guessed. It needs `m4-backlight.service` to have started the
@@ -409,7 +415,10 @@ file.
 - **Verification boundary:** on the owner's Air, with kernel
   `7.1.9-m4-gpu-backport-20261008`, DPMS off reached 0 nits within 0.93 s and
   DPMS on restored 158 nits within 0.14 s. `PSTR` read 4.33 W dark and 8.61 W
-  lit. Stopping the unit while dark restored 158. Battery runtime, lid-close
+  lit. Stopping the unit while dark restored 158. With the owner at 236 nits
+  and the screen blanked, `m4-backlight brightness +5%` (the brightness-up
+  key's path) woke at 263 nits; a follower sent `SIGKILL` while dark
+  restarted, held 0 and restored 263 on wake. Battery runtime, lid-close
   suspend and the panel's own power-down are not claimed.
 
 
