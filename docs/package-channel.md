@@ -18,7 +18,7 @@ reviewers.
 | `omarchy-m4-headphones` | The headphone jack card: two pinned modules, `m4-headphones`, its registration drop-in, UCM and WirePlumber files | `1-1`; `1-2` adds the headset microphone |
 | `omarchy-m4-cpu` | The CPU idle driver: one pinned module, `m4-cpu-idle` and its boot unit | `1-1`; `1-5` retries a leftover marker once after a proven orderly shutdown |
 | `omarchy-m4-evdi` | DisplayLink's evdi module and `libevdi`, for USB display adapters | `1.15.1-1` |
-| `omarchy-m4-backlight` | Native DCP backlight module, guarded startup, brightness-key routing and OSD | `1-1` |
+| `omarchy-m4-backlight` | Native DCP backlight module, guarded startup, brightness-key routing and OSD | `1-1`; `1-2` turns the backlight off while the screen is blanked |
 
 ### omarchy-m4-boot 1-4 and omarchy-m4-gst-audio 1.28.7-1
 
@@ -378,6 +378,48 @@ file.
   was restored before later brightness-key changes. Physical keys and OSD
   were confirmed. No suspend, other-board or native external-display support
   is claimed.
+
+### omarchy-m4-backlight 1-2
+
+- **Problem:** scanout is `simpledrm`, which cannot reach the panel
+  backlight. DPMS off (the idle and lock-screen blank, which lid close triggers) left
+  `j713-dcp` at its level behind a black picture. On the owner's Air (AC,
+  SMC `PSTR`, medians of 160 samples) the desktop drew 8.48 W lit at 158 nits,
+  5.92 W with DPMS off and 3.97 W with DPMS off and the backlight at 0.
+  With the screen lit, system draw ran from 7.57 W at 0 nits to 14.44 W at 525.
+- **Change:** `m4-backlight-display.service` runs `m4-backlight
+  --follow-display`. It reads the boot framebuffer connector
+  (`/sys/class/drm/card*-Unknown-1` on `simple-framebuffer`, `enabled` and
+  `dpms`) every second while lit and every 0.2 s while dark. When the scanout
+  goes off, it saves the level and writes 0; when the scanout returns, it
+  writes the level back. A level written while the scanout is still off is
+  held at 0 and becomes the level restored on wake; one set as the scanout
+  returns (for example by a brightness key that woke the screen) is kept.
+  While it holds 0 it publishes the saved level in
+  `/run/omarchy-m4/backlight-held`, and a brightness key on the blanked panel
+  steps from that level rather than from 0, so a key wake comes back one step
+  from the owner's level instead of at 1%.
+  Hyprland reports no DPMS event, and its key and mouse wake bypass every
+  DPMS caller, so the follower watches the connector rather than wrapping
+  `omarchy-brightness-display`.
+- **Shutdown:** the unit stops before
+  `systemd-backlight@backlight:j713-dcp.service` and restores a level it is
+  holding at 0, so a shutdown with the screen dark never saves 0. A follower
+  killed while dark restarts (`Restart=on-failure`) and restores the level it
+  published.
+- **Scope:** it refuses unless exactly one `Unknown-1` connector belongs to
+  `simple-framebuffer`, so a future native display driver is not
+  second-guessed. It needs `m4-backlight.service` to have started the
+  backlight. The upgrade starts it at once when the backlight is already
+  running; it never starts the backlight module outside boot.
+- **Verification boundary:** on the owner's Air, with kernel
+  `7.1.9-m4-gpu-backport-20261008`, DPMS off reached 0 nits within 0.93 s and
+  DPMS on restored 158 nits within 0.14 s. `PSTR` read 4.33 W dark and 8.61 W
+  lit. Stopping the unit while dark restored 158. With the owner at 236 nits
+  and the screen blanked, `m4-backlight brightness +5%` (the brightness-up
+  key's path) woke at 263 nits; a follower sent `SIGKILL` while dark
+  restarted, held 0 and restored 263 on wake. Battery runtime, lid-close
+  suspend and the panel's own power-down are not claimed.
 
 
 ### Retained bounds candidate: boot 1-19 and speaker 1-5

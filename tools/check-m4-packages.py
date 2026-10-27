@@ -35,6 +35,7 @@ GPU_DROP_IN = 'usr/lib/systemd/system/m4-gpu.service.d/20-m4-gpu-module.conf'
 HEADPHONES_DROP_IN = 'usr/lib/systemd/system/m4-j713-audio-register.service.d/30-m4-headphones.conf'
 CPU_IDLE_UNIT = 'usr/lib/systemd/system/m4-cpu-idle.service'
 BACKLIGHT_UNIT = 'usr/lib/systemd/system/m4-backlight.service'
+BACKLIGHT_DISPLAY_UNIT = 'usr/lib/systemd/system/m4-backlight-display.service'
 # Installed paths of the headphone UCM and WirePlumber files, relative to their
 # source tree audio/j713/headphones/policy/.
 HEADPHONES_POLICY = ('usr/share/alsa/ucm2/conf.d/J713Headphones/J713Headphones.conf',
@@ -381,6 +382,8 @@ def check_package(channel, package, info, files, root, joins=None):
         require(files.get('usr/bin/m4-backlight') == (0o755, sha(helper)), 'Packaged backlight helper differs')
         unit = (ROOT / 'packaging/omarchy-m4/omarchy-m4-backlight/m4-backlight.service').read_bytes()
         require(files.get(BACKLIGHT_UNIT) == (0o644, sha(unit)), 'Native backlight boot unit differs')
+        unit = (ROOT / 'packaging/omarchy-m4/omarchy-m4-backlight/m4-backlight-display.service').read_bytes()
+        require(files.get(BACKLIGHT_DISPLAY_UNIT) == (0o644, sha(unit)), 'Native backlight display unit differs')
         pins = json.loads((root / 'usr/lib/omarchy-m4/backlight/module.json').read_bytes())
         path = 'usr/lib/omarchy-m4/backlight/j713_dcp_backlight.ko'
         require(pins == {'kernel_release': kernel['release'],

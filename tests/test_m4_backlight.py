@@ -9,8 +9,12 @@ import os
 from types import SimpleNamespace
 from unittest.mock import patch
 from pathlib import Path
+import shutil
+import signal
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 
 SOURCE = Path(__file__).resolve().parents[1] / 'tools/m4-backlight.py'
@@ -243,6 +247,219 @@ class BrightnessRouting(unittest.TestCase):
         self.change('1%-', no_osd=True)
         self.assertEqual(self.calls, [['hyprctl', 'monitors', '-j'],
                                      ['omarchy', 'brightness', 'display', '--no-osd', '1%-']])
+
+
+class DisplayFollow(unittest.TestCase):
+    class Stop(Exception):
+        pass
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        board = self.root / BACKLIGHT.COMPATIBLE
+        board.parent.mkdir(parents=True)
+        board.write_bytes(b'apple,j713\0apple,t8132\0')
+        self.level = self.root / BACKLIGHT.BACKLIGHT / 'brightness'
+        self.level.parent.mkdir(parents=True)
+        self.level.write_text('158\n')
+        self.connector = self.connect('card0', 'simple-framebuffer')
+        self.intervals = []
+
+    def connect(self, card, driver):
+        drivers = self.root / 'sys/bus/platform/drivers' / driver
+        drivers.mkdir(parents=True, exist_ok=True)
+        device = self.root / BACKLIGHT.DRM / card / 'device'
+        device.mkdir(parents=True)
+        (device / 'driver').symlink_to(drivers)
+        connector = self.root / BACKLIGHT.DRM / f'{card}-Unknown-1'
+        connector.mkdir()
+        self.scanout(True, connector)
+        return connector
+
+    def scanout(self, on, connector=None):
+        connector = connector or self.connector
+        (connector / 'enabled').write_text('enabled\n' if on else 'disabled\n')
+        (connector / 'dpms').write_text('On\n' if on else 'Off\n')
+
+    def follow(self, *steps):
+        """Run the follower; each sleep applies the next step, then the follower stops."""
+        steps = list(steps)
+
+        def sleep(interval):
+            self.intervals.append(interval)
+            if not steps:
+                raise self.Stop
+            steps.pop(0)()
+
+        with self.assertRaises(self.Stop):
+            BACKLIGHT.follow_display(self.root, sleep)
+
+    def key(self, step):
+        """A brightness key on the panel, through a brightnessctl that reads and writes the live level."""
+        def run(command, **options):
+            if command == ['hyprctl', 'monitors', '-j']:
+                return SimpleNamespace(stdout=json.dumps([{'name': 'Unknown-1', 'focused': True}]))
+            if command == ['brightnessctl', '-d', 'j713-dcp', '-m']:
+                raw = int(self.level.read_text())
+                return SimpleNamespace(stdout=f'j713-dcp,backlight,{raw},{round(raw * 100 / 525)}%,525\n')
+            if command[:4] == ['brightnessctl', '-d', 'j713-dcp', 'set']:
+                self.level.write_text(f'{round(int(command[4].rstrip("%")) * 525 / 100)}\n')
+            return SimpleNamespace(returncode=0)
+        with patch.dict(os.environ, {'XDG_RUNTIME_DIR': str(self.root)}):
+            BACKLIGHT.brightness(step, True, run, self.root)
+
+    def test_blank_holds_zero_and_wake_restores_the_level(self):
+        seen = []
+
+        def look():
+            held = self.root / BACKLIGHT.HELD
+            seen.append((self.level.read_text(), held.read_text() if held.exists() else None))
+        self.follow(lambda: self.scanout(False), look, lambda: self.scanout(True), look)
+        # The owner's level is published only while the panel is held dark.
+        self.assertEqual(seen, [('0\n', '158\n'), ('158\n', None)])
+        self.assertEqual(self.intervals, [BACKLIGHT.LIT_INTERVAL, BACKLIGHT.DARK_INTERVAL,
+                                          BACKLIGHT.DARK_INTERVAL, BACKLIGHT.LIT_INTERVAL,
+                                          BACKLIGHT.LIT_INTERVAL])
+
+    def test_monitor_disabled_with_dpms_still_on_is_dark(self):
+        seen = []
+
+        def disable():
+            (self.connector / 'enabled').write_text('disabled\n')
+        self.follow(disable, lambda: seen.append(self.level.read_text()))
+        self.assertEqual(seen, ['0\n'])
+
+    def test_level_set_with_the_wake_is_kept(self):
+        def key_wake():
+            self.level.write_text('26\n')
+            self.scanout(True)
+        self.follow(lambda: self.scanout(False), key_wake)
+        self.assertEqual(self.level.read_text(), '26\n')
+
+    def test_level_written_while_still_dark_is_held_at_zero_then_restored(self):
+        seen = []
+        self.follow(lambda: self.scanout(False),
+                    lambda: self.level.write_text('40\n'),
+                    lambda: seen.append(self.level.read_text()),
+                    lambda: self.scanout(True))
+        self.assertEqual(seen, ['0\n'])
+        self.assertEqual(self.level.read_text(), '40\n')
+
+    def test_stopping_while_dark_restores_the_level_before_it_can_be_saved(self):
+        def shutdown():
+            self.assertEqual(self.level.read_text(), '0\n')
+            raise SystemExit(0)  # What the SIGTERM handler raises.
+        steps = [lambda: self.scanout(False), shutdown]
+        with self.assertRaises(SystemExit):
+            BACKLIGHT.follow_display(self.root, lambda interval: steps.pop(0)())
+        self.assertEqual(self.level.read_text(), '158\n')
+
+    def test_brightness_key_while_blanked_wakes_one_step_from_the_owner_level(self):
+        # 158 of 525 nits is 30%: one step up is 35% (184 nits), one step down 25% (131 nits).
+        for step, expected in (('+5%', '184\n'), ('5%-', '131\n')):
+            for order in ('while dark', 'with the wake'):
+                with self.subTest(step=step, order=order):
+                    self.level.write_text('158\n')
+                    self.scanout(True)
+                    if order == 'while dark':
+                        wake = (lambda: self.key(step), lambda: self.scanout(True))
+                    else:
+                        wake = (lambda: (self.key(step), self.scanout(True)),)
+                    self.follow(lambda: self.scanout(False), *wake)
+                    self.assertEqual(self.level.read_text(), expected)
+                    self.assertFalse(os.path.lexists(self.root / BACKLIGHT.HELD))
+
+    def test_restarted_follower_restores_the_level_a_killed_one_published(self):
+        for dark in (True, False):
+            with self.subTest(dark=dark):
+                # What a follower killed while holding the panel dark leaves behind.
+                BACKLIGHT.publish_held(self.root, 158)
+                self.level.write_text('0\n')
+                self.scanout(not dark)
+                seen = []
+                self.follow(lambda: seen.append(self.level.read_text()), lambda: self.scanout(True))
+                self.assertEqual(seen, ['0\n' if dark else '158\n'])
+                self.assertEqual(self.level.read_text(), '158\n')
+                self.assertFalse(os.path.lexists(self.root / BACKLIGHT.HELD))
+
+    def test_sigterm_while_dark_restores_the_level(self):
+        child_code = ('import importlib.util, sys\n'
+                      'spec = importlib.util.spec_from_file_location("m4_backlight", sys.argv[1])\n'
+                      'tool = importlib.util.module_from_spec(spec)\n'
+                      'spec.loader.exec_module(tool)\n'
+                      'tool.os.geteuid = lambda: 0\n'
+                      'sys.exit(tool.main(["--follow-display", "--root", sys.argv[2]]))\n')
+        self.scanout(False)
+        child = subprocess.Popen([sys.executable, '-c', child_code, str(SOURCE), str(self.root)],
+                                 stderr=subprocess.PIPE, text=True)
+        try:
+            deadline = time.monotonic() + 10
+            while self.level.read_text() != '0\n':
+                self.assertIsNone(child.poll(), 'the follower exited before holding the panel dark')
+                self.assertLess(time.monotonic(), deadline, 'the follower never held the panel dark')
+                time.sleep(0.02)
+            child.send_signal(signal.SIGTERM)
+            self.assertEqual(child.wait(timeout=10), 0, child.stderr.read())
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait()
+            child.stderr.close()
+        self.assertEqual(self.level.read_text(), '158\n')
+        self.assertFalse(os.path.lexists(self.root / BACKLIGHT.HELD))
+
+    def test_zero_level_at_blank_is_left_alone(self):
+        self.level.write_text('0\n')
+        self.follow(lambda: self.scanout(False), lambda: self.scanout(True))
+        self.assertEqual(self.level.read_text(), '0\n')
+
+    def test_refuses_a_second_framebuffer_panel(self):
+        self.connect('card1', 'simple-framebuffer')
+        with self.assertRaisesRegex(BACKLIGHT.Refused, 'boot-framebuffer panel'):
+            BACKLIGHT.follow_display(self.root, lambda interval: self.fail('followed'))
+
+    def test_ignores_a_panel_driven_by_another_display_driver(self):
+        shutil.rmtree(self.root / BACKLIGHT.DRM)
+        self.connect('card0', 'apple-dcp')
+        self.scanout(False, self.root / BACKLIGHT.DRM / 'card0-Unknown-1')
+        with self.assertRaisesRegex(BACKLIGHT.Refused, 'boot-framebuffer panel'):
+            BACKLIGHT.follow_display(self.root, lambda interval: self.fail('followed'))
+        self.assertEqual(self.level.read_text(), '158\n')
+
+    def test_unit_stops_before_systemd_backlight_saves_and_restarts_after_a_kill(self):
+        lines = (SOURCE.parents[1] / 'packaging/omarchy-m4/omarchy-m4-backlight/m4-backlight-display.service'
+                 ).read_text().splitlines()
+        # Units stop in reverse start order: After= makes this restore before systemd-backlight saves.
+        self.assertIn('After=m4-backlight.service systemd-backlight@backlight:j713-dcp.service', lines)
+        self.assertIn('Requires=m4-backlight.service', lines)
+        self.assertIn('Restart=on-failure', lines)
+
+
+class InstallScriptlet(unittest.TestCase):
+    INSTALL = SOURCE.parents[1] / 'packaging/omarchy-m4/omarchy-m4-backlight/omarchy-m4-backlight.install'
+
+    def systemctl_calls(self, hook, backlight_active):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'bin').mkdir()
+            systemctl = root / 'bin/systemctl'
+            systemctl.write_text('#!/bin/sh\necho "$*" >> "$SYSTEMCTL_LOG"\n'
+                                 '[ "$1" != is-active ] || exit "$ACTIVE"\n')
+            systemctl.chmod(0o755)
+            env = dict(os.environ, PATH=str(root / 'bin') + os.pathsep + os.environ['PATH'],
+                       SYSTEMCTL_LOG=str(root / 'systemctl.log'), ACTIVE='0' if backlight_active else '3')
+            subprocess.run(['bash', '-c', 'source "$1" && "$2"', 'bash', str(self.INSTALL), hook],
+                           cwd=root, env=env, capture_output=True, text=True, check=True)
+            return (root / 'systemctl.log').read_text().splitlines()
+
+    def test_upgrade_enables_the_follower_and_restarts_it_only_beside_a_running_backlight(self):
+        enable = 'enable m4-backlight.service m4-backlight-display.service'
+        probe = 'is-active --quiet m4-backlight.service'
+        self.assertEqual(self.systemctl_calls('post_install', True), [enable])
+        self.assertEqual(self.systemctl_calls('post_upgrade', True),
+                         [enable, probe, 'restart m4-backlight-display.service'])
+        self.assertEqual(self.systemctl_calls('post_upgrade', False), [enable, probe])
 
 
 class OwnerKeys(unittest.TestCase):
