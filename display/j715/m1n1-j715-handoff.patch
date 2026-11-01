@@ -1,0 +1,463 @@
+# SPDX-License-Identifier: MIT
+# J715 integration over the N1-pinned upstream handoff; original MIT notices retained.
+--- a/src/kboot.c
++++ b/src/kboot.c
+@@ -1968,203 +1968,257 @@
+  * previous macOS boot. */
+-struct dcp_handoff_run {
+-    u64 iova;
+-    u64 phys;
+-    size_t size;
+-};
+-
+-struct dcp_handoff {
+-    struct dcp_handoff_run runs[32];
+-    unsigned int nruns;
+-};
+-
+-static int dt_dcp_record_page(u64 iova, u64 phys, void *cookie)
+-{
+-    struct dcp_handoff *state = cookie;
+-    /* Coalesce the live mappings first; validate complete spans once below. */
+-
+-    if (state->nruns) {
+-        struct dcp_handoff_run *last = &state->runs[state->nruns - 1];
+-        if (iova == last->iova + last->size && phys == last->phys + last->size) {
+-            last->size += SZ_16K;
+-            return 0;
+-        }
+-    }
+-    if (state->nruns >= ARRAY_SIZE(state->runs))
+-        return -1;
+-    state->runs[state->nruns++] = (struct dcp_handoff_run){iova, phys, SZ_16K};
+-    return 0;
+-}
+-
+-static bool dt_dcp_carveout_contains(u64 phys, size_t size)
+-{
+-    int node = adt_path_offset(adt, "/chosen/carveout-memory-map");
+-    if (node < 0 || !size || phys + size < phys)
+-        return false;
+-    u64 end = phys + size;
+-    while (phys < end) {
+-        u64 covered = phys;
+-        ADT_FOREACH_PROPERTY(adt, node, prop) {
+-            if (strncmp(prop->name, "region-id-", 10) || prop->size != 16)
+-                continue;
+-            u64 range[2];
+-            memcpy(range, prop->value, sizeof(range));
+-            if (range[0] <= phys && range[1] <= ~0ULL - range[0] &&
+-                range[0] + range[1] > phys)
+-                covered = max(covered, range[0] + range[1]);
+-        }
+-        if (covered == phys)
+-            return false;
+-        phys = min(covered, end);
+-    }
+-    return true;
+-}
+-
+-static bool dt_dcp_mapping_contains(const struct dcp_handoff *state, u64 phys, size_t size)
+-{
+-    if (!size || phys + size < phys)
+-        return false;
+-    u64 end = phys + size;
+-    while (phys < end) {
+-        u64 covered = phys;
+-        for (unsigned int i = 0; i < state->nruns; ++i) {
+-            const struct dcp_handoff_run *run = &state->runs[i];
+-            if (run->phys <= phys && run->phys + run->size > phys)
+-                covered = max(covered, run->phys + run->size);
+-        }
+-        if (covered == phys)
+-            return false;
+-        phys = min(covered, end);
+-    }
+-    return true;
+-}
+-
+-static int dt_set_t8132_dcp_handoff(void)
+-{
+-    int dev = fdt_path_offset(dt, "dcp");
+-    if (dev < 0)
+-        return 0; /* An unchanged DT has no brightness client. */
+-    if (fdt_node_check_compatible(dt, dev, "omarchy,j713-dcp-backlight"))
+-        bail("FDT: T8132 display handoff requires the brightness-only client\n");
+-
+-    int len;
+-    const fdt32_t *iommus = fdt_getprop(dt, dev, "iommus", &len);
+-    if (!iommus || len != 8 || fdt32_ld(iommus + 1) != 23)
+-        bail("FDT: brightness client needs exactly DCP stream 23\n");
+-    u32 dart_phandle = fdt32_ld(iommus);
+-    u32 dev_phandle = fdt_get_phandle(dt, dev);
+-    if (!dev_phandle)
+-        bail("FDT: brightness client has no phandle\n");
+-
+-    int nub = adt_path_offset(adt, "/arm-io/dcp/iop-dcp-nub");
+-    int dart_node = adt_path_offset(adt, "/arm-io/dart-dcp");
+-    if (nub < 0 || dart_node < 0)
+-        bail("ADT: DCP nub or DART missing\n");
+-    u32 bytes = 0;
+-    const struct adt_segment_ranges *segments = adt_getprop(adt, nub, "segment-ranges", &bytes);
+-    if (!segments || bytes % sizeof(*segments))
+-        bail("ADT: invalid DCP segment descriptions\n");
+-    struct dcp_handoff state = {0};
+-    unsigned int count = bytes / sizeof(*segments);
+-    if (count < 3 || count > 16)
+-        bail("ADT: unsupported DCP segment count\n");
+-
+-    u64 vm_base, vm_size, pt[2];
+-    if (ADT_GETPROP(adt, dart_node, "vm-base", &vm_base) != sizeof(vm_base) ||
+-        ADT_GETPROP(adt, dart_node, "vm-size-23", &vm_size) != sizeof(vm_size) ||
+-        ADT_GETPROP_ARRAY(adt, dart_node, "pt-region-23", pt) != sizeof(pt))
+-        bail("ADT: DCP stream aperture or reserved tables missing\n");
+-    /* Match the locked three-level table's 36-bit offset aperture. */
+-    if ((vm_base & GENMASK(35, 0)) || vm_size != BIT(36) ||
+-        vm_base > GENMASK(41, 0) - (vm_size - 1))
+-        bail("ADT: unsupported DCP firmware address aperture\n");
+-
+-    u64 allocator_start = SZ_16K;
+-    for (unsigned int i = 0; i < count; ++i) {
+-        const struct adt_segment_ranges *seg = &segments[i];
+-        size_t size = ALIGN_UP((size_t)seg->size, SZ_16K);
+-        if (!size || size >= vm_size || (seg->phys & (SZ_16K - 1)) ||
+-            seg->phys + size < seg->phys || (seg->remap & ~GENMASK(35, 0)) != vm_base ||
+-            !dt_dcp_carveout_contains(seg->phys, size))
+-            bail("ADT: unsupported or unreserved DCP segment %u\n", i);
+-        u64 offset = seg->remap & GENMASK(35, 0);
+-        if (offset > vm_size - size)
+-            bail("ADT: DCP segment exceeds aperture\n");
+-        allocator_start = max(allocator_start, offset + size);
+-    }
+-
+-    int ret = dart_visit_existing_fdt(dt, dart_phandle, 23, pt[0], pt[1],
+-                                      dt_dcp_record_page, &state);
+-    if (ret || !state.nruns || pt[0] >= pt[1] ||
+-        !dt_dcp_carveout_contains(pt[0], pt[1] - pt[0]))
+-        bail("FDT: DCP mappings or boot tables cannot be preserved safely\n");
+-    for (unsigned int i = 0; i < state.nruns; ++i) {
+-        const struct dcp_handoff_run *run = &state.runs[i];
+-        if (run->phys + run->size < run->phys ||
+-            !dt_dcp_carveout_contains(run->phys, run->size))
+-            bail("FDT: DCP mapped memory is not reserved by this boot\n");
+-        allocator_start = max(allocator_start, run->iova + run->size);
+-    }
+-    if (!cur_boot_args.video.base || !cur_boot_args.video.height ||
+-        cur_boot_args.video.stride > ~0ULL / cur_boot_args.video.height ||
+-        !dt_dcp_mapping_contains(&state, cur_boot_args.video.base,
+-                                 cur_boot_args.video.stride * cur_boot_args.video.height) ||
+-        allocator_start >= vm_size)
+-        bail("FDT: DCP framebuffer or allocation space missing\n");
+-
+-    for (unsigned int i = 0; i < count; ++i) {
+-        size_t size = ALIGN_UP((size_t)segments[i].size, SZ_16K);
+-        bool mapped = dt_dcp_mapping_contains(&state, segments[i].phys, size);
+-        if (!mapped && i < 2)
+-            bail("FDT: DCP text/data segment %u is not fully mapped\n", i);
+-        if (mapped)
+-            continue;
+-        for (unsigned int j = 0; j < state.nruns; ++j) {
+-            const struct dcp_handoff_run *run = &state.runs[j];
+-            if (run->phys < segments[i].phys + size &&
+-                segments[i].phys < run->phys + run->size)
+-                bail("FDT: DCP segment %u is only partially mapped\n", i);
+-        }
+-        char name[64];
+-        snprintf(name, sizeof(name), "dcp-segment@%lx", segments[i].phys);
+-        int mem = dt_get_or_add_reserved_mem(name, "apple,asc-mem", true, segments[i].phys, size);
+-        if (mem < 0)
+-            return mem;
+-    }
+-    if (pt[0] >= pt[1])
+-        bail("ADT: invalid reserved DCP page-table span\n");
+-    int tables = dt_get_or_add_reserved_mem("dcp-boot-tables", "apple,asc-mem", true,
+-                                            pt[0], pt[1] - pt[0]);
+-    if (tables < 0)
+-        return tables;
+-
+-    for (unsigned int i = 0; i < state.nruns; ++i) {
+-        const struct dcp_handoff_run *run = &state.runs[i];
+-        char name[64];
+-        snprintf(name, sizeof(name), "dcp-mapping@%lx", run->phys);
+-        int mem = dt_get_or_add_reserved_mem(name, "apple,asc-mem", true, run->phys, run->size);
+-        if (mem < 0)
+-            return mem;
+-        u32 phandle = fdt_get_phandle(dt, mem);
+-        ret = dt_device_set_reserved_mem(mem, name, dev_phandle, vm_base | run->iova, run->size);
+-        if (ret)
+-            return ret;
+-        ret = dt_device_add_mem_region("dcp", phandle, NULL);
+-        if (ret)
+-            return ret;
+-    }
+-
+-    int iommu = fdt_node_offset_by_phandle(dt, dart_phandle);
+-    u64 aperture[2] = {cpu_to_fdt64(vm_base + allocator_start),
+-                       cpu_to_fdt64(vm_size - allocator_start)};
+-    if (iommu < 0 || fdt_setprop(dt, iommu, "apple,dma-range", aperture, sizeof(aperture)))
+-        bail("FDT: could not set DCP DMA aperture\n");
+-    dev = fdt_node_offset_by_phandle(dt, dev_phandle);
+-    if (dev < 0 || fdt_setprop_empty(dt, dev, "omarchy,display-handoff-verified"))
+-        bail("FDT: could not record verified DCP handoff\n");
+-    printf("FDT: DCP brightness handoff: %u preserved runs, DMA base 0x%lx\n",
+-           state.nruns, vm_base + allocator_start);
+-    return 0;
+-}
+-static int dt_set_display(void)
+-{
++#include "j715-profile-generated.h"
++
++struct dcp_handoff_run {
++    u64 iova;
++    u64 phys;
++    size_t size;
++};
++
++struct dcp_handoff {
++    struct dcp_handoff_run runs[32];
++    unsigned int nruns;
++};
++
++static int dt_dcp_record_page(u64 iova, u64 phys, void *cookie)
++{
++    struct dcp_handoff *state = cookie;
++    if (iova > BIT(36) - SZ_16K || phys > GENMASK(41, 0) - (SZ_16K - 1))
++        return -1;
++    /* Coalesce only representable, contiguous live pages. */
++
++    if (state->nruns) {
++        struct dcp_handoff_run *last = &state->runs[state->nruns - 1];
++        if (iova == last->iova + last->size && phys == last->phys + last->size) {
++            last->size += SZ_16K;
++            return 0;
++        }
++    }
++    if (state->nruns >= ARRAY_SIZE(state->runs))
++        return -1;
++    state->runs[state->nruns++] = (struct dcp_handoff_run){iova, phys, SZ_16K};
++    return 0;
++}
++
++static bool dt_dcp_carveout_contains(u64 phys, size_t size)
++{
++    int node = adt_path_offset(adt, "/chosen/carveout-memory-map");
++    if (node < 0 || !size || phys + size < phys)
++        return false;
++    u64 end = phys + size;
++    while (phys < end) {
++        u64 covered = phys;
++        ADT_FOREACH_PROPERTY(adt, node, prop) {
++            if (strncmp(prop->name, "region-id-", 10) || prop->size != 16)
++                continue;
++            u64 range[2];
++            memcpy(range, prop->value, sizeof(range));
++            if (range[0] <= phys && range[1] <= ~0ULL - range[0] &&
++                range[0] + range[1] > phys)
++                covered = max(covered, range[0] + range[1]);
++        }
++        if (covered == phys)
++            return false;
++        phys = min(covered, end);
++    }
++    return true;
++}
++
++static bool dt_dcp_mapping_contains(const struct dcp_handoff *state, u64 phys, size_t size)
++{
++    if (!size || phys + size < phys)
++        return false;
++    u64 end = phys + size;
++    while (phys < end) {
++        u64 covered = phys;
++        for (unsigned int i = 0; i < state->nruns; ++i) {
++            const struct dcp_handoff_run *run = &state->runs[i];
++            if (run->phys <= phys && run->phys + run->size > phys)
++                covered = max(covered, run->phys + run->size);
++        }
++        if (covered == phys)
++            return false;
++        phys = min(covered, end);
++    }
++    return true;
++}
++
++static int dt_set_t8132_dcp_handoff(void)
++{
++    int dev = fdt_path_offset(dt, "dcp");
++    if (dev < 0)
++        return 0; /* An unchanged DT has no brightness client. */
++    /* Invalidate any imported claim before validating this boot. */
++    fdt_delprop(dt, dev, "omarchy,display-handoff-verified");
++    int identity_len;
++    const char *identity = fdt_getprop(dt, dev, "omarchy,display-profile", &identity_len);
++    if (fdt_node_check_compatible(dt, 0, "apple,j715") ||
++        fdt_node_check_compatible(dt, 0, "apple,t8132") ||
++        !identity || identity_len != sizeof(J715_PROFILE_SHA256) ||
++        memcmp(identity, J715_PROFILE_SHA256, sizeof(J715_PROFILE_SHA256)) ||
++        strcmp(os_firmware.iboot, J715_FIRMWARE_ID))
++        bail("FDT: J715 board, profile or current firmware mismatch\n");
++    if (fdt_node_check_compatible(dt, dev, "omarchy,j715-dcp-backlight"))
++        bail("FDT: T8132 display handoff requires the brightness-only client\n");
++
++    int len;
++    const fdt32_t *iommus = fdt_getprop(dt, dev, "iommus", &len);
++    if (!iommus || len != 8 || fdt32_ld(iommus + 1) != J715_STREAM)
++        bail("FDT: brightness client needs exactly profile DCP stream\n");
++    u32 dart_phandle = fdt32_ld(iommus);
++    u32 dev_phandle = fdt_get_phandle(dt, dev);
++    if (!dev_phandle)
++        bail("FDT: brightness client has no phandle\n");
++
++    int nub = adt_path_offset(adt, J715_ADT_NUB);
++    int dart_node = adt_path_offset(adt, J715_ADT_DART);
++    if (nub < 0 || dart_node < 0)
++        bail("ADT: DCP nub or DART missing\n");
++    int trace[8];
++    u64 reg, reg_size;
++    int dart_fdt = fdt_node_offset_by_phandle(dt, dart_phandle);
++    if (dart_fdt < 0 || dt_get_address(dt, dart_fdt) != J715_DART_ADDRESS ||
++        dt_get_address(dt, dev) != J715_DCP_ADDRESS ||
++        adt_path_offset_trace(adt, J715_ADT_DART, trace) < 0 ||
++        adt_get_reg(adt, trace, "reg", 0, &reg, &reg_size) < 0 ||
++        reg != J715_DART_ADDRESS || reg_size < J715_DART_SIZE ||
++        adt_path_offset_trace(adt, J715_ADT_DCP, trace) < 0 ||
++        adt_get_reg(adt, trace, "reg", 0, &reg, &reg_size) < 0 ||
++        reg != J715_DCP_ADDRESS || reg_size < J715_DCP_SIZE)
++        bail("ADT: profile MMIO does not match this boot\n");
++    u32 bytes = 0;
++    const struct adt_segment_ranges *segments = adt_getprop(adt, nub, "segment-ranges", &bytes);
++    if (!segments || bytes % sizeof(*segments))
++        bail("ADT: invalid DCP segment descriptions\n");
++    struct dcp_handoff state = {0};
++    unsigned int count = bytes / sizeof(*segments);
++    if (count < 3 || count > 16)
++        bail("ADT: unsupported DCP segment count\n");
++
++    u64 vm_base, vm_size, pt[2];
++    char vm_name[32], pt_name[32];
++    snprintf(vm_name, sizeof(vm_name), "vm-size-%u", J715_STREAM);
++    snprintf(pt_name, sizeof(pt_name), "pt-region-%u", J715_STREAM);
++    if (ADT_GETPROP(adt, dart_node, "vm-base", &vm_base) != sizeof(vm_base) ||
++        ADT_GETPROP(adt, dart_node, vm_name, &vm_size) != sizeof(vm_size) ||
++        ADT_GETPROP_ARRAY(adt, dart_node, pt_name, pt) != sizeof(pt))
++        bail("ADT: DCP stream aperture or reserved tables missing\n");
++    /* Match the locked three-level table's 36-bit offset aperture. */
++    if ((vm_base & GENMASK(35, 0)) || vm_size != BIT(36) ||
++        vm_base > GENMASK(41, 0) - (vm_size - 1))
++        bail("ADT: unsupported DCP firmware address aperture\n");
++
++    u64 allocator_start = SZ_16K;
++    for (unsigned int i = 0; i < count; ++i) {
++        const struct adt_segment_ranges *seg = &segments[i];
++        if (seg->size > ~0ULL - (SZ_16K - 1))
++            bail("ADT: DCP segment size overflow\n");
++        size_t size = ALIGN_UP((size_t)seg->size, SZ_16K);
++        if (!size || size >= vm_size || (seg->phys & (SZ_16K - 1)) ||
++            seg->phys + size < seg->phys || (seg->remap & ~GENMASK(35, 0)) != vm_base ||
++            !dt_dcp_carveout_contains(seg->phys, size))
++            bail("ADT: unsupported or unreserved DCP segment %u\n", i);
++        u64 offset = seg->remap & GENMASK(35, 0);
++        if (offset > vm_size - size)
++            bail("ADT: DCP segment exceeds aperture\n");
++        allocator_start = max(allocator_start, offset + size);
++    }
++
++    /* Validate the no-map table reservation BEFORE reading page tables. */
++    if (pt[0] >= pt[1] || !dt_dcp_carveout_contains(pt[0], pt[1] - pt[0]))
++        bail("ADT: unreserved DCP tables\n");
++    int ret = dart_visit_existing_fdt(dt, dart_phandle, J715_STREAM, pt[0], pt[1],
++                                      dt_dcp_record_page, &state);
++    if (ret || !state.nruns || pt[0] >= pt[1] ||
++        !dt_dcp_carveout_contains(pt[0], pt[1] - pt[0]))
++        bail("FDT: DCP mappings or boot tables cannot be preserved safely\n");
++    for (unsigned int i = 0; i < state.nruns; ++i) {
++        const struct dcp_handoff_run *run = &state.runs[i];
++        if (run->phys + run->size < run->phys ||
++            !dt_dcp_carveout_contains(run->phys, run->size))
++            bail("FDT: DCP mapped memory is not reserved by this boot\n");
++        allocator_start = max(allocator_start, run->iova + run->size);
++    }
++    if (!cur_boot_args.video.base || !cur_boot_args.video.height ||
++        cur_boot_args.video.stride > ~0ULL / cur_boot_args.video.height ||
++        !dt_dcp_mapping_contains(&state, cur_boot_args.video.base,
++                                 cur_boot_args.video.stride * cur_boot_args.video.height) ||
++        allocator_start >= vm_size)
++        bail("FDT: DCP framebuffer or allocation space missing\n");
++
++    /* Validate every segment before publishing any reservation or DMA range. */
++    for (unsigned int i = 0; i < count; ++i) {
++        const struct adt_segment_ranges *seg = &segments[i];
++        u64 size = ALIGN_UP(seg->size, SZ_16K), covered = 0;
++        bool overlap = false;
++        for (unsigned int j = 0; j < state.nruns; ++j) {
++            const struct dcp_handoff_run *run = &state.runs[j];
++            u64 offset = seg->remap - vm_base;
++            if (run->phys < seg->phys + size && seg->phys < run->phys + run->size)
++                overlap = true;
++            if (offset + covered >= run->iova && offset + covered < run->iova + run->size &&
++                run->phys + (offset + covered - run->iova) == seg->phys + covered)
++                covered += min(size - covered, run->iova + run->size - offset - covered);
++        }
++        if (covered != size && (i < 2 || overlap))
++            bail("ADT: incomplete or noncontiguous segment translation\n");
++    }
++    for (unsigned int i = 0; i < count; ++i) {
++        size_t size = ALIGN_UP((size_t)segments[i].size, SZ_16K);
++        bool mapped = dt_dcp_mapping_contains(&state, segments[i].phys, size);
++        if (!mapped && i < 2)
++            bail("FDT: DCP text/data segment %u is not fully mapped\n", i);
++        if (mapped)
++            continue;
++        for (unsigned int j = 0; j < state.nruns; ++j) {
++            const struct dcp_handoff_run *run = &state.runs[j];
++            if (run->phys < segments[i].phys + size &&
++                segments[i].phys < run->phys + run->size)
++                bail("FDT: DCP segment %u is only partially mapped\n", i);
++        }
++        char name[64];
++        snprintf(name, sizeof(name), "dcp-segment@%lx", segments[i].phys);
++        int mem = dt_get_or_add_reserved_mem(name, "apple,asc-mem", true, segments[i].phys, size);
++        if (mem < 0)
++            return mem;
++    }
++    if (pt[0] >= pt[1])
++        bail("ADT: invalid reserved DCP page-table span\n");
++    int tables = dt_get_or_add_reserved_mem("dcp-boot-tables", "apple,asc-mem", true,
++                                            pt[0], pt[1] - pt[0]);
++    if (tables < 0)
++        return tables;
++
++    for (unsigned int i = 0; i < state.nruns; ++i) {
++        const struct dcp_handoff_run *run = &state.runs[i];
++        char name[64];
++        snprintf(name, sizeof(name), "dcp-mapping@%lx", run->phys);
++        int mem = dt_get_or_add_reserved_mem(name, "apple,asc-mem", true, run->phys, run->size);
++        if (mem < 0)
++            return mem;
++        u32 phandle = fdt_get_phandle(dt, mem);
++        ret = dt_device_set_reserved_mem(mem, name, dev_phandle, vm_base | run->iova, run->size);
++        if (ret)
++            return ret;
++        ret = dt_device_add_mem_region("dcp", phandle, NULL);
++        if (ret)
++            return ret;
++    }
++
++    int iommu = fdt_node_offset_by_phandle(dt, dart_phandle);
++    u64 aperture[2] = {cpu_to_fdt64(vm_base + allocator_start),
++                       cpu_to_fdt64(vm_size - allocator_start)};
++    if (iommu < 0 || fdt_setprop(dt, iommu, "apple,dma-range", aperture, sizeof(aperture)))
++        bail("FDT: could not set DCP DMA aperture\n");
++    dev = fdt_node_offset_by_phandle(dt, dev_phandle);
++    if (dev < 0 || fdt_setprop_empty(dt, dev, "omarchy,display-handoff-verified"))
++        bail("FDT: could not record verified DCP handoff\n");
++    printf("FDT: DCP brightness handoff: %u preserved runs, DMA base 0x%lx\n",
++           state.nruns, vm_base + allocator_start);
++    return 0;
++}
++static int dt_set_display(void)
++{
++    /* Do not lock, reset or otherwise touch scanout/PIODMA for J715. */
++    if (!fdt_node_check_compatible(dt, 0, "apple,j715"))
++        return dt_set_t8132_dcp_handoff();
+     /* lock dart-disp0 to prevent old software from resetting it */

@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "board": "apple,j715",
+  "soc": "apple,t8132",
+  "synthetic": true,
+  "qualification": "synthetic",
+  "base_dtb_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "firmware": {"identity": "SYNTHETIC-NOT-HARDWARE", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"},
+  "evidence": {
+    "adt": {"path": "evidence/synthetic-adt", "sha256": "2222222222222222222222222222222222222222222222222222222222222222"},
+    "firmware": {"path": "evidence/synthetic-firmware", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"},
+    "panel": {"path": "evidence/synthetic-panel", "sha256": "3333333333333333333333333333333333333333333333333333333333333333"},
+    "protocol": {"path": "evidence/synthetic-protocol", "sha256": "4444444444444444444444444444444444444444444444444444444444444444"}
+  },
+  "resources": {
+    "dcp": {"path": "/soc/dcp-backlight@100000", "address": 1048576, "size": 65536, "compatible": ["omarchy,j715-dcp-backlight"], "interrupts": [], "roles": [], "power": [0]},
+    "dart": {"path": "/soc/iommu@200000", "address": 2097152, "size": 65536, "compatible": ["apple,t8132-dart", "apple,t8110-dart"], "interrupts": [7], "roles": ["fault"], "power": [0]},
+    "mailbox": {"path": "/soc/mbox@108000", "address": 1081344, "size": 16384, "compatible": ["apple,t8132-asc-mailbox", "apple,asc-mailbox-v4"], "interrupts": [8, 9, 10, 11], "roles": ["send-empty", "send-not-empty", "recv-empty", "recv-not-empty"], "power": [0]}
+  },
+  "interrupt_parent": {"path": "/soc/interrupt-controller@300000", "compatible": "apple,t8132-aic3"},
+  "power": [{"path": "/soc/power/test", "label": "synthetic_display"}],
+  "stream": 5,
+  "dma": {"address_bits": 42, "offset_bits": 36, "page_shift": 14, "table_levels": 3},
+  "protocol": {"endpoint": 35, "channel": 3, "service": "disp0-service", "native": "afk-native-24-v1"},
+  "panel": {"identity": "SYNTHETIC-NOT-A-PANEL", "min_nits": 2, "max_nits": 123, "initial_nits": 17},
+  "adt": {"nub": "/arm-io/synthetic-dcp/iop-dcp-nub", "dart": "/arm-io/synthetic-dart"}
+}

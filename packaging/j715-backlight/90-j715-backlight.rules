@@ -1,0 +1,2 @@
+# Permit the existing video group to control only the J715 panel backlight.
+ACTION=="add|change", SUBSYSTEM=="backlight", KERNEL=="j715-dcp", RUN+="/usr/bin/chgrp video /sys%p/brightness", RUN+="/usr/bin/chmod 0664 /sys%p/brightness"

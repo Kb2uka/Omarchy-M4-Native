@@ -94,6 +94,14 @@
     ],
     "omarchy-m4-backlight": [
       "usr/bin/m4-backlight",
+      "usr/bin/m4-j715-backlight",
+      "usr/lib/omarchy-m4/backlight/j715/tools/m4-j715-backlight.py",
+      "usr/lib/omarchy-m4/backlight/j715/tools/m4-backlight.py",
+      "usr/lib/omarchy-m4/backlight/j715/tools/j715_display_profile.py",
+      "usr/lib/omarchy-m4/backlight/j715/tools/j715_sources.py",
+      "usr/lib/omarchy-m4/backlight/j715/display/j715/profile.schema.json",
+      "usr/lib/udev/rules.d/90-j715-backlight.rules",
+      "usr/lib/systemd/system/m4-j715-backlight.service",
       "usr/lib/omarchy-m4/backlight/j713_dcp_backlight.ko",
       "usr/lib/omarchy-m4/backlight/module.json",
       "usr/lib/systemd/system/m4-backlight.service",
@@ -136,7 +144,8 @@
     "usr/share/wireplumber/wireplumber.conf.d/83-j713-headphones.conf": "names the headphone sink and the headset mic source and adds their default-node hook as an optional component",
     "usr/share/wireplumber/scripts/default-nodes/j713-headphones.lua": "the headphone default-node hook; it only selects the headphone sink and the headset mic while they are available",
     "usr/lib/systemd/system/m4-cpu-idle.service": "loads the J713 CPU idle driver (#65) at boot, with a one-strike guard",
-    "usr/lib/systemd/system/m4-backlight.service": "loads the verified J713 native backlight after the per-boot display handoff; a one-strike guard prevents repeated failed startup"
+    "usr/lib/systemd/system/m4-backlight.service": "loads the verified J713 native backlight after the per-boot display handoff; a one-strike guard prevents repeated failed startup",
+    "usr/lib/systemd/system/m4-j715-backlight.service": "starts only on J715 with separately qualified module, profile and current-boot handoff; the one-strike owner prevents repeated failed activation"
   },
   "speaker_module": {
     "usr/lib/omarchy-m4/j713-audio/snd-soc-j713-group.ko": "aaad802eb136ff6cb915feaa123001b3eb848bc2f038d0a5b71c8e2ff35d2581"

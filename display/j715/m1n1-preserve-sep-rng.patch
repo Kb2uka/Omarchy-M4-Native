@@ -1,0 +1,20 @@
+--- a/src/kboot.c
++++ b/src/kboot.c
+@@ -110,6 +110,17 @@
+     u64 kaslr_seed;
+     uint8_t rng_seed[128]; // same size used by Linux for kexec
+
++    /*
++     * T8132: iBoot hands over a running sepOS. It takes this ROM-endpoint
++     * request off the mailbox, never answers, and then stops reading the
++     * mailbox, which leaves Linux unable to register with the SEP. The ADT
++     * seed below is what this machine has always used anyway.
++     */
++    if (chip_id == T8132) {
++        printf("SEP: skipping ROM random request on T8132; using ADT seed\n");
++        return -1;
++    }
++
+     if (sep_get_random(&kaslr_seed, sizeof(kaslr_seed)) != sizeof(kaslr_seed))
+         bail("SEP: couldn't get enough random bytes for KASLR seed\n");
+     if (sep_get_random(rng_seed, sizeof(rng_seed)) != sizeof(rng_seed))

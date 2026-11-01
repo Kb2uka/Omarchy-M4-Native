@@ -2,8 +2,8 @@
 # Signed update-channel delivery; source and byte-identical build recorded in channel-source-joins.json.
 pkgname=omarchy-m4-backlight
 pkgver=1
-pkgrel=1
-pkgdesc='Native panel brightness and brightness keys for the J713 M4 Air'
+pkgrel=2
+pkgdesc='Native J713 panel brightness with evidence-gated J715 startup integration'
 arch=('aarch64')
 url='https://github.com/Kb2uka/Omarchy-M4-Native'
 license=('GPL-2.0-only' 'MIT')
@@ -11,6 +11,8 @@ depends=('python' 'kmod' 'brightnessctl')
 install=omarchy-m4-backlight.install
 options=('!strip' '!debug')
 source=('m4-backlight.py' 'module.json' 'm4-backlight.service' 'NOTICE' 'MIT.txt' 'GPL-2.0-only.txt'
+        'm4-j715-backlight.py' 'j715_display_profile.py' 'j715_sources.py' 'profile.schema.json'
+        'm4-j715-backlight' 'm4-j715-backlight.service' '90-j715-backlight.rules'
         "j713_dcp_backlight.ko::${url}/releases/download/package-inputs/j713-dcp-backlight-2186b280.ko")
 sha256sums=('008f7ba01880a60015e0e8011209982f97ccac573cde8d78850a379e4232eacd'
             'ff21a39817e86971a30ff2412c0e5deee6578b4a247d19cd837fcda355381db6'
@@ -18,10 +20,23 @@ sha256sums=('008f7ba01880a60015e0e8011209982f97ccac573cde8d78850a379e4232eacd'
             '14f8288e71131582403f5db6763a3a8239b09fe07519e55e4f62defd94d21031'
             'c9bb6d6a048ced56562cb3ae3cdea0af0e093e61830a80188a25022b270e3520'
             '77dc7854b1bdc02d96ab5e531e1023482c94dc4a24d28637e2d3d26554b33346'
+            'f10823f33acf7eed91ff08080a210b5ec8a2819748f8480140269d01c3a929ba'
+            'b4199f5ca97b415344d488c9715e205a1a0ef09434d3bb04f520e0cf4da682e0'
+            'b645d0f42c1d96a3ac5710a0f05e1f2cd9b920b2c7dd51e9c8e3af903e5f87a0'
+            '8836daa67f6feac1f0bb8f9b67c5fe42c4e97c3670723ed645fc1c51f802f9bf'
+            'c71b08b18a31b31d4ca593e2cd8c9b8be29609ffefe7e760318ea7b131442b67'
+            '7dc4938a4347b1e5b2de6bc8a2bf6ed4f93e8c2e430740393e37c9ca2bf2542f'
+            '6eec2e9c3d7ed23d2785e0c0fcbbc87a6c2efa4e9d09d1d7af7ecb895f9e2a2c'
             '2186b280cce0c321b204cfda0cf65d221e42cc63b97b7b884ac31b5999a8e390' )
 
 package() {
   install -Dm755 m4-backlight.py "$pkgdir/usr/bin/m4-backlight"
+  install -Dm755 m4-j715-backlight "$pkgdir/usr/bin/m4-j715-backlight"
+  local j715="$pkgdir/usr/lib/omarchy-m4/backlight/j715"
+  install -Dm644 -t "$j715/tools" m4-j715-backlight.py m4-backlight.py j715_display_profile.py j715_sources.py
+  install -Dm644 profile.schema.json "$j715/display/j715/profile.schema.json"
+  install -Dm644 m4-j715-backlight.service "$pkgdir/usr/lib/systemd/system/m4-j715-backlight.service"
+  install -Dm644 90-j715-backlight.rules "$pkgdir/usr/lib/udev/rules.d/90-j715-backlight.rules"
   install -Dm644 j713_dcp_backlight.ko "$pkgdir/usr/lib/omarchy-m4/backlight/j713_dcp_backlight.ko"
   install -Dm644 module.json "$pkgdir/usr/lib/omarchy-m4/backlight/module.json"
   install -Dm644 m4-backlight.service "$pkgdir/usr/lib/systemd/system/m4-backlight.service"

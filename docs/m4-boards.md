@@ -35,6 +35,10 @@ a mini.
 
 ## Support status
 
+The separate [J715 native backlight work](j715-backlight.md) records focused
+panel testing and its remaining publication inputs. It does not change J715's
+testing status or the J713 installer and boot qualification gates.
+
 - `qualified`: the release installs on it and every gate admits it. Moving a
   board here needs boot evidence from that board.
 - `testing`: a board testers may install before it is qualified, from a kit

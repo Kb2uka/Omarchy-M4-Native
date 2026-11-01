@@ -1,6 +1,9 @@
 post_install() {
   systemctl enable m4-backlight.service >/dev/null 2>&1 || true
   if [ -x usr/bin/python3 ]; then
+    if usr/bin/python3 -B usr/lib/omarchy-m4/backlight/j715/tools/m4-j715-backlight.py --supported; then
+      systemctl enable m4-j715-backlight.service >/dev/null 2>&1 || true
+    fi
     usr/bin/python3 usr/bin/m4-backlight --keys-hook || true
   fi
   printf '%s\n' '==> Native panel brightness starts after the next restart. Brightness keys keep their existing meaning.'
@@ -12,7 +15,9 @@ post_upgrade() {
 
 pre_remove() {
   systemctl disable m4-backlight.service >/dev/null 2>&1 || true
+  systemctl disable m4-j715-backlight.service >/dev/null 2>&1 || true
   if [ -x usr/bin/python3 ]; then
     usr/bin/python3 usr/bin/m4-backlight --keys-remove-hook || true
+    usr/bin/python3 -B usr/lib/omarchy-m4/backlight/j715/tools/m4-j715-backlight.py --keys-remove-hook || true
   fi
 }

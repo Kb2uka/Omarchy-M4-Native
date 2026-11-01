@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: GPL-2.0-only
+obj-m += j715_dcp_backlight.o
+j715_dcp_backlight-y := client.o afk.o
