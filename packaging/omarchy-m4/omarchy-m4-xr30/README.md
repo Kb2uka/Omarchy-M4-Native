@@ -33,8 +33,34 @@ The package supplies XR30 capability, not a monitor policy. The owner's
 existing monitor rules determine bit depth, mode, scale, position, transform
 and all other behavior. For example, an owner choosing 10-bit output can add
 `bitdepth = 10` to their existing Lua `hl.monitor({...})` table. The package
-does not add that setting, create another monitor rule, inject configuration,
-or contact a running compositor. An existing 8-bit choice remains 8-bit.
+does not add that setting, create another monitor rule, or contact a running
+compositor. An existing 8-bit choice remains 8-bit.
+
+## Hyprland 0.57 format quirk
+
+Library selection alone does not fix the confirmed J715 simpledrm regression:
+the default `quirks:skip_non_kms_dmabuf_formats=true` leaves only opaque
+advertised formats, and Firefox fails EGLConfig selection. A persistent Lua
+setting of `false` in the loaded `looknfeel.lua`, with full `true` then `false`
+configuration reloads, restored alpha EGL configs in the running test session.
+A fresh session rendered Firefox and the bar and completed a desktop capture.
+Extended capture and shell rendering still have separate unresolved failures;
+this is not full graphics-stack qualification.
+
+Release 4 delivers the quirk automatically through `omarchy-m4-update`.
+The package install/upgrade hook mirrors the lid/backlight migrations: it
+drops to each login owner's UID and groups before accessing configuration.
+On a qualified J715 native XR30 simpledrm panel, it appends an idempotent block
+to an existing regular `looknfeel.lua` explicitly loaded by the owner's
+Omarchy `hyprland.lua`. Missing, symlinked or unrecognized configurations are
+left alone; existing owner quirk settings in either file are preserved.
+The block gates the option on the running Hyprland version (0.57 or later),
+so an older or unknown version does not receive a nonexistent option, even
+after a downgrade. No restart or explicit reload is issued; automatic config
+reloads remain possible. A refusal reports its reason without failing the
+upgrade. Check the result at the next graphical login.
+See [qualification and remaining gates](../../../docs/j715-xr30.md#hyprland-057-format-quirk).
+The compiler/probe checks do not qualify Hyprland 0.57 client compatibility.
 
 ## Controls
 

@@ -1,0 +1,11 @@
+post_install() {
+  # Like the lid/backlight migrations: owner writes, no compositor commands.
+  # A refused configuration never fails the package upgrade.
+  if [ -x usr/bin/m4-xr30 ]; then
+    usr/bin/m4-xr30 --config-hook || true
+  fi
+}
+
+post_upgrade() {
+  post_install
+}

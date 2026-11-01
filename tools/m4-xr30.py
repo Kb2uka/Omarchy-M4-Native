@@ -5,12 +5,15 @@
 Monitor configuration remains the owner's responsibility. This wrapper neither
 requests a bit depth nor contacts a running compositor. --disable and --enable
 only change the global hold for subsequent logins; inspection is the default.
+The package's --config-hook appends the version-gated simpledrm format quirk
+to recognized, loaded owner configurations, without requesting a reload.
 """
 import argparse
 import json
 import os
 from pathlib import Path
 import re
+import stat
 import sys
 
 DT = 'sys/firmware/devicetree/base'
@@ -19,6 +22,17 @@ PREFIX = 'usr/lib/omarchy-m4/mesa'
 VENDOR = 'share/glvnd/egl_vendor.d/50_mesa.json'
 STATE = 'var/lib/omarchy-m4/xr30'
 LAUNCHER = 'usr/bin/start-hyprland'
+FORMAT_MARKER = '-- J715 simpledrm alpha formats (omarchy-m4-xr30)'
+# Runtime gating also covers a later compositor upgrade or downgrade. hl.version()
+# returns HYPRLAND_VERSION (src/config/lua/bindings/LuaBindingsToplevel.cpp).
+FORMAT_QUIRK = FORMAT_MARKER + '''
+do
+  local major, minor = (hl.version and hl.version() or ""):match("^v?(%d+)%.(%d+)%.")
+  if major and (tonumber(major) > 0 or tonumber(minor) >= 57) then
+    hl.config({ quirks = { skip_non_kms_dmabuf_formats = false } })
+  end
+end
+'''
 
 
 class Refused(Exception):
@@ -129,6 +143,78 @@ def set_enabled(root, enabled):
             os.umask(previous_umask)
 
 
+def add_format_quirk(home: Path, apply: bool) -> str:
+    """Append once to a loaded Omarchy looknfeel, with the owner's rights."""
+    directory = home / '.config/hypr'
+    flags = os.O_NOFOLLOW | os.O_NONBLOCK
+    try:
+        fd = os.open(directory / 'hyprland.lua', os.O_RDONLY | flags)
+    except FileNotFoundError:
+        return 'no configuration'
+    with os.fdopen(fd, 'rb') as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            return 'skipped: not a regular configuration'
+        source = stream.read().decode('utf-8')
+    if not all(re.search(r'^\s*require\(\s*["\']' + name + r'["\']\s*\)\s*(?:--[^\n]*)?$',
+                         source, re.M)
+               for name in (r'default\.hypr\.omarchy', r'hypr\.looknfeel')):
+        return 'skipped: not a recognized loaded Omarchy looknfeel'
+    if 'skip_non_kms_dmabuf_formats' in source:
+        return 'skipped: owner format quirk preserved'
+    try:
+        fd = os.open(directory / 'looknfeel.lua',
+                     (os.O_RDWR | os.O_APPEND if apply else os.O_RDONLY) | flags)
+    except FileNotFoundError:
+        return 'no looknfeel configuration'
+    with os.fdopen(fd, 'r+b' if apply else 'rb', buffering=0) as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            return 'skipped: not a regular configuration'
+        source = stream.read().decode('utf-8')
+        if FORMAT_MARKER in source:
+            return 'present'
+        if 'skip_non_kms_dmabuf_formats' in source:
+            return 'skipped: owner format quirk preserved'
+        if re.search(r'^\s*return\b', source, re.M):
+            return 'skipped: unrecognized looknfeel configuration'
+        if not apply:
+            return 'missing'
+        stream.write((('' if source.endswith('\n') else '\n') + FORMAT_QUIRK).encode())
+        os.fsync(stream.fileno())
+    return 'added; takes effect at next graphical login'
+
+
+def format_hook(root: Path) -> dict[str, str]:
+    """Mirror the lid/backlight hook: root enumerates, owner accesses files."""
+    native_panel(root)  # Inert on J713 and non-native/non-XR30 displays.
+    report = {}
+    for line in (root / 'etc/passwd').read_text().splitlines():
+        fields = line.split(':')
+        if len(fields) != 7 or not fields[2].isdigit() or not fields[3].isdigit():
+            continue
+        name, _, uid, gid, _, home, shell = fields
+        if not (1000 <= int(uid) < 60000 and home.startswith('/home/') and not shell.endswith('nologin')):
+            continue
+        read_fd, write_fd = os.pipe()
+        child = os.fork()
+        if child == 0:
+            os.close(read_fd)
+            try:
+                os.setgroups([])
+                os.initgroups(name, int(gid))
+                os.setgid(int(gid))
+                os.setuid(int(uid))
+                value = add_format_quirk(root / home.lstrip('/'), True)
+            except (OSError, ValueError) as error:
+                value = 'skipped: ' + str(error)
+            os.write(write_fd, value.encode())
+            os._exit(0)
+        os.close(write_fd)
+        with os.fdopen(read_fd, 'rb') as stream:
+            report[name] = stream.read().decode() or 'skipped: no result'
+        os.waitpid(child, 0)
+    return report
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     action = parser.add_mutually_exclusive_group()
@@ -136,6 +222,7 @@ def main(argv=None):
     action.add_argument('--status', action='store_true', help='report next-login selection (default)')
     action.add_argument('--enable', action='store_true', help='remove the next-login hold (root)')
     action.add_argument('--disable', action='store_true', help='hold the private prefix at next login (root)')
+    action.add_argument('--config-hook', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--root', type=Path, default=Path('/'), help=argparse.SUPPRESS)
     parser.add_argument('arguments', nargs=argparse.REMAINDER, help='arguments for start-hyprland, after --')
     args = parser.parse_args(argv)
@@ -143,6 +230,14 @@ def main(argv=None):
         parser.error('launcher arguments require --start')
     root = args.root.resolve()
     try:
+        if args.config_hook:
+            if os.geteuid() != 0:
+                raise Refused('configuration hook requires root')
+            report = format_hook(root)
+            print(json.dumps(report, indent=2, sort_keys=True))
+            if any(value.startswith('added') for value in report.values()):
+                print('==> J715 alpha format quirk added. Log out and back in once to apply it.')
+            return 0
         if args.enable or args.disable:
             set_enabled(root, args.enable)
         report = inspect(root)
