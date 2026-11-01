@@ -19,7 +19,7 @@ mount -t tmpfs -o mode=755 tmpfs /run
 . /lib/m4-root-config.sh
 . /lib/m4-ssd-root.sh
 read_root_config /sys/firmware/devicetree/base/chosen || fail boot-identity-missing
-insmod /lib/modules/nvme-apple.ko
+insmod /lib/modules/nvme-apple.ko flush_interval=0
 for i in $(seq 1 30); do
     if resolve_root "$ROOT_PARTUUID" "$ROOT_FSUUID" nvme0n1 >/dev/null &&
        resolve_efi "$EFI_PARTUUID" nvme0n1 >/dev/null; then

@@ -84,6 +84,7 @@ sleep() { record "sleep $*"; test "$*" = 1 || exit 99; }
         loads = [line for line in trace if line.startswith('insmod ')]
         self.assertEqual(len(loads), 1)
         self.assertIn('nvme-apple.ko', loads[0])
+        self.assertIn('flush_interval=0', loads[0])
         moves = [line for line in trace if line.startswith('mount --move ')]
         self.assertEqual(moves, [f'mount --move /{name} {directory}/newroot/{name}'
                                  for name in ('dev', 'proc', 'sys', 'run')])
