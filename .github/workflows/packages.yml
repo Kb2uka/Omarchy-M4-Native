@@ -17,7 +17,7 @@ concurrency:
 jobs:
   build:
     name: Package channel
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -25,9 +25,29 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - name: Install package tools
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends makepkg pacman-package-manager libarchive-tools fakeroot zstd gnupg && sudo mkdir -p /var/lib/pacman/local && echo 9 | sudo tee /var/lib/pacman/local/ALPM_DB_VERSION
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            makepkg pacman-package-manager libarchive-tools fakeroot zstd gnupg \
+            build-essential pkg-config meson ninja-build bison flex \
+            python3-mako python3-packaging python3-yaml glslang-tools \
+            llvm-21-dev clang-21 libclang-21-dev libclang-cpp21-dev libllvmspirvlib-21-dev \
+            spirv-tools libdrm-dev libexpat1-dev zlib1g-dev libzstd-dev \
+            libglvnd-dev libgbm-dev libegl-dev libgles-dev libudev-dev \
+            libelf-dev libsensors-dev libunwind-dev libdisplay-info-dev \
+            wayland-protocols libwayland-dev libx11-dev libxext-dev libxfixes-dev \
+            libxxf86vm-dev libxrandr-dev libxshmfence-dev libxcb-dri3-dev \
+            libxcb-glx0-dev libxcb-present-dev libxcb-randr0-dev \
+            libxcb-shm0-dev libxcb-sync-dev libxcb-xfixes0-dev
+          sudo mkdir -p /var/lib/pacman/local
+          echo 9 | sudo tee /var/lib/pacman/local/ALPM_DB_VERSION
+      - name: Preserve the published package metadata format
+        run: |
+          bash tools/ci/bootstrap-m4-makepkg.sh "$RUNNER_TEMP/makepkg"
+          echo "$RUNNER_TEMP/makepkg/usr/bin" >> "$GITHUB_PATH"
+          echo "LIBRARY=$RUNNER_TEMP/makepkg/usr/share/makepkg" >> "$GITHUB_ENV"
       - name: Build packages
-        run: python3 tools/build-m4-packages.py --out "$RUNNER_TEMP/packages"
+        run: PATH="/usr/lib/llvm-21/bin:$PATH" python3 tools/build-m4-packages.py --out "$RUNNER_TEMP/packages"
       - name: Check package policy and published versions
         run: python3 tools/check-m4-packages.py "$RUNNER_TEMP/packages"
       - name: Install through a signed sandbox repository
@@ -37,7 +57,7 @@ jobs:
     name: Publish package channel
     needs: build
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 30
     environment: package-publish
     permissions:
@@ -51,9 +71,29 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - name: Install package tools
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends makepkg pacman-package-manager libarchive-tools fakeroot zstd gnupg && sudo mkdir -p /var/lib/pacman/local && echo 9 | sudo tee /var/lib/pacman/local/ALPM_DB_VERSION
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            makepkg pacman-package-manager libarchive-tools fakeroot zstd gnupg \
+            build-essential pkg-config meson ninja-build bison flex \
+            python3-mako python3-packaging python3-yaml glslang-tools \
+            llvm-21-dev clang-21 libclang-21-dev libclang-cpp21-dev libllvmspirvlib-21-dev \
+            spirv-tools libdrm-dev libexpat1-dev zlib1g-dev libzstd-dev \
+            libglvnd-dev libgbm-dev libegl-dev libgles-dev libudev-dev \
+            libelf-dev libsensors-dev libunwind-dev libdisplay-info-dev \
+            wayland-protocols libwayland-dev libx11-dev libxext-dev libxfixes-dev \
+            libxxf86vm-dev libxrandr-dev libxshmfence-dev libxcb-dri3-dev \
+            libxcb-glx0-dev libxcb-present-dev libxcb-randr0-dev \
+            libxcb-shm0-dev libxcb-sync-dev libxcb-xfixes0-dev
+          sudo mkdir -p /var/lib/pacman/local
+          echo 9 | sudo tee /var/lib/pacman/local/ALPM_DB_VERSION
+      - name: Preserve the published package metadata format
+        run: |
+          bash tools/ci/bootstrap-m4-makepkg.sh "$RUNNER_TEMP/makepkg"
+          echo "$RUNNER_TEMP/makepkg/usr/bin" >> "$GITHUB_PATH"
+          echo "LIBRARY=$RUNNER_TEMP/makepkg/usr/share/makepkg" >> "$GITHUB_ENV"
       - name: Build packages
-        run: python3 tools/build-m4-packages.py --out "$RUNNER_TEMP/packages"
+        run: PATH="/usr/lib/llvm-21/bin:$PATH" python3 tools/build-m4-packages.py --out "$RUNNER_TEMP/packages"
       - name: Check package policy and published versions
         run: python3 tools/check-m4-packages.py "$RUNNER_TEMP/packages"
       - name: Sign and publish

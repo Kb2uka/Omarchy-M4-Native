@@ -1,13 +1,61 @@
 # Updates for the experimental M4 build
 
 M4 kernel, devicetree and boot fixes ship as **signed packages** from this
-project's `[omarchy-m4]` repository. Connect each Air once; after that, run
+project's `[omarchy-m4]` repository for the qualified J713. Connect each Air once; after that, run
 `omarchy-m4-update` to get them, and the boot object is updated for you.
 Nothing is reinstalled. How it works: [package-channel.md](package-channel.md).
 
+## J715 tester: graphics only
+
+The J715 remains a testing board. Its authorized channel route updates only
+`omarchy-m4-keyring`, the shared `omarchy-m4-update` package and
+`omarchy-m4-xr30`. It never installs `omarchy-m4-boot`, upgrades the tester
+kernel or installs J713 audio/module packages. The J713 boot composer is not
+run. The full-update and boot rollback instructions below apply to J713,
+not to this route.
+
+For initial enrollment use the **same Connect once setup tool below**; it
+selects the graphics route from the exact J715/T8132 identity. There is no
+separate manual package install. After enrollment, run **`omarchy-m4-update`**
+for subsequent graphics updates.
+
+Setup requires the installed tester base kernel package
+`linux-m4-omarchy 7.1.9.m4.20261008-1`, the running
+`7.1.9-m4-gpu-backport-20261008` release and coherent inherited audio/video
+manifests. Those manifests remain J713-named and identify schema 1,
+`apple,j713`, `apple,t8132` and that release, as the tester kit leaves them.
+An installed J713 boot package, a missing or different prerequisite, or a
+dependency transaction that would install anything beyond the three graphics
+packages is a refusal. Setup does not repair these by replacing the tester
+kernel or installing additional distribution libraries.
+
+`graphical_login_needed: true` means the new graphics selection applies at
+the **next graphical login**. It does not ask for a machine reboot:
+`restart_needed` remains false. No live compositor is restarted. A failed
+installation restores the repository configuration and reports that graphics
+installation may be partial; fix its cause and rerun `omarchy-m4-update`.
+Neither the success nor failure path invokes boot or audio recovery.
+This route does not install or start the J713 daily update notifier.
+
+### Shared updater migration on J713
+
+`omarchy-m4-update` 1-1 owns `/usr/bin/omarchy-m4-update` and
+`/usr/lib/omarchy-m4/m4-channel-setup.py`. Boot package 1-20 stops owning those
+files and depends on `omarchy-m4-update>=1-1`. The normal update upgrades boot
+and installs the shared updater in **one pacman transaction**, transferring
+file ownership without removing boot. Older setup scripts receive the common
+package through that dependency. There is no `replaces`, `conflicts`,
+file-deleting install script or `--overwrite` migration.
+
+Publishing the new updater without boot 1-20 would leave old J713 installations
+unable to transfer those files. Publish both together. Installing the common
+package alone over an old boot package is not a supported migration path.
+The signed-package E2E harness covers the real pacman ownership transfer and
+a second idempotent update; it also checks the J715 three-package closure.
+
 ## Connect once
 
-Every v0.1.0-alpha.1 Air needs this step once, including a fresh installation
+Every unconnected v0.1.0-alpha.1 Air needs this step once, including a fresh installation
 and an Air that already has update 1. Join Wi-Fi first (`nmtui`). Open a
 terminal, paste this one line, press Enter, and type your password when
 asked:
@@ -58,11 +106,13 @@ What it does:
 - adds `/etc/pacman.d/omarchy-m4.conf` and one `Include` line above `[core]`
   in `/etc/pacman.conf`, keeping the old file as `/etc/pacman.conf.pre-omarchy-m4`;
 - installs `omarchy-m4-keyring`, `omarchy-m4-boot` and `linux-m4-omarchy`.
+  On J715, only the three graphics packages listed above are selected instead.
 
 It refreshes only the M4 repository's database, so it is **not** a system
-upgrade. The kernel it installs is the one your Air already boots. It never
-touches the browser, Widevine, video, graphics, speaker or audio files, the
-boot options that the trackpad needs, or your Apple firmware.
+upgrade. J713 retains its qualified kernel/boot update route. The J715 route
+does not install a kernel: it adds an isolated graphics runtime and selects it
+at the next eligible login, preserving the existing graphics, video and audio
+files, boot object and Apple firmware.
 
 ## Receiving fixes
 
@@ -76,7 +126,8 @@ This is separate from Omarchy's own update indicator, which only watches the
 Run **`omarchy-m4-update`** and type your password. It refreshes only the M4
 repository and installs or upgrades only the M4 packages, including any new
 one, the same way the connect step does; nothing else on the system changes.
-(`omarchy-m4-boot` 1-5 adds the command. On an Air with an older boot package,
+(`omarchy-m4-boot` 1-5 added the command; 1-20 transfers it to the shared
+`omarchy-m4-update` package. On a J713 with an older boot package,
 run the connect line once instead.) `omarchy update` also installs M4 fixes,
 but it updates the whole system as well, which is not qualified on this
 hardware (below). When an M4 fix is included, pacman shows

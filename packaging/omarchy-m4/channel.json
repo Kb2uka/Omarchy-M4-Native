@@ -6,6 +6,8 @@
   "signing_fingerprint": "578DF78177CF6DF29B888B8C9404F3CC90797A50",
   "packages": [
     "omarchy-m4-keyring",
+    "omarchy-m4-update",
+    "omarchy-m4-xr30",
     "omarchy-m4-boot",
     "linux-m4-omarchy",
     "omarchy-m4-gst-audio",
@@ -25,6 +27,18 @@
     "sha256": "afb025a8f1c946d164fe962f20b2e9d5cd987cfc668985eee62e41767722b2aa"
   },
   "allowed_paths": {
+    "omarchy-m4-update": [
+      "usr/bin/omarchy-m4-update",
+      "usr/lib/omarchy-m4/m4-channel-setup.py",
+      "usr/share/licenses/omarchy-m4-update/"
+    ],
+    "omarchy-m4-xr30": [
+      "usr/bin/m4-xr30",
+      "usr/lib/omarchy-m4/mesa/",
+      "usr/lib/omarchy-m4/xr30/xr30-probe",
+      "usr/lib/systemd/user/wayland-wm@hyprland.desktop.service.d/90-m4-xr30.conf",
+      "usr/share/licenses/omarchy-m4-xr30/"
+    ],
     "omarchy-m4-keyring": [
       "usr/share/pacman/keyrings/omarchy-m4.gpg",
       "usr/share/pacman/keyrings/omarchy-m4-trusted",
@@ -39,8 +53,7 @@
       "usr/lib/systemd/user/omarchy-m4-update-check.service",
       "usr/lib/systemd/user/omarchy-m4-update-check.timer",
       "usr/share/licenses/omarchy-m4-boot/",
-      "usr/bin/omarchy-m4-update",
-      "usr/lib/omarchy-m4/m4-channel-setup.py", "usr/lib/omarchy-m4/m4-lid-lock.py",
+      "usr/lib/omarchy-m4/m4-lid-lock.py",
       "usr/bin/m4-notch", "usr/lib/omarchy-m4/backlight/stage2-hidden.bin",
       "usr/lib/omarchy-m4/backlight/stage2-shown.bin", "usr/lib/systemd/user/omarchy-m4-notch.service",
       "usr/lib/omarchy-m4/retained-bounds/Image.gz"

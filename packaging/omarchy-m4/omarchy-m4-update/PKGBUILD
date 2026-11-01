@@ -1,0 +1,24 @@
+# Maintainer: KB2UKA
+# Tools and MIT.txt are staged by tools/build-m4-packages.py.
+pkgname=omarchy-m4-update
+pkgver=1
+pkgrel=1
+pkgdesc='Shared signed M4 channel enrollment and update command'
+arch=('aarch64')
+url='https://github.com/Kb2uka/Omarchy-M4-Native'
+license=('MIT')
+depends=('python' 'pacman')
+# Boot 1-20 drops these files and depends on this package. Pacman transfers
+# ownership in that single transaction; never replace/remove the boot package
+# or use --overwrite to bypass its ownership on an old installation.
+options=('!strip' '!debug')
+source=('m4-channel-setup.py' 'omarchy-m4-update' 'MIT.txt')
+sha256sums=('2dabccc3d375d5e4d7d34fddf0ce34f6969e11bd8d1a16044f508e437510ae2e'
+            '77b1756448d9191b3167f63622a891dceb55bc4891f436391cc483690d72c6a1'
+            'b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5')
+
+package() {
+  install -Dm755 omarchy-m4-update "$pkgdir/usr/bin/omarchy-m4-update"
+  install -Dm644 m4-channel-setup.py "$pkgdir/usr/lib/omarchy-m4/m4-channel-setup.py"
+  install -Dm644 MIT.txt "$pkgdir/usr/share/licenses/$pkgname/MIT.txt"
+}

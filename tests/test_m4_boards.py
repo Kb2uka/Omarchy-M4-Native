@@ -304,6 +304,30 @@ def snapshot(root):
             for path in sorted(root.rglob('*'))}
 
 
+class GraphicsBoardGate(unittest.TestCase):
+    """The graphics exception never broadens the existing J713 preflight."""
+
+    def test_graphics_preflight_refuses_every_other_identity_before_commands(self):
+        cases = [(board['target'], identity(board)) for board in BOARDS if board['target'] != 'J715']
+        cases += [('J715 wrong SoC', b'apple,j715\0apple,t6040\0apple,arm-platform\0'),
+                  ('J715 near board', b'apple,j715x\0apple,t8132\0'),
+                  ('J715 near SoC', b'apple,j715\0apple,t8132x\0'),
+                  ('J715 unterminated', b'apple,j715\0apple,t8132'),
+                  ('J715 mixed boards', b'apple,j715\0apple,j713\0apple,t8132\0'),
+                  ('J715 duplicate board', b'apple,j715\0apple,j715\0apple,t8132\0')]
+        for label, compatible in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                path = root / COMPATIBLE
+                path.parent.mkdir(parents=True)
+                path.write_bytes(compatible)
+                before = snapshot(root)
+                with unittest.mock.patch.object(CHANNEL.subprocess, 'run', side_effect=never):
+                    with self.assertRaises(CHANNEL.Refused):
+                        CHANNEL.graphics_preflight(root, CHANNEL.Machine(root))
+                self.assertEqual(snapshot(root), before)
+
+
 WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
 # Mutating os.* audit events: (argument positions holding a target path, positions holding a dir_fd).
 MUTATING = {

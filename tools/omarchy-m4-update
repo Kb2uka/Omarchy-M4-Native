@@ -4,7 +4,8 @@
 #
 # Update only the M4 packages. Refreshes only the [omarchy-m4] repository and
 # installs or upgrades only its packages, the same way the connect step does;
-# the rest of the system is not touched. Restart once afterwards.
+# J713 keeps its full route; J715 testers receive graphics only. Follow the
+# result's restart or next-graphical-login indication.
 set -euo pipefail
 if [[ $EUID -ne 0 ]]; then
   exec sudo /usr/bin/omarchy-m4-update "$@"

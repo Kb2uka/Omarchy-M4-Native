@@ -5,7 +5,7 @@
 # and the m1n1-* notices from display/j713/m1n1-base/, by tools/build-m4-packages.py.
 pkgname=omarchy-m4-boot
 pkgver=1
-pkgrel=19
+pkgrel=20
 pkgdesc='Keeps the J713 boot.bin in step with the packaged M4 kernel and devicetree'
 arch=('aarch64')
 url='https://github.com/Kb2uka/Omarchy-M4-Native'
@@ -29,7 +29,11 @@ license=('MIT' 'GPL-2.0-only' 'GPL-2.0-or-later OR MIT' 'BSD-2-Clause OR GPL-2.0
 # notch helper uses that resume command. A non-regular hold is refused, a
 # non-string kernel pin is refused, and a refusal names the rooted recovery
 # journal. Boot 1-18 preserves boot holds and newer installed channel packages.
-depends=('python' 'pacman' 'omarchy-m4-gpu' 'omarchy-m4-headphones' 'omarchy-m4-cpu' 'omarchy-m4-evdi' 'omarchy-m4-backlight' 'omarchy-m4-speaker>=1-5')
+# 1-20 transfers the two common updater files in the same pacman transaction.
+# Do not add replaces/conflicts: the J713 boot package remains installed.
+# The XR30 package is inert on J713; its dependency lets older setup scripts
+# deliver the new channel package without a separate installation command.
+depends=('python' 'pacman' 'omarchy-m4-update>=1-1' 'omarchy-m4-xr30' 'omarchy-m4-gpu' 'omarchy-m4-headphones' 'omarchy-m4-cpu' 'omarchy-m4-evdi' 'omarchy-m4-backlight' 'omarchy-m4-speaker>=1-5')
 install=omarchy-m4-boot.install
 options=('!strip' '!debug')
 # The CPU frequency, CPU temperature, CPU thermal zone and boost-state devicetree, with P
@@ -39,7 +43,7 @@ options=('!strip' '!debug')
 source=('m4-boot-compose.py' '90-omarchy-m4-boot.hook' 'm4-update-check.py'
         'omarchy-m4-update-check.service' 'omarchy-m4-update-check.timer' 'MIT.txt' 'GPL-2.0-or-later.txt'
         'GPL-2.0-only.txt'
-        'speakersafetyd-j713-realtime.conf' 'm4-channel-setup.py' 'omarchy-m4-update' 'm4-lid-lock.py'
+        'speakersafetyd-j713-realtime.conf' 'm4-lid-lock.py'
         "j713-backlight.dtb::${url}/releases/download/package-inputs/j713-backlight-afb025a8.dtb"
         "Image-retained-bounds.gz::${url}/releases/download/package-inputs/j713-retained-bounds-ca1fff57-Image.gz"
         'm4-notch.py' 'omarchy-m4-notch.service'
@@ -58,8 +62,6 @@ sha256sums=('6ace30fa8c07cffbd6ea3af654e1697e77425cae74d6ee91903f2f28238b6a02'
             'aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3'
             'aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3'
             'a116d5a6aa09bc2aec1393ef737f21d9cc0eaac474615cb215f48491b7db8a56'
-            '8277cc4615875db20c585fcbef67b8e96490d828f4b86de41b98c4c3c1d009dc'
-            'bde52f8012b209e06c0e2b41325413c642ae4c6e6eedce7ff04331ca4d50c0f1'
             'f605580fc7e8e672cee85f5afee930550b8f445f026b5a04c1828e52c88ea6de'
             'afb025a8f1c946d164fe962f20b2e9d5cd987cfc668985eee62e41767722b2aa'
             'ca1fff571cf1b9d8c0b07b2e97ba0a5402f93c1b7a2d54ea2c07e24a8b70f9d0'
@@ -82,8 +84,6 @@ package() {
   install -Dm755 m4-boot-compose.py "$pkgdir/usr/bin/m4-boot-compose"
   install -Dm644 90-omarchy-m4-boot.hook "$pkgdir/usr/share/libalpm/hooks/90-omarchy-m4-boot.hook"
   install -Dm755 m4-update-check.py "$pkgdir/usr/bin/omarchy-m4-update-check"
-  install -Dm755 omarchy-m4-update "$pkgdir/usr/bin/omarchy-m4-update"
-  install -Dm644 m4-channel-setup.py "$pkgdir/usr/lib/omarchy-m4/m4-channel-setup.py"
   install -Dm644 m4-lid-lock.py "$pkgdir/usr/lib/omarchy-m4/m4-lid-lock.py"
   install -Dm644 -t "$pkgdir/usr/lib/systemd/user" omarchy-m4-update-check.service omarchy-m4-update-check.timer
   install -Dm644 j713-backlight.dtb "$pkgdir/usr/lib/omarchy-m4/j713.dtb"

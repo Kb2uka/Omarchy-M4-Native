@@ -44,12 +44,14 @@ CHANNEL = json.loads((ROOT / 'packaging/omarchy-m4/channel.json').read_text())
 RELEASE = CHANNEL['kernel']['release']
 # Packages an Air's 1-5 setup script does not list; omarchy-m4-boot's dependencies bring them.
 BROUGHT_BY_BOOT = ('omarchy-m4-gpu', 'omarchy-m4-headphones', 'omarchy-m4-cpu', 'omarchy-m4-evdi',
-                   'omarchy-m4-backlight')
+                   'omarchy-m4-backlight', 'omarchy-m4-update', 'omarchy-m4-xr30')
 STUB = '''pkgname=e2e-system
 pkgver=1
 pkgrel=1
 arch=(any)
-provides=(python coreutils kmod pacman brightnessctl gstreamer=1.28.7 gst-plugins-base-libs=1.28.7 libpulse)
+provides=(python coreutils kmod pacman brightnessctl gstreamer=1.28.7 gst-plugins-base-libs=1.28.7 libpulse
+          glibc gcc-libs libdrm expat zlib zstd spirv-tools lm_sensors libglvnd libx11 libxcb libxext
+          libxrandr libxxf86vm libxshmfence wayland systemd-libs)
 package() { mkdir -p "$pkgdir/usr/share/e2e-system"; }
 '''
 OLD_KERNEL = '''pkgname=linux-m4-omarchy
@@ -70,6 +72,18 @@ pkgrel=1
 arch=(aarch64)
 depends=(python)
 package() { install -Dm644 /dev/null "$pkgdir/usr/bin/m4-speaker-module"; }
+'''
+# Real ALPM file-ownership migration, with synthetic old contents. This is not
+# a rebuild of 1-19; it reproduces its ownership of the two common files.
+OLD_BOOT = '''pkgname=omarchy-m4-boot
+pkgver=1
+pkgrel=19
+arch=(aarch64)
+depends=(python pacman)
+package() {
+  printf 'legacy updater\\n' | install -Dm755 /dev/stdin "$pkgdir/usr/bin/omarchy-m4-update"
+  printf 'legacy setup\\n' | install -Dm644 /dev/stdin "$pkgdir/usr/lib/omarchy-m4/m4-channel-setup.py"
+}
 '''
 # Arbitrary live bytes, not a stock or fixed identity. Left in place. The
 # updater must classify them as unknown and must not ask for a restart when
@@ -379,6 +393,7 @@ def main():
             makepkg(scratch / 'stub', STUB, local)
             makepkg(scratch / 'old-kernel', OLD_KERNEL, local)
             makepkg(scratch / 'old-speaker', OLD_SPEAKER, local)
+            makepkg(scratch / 'old-boot', OLD_BOOT, local)
             env, fingerprint, armored = new_key(scratch / 'gnupg', 'M4 channel e2e <e2e@invalid>')
             signed_repository(scratch / 'repo', packages, env, fingerprint)
             root = scratch / 'root'
@@ -394,6 +409,12 @@ def main():
             stub, = local.glob('e2e-system-*.pkg.tar.zst')
             # --noscriptlet: the legacy stubs do not run hooks. Later setup calls the composer explicitly.
             pacman = sandbox(root, old, stub, old_speaker)
+            old_boot, = local.glob('omarchy-m4-boot-1-19-*.pkg.tar.zst')
+            sudo(*pacman, '-U', '--noconfirm', '--noscriptlet', old_boot)
+            common_paths = ('usr/bin/omarchy-m4-update', 'usr/lib/omarchy-m4/m4-channel-setup.py')
+            for path in common_paths:
+                owner = run(*pacman, '-Qoq', root / path, capture_output=True, text=True).stdout.strip()
+                require(owner == 'omarchy-m4-boot', 'Legacy fixture did not own ' + path)
             base_files = base_payload(by_name['linux-m4-omarchy'], scratch)
             before = snapshot(root)
             key = scratch / 'key.asc'
@@ -429,6 +450,11 @@ def main():
                     require('omarchy-m4-speaker 1-5' in run(*pacman, '-Q', 'omarchy-m4-speaker',
                                                            capture_output=True, text=True).stdout,
                             'The boot dependency did not upgrade the speaker stub to 1-5')
+                    for path in common_paths:
+                        owner = run(*pacman, '-Qoq', root / path, capture_output=True, text=True).stdout.strip()
+                        require(owner == 'omarchy-m4-update', 'Shared file ownership did not migrate: ' + path)
+                        require((root / path).read_bytes() == member(by_name['omarchy-m4-update'], path),
+                                'Migrated common file does not match the built updater: ' + path)
                     after_first = snapshot(root)
                     assert_base_kernel(root, base_files)
                 conf = (root / 'etc/pacman.conf').read_text()
@@ -523,13 +549,58 @@ def main():
             refused = sudo('pacman', '--root', root, '--dbpath', scratch / 'forged-db', '--noconfirm',
                            '--gpgdir', root / 'etc/pacman.d/gnupg', '--config', forged, '-Sy', check=False)
             require(refused.returncode != 0, 'pacman accepted a database signed by an untrusted key')
+            # A J715 tester inherits the base package and J713-named manifests,
+            # but it must never acquire the boot package or channel kernel.
+            graphics = scratch / 'graphics-root'
+            graphics.mkdir()
+            graphics_pacman = sandbox(graphics, old, stub, old_speaker)
+            fixture_files = {
+                'sys/firmware/devicetree/base/compatible': 'apple,j715\0apple,t8132\0apple,arm-platform\0',
+                'proc/sys/kernel/osrelease': RELEASE + '\n',
+                'boot/efi/omarchy/boot.bin': 'tester boot object',
+            }
+            for name in ('etc/omarchy/j713-video-manifest.json', 'etc/omarchy/j713-audio-manifest.json'):
+                fixture_files[name] = json.dumps({'schema': 1, 'board': 'apple,j713', 'soc': 'apple,t8132',
+                                                 'kernel_release': RELEASE}) + '\n'
+            for index, (name, contents) in enumerate(fixture_files.items()):
+                temporary = scratch / f'graphics-fixture-{index}'
+                temporary.write_text(contents)
+                sudo('install', '-Dm644', temporary, graphics / name)
+            graphics_before = snapshot(graphics)
+            base_image = (graphics / 'usr/lib/omarchy-m4/Image.gz').read_bytes()
+            installed_before = set(run(*graphics_pacman, '-Qq', capture_output=True, text=True).stdout.splitlines())
+            graphics_setup = ['python3', ROOT / 'tools/m4-channel-setup.py', '--root', graphics,
+                              '--server', f'file://{scratch}/repo', '--key-file', key,
+                              '--fingerprint', fingerprint, '--apply']
+            for attempt in range(2):
+                result = sudo(*graphics_setup, capture_output=True, text=True, check=False)
+                print(result.stdout + result.stderr)
+                require(result.returncode == 0, 'J715 graphics setup failed')
+                plan = json.loads(result.stdout)
+                require(plan['scope'] == 'j715-graphics' and plan['restart_needed'] is False and
+                        plan['graphical_login_needed'] is (attempt == 0),
+                        'J715 graphics setup reported boot work or an incorrect login requirement')
+                require(plan['install'] == (['omarchy-m4-keyring', 'omarchy-m4-update', 'omarchy-m4-xr30']
+                                            if attempt == 0 else []),
+                        'J715 selected packages outside the graphics route')
+                require('m4-boot-compose' not in result.stderr, 'J715 invoked the J713 composer')
+                require(snapshot(graphics) == graphics_before, 'J715 changed boot or protected stack files')
+                require((graphics / 'usr/lib/omarchy-m4/Image.gz').read_bytes() == base_image,
+                        'J715 changed its installed kernel image')
+            installed_after = set(run(*graphics_pacman, '-Qq', capture_output=True, text=True).stdout.splitlines())
+            require(installed_after - installed_before ==
+                    {'omarchy-m4-keyring', 'omarchy-m4-update', 'omarchy-m4-xr30'} and
+                    installed_before <= installed_after, 'J715 dependency closure escaped graphics scope')
+            require(not (graphics / 'usr/bin/m4-boot-compose').exists(), 'J715 acquired the boot composer')
+            require(run(*graphics_pacman, '-Q', 'linux-m4-omarchy', capture_output=True,
+                        text=True).stdout.strip() == package_version(old), 'J715 upgraded the tester base package')
             prove_newer_candidates_stay(scratch, stub, old, old_speaker, env, fingerprint, key)
             print('m4-channel-e2e: passed')
         finally:
             # pacman ran as root in these trees; remove them before the temporary directory goes.
             subprocess.run(['sudo', 'rm', '-rf', str(scratch / 'root'), str(scratch / 'forged-db'),
                             str(scratch / 'newer-hold'), str(scratch / 'newer-baseline'),
-                            str(scratch / 'newer-kept')], check=False)
+                            str(scratch / 'newer-kept'), str(scratch / 'graphics-root')], check=False)
 
 
 if __name__ == '__main__':

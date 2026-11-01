@@ -40,8 +40,35 @@ a mini.
 - `testing`: a board testers may install before it is qualified, from a kit
   built for that board and only with the tester's explicit opt-in. It needs an
   installer profile. The J713 release, its `Install.command` and every live
-  gate refuse it like a refused board; the tester kit is what admits it.
+  full-update, boot, audio and module gates refuse it like a refused board;
+  the tester kit is what admits it. The bounded J715 graphics update route
+  below is an explicit exception, not a qualification.
 - `refused`: nothing installs or runs on it.
+
+## J715 graphics-only tester updates
+
+An already installed J715 tester can enroll through the existing channel setup
+tool and then run `omarchy-m4-update`, as described in [updates.md](updates.md).
+This route requires the exact `apple,j715` / `apple,t8132` identity, the tester
+base package `linux-m4-omarchy 7.1.9.m4.20261008-1`, the running release
+`7.1.9-m4-gpu-backport-20261008`, and coherent inherited stack manifests.
+The kit deliberately retains the J713-named audio/video manifests: each must
+still identify schema 1, `apple,j713`, `apple,t8132` and that kernel release.
+These checks establish the inherited tester environment, not the identity or
+qualification of a locally changed boot image.
+
+The only install/upgrade targets are `omarchy-m4-keyring`,
+`omarchy-m4-update` and `omarchy-m4-xr30`. Before installing, setup resolves
+their dependency closure and refuses any package outside that set, a different
+repository, conflicts or replacements. Required distribution libraries must
+already be installed. A J715 with `omarchy-m4-boot` installed is refused rather
+than upgraded or repaired. No J713 boot composer, audio helper, module helper
+or notifier is called, including after an installation failure. The boot
+object, kernel, module and audio state are not update targets.
+
+This exception leaves J715 `testing`, preserves J713's full update behavior
+and changes no installer, boot, audio or module board guard. Graphics apply
+at the next graphical login, not by composing J713 boot objects.
 
 ## What the board tests check
 
@@ -60,7 +87,8 @@ a mini.
   unqualified board or refuses a qualified one;
 - a live-system board gate lets a real sibling M4 identity through, refuses it
   with a different message, or writes anything before refusing. The gates are
-  `m4-boot-compose`, `m4-channel-setup`, `m4-headphones`, `m4-lid-lock`,
+  `m4-boot-compose`, the default full-update `m4-channel-setup` preflight,
+  `m4-headphones`, `m4-lid-lock`,
   `m4-session-placement`, `m4-j713-audio-ready`, `m4-j713-audio-register`,
   `m4-j713-owner-assets` (its fixed paths redirected into the fixture) and the
   board and SoC lines of `m4-video-start` (run with its own `fail()`). Each
@@ -68,6 +96,10 @@ a mini.
   (`apple,<board>`, `apple,<chip>`, `apple,arm-platform`), so the J773s
   identity also carries a different SoC string. The gates that also
   check the SoC must refuse the J713 name on an M2 SoC;
+- the separate J715 graphics preflight admits a sibling, near-match,
+  unterminated or mixed-board identity. Channel setup tests cover its exact
+  tester prerequisites, bounded dependency transaction and protected-state
+  preservation on success and failure;
 - a gate that reads a devicetree file lets a sibling M4 identity, or the J713
   name on an M2 SoC, through: the J713 devicetree builders
   (`build-j713-cpufreq-dtb.py`, `build-j713-cputemp-dtb.py`,
