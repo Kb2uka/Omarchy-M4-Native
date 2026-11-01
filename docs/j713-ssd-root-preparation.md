@@ -95,8 +95,10 @@ test reproduces this exact offset contract.
 
 [`m4-ssd-init`](../tools/m4-ssd-init) runs as PID 1 in the initramfs. Its libraries
 are intended to be sourced there, not invoked against a running installation.
-It loads the Apple NVMe module, waits for the selected partitions, then calls
-[`m4-ssd-root.sh`](../tools/m4-ssd-root.sh).
+It loads the Apple NVMe module with `flush_interval=0` to ensure flushes follow the
+normal ordered synchronous path and avoid coprocessor crashes on sustained writes
+([issue #167](https://github.com/Kb2uka/Omarchy-M4-Native/issues/167)), waits for the
+selected partitions, then calls [`m4-ssd-root.sh`](../tools/m4-ssd-root.sh).
 
 The helpers require canonical UUID properties with an exact 37-byte device-tree
 encoding, including the terminating NUL. They do not source `/etc/m4-root.conf`.
